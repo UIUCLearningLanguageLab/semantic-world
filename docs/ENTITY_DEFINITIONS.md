@@ -187,8 +187,5 @@ Dynamica is licensed under GPL-3.0. Jon owns the code, so reusing Dynamica code 
 - **Rendered vision.** Included in the first milestone.
 - **How types are defined.** Entity types are built in code from parameters and can be created dynamically. Files store only default values and allowed ranges.
 - **Audition.** The first version uses the simple sound-event model. The full wave solver is kept as a later, higher-fidelity option, most likely for offline precomputation.
+- **Default-value file syntax.** YAML (decided 2026-09-27; see `CONTRACTS.md`).
 - **3D models.** Low-poly and stylized; placeholders first; free, openly licensed libraries first; glTF; variation through parameters. See "3D models and variants" above.
-
-## Open questions
-
-- **Default-value file syntax.** YAML or TOML for the files of default values and ranges.
