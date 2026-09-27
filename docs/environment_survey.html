@@ -1,0 +1,313 @@
+<title>Semantic World Environment Survey</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F5F6F2; --panel:#FFFFFF; --ink:#1B2220; --muted:#5B6662; --line:#DDE1DA;
+  --accent:#1F5F74; --accent-soft:#E3EEF1;
+  --v-adopt:#2F6B3F; --v-adopt-bg:#E4F0E6;
+  --v-extend:#1F5F74; --v-extend-bg:#E3EEF1;
+  --v-borrow:#8A5A12; --v-borrow-bg:#F6EBD7;
+  --v-out:#8C3B34; --v-out-bg:#F4E2DF;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --sans:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#141A19; --panel:#1B2322; --ink:#E6EBE8; --muted:#9AA7A2; --line:#2E3836;
+    --accent:#7FBFD2; --accent-soft:#1E3139;
+    --v-adopt:#8FCB9C; --v-adopt-bg:#1F3324;
+    --v-extend:#7FBFD2; --v-extend-bg:#1E3139;
+    --v-borrow:#E0B46A; --v-borrow-bg:#3A2E18;
+    --v-out:#E39A91; --v-out-bg:#3B2320;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#141A19; --panel:#1B2322; --ink:#E6EBE8; --muted:#9AA7A2; --line:#2E3836;
+  --accent:#7FBFD2; --accent-soft:#1E3139;
+  --v-adopt:#8FCB9C; --v-adopt-bg:#1F3324;
+  --v-extend:#7FBFD2; --v-extend-bg:#1E3139;
+  --v-borrow:#E0B46A; --v-borrow-bg:#3A2E18;
+  --v-out:#E39A91; --v-out-bg:#3B2320;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;padding-inline:20px;padding-block:32px 64px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;gap:40px}
+header{display:grid;gap:12px;max-width:760px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(30px,5vw,44px);line-height:1.1;margin:0;text-wrap:balance}
+h2{font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.2;margin:0;text-wrap:balance}
+h3{font-size:15px;font-weight:600;margin:0}
+p{margin:0;max-width:68ch}
+.lede{font-size:17px;color:var(--ink)}
+section{display:grid;gap:16px}
+.gap-note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:12px 16px;border-radius:0 6px 6px 0;max-width:760px}
+
+/* architecture diagram */
+.arch{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px;display:grid;gap:14px}
+.layers{display:grid;gap:8px}
+.layer{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:baseline;padding:10px 12px;border:1px solid var(--line);border-radius:6px}
+.layer .name{font-family:var(--mono);font-size:12.5px;color:var(--accent);font-weight:500}
+.layer.core{background:var(--accent-soft);border-color:transparent}
+.arch .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.arch .notes div{display:grid;gap:4px}
+.arch .notes p{font-size:14px;color:var(--muted)}
+@media (max-width:560px){.layer{grid-template-columns:1fr;gap:2px}}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.group{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.group .lbl{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:4px 10px;border-radius:999px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+.chip:focus-visible,input:focus-visible,th button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input[type=search]{font:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);min-width:0;width:220px;max-width:100%}
+.count{font-family:var(--mono);font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* table */
+.tablebox{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:860px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:none}
+th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;white-space:nowrap}
+th button{all:unset;cursor:pointer}
+th button::after{content:" ↕";opacity:.4}
+th button[data-dir="asc"]::after{content:" ↑";opacity:1}
+th button[data-dir="desc"]::after{content:" ↓";opacity:1}
+td.name a{color:var(--ink);font-weight:600;text-decoration:none;border-bottom:1px solid var(--line)}
+td.name a:hover{border-color:var(--accent);color:var(--accent)}
+td.name .cat{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);font-weight:400;margin-top:2px}
+td.stack,td.lic,td.status{font-size:13px;color:var(--muted)}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pill.adopt{color:var(--v-adopt);background:var(--v-adopt-bg)}
+.pill.extend{color:var(--v-extend);background:var(--v-extend-bg)}
+.pill.borrow{color:var(--v-borrow);background:var(--v-borrow-bg)}
+.pill.out{color:var(--v-out);background:var(--v-out-bg)}
+.empty{padding:24px;color:var(--muted)}
+
+/* ideas */
+.ideas{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}
+.ideas article{display:grid;gap:10px;align-content:start}
+.ideas ul{margin:0;padding-left:18px;display:grid;gap:8px}
+.ideas li{font-size:14px}
+.ideas li b{font-weight:600}
+.src{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.decisions{margin:0;padding-left:20px;display:grid;gap:6px;max-width:760px}
+footer{font-size:13px;color:var(--muted);max-width:760px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Semantic World · background review · checked 25 Sept 2026</div>
+    <h1>Environment Survey</h1>
+    <p class="lede">No existing environment can be adopted as Semantic World. Each candidate misses something we need: full 3D, a fully open stack, a propositional observation channel, language between agents, or support for both world regimes. So we build our own core and borrow heavily.</p>
+  </header>
+
+  <div class="gap-note"><p><b>A real gap.</b> No maintained, open simulator combines novel compositional object kinds, a taxonomy over those kinds, and a generated lexicon. Filling that gap is a contribution in its own right.</p></div>
+
+  <section aria-labelledby="arch-h">
+    <h2 id="arch-h">Recommended architecture</h2>
+    <div class="arch">
+      <div class="layers" role="list">
+        <div class="layer" role="listitem"><span class="name">Models</span><span>Deep RL agents, symbolic planners, Bayesian and other models, all in Python.</span></div>
+        <div class="layer" role="listitem"><span class="name">Adapters</span><span>Thin Gymnasium (one agent) and PettingZoo (many agents) wrappers. PufferLib as an optional RL training harness.</span></div>
+        <div class="layer" role="listitem"><span class="name">Core API</span><span>PyO3 + maturin. A batch object steps many worlds per call. Returns NumPy arrays plus a symbolic state and query API for non-RL models.</span></div>
+        <div class="layer core" role="listitem"><span class="name">Rust core</span><span>Headless, using Bevy's ECS on its own. Compositional objects are entity hierarchies. Synchronous fixed-timestep stepping, one seeded RNG per world. Rapier physics for the generative world only.</span></div>
+        <div class="layer" role="listitem"><span class="name">Viewers</span><span>State snapshots streamed over a websocket to a browser viewer (three.js, or Bevy compiled to WebAssembly). Rerun for debugging and replay.</span></div>
+      </div>
+      <div class="notes">
+        <div><h3>Why Rust</h3><p>Memory safety for a codebase touched by rotating students and RAs. Easy Python packaging with maturin. The core, the physics, and the viewer share one language. A C++ stack (flecs, Jolt, nanobind) is equally viable.</p></div>
+        <div><h3>Alternative: Luanti</h3><p>The fastest path to the survival world: open C++ voxel engine, headless server, Lua scripting, native multiplayer. Voxels fit the generative world badly, so it likely means two engines.</p></div>
+        <div><h3>Main risks</h3><p>Bevy's frequent breaking releases. The cost of a custom viewer. GPU rendering at scale. Determinism limits some physics speedups. Rust ramp-up for students.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="tbl-h">
+    <h2 id="tbl-h">Everything surveyed</h2>
+    <div class="controls">
+      <div class="group" id="catGroup"><span class="lbl">Group</span></div>
+      <div class="group" id="verGroup"><span class="lbl">Verdict</span></div>
+      <input type="search" id="q" placeholder="Search names, stacks, ideas" aria-label="Search the survey">
+      <span class="count" id="count" aria-live="polite"></span>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead><tr>
+          <th><button data-key="name">Name</button></th>
+          <th><button data-key="stack">Stack</button></th>
+          <th><button data-key="lic">License</button></th>
+          <th><button data-key="status">Status</button></th>
+          <th>What it offers us</th>
+          <th><button data-key="v">Verdict</button></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="ideas-h">
+    <h2 id="ideas-h">Ideas to borrow, by workstream</h2>
+    <div class="ideas">
+      <article>
+        <h3>Contracts and engine</h3>
+        <ul>
+          <li><b>One canonical symbolic state.</b> Pixels, propositions, and text are all views of that state. <span class="src">ALFWorld, TextWorld</span></li>
+          <li><b>PDDL-compatible propositions.</b> Off-the-shelf planners become symbolic baselines for free. <span class="src">Blocks World PDDL</span></li>
+          <li><b>Predicates over object states</b> as the template for the propositional channel. <span class="src">BEHAVIOR BDDL, AI2-THOR</span></li>
+          <li><b>Entities and rules declared as data.</b> <span class="src">Melting Pot</span></li>
+          <li><b>Symbolic, pixel, and text channels plus agent messaging.</b> <span class="src">Alem</span></li>
+        </ul>
+      </article>
+      <article>
+        <h3>Survival world</h3>
+        <ul>
+          <li><b>Minimal need dynamics.</b> Separate hunger, thirst, and fatigue counters; slower decay during sleep; day/night. We add temperature. <span class="src">Crafter</span></li>
+          <li><b>Multi-agent resources.</b> Regrowth, depletion, respawning, and death. <span class="src">Neural MMO</span></li>
+          <li><b>Regional temperature</b> from biome heat values. <span class="src">Luanti</span></li>
+        </ul>
+      </article>
+      <article>
+        <h3>Generative world</h3>
+        <ul>
+          <li><b>Sampled rule grammars</b> linking features, parts, and kinds to capacities, with complexity and stochasticity as variables. <span class="src">XLand-MiniGrid</span></li>
+          <li><b>Part-level attributes</b> ("the blorg with red arms"). <span class="src">Super-CLEVR</span></li>
+          <li><b>Compositional splits built into the generator.</b> <span class="src">SCAN, gSCAN, PHYRE</span></li>
+          <li><b>Distractors that make every word necessary.</b> <span class="src">ReaSCAN</span></li>
+          <li><b>Balanced questions and four question types.</b> <span class="src">CLEVR, CLEVRER</span></li>
+          <li><b>The lexicon as a manipulation.</b> English names give LLMs a head start from prior knowledge. <span class="src">Mystery Blocksworld, ScienceWorld</span></li>
+          <li><b>Word-learning task checklist.</b> <span class="src">MEWL</span></li>
+        </ul>
+      </article>
+      <article>
+        <h3>Models and evaluation</h3>
+        <ul>
+          <li><b>Held-out partners</b> at test time. <span class="src">Melting Pot</span></li>
+          <li><b>Compositionality metrics</b> for emergent language. <span class="src">EGG</span></li>
+          <li><b>Similarity to children's response patterns</b>, if developmental comparison becomes a priority. <span class="src">DevBench</span></li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="dec-h">
+    <h2 id="dec-h">Decisions this survey suggests</h2>
+    <ol class="decisions">
+      <li>Choose Rust for the core, unless there is a reason to prefer C++.</li>
+      <li>Use one engine for both world regimes, rather than extending Luanti for the survival world only.</li>
+      <li>Make the propositional layer PDDL-compatible.</li>
+      <li>Design our own core API first, with Gymnasium and PettingZoo as adapters.</li>
+    </ol>
+  </section>
+
+  <footer><p>Researched with web search, PyPI, crates.io, and project pages. GitHub's API was blocked during the survey, so some last-activity dates are approximate. The full write-up with sources is <span class="src">docs/ENVIRONMENT_SURVEY.md</span> in the project folder.</p></footer>
+</div>
+
+<script>
+const V = {adopt:"Use",extend:"Consider",borrow:"Borrow ideas",out:"Rule out"};
+const VORDER = {adopt:0,extend:1,borrow:2,out:3};
+const D = [
+ // survival / multi-agent
+ ["Crafter","Survival & multi-agent","Python, 2D","MIT","Dormant since Dec 2023","Cleanest minimal need model: food, drink, energy, health, day/night.","borrow","https://github.com/danijar/crafter"],
+ ["Craftax","Survival & multi-agent","JAX, 2D","MIT","Active (Jun 2026)","Speed reference: about 1B steps in under an hour on one GPU. Symbolic observations.","borrow","https://github.com/MichaelTMatthews/Craftax"],
+ ["Alem","Survival & multi-agent","JAX, 2D","MIT","Very active (2026)","Multi-agent survival with symbolic, pixel, and text observations plus agent messaging.","borrow","https://github.com/alem-world/alem-env"],
+ ["Multi-agent Craftax","Survival & multi-agent","JAX, 2D","MIT","Paper artifact (2025)","Several agents sharing Craftax survival needs; trading. Superseded by Alem.","borrow","https://github.com/BaselOmari/MA-Craftax"],
+ ["Neural MMO 2","Survival & multi-agent","Python, 2D","MIT","Ended Aug 2024","Food, water, health for 100+ agents; respawning and death.","borrow","https://github.com/NeuralMMO/environment"],
+ ["Neural MMO 3","Survival & multi-agent","C, 2D (in PufferLib)","MIT code, restricted art","Active","Fast C core behind a thin Python binding; seasons; 1000+ agents.","borrow","https://github.com/PufferAI/PufferLib"],
+ ["Melting Pot / DMLab2D","Survival & multi-agent","C++ and Lua, 2D","Apache-2.0","Active","Entities declared as components; held-out-partner evaluation.","borrow","https://github.com/google-deepmind/meltingpot"],
+ ["XLand-MiniGrid","Survival & multi-agent","JAX, 2D","Apache-2.0","Low activity","Sampled rule grammars (\"if A near B then C\") over objects.","borrow","https://github.com/dunnolab/xland-minigrid"],
+ ["JaxLife","Survival & multi-agent","JAX, 2D","No license file","Dormant (2024)","Artificial life with climate, evolution, and message passing. Code not reusable.","borrow","https://github.com/luchris429/JaxLife"],
+ ["Overcooked-AI","Survival & multi-agent","Python and JavaScript, 2D","MIT","Low activity","Two-player cooperation; browser setup for humans playing with agents.","out","https://github.com/HumanCompatibleAI/overcooked_ai"],
+ ["NetHack LE / MiniHack","Survival & multi-agent","C and Python, 2D","NetHack GPL / Apache-2.0","Active / dormant","In-game text messages as a language channel. Fixed ontology, single agent.","out","https://github.com/NetHack-LE/nle"],
+ // 3D
+ ["Luanti","3D embodied","C++17 core, Lua mods","LGPL-2.1","Very active","Headless server, native multiplayer and chat, easy Lua scripting. Voxel only.","extend","https://github.com/luanti-org/luanti"],
+ ["Craftium","3D embodied","Luanti fork plus Python","LGPL-2.1","Small academic project","Gymnasium and PettingZoo on Luanti; about 2,700 steps per second.","extend","https://github.com/mikelma/craftium"],
+ ["MineRL","3D embodied","Minecraft (Java)","Proprietary Minecraft","Dormant","Human demonstration datasets. Slow, single agent.","out","https://github.com/minerllabs/minerl"],
+ ["MineDojo","3D embodied","Minecraft (Java)","Proprietary Minecraft","Dormant","Privileged observations and a large task catalog.","borrow","https://github.com/MineDojo/MineDojo"],
+ ["Project Malmo","3D embodied","Minecraft (Java)","Proprietary Minecraft","Abandoned (2018)","Historical reference for mission specs and grid observations.","out","https://github.com/microsoft/malmo"],
+ ["MineLand","3D embodied","Minecraft plus JavaScript","Proprietary Minecraft","Archived Jun 2026","Up to 48 agents with physical needs and limited senses.","borrow","https://github.com/cocacola-lab/MineLand"],
+ ["MineStudio","3D embodied","Minecraft (Java), Python","Proprietary Minecraft","Last release Jun 2025","Inherits MineRL's limits.","out","https://github.com/CraftJarvis/MineStudio"],
+ ["AI2-THOR / ProcTHOR","3D embodied","Unity","Proprietary Unity","Slow public development","Excellent object metadata; procedural houses.","borrow","https://github.com/allenai/ai2thor"],
+ ["ThreeDWorld","3D embodied","Unity","Closed engine source","Long-term support only","Rich physics and audio output data.","out","https://github.com/threedworld-mit/tdw"],
+ ["Habitat 3.x","3D embodied","C++ core, Python","Some datasets non-commercial","Meta stopped development","The right shape: fast C++ core, Python API, headless at scale.","borrow","https://github.com/facebookresearch/habitat-sim"],
+ ["BEHAVIOR-1K / OmniGibson","3D embodied","NVIDIA Isaac Sim","Proprietary Isaac Sim","Very active","Best-in-class predicate state (BDDL). Needs an RTX GPU.","borrow","https://github.com/StanfordVL/BEHAVIOR-1K"],
+ ["SimWorld","3D embodied","Unreal Engine 5","Unreal license terms","Active","Language-driven procedural cities; structured observations.","borrow","https://github.com/maitrix-org/SimWorld"],
+ // engines
+ ["Bevy / bevy_ecs","Engines & infrastructure","Rust","MIT / Apache-2.0","Active; breaking releases every 3–6 months","Headless ECS core and a viewer that compiles to the web.","adopt","https://bevy.org/news/bevy-0-19/"],
+ ["Rapier","Engines & infrastructure","Rust","Apache-2.0","Very active","Physics with a cross-platform determinism mode.","adopt","https://rapier.rs/docs/user_guides/rust/determinism/"],
+ ["PyO3 + maturin","Engines & infrastructure","Rust to Python","MIT / Apache-2.0","Active","Python bindings and one-command wheel builds.","adopt","https://crates.io/crates/pyo3"],
+ ["Gymnasium / PettingZoo","Engines & infrastructure","Python","MIT","Active","Standard agent interfaces, used as thin adapters.","adopt","https://pettingzoo.farama.org/"],
+ ["Rerun","Engines & infrastructure","Rust, C++, Python","MIT / Apache-2.0","Active","3D logging with a web viewer, for debugging and replay.","adopt","https://rerun.io/docs/reference/cli"],
+ ["three.js / Babylon.js","Engines & infrastructure","JavaScript","MIT / Apache-2.0","Active","Browser rendering for the web viewer.","adopt","https://threejs.org/"],
+ ["PufferLib","Engines & infrastructure","C and Python","MIT","Very active","Fast vectorized RL training harness.","extend","https://github.com/PufferAI/PufferLib"],
+ ["Jolt","Engines & infrastructure","C++","MIT","Active","Deterministic physics; the C++-path equivalent of Rapier.","extend","https://github.com/jrouwe/JoltPhysics"],
+ ["flecs / EnTT","Engines & infrastructure","C / C++","MIT","Active","ECS libraries; flecs has built-in relationships and hierarchies.","extend","https://ajmmertens.medium.com/flecs-4-1-is-out-fab4f32e36f6"],
+ ["nanobind","Engines & infrastructure","C++ to Python","BSD","Active","Faster alternative to pybind11 for a C++ core.","extend","https://pypi.org/project/nanobind/"],
+ ["Godot 4.x","Engines & infrastructure","C++ engine, GDScript","MIT","Active","Best off-the-shelf fallback. Weak batching; headless mode has no rendering.","extend","https://endoflife.date/godot"],
+ ["MuJoCo / MJX","Engines & infrastructure","C, Python, JAX","Apache-2.0","Very active","Excellent contact physics; awkward for runtime-generated objects.","extend","https://github.com/google-deepmind/mujoco"],
+ ["Unity + ML-Agents","Engines & infrastructure","C# on Unity","Proprietary Unity","Active","Conflicts with open source from the first commit.","out","https://github.com/Unity-Technologies/ml-agents"],
+ ["Genesis / Newton / Isaac","Engines & infrastructure","Python on GPU","Mixed; Isaac proprietary","Active","GPU robotics simulators; far heavier than needed.","out","https://github.com/Genesis-Embodied-AI/Genesis"],
+ ["Bullet / PhysX","Engines & infrastructure","C++","zlib / BSD-3","Maintenance mode / heavy","Jolt or Rapier cover the same need.","out","https://github.com/bulletphysics/bullet3"],
+ // language
+ ["SHRDLU revivals","Language & compositional","Lisp, Go, TypeScript","Mixed","Mostly dormant","Dialog types: reference, anaphora, \"why\" questions, commands.","borrow","https://github.com/garfix/blocks-world"],
+ ["Blocks World PDDL / PlanBench","Language & compositional","PDDL","Open","Active","Propositional state format; renamed predicates collapse LLM performance.","adopt","https://github.com/karthikv792/LLMs-Planning"],
+ ["CLEVR","Language & compositional","Blender, Python","BSD-style","Archived 2023","Scene graph to program to question, with answer balancing.","borrow","https://github.com/facebookresearch/clevr-dataset-gen"],
+ ["Super-CLEVR","Language & compositional","Blender, Python","Unverified","Research code","Objects with parts and part-level attributes.","borrow","https://github.com/Lizw14/Super-CLEVR"],
+ ["CLEVRER","Language & compositional","Dataset","Unverified","Generator not released","Event annotations; four question types.","borrow","https://github.com/chuangg/CLEVRER"],
+ ["Kubric","Language & compositional","Blender, PyBullet","Apache-2.0","Low activity","Procedural 3D scene and video rendering.","extend","https://github.com/google-research/kubric"],
+ ["PHYRE / Physion","Language & compositional","Box2D / TDW","Apache-2.0 / MIT","Archived / research code","Generalization splits; hidden properties revealed by behavior.","borrow","https://github.com/cogtoolslab/physics-benchmarking-neurips2021"],
+ ["BabyAI / MiniGrid","Language & compositional","Python, 2D","MIT","Active (May 2026)","Instruction grammar with a verifier; Gymnasium API.","borrow","https://minigrid.farama.org/"],
+ ["SCAN / gSCAN / ReaSCAN","Language & compositional","Python","Mixed","Dormant","Compositional splits; distractors that make every word necessary.","borrow","https://github.com/frankaging/Reason-SCAN"],
+ ["TextWorld / ALFWorld","Language & compositional","Python","MIT","Active","Facts-plus-rules state; one world with text and visual views.","borrow","https://github.com/microsoft/TextWorld"],
+ ["ScienceWorld","Language & compositional","Scala, Python","Apache-2.0","Active","Shows how real-world knowledge biases comparisons toward LLMs.","borrow","https://github.com/allenai/ScienceWorld"],
+ ["EGG","Language & compositional","PyTorch","MIT","Archived Aug 2026","Emergent-communication games and compositionality metrics.","borrow","https://github.com/facebookresearch/EGG"],
+ ["MEWL","Language & compositional","Dataset","Unverified","Research release (2023)","Nine few-shot word-learning tasks from developmental psychology.","borrow","https://arxiv.org/abs/2306.00503"],
+ ["DevBench","Language & compositional","Python","Unverified","Research release (2024)","Scores models by similarity to children's responses.","borrow","https://arxiv.org/abs/2406.10215"]
+].map(r=>({name:r[0],cat:r[1],stack:r[2],lic:r[3],status:r[4],offer:r[5],v:r[6],url:r[7]}));
+
+const cats=["All",...new Set(D.map(d=>d.cat))];
+const vers=["All",...Object.keys(V)];
+let fCat="All", fVer="All", q="", sortKey=null, sortDir=1;
+
+function mkChips(el,list,labelFn,onPick,current){
+  list.forEach(v=>{
+    const b=document.createElement("button");
+    b.className="chip"; b.type="button"; b.textContent=labelFn(v);
+    b.setAttribute("aria-pressed",v===current());
+    b.addEventListener("click",()=>{onPick(v);[...el.querySelectorAll(".chip")].forEach(c=>c.setAttribute("aria-pressed",c===b));render();});
+    el.appendChild(b);
+  });
+}
+mkChips(document.getElementById("catGroup"),cats,v=>v,v=>fCat=v,()=>fCat);
+mkChips(document.getElementById("verGroup"),vers,v=>v==="All"?"All":V[v],v=>fVer=v,()=>fVer);
+document.getElementById("q").addEventListener("input",e=>{q=e.target.value.toLowerCase();render();});
+document.querySelectorAll("th button").forEach(b=>b.addEventListener("click",()=>{
+  const k=b.dataset.key;
+  if(sortKey===k){sortDir=-sortDir}else{sortKey=k;sortDir=1}
+  document.querySelectorAll("th button").forEach(x=>x.removeAttribute("data-dir"));
+  b.setAttribute("data-dir",sortDir===1?"asc":"desc");
+  render();
+}));
+
+function esc(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function render(){
+  let rows=D.filter(d=>(fCat==="All"||d.cat===fCat)&&(fVer==="All"||d.v===fVer)&&
+    (!q||[d.name,d.stack,d.lic,d.status,d.offer,d.cat].join(" ").toLowerCase().includes(q)));
+  if(sortKey){rows=[...rows].sort((a,b)=>{
+    const x=sortKey==="v"?VORDER[a.v]:a[sortKey].toLowerCase(), y=sortKey==="v"?VORDER[b.v]:b[sortKey].toLowerCase();
+    return (x<y?-1:x>y?1:0)*sortDir;})}
+  const tb=document.getElementById("rows");
+  tb.innerHTML=rows.length?rows.map(d=>`<tr>
+    <td class="name"><a href="${d.url}" target="_blank" rel="noopener">${esc(d.name)}</a><span class="cat">${esc(d.cat)}</span></td>
+    <td class="stack">${esc(d.stack)}</td><td class="lic">${esc(d.lic)}</td><td class="status">${esc(d.status)}</td>
+    <td>${esc(d.offer)}</td><td><span class="pill ${d.v}">${V[d.v]}</span></td></tr>`).join("")
+    :`<tr><td colspan="6" class="empty">Nothing matches these filters. Clear the search or pick "All".</td></tr>`;
+  document.getElementById("count").textContent=`${rows.length} of ${D.length}`;
+}
+render();
+</script>
