@@ -60,12 +60,16 @@ pub enum Blocking {
     },
 }
 
-/// The entity's circle on the ground plane, used for blocking and surface distances.
+/// The entity's circle on the ground plane, used for blocking and surface distances, plus
+/// its height, used for line-of-sight checks.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 pub struct Footprint {
     pub radius: f64,
     pub solid: bool,
     pub blocking: Blocking,
+    /// Height above the ground in meters: the body's `height` trait, or else the top of the
+    /// placeholder. A solid entity taller than a camera occludes the camera's line of sight.
+    pub height_m: f64,
 }
 
 /// Free-form labels that rules select on.

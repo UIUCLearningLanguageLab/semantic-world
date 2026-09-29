@@ -34,6 +34,7 @@ pub struct EntitySnapshot {
     pub z: f64,
     pub yaw: f64,
     pub radius: f64,
+    pub height: f64,
     pub solid: bool,
     pub tags: Vec<String>,
     /// `(name, count, max)`.
@@ -94,7 +95,7 @@ impl StateSnapshot {
             hash_str(&mut h, &e.id);
             hash_str(&mut h, &e.type_name);
             h.update(e.index.to_le_bytes());
-            for v in [e.x, e.z, e.yaw, e.radius] {
+            for v in [e.x, e.z, e.yaw, e.radius, e.height] {
                 h.update(v.to_bits().to_le_bytes());
             }
             h.update([u8::from(e.solid)]);

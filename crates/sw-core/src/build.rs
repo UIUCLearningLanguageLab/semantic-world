@@ -51,10 +51,21 @@ pub fn spawn(
             }
         }
     };
+    let placeholder_top = body
+        .placeholder
+        .as_ref()
+        .map(|p| {
+            p.parts()
+                .iter()
+                .map(|part| part.center()[1] + part.size[1] / 2.0)
+                .fold(0.0, f64::max)
+        })
+        .unwrap_or(0.0);
     let footprint = Footprint {
         radius: body.radius_m(),
         solid: body.solid,
         blocking,
+        height_m: body.height.as_ref().map_or(placeholder_top, |h| *h.value()),
     };
     let stocks: IndexMap<String, Stock> = body
         .stock

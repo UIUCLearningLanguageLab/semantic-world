@@ -8,6 +8,18 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sw-schema.workspace = true
+sw-core.workspace = true
+bevy_ecs.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+rand_chacha.workspace = true
 
 [lints]
 workspace = true

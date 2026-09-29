@@ -1130,6 +1130,18 @@ version = "0.1.0"
 [[package]]
 name = "sw-rules"
 version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "glam 0.33.11",
+ "indexmap",
+ "rand",
+ "rand_chacha",
+ "serde",
+ "serde_json",
+ "sw-core",
+ "sw-schema",
+ "thiserror",
+]
 
 [[package]]
 name = "sw-schema"

@@ -456,6 +456,7 @@ impl World {
             z: position.y,
             yaw: facing.yaw,
             radius: footprint.radius,
+            height: footprint.height_m,
             solid: footprint.solid,
             tags: tags.0.clone(),
             stocks: stocks

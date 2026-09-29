@@ -106,6 +106,81 @@ impl Obstacle {
     pub fn overlaps(&self, point: DVec2, radius: f64) -> bool {
         self.nearest(point, radius).1 < 0.0
     }
+
+    /// Whether the segment from `a` to `b` passes through this obstacle's solid region.
+    pub fn blocks_segment(&self, a: DVec2, b: DVec2) -> bool {
+        match self.footprint.blocking {
+            Blocking::Circle => segment_point_distance(a, b, self.position) < self.footprint.radius,
+            Blocking::Walls {
+                half_forward,
+                half_side,
+                thickness,
+            } => {
+                let la = self.local_of(a);
+                let lb = self.local_of(b);
+                let walls = [
+                    (
+                        DVec2::new(-half_forward, -half_side),
+                        DVec2::new(-half_forward + thickness, half_side),
+                    ),
+                    (
+                        DVec2::new(-half_forward, -half_side),
+                        DVec2::new(half_forward, -half_side + thickness),
+                    ),
+                    (
+                        DVec2::new(-half_forward, half_side - thickness),
+                        DVec2::new(half_forward, half_side),
+                    ),
+                ];
+                walls
+                    .iter()
+                    .any(|(lo, hi)| segment_intersects_box(la, lb, *lo, *hi))
+            }
+        }
+    }
+}
+
+/// Distance from `p` to the segment `a`–`b`.
+pub fn segment_point_distance(a: DVec2, b: DVec2, p: DVec2) -> f64 {
+    let ab = b - a;
+    let len2 = ab.length_squared();
+    let t = if len2 > 0.0 {
+        ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (a + ab * t - p).length()
+}
+
+/// Whether the segment `a`–`b` intersects the axis-aligned box `lo`–`hi` (slab method).
+pub fn segment_intersects_box(a: DVec2, b: DVec2, lo: DVec2, hi: DVec2) -> bool {
+    let d = b - a;
+    let mut t_min = 0.0_f64;
+    let mut t_max = 1.0_f64;
+    for axis in 0..2 {
+        let (o, dir, l, h) = if axis == 0 {
+            (a.x, d.x, lo.x, hi.x)
+        } else {
+            (a.y, d.y, lo.y, hi.y)
+        };
+        if dir.abs() < 1e-12 {
+            if o < l || o > h {
+                return false;
+            }
+        } else {
+            let mut t1 = (l - o) / dir;
+            let mut t2 = (h - o) / dir;
+            if t1 > t2 {
+                std::mem::swap(&mut t1, &mut t2);
+            }
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+            if t_min > t_max {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The walls at the meadow's edges: a square of `half` meters from the origin.
@@ -227,6 +302,7 @@ mod tests {
                 radius,
                 solid: true,
                 blocking: Blocking::Circle,
+                height_m: 3.0,
             },
         }
     }
@@ -243,6 +319,7 @@ mod tests {
                     half_side: 1.5,
                     thickness: 0.2,
                 },
+                height_m: 2.5,
             },
         }
     }
@@ -266,6 +343,33 @@ mod tests {
         let r = try_move(DVec2::ZERO, DVec2::new(1.0, 0.0), 0.25, &[tree], &BOUNDS);
         assert!(!r.blocked);
         assert_eq!(r.position, DVec2::new(1.0, 0.0));
+    }
+
+    #[test]
+    fn segments_are_blocked_by_trunks_and_walls() {
+        let tree = circle(5.0, 0.0, 0.3);
+        assert!(tree.blocks_segment(DVec2::ZERO, DVec2::new(10.0, 0.0)));
+        assert!(!tree.blocks_segment(DVec2::ZERO, DVec2::new(10.0, 1.0)));
+        assert!(!tree.blocks_segment(DVec2::ZERO, DVec2::new(4.0, 0.0)));
+        let s = shelter(0.0, 0.0, 0.0);
+        // Through the back wall.
+        assert!(s.blocks_segment(DVec2::new(-5.0, 0.0), DVec2::new(5.0, 0.0)));
+        // In through the open side, stopping inside: nothing blocks.
+        assert!(!s.blocks_segment(DVec2::new(5.0, 0.0), DVec2::new(0.0, 0.0)));
+        // Across a side wall.
+        assert!(s.blocks_segment(DVec2::new(0.0, -5.0), DVec2::new(0.0, 0.0)));
+        assert!(segment_intersects_box(
+            DVec2::new(-1.0, 0.5),
+            DVec2::new(1.0, 0.5),
+            DVec2::ZERO,
+            DVec2::ONE
+        ));
+        assert!(!segment_intersects_box(
+            DVec2::new(-1.0, 2.0),
+            DVec2::new(1.0, 2.0),
+            DVec2::ZERO,
+            DVec2::ONE
+        ));
     }
 
     #[test]
