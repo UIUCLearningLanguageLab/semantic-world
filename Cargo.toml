@@ -1,0 +1,52 @@
+# Cargo workspace for Semantic World. See docs/specs/MILESTONE_1.md, "Repository layout".
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/sw-schema",
+    "crates/sw-core",
+    "crates/sw-rules",
+    "crates/sw-sense",
+    "crates/sw-render",
+    "crates/sw-log",
+    "crates/sw-py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/UIUCLearningLanguageLab/semantic-world"
+rust-version = "1.85"
+
+# Versions are pinned to the minor version, as checked on 2026-09-27 (MILESTONE_1.md, "Technology").
+# Upgrade deliberately, in a separate commit.
+[workspace.dependencies]
+bevy_ecs = "0.19"
+glam = "0.33"
+rand = "0.10"
+rand_chacha = "0.10"
+sha2 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde-saphyr = "~1.3"
+schemars = "~1.2"
+wgpu = "30"
+arrow = "60"
+parquet = "60"
+rerun = "0.38"
+pyo3 = { version = "0.29", features = ["abi3-py311"] }
+numpy = "0.29"
+
+# Crates inside the workspace, so members refer to each other by name.
+sw-schema = { path = "crates/sw-schema" }
+sw-core = { path = "crates/sw-core" }
+sw-rules = { path = "crates/sw-rules" }
+sw-sense = { path = "crates/sw-sense" }
+sw-render = { path = "crates/sw-render" }
+sw-log = { path = "crates/sw-log" }
+
+[workspace.lints.clippy]
+all = "warn"
+
+[profile.release]
+debug = 1

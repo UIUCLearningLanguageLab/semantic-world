@@ -29,7 +29,7 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 
 ## Commands
 
-These commands will exist once stage 1 is built. Keep this list current.
+Keep this list current. The commands assume the stable Rust toolchain is on the path (`. ~/.cargo/env` if `rustup` did not add it) and the project's virtual environment is active (`source .venv/bin/activate`, created with `uv venv .venv --python 3.12` and filled with `uv pip install -e ".[dev]"`).
 
 ```
 cargo fmt --all --check

@@ -1,0 +1,13 @@
+[package]
+name = "sw-schema"
+description = "Semantic World: Rust types for every data file, YAML loading, validation, and JSON Schema export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

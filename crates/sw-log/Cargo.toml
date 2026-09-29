@@ -1,0 +1,18 @@
+[package]
+name = "sw-log"
+description = "Semantic World: Parquet log writers and optional Rerun recording"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
+
+[features]
+# Rerun recordings (MILESTONE_1.md, "Logs"). The feature exists from stage 1 so the check list
+# can pass `--features sw-log/rerun`; stage 7 adds `dep:rerun` and the recorder behind it.
+rerun = []

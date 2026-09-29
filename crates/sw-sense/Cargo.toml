@@ -1,0 +1,13 @@
+[package]
+name = "sw-sense"
+description = "Semantic World: sensors other than eyes, plus sensor and action manifests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

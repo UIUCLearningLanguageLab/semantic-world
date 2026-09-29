@@ -1,0 +1,13 @@
+[package]
+name = "sw-core"
+description = "Semantic World: the world itself, from the ECS and clock to needs, movement, and state hashing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
