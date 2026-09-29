@@ -1,0 +1,376 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "actions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ActionSpec"
+      },
+      "description": "Actions, in the order the action manifest lists them."
+    },
+    "processes": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ProcessSpec"
+      }
+    },
+    "predicates": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/PredicateSpec"
+      },
+      "description": "The proposition vocabulary: each predicate and the generic detector that computes it."
+    }
+  },
+  "description": "One rules file. A world may load several; their sections are merged by name.",
+  "title": "RulesFile",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ActionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actuator": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The actuator the action belongs to. An agent without the actuator lacks the action."
+        },
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ArgSlot"
+          },
+          "description": "Argument slots, in manifest order."
+        },
+        "pre": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PredicateCall"
+          },
+          "description": "Preconditions. All must hold."
+        },
+        "on_start": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        },
+        "on_end": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Maximum duration in simulated seconds. Absent with no `until`: instantaneous."
+        },
+        "until": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PredicateCall"
+          },
+          "description": "Ends the action early when all of these hold. Checked every tick."
+        },
+        "module": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "energy_cost": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Energy cost, 0 in milestone 1: fatigue carries the cost of activity instead.",
+          "default": 0.0
+        },
+        "sound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SoundSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A sound event the action emits. Parsed for the contract's format; ears are not in\nmilestone 1, so no sound is produced."
+        }
+      },
+      "description": "One action type (contract 2, addition A3, addition A4).\n\nAn action is durative when it has a `duration` or an `until` condition. Its `effects`\napply when the action completes; rate effects among them apply every tick while the action\nlasts. `on_start` applies when the action starts, and `on_end` when the action ends for\nany reason, completion or interruption, after `effects`. An action whose effect cannot be\nwritten as data names a registered rule `module` and passes it `params`."
+    },
+    "ArgSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "has": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For a target slot: the tag the target must carry."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "For a target slot: whether the target may be left out, in which case the nearest\nqualifying entity in front of the agent is used."
+        }
+      },
+      "description": "One argument slot of an action: a continuous range, or a target.\n\nWritten as `{range: [lo, hi], units: rad}` for a continuous argument, or as\n`{has: edible, optional: true}` for a target that must carry a tag."
+    },
+    "PredicateCall": {
+      "description": "A call to a registered predicate, such as `within(self, target, 1.0)`.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\(.*\\))?$"
+    },
+    "Effect": {
+      "description": "A call to a registered effect: a mapping with one key, the effect name, whose value maps argument names to arguments.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/$defs/RuleArgument"
+        }
+      }
+    },
+    "RuleArgument": {
+      "description": "A literal number or boolean, a bare symbol, or a reference: self, target, or this, optionally followed by a field path and optionally preceded by a minus sign.",
+      "type": [
+        "number",
+        "boolean",
+        "string"
+      ]
+    },
+    "Trait_for_double": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/TraitFull"
+        }
+      ]
+    },
+    "TraitFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "double"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Variation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "normal": {
+              "type": "object",
+              "properties": {
+                "sd": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "sd"
+              ]
+            }
+          },
+          "required": [
+            "normal"
+          ],
+          "additionalProperties": false,
+          "description": "Normal distribution centered on the default, with standard deviation `sd`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "properties": {
+                "half_width": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "half_width"
+              ]
+            }
+          },
+          "required": [
+            "uniform"
+          ],
+          "additionalProperties": false,
+          "description": "Uniform distribution centered on the default, from `default - half_width` to\n`default + half_width`."
+        }
+      ],
+      "description": "How individuals vary when sampled. Sampled values are clipped to the trait's range."
+    },
+    "SoundSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "loudness": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "event",
+        "loudness"
+      ],
+      "description": "A sound event an action emits."
+    },
+    "ProcessSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "applies_to": {
+          "$ref": "#/$defs/Selector"
+        },
+        "every": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Period in simulated seconds, counted per entity from the start of the run."
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Effect"
+          }
+        }
+      },
+      "required": [
+        "applies_to",
+        "every"
+      ],
+      "description": "Something that happens in the world without any action, on a schedule (contract 2)."
+    },
+    "Selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "has": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "has"
+      ],
+      "description": "Selects the entities a process applies to: those carrying a tag."
+    },
+    "PredicateSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Argument names, in PDDL order. A trailing numeric argument makes a fluent."
+        },
+        "detector": {
+          "type": "string",
+          "description": "The registered detector that computes the predicate."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "detector"
+      ],
+      "description": "One predicate of the proposition vocabulary (contract 5), computed by a named detector."
+    }
+  }
+}

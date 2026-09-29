@@ -1,0 +1,18 @@
+# The proposition vocabulary for milestone 1 (contract 5; docs/specs/MILESTONE_1.md,
+# "Sensors"). Each predicate is computed by a named, generic detector with parameters. The
+# propositional sensor reports facts about entities within its range. Numeric fluents are
+# rounded to `decimals` places.
+predicates:
+  near: {args: [agent, obj], detector: surface_gap_at_most, params: {max_gap_m: 3.0}}
+  visible: {args: [agent, obj], detector: in_view}                       # in the field of view and range, line of sight not blocked by a tree trunk or shelter wall
+  is: {args: [obj, type], detector: entity_type}
+  berries: {args: [bush, n], detector: stock_count, params: {stock: berries}}
+  inside: {args: [agent, shelter], detector: inside_footprint, params: {has: shelter}}
+  asleep: {args: [agent], detector: state_is, params: {state: asleep}}
+  collapsed: {args: [agent], detector: state_is, params: {state: collapsed}}
+  night: {args: [], detector: is_night}
+  hunger: {args: [agent, v], detector: need_level, params: {need: hunger, decimals: 2}}
+  thirst: {args: [agent, v], detector: need_level, params: {need: thirst, decimals: 2}}
+  fatigue: {args: [agent, v], detector: need_level, params: {need: fatigue, decimals: 2}}
+  cold: {args: [agent, v], detector: need_level, params: {need: cold, decimals: 2}}
+  health: {args: [agent, v], detector: health_level, params: {decimals: 2}}

@@ -4,5 +4,7 @@
 //! Stage 3 of `docs/specs/MILESTONE_1.md` fills this crate in. The engine runs any world and
 //! hard-codes none: entity types, numbers, actions, and rules live in `data/`.
 
+pub mod streams;
+
 /// Name of this crate, used by the workspace smoke tests.
 pub const CRATE_NAME: &str = "sw-core";

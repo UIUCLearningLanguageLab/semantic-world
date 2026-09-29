@@ -40,6 +40,13 @@ ruff check python tests
 pytest
 ```
 
+Other commands:
+
+```
+cargo run -p sw-schema -- schemas                                # regenerate schemas/*.json after changing the data-file types
+cargo run -p sw-schema -- check data/experiments/m1_smoke.yaml   # load and resolve an experiment
+```
+
 This is the full check list. A stage is done when the full check list passes locally.
 
 ## Git

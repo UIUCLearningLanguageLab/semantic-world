@@ -1,0 +1,9 @@
+# Things that happen without any action (contract 2). Every berry bush adds 1 berry, up to its
+# maximum, every 10 calendar hours (600 simulated seconds), counted per bush from the start of
+# the run.
+processes:
+  regrow:
+    applies_to: {has: regrows}
+    every: {default: 600, range: [60, 86400], units: s}
+    effects:
+      - add_stock: {entity: this, name: berries, amount: 1, up_to: this.stock.berries.max}

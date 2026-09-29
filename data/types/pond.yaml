@@ -1,0 +1,9 @@
+# Water. A flat blue disc, 3 m in radius. Not solid: agents can walk into ponds in milestone 1.
+type: pond
+version: 1
+body:
+  plan: water
+  radius: {default: 3.0, range: [1, 10], units: m}
+  solid: false
+  tags: [drinkable]
+  placeholder: {shape: disc, size: [6.0, 0.05, 6.0], color: "#1e6fd9"}

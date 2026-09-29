@@ -1,0 +1,606 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "experiment": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "world": {
+      "$ref": "#/$defs/WorldRef"
+    },
+    "types": {
+      "type": "array",
+      "items": true,
+      "description": "Types declared on the fly, each a named override of an existing type\n(`{type: short_human, extends: human, body: {...}}`)."
+    },
+    "population": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PopulationEntry"
+      }
+    },
+    "views": {
+      "$ref": "#/$defs/Views",
+      "default": {
+        "propositional_sensor": false,
+        "speech_as_symbols": false
+      }
+    },
+    "options": {
+      "$ref": "#/$defs/Options",
+      "default": {
+        "impossible_actions": "masked",
+        "touch_detail": "whole_body",
+        "death": "ends_lifetime"
+      }
+    },
+    "clock": {
+      "$ref": "#/$defs/Clock",
+      "default": {
+        "mode": "synchronous",
+        "tick_s": 0.1,
+        "decision_every_ticks": 2
+      }
+    },
+    "lifetime": {
+      "$ref": "#/$defs/Lifetime"
+    },
+    "checkpoints": {
+      "description": "World checkpoints. Parsed for the contract's format; not in milestone 1."
+    },
+    "logging": {
+      "$ref": "#/$defs/Logging",
+      "default": {
+        "state_every_ticks": 10,
+        "images": "off",
+        "internals": "all"
+      }
+    },
+    "reward": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RewardSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The agent-side reward function the adapters call (contract 4)."
+    },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": true
+      },
+      "description": "The experimental design: each key is a dotted path into this configuration, and each\nvalue the list of settings to cross (addition A5)."
+    },
+    "seeds": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "description": "The master seeds, one run per seed per cell."
+    },
+    "seed": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0,
+      "description": "A single master seed, for one run. `seeds` and `seed` may not both be given."
+    }
+  },
+  "required": [
+    "experiment",
+    "world",
+    "population",
+    "lifetime"
+  ],
+  "description": "One run, or one batch of runs.",
+  "title": "ExperimentConfig",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "WorldRef": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/WorldSpec"
+        }
+      ],
+      "description": "The world: a path to a world file, relative to the experiment file, or an inline world."
+    },
+    "WorldSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "world": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "regime": {
+          "$ref": "#/$defs/Regime",
+          "default": "scripted"
+        },
+        "types": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Directory holding the entity type files `<name>.yaml`, relative to this file."
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Rules files, relative to this file. Their sections are merged."
+        },
+        "map": {
+          "$ref": "#/$defs/MapSpec"
+        },
+        "calendar": {
+          "$ref": "#/$defs/CalendarSpec",
+          "default": {}
+        },
+        "light": {
+          "$ref": "#/$defs/LightSpec",
+          "default": {}
+        },
+        "schedule": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true,
+          "description": "Scheduled world changes. Parsed for the contract's format; not in milestone 1."
+        }
+      },
+      "required": [
+        "map"
+      ],
+      "description": "A world settings file, or the inline `world` section of an experiment configuration."
+    },
+    "Regime": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "scripted"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "generative",
+          "description": "Physics-driven. Not in milestone 1."
+        }
+      ]
+    },
+    "MapSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "type": "string"
+        },
+        "size_m": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Extent in meters along x and z. The map is centered on the origin."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "generator",
+        "size_m"
+      ],
+      "description": "The map generator, a registered module, and its parameters."
+    },
+    "CalendarSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minutes_per_day": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Simulated minutes per calendar day."
+        },
+        "daylight_fraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fraction of the day, from dawn, that is daylight."
+        }
+      },
+      "description": "The calendar (contract 6): how simulated seconds map to days.\n\nFields are optional so that a partial inline calendar parses; a run needs all of them,\nwhich [`WorldSpec::validate`] checks."
+    },
+    "Trait_for_double": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/TraitFull"
+        }
+      ]
+    },
+    "TraitFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "double"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Variation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "normal": {
+              "type": "object",
+              "properties": {
+                "sd": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "sd"
+              ]
+            }
+          },
+          "required": [
+            "normal"
+          ],
+          "additionalProperties": false,
+          "description": "Normal distribution centered on the default, with standard deviation `sd`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "properties": {
+                "half_width": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "half_width"
+              ]
+            }
+          },
+          "required": [
+            "uniform"
+          ],
+          "additionalProperties": false,
+          "description": "Uniform distribution centered on the default, from `default - half_width` to\n`default + half_width`."
+        }
+      ],
+      "description": "How individuals vary when sampled. Sampled values are clipped to the trait's range."
+    },
+    "LightSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "twilight_hours": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Length of the linear rise at dawn and fall at dusk, in calendar hours, centered on\nthe day–night boundary."
+        },
+        "night_below": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "It is night when the light level is below this value."
+        }
+      },
+      "description": "Light: the dawn and dusk transitions and the night threshold."
+    },
+    "PopulationEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "nervous_system": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NervousSystem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Replaces the type's nervous system for this group."
+        },
+        "overrides": {
+          "description": "Trait overrides for this group, in the shape of a type file."
+        }
+      },
+      "required": [
+        "type",
+        "count"
+      ],
+      "description": "One group of agents or objects placed in the world."
+    },
+    "NervousSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "description": "The nervous system: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
+    },
+    "Views": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "propositional_sensor": {
+          "type": "boolean",
+          "default": false
+        },
+        "speech_as_symbols": {
+          "type": "boolean",
+          "description": "Heard speech as symbols. Not in milestone 1.",
+          "default": false
+        }
+      },
+      "description": "Which views agents receive."
+    },
+    "Options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "impossible_actions": {
+          "$ref": "#/$defs/ImpossibleActions",
+          "default": "masked"
+        },
+        "touch_detail": {
+          "$ref": "#/$defs/TouchDetailOption",
+          "default": "whole_body"
+        },
+        "death": {
+          "$ref": "#/$defs/Death",
+          "default": "ends_lifetime"
+        }
+      }
+    },
+    "ImpossibleActions": {
+      "type": "string",
+      "enum": [
+        "masked",
+        "attempt_and_fail"
+      ]
+    },
+    "TouchDetailOption": {
+      "type": "string",
+      "enum": [
+        "whole_body",
+        "per_part"
+      ]
+    },
+    "Death": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "ends_lifetime"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "persistent_society",
+          "description": "Not in milestone 1."
+        }
+      ]
+    },
+    "Clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/ClockMode",
+          "default": "synchronous"
+        },
+        "tick_s": {
+          "type": "number",
+          "format": "double",
+          "default": 0.1
+        },
+        "decision_every_ticks": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 2
+        }
+      },
+      "description": "The clock (contract 6). The defaults are the contract's: 0.1 s ticks, a decision every\n2 ticks."
+    },
+    "ClockMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "synchronous"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "realtime",
+          "description": "Not in milestone 1."
+        }
+      ]
+    },
+    "Lifetime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_days": {
+          "type": "number",
+          "format": "double",
+          "description": "The run ends after this many calendar days, if any agent is still alive."
+        }
+      },
+      "required": [
+        "default_days"
+      ]
+    },
+    "Logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state_every_ticks": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "description": "State snapshots every this many ticks.",
+          "default": 10
+        },
+        "images": {
+          "$ref": "#/$defs/LogRate",
+          "description": "Rendered images: off by default.",
+          "default": "off"
+        },
+        "internals": {
+          "$ref": "#/$defs/LogRate",
+          "description": "Agent internals.",
+          "default": "all"
+        }
+      }
+    },
+    "LogRate": {
+      "description": "off, all, every_decision, or every_<n>th (for example every_10th)",
+      "type": "string",
+      "pattern": "^(off|all|every_decision|every_frame|every_[1-9][0-9]*th)$"
+    },
+    "RewardSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "description": "The agent-side reward function (contract 4), registered by name in `semantic_world.reward`."
+    }
+  }
+}

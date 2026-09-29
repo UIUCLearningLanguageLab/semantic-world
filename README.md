@@ -2,7 +2,7 @@
 
 An artificial world for comparing cognitive models.
 
-**Status:** early build. The design documents are in `docs/`, and the code is being built in stages against `docs/specs/MILESTONE_1.md`. Stage 1, the workspace skeleton, is done.
+**Status:** early build. The design documents are in `docs/`, and the code is being built in stages against `docs/specs/MILESTONE_1.md`. The git log names the stages done so far.
 
 ## Purpose
 

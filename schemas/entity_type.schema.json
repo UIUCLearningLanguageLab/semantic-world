@@ -1,0 +1,1001 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "The type's name, which is also the prefix of its entity IDs (`human_0`)."
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "extends": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The type this one was derived from, if any. Recorded for provenance; the derivation has\nalready been applied when this struct exists."
+    },
+    "body": {
+      "$ref": "#/$defs/Body"
+    },
+    "sensors": {
+      "$ref": "#/$defs/Sensors"
+    },
+    "actuators": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "nervous_system": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NervousSystem"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "type",
+    "body"
+  ],
+  "description": "One entity type: what the entity is, senses, does, and thinks with.",
+  "title": "EntityType",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Body": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "type": "string",
+          "description": "The body plan, a registered module that sets the parts list and the collision shapes."
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Asset name. Optional in milestone 1 and not validated against an asset manifest."
+        },
+        "mass": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "height": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "insulation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fraction of cold rise removed, 0 to 1. Absent means 0."
+        },
+        "radius": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Radius of the entity's circle on the ground plane, in meters, used for blocking and\nfor surface distances. Absent means 0: a point."
+        },
+        "solid": {
+          "type": "boolean",
+          "description": "Whether the entity blocks movement."
+        },
+        "collision": {
+          "$ref": "#/$defs/Collision",
+          "description": "The blocking shape of a solid entity."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "needs": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/NeedSpec"
+          }
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stock": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/StockSpec"
+          }
+        },
+        "provides": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Trait_for_double"
+          },
+          "description": "Need changes per unit consumed, by need name."
+        },
+        "placeholder": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Placeholder"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "description": "The body: what the entity is physically (contract 1, additions A1 and A2)."
+    },
+    "Trait_for_double": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/TraitFull"
+        }
+      ]
+    },
+    "TraitFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "double"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Variation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "normal": {
+              "type": "object",
+              "properties": {
+                "sd": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "sd"
+              ]
+            }
+          },
+          "required": [
+            "normal"
+          ],
+          "additionalProperties": false,
+          "description": "Normal distribution centered on the default, with standard deviation `sd`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "properties": {
+                "half_width": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "half_width"
+              ]
+            }
+          },
+          "required": [
+            "uniform"
+          ],
+          "additionalProperties": false,
+          "description": "Uniform distribution centered on the default, from `default - half_width` to\n`default + half_width`."
+        }
+      ],
+      "description": "How individuals vary when sampled. Sampled values are clipped to the trait's range."
+    },
+    "Collision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "shape": {
+              "type": "string",
+              "const": "circle"
+            }
+          },
+          "required": [
+            "shape"
+          ],
+          "additionalProperties": false,
+          "description": "A circle of the body's `radius`. The default."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "thickness": {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            "shape": {
+              "type": "string",
+              "const": "walls"
+            }
+          },
+          "required": [
+            "shape",
+            "thickness"
+          ],
+          "description": "The walls of the placeholder footprint, open side excepted, `thickness` meters thick."
+        }
+      ],
+      "description": "The blocking shape of a solid entity on the ground plane."
+    },
+    "NeedSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/Trait_for_double",
+          "default": 0.0
+        },
+        "rise_per_day": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Rise rate in normal conditions, per calendar day."
+        },
+        "rise_when": {
+          "$ref": "#/$defs/Trait_for_RiseWhen",
+          "default": "always"
+        },
+        "rise_multipliers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "asleep": {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            "in_shelter": {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            "running": {
+              "$ref": "#/$defs/Trait_for_double"
+            }
+          },
+          "description": "Multiply the rise rate while a state holds."
+        },
+        "fall_per_day": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Passive fall rate, per calendar day, when the rise condition does not hold.",
+          "default": 0.0
+        },
+        "fall_multipliers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "asleep": {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            "in_shelter": {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            "running": {
+              "$ref": "#/$defs/Trait_for_double"
+            }
+          }
+        },
+        "insulation_reduces_rise": {
+          "$ref": "#/$defs/Trait_for_boolean",
+          "description": "If true, the rise rate is multiplied by (1 − body.insulation).",
+          "default": false
+        },
+        "at_max": {
+          "$ref": "#/$defs/AtMax"
+        }
+      },
+      "required": [
+        "rise_per_day",
+        "at_max"
+      ],
+      "description": "One need: a generic mechanism, all of whose fields are traits (addition A1)."
+    },
+    "Trait_for_RiseWhen": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RiseWhen"
+        },
+        {
+          "$ref": "#/$defs/TraitFull2"
+        }
+      ]
+    },
+    "RiseWhen": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "always",
+            "night_outside_shelter"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "awake",
+          "description": "While the agent is awake. Not in the A1 list; see `docs/proposals/`."
+        }
+      ],
+      "description": "When a need rises (addition A1)."
+    },
+    "TraitFull2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/RiseWhen"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/RiseWhen"
+          }
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Trait_for_boolean": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/TraitFull3"
+        }
+      ]
+    },
+    "TraitFull3": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "boolean"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "boolean"
+          }
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "AtMax": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "health_drain_per_hour": {
+              "$ref": "#/$defs/Trait_for_double"
+            }
+          },
+          "required": [
+            "health_drain_per_hour"
+          ],
+          "additionalProperties": false,
+          "description": "Health drains at this rate per calendar hour."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "collapse": {
+              "type": "object",
+              "properties": {
+                "duration_hours": {
+                  "$ref": "#/$defs/Trait_for_double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "duration_hours"
+              ]
+            }
+          },
+          "required": [
+            "collapse"
+          ],
+          "additionalProperties": false,
+          "description": "Forced sleep that cannot be interrupted."
+        }
+      ],
+      "description": "What happens when a need is at 1.0 (addition A1)."
+    },
+    "HealthSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/Trait_for_double",
+          "default": 1.0
+        },
+        "recover_per_hour": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Recovery per calendar hour while no need is at max."
+        }
+      },
+      "required": [
+        "recover_per_hour"
+      ],
+      "description": "Health (addition A1)."
+    },
+    "StockSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initial": {
+          "$ref": "#/$defs/Trait_for_int64"
+        },
+        "max": {
+          "$ref": "#/$defs/Trait_for_int64"
+        }
+      },
+      "required": [
+        "initial",
+        "max"
+      ],
+      "description": "A countable amount held by an entity (addition A2)."
+    },
+    "Trait_for_int64": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "$ref": "#/$defs/TraitFull4"
+        }
+      ]
+    },
+    "TraitFull4": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Placeholder": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlaceholderPart"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "parts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PlaceholderPart"
+              }
+            }
+          },
+          "required": [
+            "parts"
+          ]
+        }
+      ],
+      "description": "A placeholder: one part, or a list of parts with offsets (addition A2).\n\nWritten either as a single part (`{shape: sphere, size: [...], color: \"#...\"}`) or as\n`{parts: [...]}`."
+    },
+    "PlaceholderPart": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "$ref": "#/$defs/Shape"
+        },
+        "size": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Full extent in meters along x, y (up), and z."
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "offset": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "The part's center relative to the entity's origin on the ground. Absent means the part\nstands on the ground, centered: `[0, size[1] / 2, 0]`."
+        },
+        "color_when_stocked": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StockedColor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "shape",
+        "size",
+        "color"
+      ],
+      "description": "One part of a placeholder."
+    },
+    "Shape": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "capsule",
+            "sphere",
+            "cylinder",
+            "cone",
+            "box",
+            "disc"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "shelter",
+          "description": "A box with one open side. The open side faces the entity's facing direction."
+        }
+      ],
+      "description": "Placeholder shapes (addition A2)."
+    },
+    "Color": {
+      "type": "string",
+      "description": "A color as `#rrggbb`."
+    },
+    "StockedColor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stock": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        }
+      },
+      "required": [
+        "stock",
+        "color"
+      ],
+      "description": "A different color while a stock is at least 1: a bush is red while berries remain."
+    },
+    "Sensors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "eyes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EyesSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interoception": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InteroceptionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "touch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TouchSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proprioception": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProprioceptionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "propositional": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PropositionalSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The propositional sensor. Present means the agent may have it; the experiment's\n`views.propositional_sensor` switches it on."
+        },
+        "ears": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "smell": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "taste": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "pain": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "temperature": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "pressure": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "description": "The sensors an entity has. Each field is a registered sensor module with its parameters.\nSensors designed but not built in milestone 1 parse as free-form parameters and are\nrejected at validation."
+    },
+    "EyesSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resolution": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Width and height in pixels."
+        },
+        "fov_deg": {
+          "$ref": "#/$defs/Trait_for_double"
+        },
+        "range_m": {
+          "$ref": "#/$defs/Trait_for_double"
+        },
+        "color": {
+          "type": "boolean",
+          "default": true
+        },
+        "height_m": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Camera height above the ground, in meters.",
+          "default": 1.6
+        }
+      },
+      "required": [
+        "resolution",
+        "fov_deg",
+        "range_m"
+      ],
+      "description": "Eyes: a rendered view from a camera above the ground, along the agent's facing."
+    },
+    "InteroceptionSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "needs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The needs reported, in block order."
+        },
+        "health": {
+          "type": "boolean",
+          "description": "Whether health is reported after the needs.",
+          "default": true
+        },
+        "noise_sd": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Standard deviation of Gaussian noise added to each value, clipped to 0 to 1.",
+          "default": 0.0
+        }
+      },
+      "required": [
+        "needs"
+      ],
+      "description": "Interoception: need levels, and health, as a float block."
+    },
+    "TouchSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/TouchDetail"
+        }
+      },
+      "required": [
+        "detail"
+      ]
+    },
+    "TouchDetail": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "whole_body"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "per_part",
+          "description": "Per body part. Not in milestone 1."
+        }
+      ],
+      "description": "How finely touch is reported."
+    },
+    "ProprioceptionSpec": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "PropositionalSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "range_m": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Facts are reported about entities within this distance, in meters."
+        }
+      },
+      "required": [
+        "range_m"
+      ]
+    },
+    "NervousSystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "module"
+      ],
+      "description": "The nervous system: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
+    }
+  }
+}
