@@ -864,6 +864,11 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     root = _Node(source, "", data)
     name = root.string("name", "default")
     master_seed = root.int("seed", 1, min=0, max=SEED_MAX)
+    # A run's config.yaml records its provenance (git commit, package version, stream seeds)
+    # under this key, so that a run folder's configuration loads back unchanged.
+    prov = root.get("provenance", None, nullable=True)
+    if prov is not None and not isinstance(prov, dict):
+        raise root.error("provenance", f"expected a mapping, found {_describe(prov)}")
     if seed is not None:
         master_seed = root.check_int("seed", seed, min=0, max=SEED_MAX)
     features = _read_features(root.mapping("features"))

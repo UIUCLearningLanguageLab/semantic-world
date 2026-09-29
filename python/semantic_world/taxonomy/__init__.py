@@ -13,6 +13,7 @@ from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import Expr, ExpressionError, parse_expression
 from semantic_world.taxonomy.features import Feature, FeatureSet, build_features
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
+from semantic_world.taxonomy.generate import TaxonomyResult, generate
 from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.rules import Rule, RuleSet, generate_rules
 from semantic_world.taxonomy.streams import STREAM_NAMES, Streams, stream_seed
@@ -34,11 +35,13 @@ __all__ = [
     "Rule",
     "RuleSet",
     "Streams",
+    "TaxonomyResult",
     "Tree",
     "TruthTable",
     "build_features",
     "compute_node_vectors",
     "config_from_mapping",
+    "generate",
     "generate_instances",
     "generate_rules",
     "generate_tree",

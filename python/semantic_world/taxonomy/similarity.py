@@ -59,3 +59,30 @@ def cross_similarity(a: np.ndarray, b: np.ndarray, metric: str) -> np.ndarray:
 def pair_similarity(a: np.ndarray, b: np.ndarray, metric: str) -> float:
     """The similarity of two vectors, or NaN."""
     return float(cross_similarity(np.atleast_2d(a), np.atleast_2d(b), metric)[0, 0])
+
+
+def rowwise_similarity(a: np.ndarray, b: np.ndarray, metric: str) -> np.ndarray:
+    """The similarity of row ``i`` of ``a`` with row ``i`` of ``b``, for every ``i``."""
+    x = np.asarray(a, dtype=float)
+    y = np.asarray(b, dtype=float)
+    if x.shape != y.shape or x.ndim != 2:
+        raise ValueError(f"expected two matrices of the same shape, got {x.shape} and {y.shape}")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        if metric == "phi":
+            xc = x - x.mean(axis=1, keepdims=True)
+            yc = y - y.mean(axis=1, keepdims=True)
+            result = (xc * yc).sum(axis=1) / np.sqrt((xc**2).sum(axis=1) * (yc**2).sum(axis=1))
+        elif metric == "cosine":
+            result = (x * y).sum(axis=1) / np.sqrt((x**2).sum(axis=1) * (y**2).sum(axis=1))
+        elif metric == "jaccard":
+            intersection = (x * y).sum(axis=1)
+            result = intersection / (x.sum(axis=1) + y.sum(axis=1) - intersection)
+        else:
+            raise ValueError(
+                f"unknown similarity metric {metric!r}; the metrics are {', '.join(METRICS)}"
+            )
+    result = np.asarray(result, dtype=float)
+    result[~np.isfinite(result)] = np.nan
+    if metric == "phi":
+        np.clip(result, -1.0, 1.0, out=result)
+    return result
