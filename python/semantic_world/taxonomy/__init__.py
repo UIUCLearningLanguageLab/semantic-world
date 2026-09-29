@@ -14,9 +14,11 @@ from semantic_world.taxonomy.expressions import Expr, ExpressionError, parse_exp
 from semantic_world.taxonomy.features import Feature, FeatureSet, build_features
 from semantic_world.taxonomy.rules import Rule, RuleSet, generate_rules
 from semantic_world.taxonomy.streams import STREAM_NAMES, Streams, stream_seed
+from semantic_world.taxonomy.tree import Category, Role, Tree, generate_tree
 
 __all__ = [
     "STREAM_NAMES",
+    "Category",
     "Config",
     "ConfigError",
     "Expr",
@@ -24,13 +26,16 @@ __all__ = [
     "Feature",
     "FeatureSet",
     "GenerationError",
+    "Role",
     "Rule",
     "RuleSet",
     "Streams",
+    "Tree",
     "TruthTable",
     "build_features",
     "config_from_mapping",
     "generate_rules",
+    "generate_tree",
     "load_config",
     "parse_expression",
     "stream_seed",

@@ -1,6 +1,6 @@
 # Proposal: when the variance bound is checked
 
-September 29, 2026. Raised while building stage 3 of `docs/specs/TAXONOMY_GENERATOR.md`. Status: waiting for Jon.
+September 29, 2026. Raised while building stage 3 of `docs/specs/TAXONOMY_GENERATOR.md`. Status: decided. Jon chose option 1 on September 29, 2026.
 
 ## The question
 
