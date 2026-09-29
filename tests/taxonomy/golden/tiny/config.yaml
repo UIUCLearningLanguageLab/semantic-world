@@ -1,0 +1,54 @@
+name: tiny
+seed: 1
+features:
+  is: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  has: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  can: {count: 4}
+  base_rate_override: null
+  base_rate_heterogeneity: null
+rules:
+  source: automatic
+  file: null
+  max_chain_depth: 1
+  arity: {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
+  operator_mix: {AND: 1, OR: 1, XOR: 1}
+  negation_probability: 0.2
+  arity_3_families: {I: 1, II: 1, III: 1, IV: 1, V: 1, VI: 1, compositional: 1}
+  nesting_depth: {1: 0.5, 2: 0.5}
+  input_type_weights: {is: 1, has: 1}
+  overrides: {}
+  allow_duplicate_rules: false
+  variance_bound: null
+taxonomy:
+  superordinates: 2
+  depth: 2
+  branching:
+    schedule: list
+    values: [2]
+superordinates:
+  similarity_bound: {metric: phi, scope: free, min: null, max: 0.3, max_tries: 10000,
+    local_search: true}
+inheritance:
+  proportion_defining:
+    schedule: list
+    values: [0.1, 0.1]
+  proportion_characteristic:
+    schedule: list
+    values: [0.5, 0.5]
+  characteristic_probability:
+    schedule: list
+    values: [0.9, 0.9]
+  require_distinct_leaves: true
+  distinct_max_tries: 1000
+instances: {per_leaf: 3, characteristic_probability: 0.9}
+analysis: {similarity_metric: cosine, similarity_features: non_isa, max_pairs: 200000}
+provenance:
+  git_commit: 7ab5f7b9a54a6f675750b5fe4ff35329f43ca2a3
+  git_dirty: false
+  package_version: 0.1.0
+  stream_seeds: {'taxonomy:base_rates': 62329891537121046362963677271070578810010733763006158817907896126429270944263,
+    'taxonomy:rules': 27640572522727452744182043368199085913796669335166767209556260316189912458429,
+    'taxonomy:superordinates': 103036945527689773425162544588219861203737846749682948439638730413040665232275,
+    'taxonomy:tree': 24945472229550621691521188581062127506946659923423747117092871549376537448986,
+    'taxonomy:instances': 98232556604939197138919912747894053466214844262451780508074870084733736741255,
+    'taxonomy:analysis': 46015020034215618088007401462366493660427730940381358579990426374514347259695}
