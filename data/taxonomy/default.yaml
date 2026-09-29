@@ -1,0 +1,50 @@
+# The default taxonomy configuration. Every parameter is shown with its default value.
+# See docs/specs/TAXONOMY_GENERATOR.md, "Configuration".
+
+name: default
+seed: 1                          # master seed, a 64-bit unsigned integer
+
+features:
+  is:  {count: 40, proportion_determined: 0.25, expected_true_free: 6}
+  has: {count: 40, proportion_determined: 0.25, expected_true_free: 6}
+  can: {count: 20}
+  base_rate_override: null       # one probability for all free features; replaces expected_true_free
+  base_rate_heterogeneity: null  # null: equal base rates within a type; a number: Beta concentration
+
+rules:
+  source: automatic              # automatic or file
+  file: null                     # path to a rule file when source is file
+  max_chain_depth: 1
+  arity: {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}      # weights
+  operator_mix: {AND: 1, OR: 1, XOR: 1}          # weights
+  negation_probability: 0.2
+  arity_3_families: {I: 1, II: 1, III: 1, IV: 1, V: 1, VI: 1, compositional: 1}
+  nesting_depth: {1: 0.5, 2: 0.5}                # compositional rules only
+  input_type_weights: {is: 1, has: 1}
+  overrides: {}                  # optional per-output-type settings, e.g. {can: {arity: {2: 1, 3: 1}}}
+  allow_duplicate_rules: false
+  variance_bound: null           # [low, high] proportion of instances true; null is off
+
+taxonomy:
+  superordinates: 4
+  depth: 3
+  branching: [2, 4]              # a number, a range, or {schedule: list, values: [...]} with one value per level 1..depth-1
+
+superordinates:
+  similarity_bound: {metric: phi, scope: free, min: null, max: 0.3, max_tries: 10000, local_search: true}
+
+inheritance:
+  proportion_defining: 0.1
+  proportion_characteristic: 0.5
+  characteristic_probability: 0.9
+  require_distinct_leaves: true
+  distinct_max_tries: 1000
+
+instances:
+  per_leaf: [5, 10]              # a number or a range
+  characteristic_probability: 0.9
+
+analysis:
+  similarity_metric: cosine      # phi, cosine, or jaccard
+  similarity_features: non_isa   # non_isa or all
+  max_pairs: 200000              # pairs above this number are sampled
