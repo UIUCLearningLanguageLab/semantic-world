@@ -26,6 +26,9 @@ sw-rules.workspace = true
 sw-sense.workspace = true
 sw-render.workspace = true
 sw-log.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
 
 # `pyo3/extension-module` is turned on by maturin (see pyproject.toml), not here, so that
 # `cargo test --workspace --all-features` can still link this crate against libpython.

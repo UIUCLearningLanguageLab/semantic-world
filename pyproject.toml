@@ -50,6 +50,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
+ignore = ["B027"]  # optional hooks on the NervousSystem base class are empty on purpose
+
+[tool.ruff.lint.isort]
+known-first-party = ["semantic_world"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

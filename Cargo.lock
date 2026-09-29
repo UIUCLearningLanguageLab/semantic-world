@@ -1113,14 +1113,17 @@ version = "0.1.0"
 name = "sw-py"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
  "numpy",
  "pyo3",
+ "serde_json",
  "sw-core",
  "sw-log",
  "sw-render",
  "sw-rules",
  "sw-schema",
  "sw-sense",
+ "thiserror",
 ]
 
 [[package]]
@@ -1161,6 +1164,17 @@ dependencies = [
 [[package]]
 name = "sw-sense"
 version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rand",
+ "rand_chacha",
+ "serde",
+ "serde_json",
+ "sw-core",
+ "sw-rules",
+ "sw-schema",
+ "thiserror",
+]
 
 [[package]]
 name = "syn"

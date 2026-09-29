@@ -181,6 +181,9 @@ pub struct Motion {
     pub speed_mps: f64,
     pub running: bool,
     pub ticks_left: u32,
+    /// The speed the agent moved at during the last tick, 0 when it stood still. This is
+    /// what proprioception reports as the current speed.
+    pub last_tick_speed_mps: f64,
 }
 
 impl Motion {
@@ -189,6 +192,7 @@ impl Motion {
             speed_mps: 0.0,
             running: false,
             ticks_left: 0,
+            last_tick_speed_mps: 0.0,
         }
     }
 

@@ -16,8 +16,11 @@ pub mod space;
 pub mod streams;
 pub mod world;
 
+/// Re-exported so crates built on the core need no ECS or math dependency of their own.
+pub use bevy_ecs::prelude::Entity;
 pub use clock::Clock;
 pub use error::{CoreError, Result};
+pub use glam::DVec2;
 pub use snapshot::{EntitySnapshot, StateHash, StateSnapshot};
 pub use world::World;
 

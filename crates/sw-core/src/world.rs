@@ -243,6 +243,7 @@ impl World {
             speed_mps: speed_mps.max(0.0),
             running,
             ticks_left: ticks,
+            last_tick_speed_mps: 0.0,
         };
         Ok(())
     }
@@ -316,7 +317,7 @@ impl World {
                     speed = motion.speed_mps;
                 }
             }
-            let _ = speed;
+            motion.last_tick_speed_mps = speed;
             let mut entity_mut = self.ecs.entity_mut(entity);
             *entity_mut.get_mut::<Motion>().expect("motion") = motion;
             *entity_mut.get_mut::<Contact>().expect("contact") = contact;

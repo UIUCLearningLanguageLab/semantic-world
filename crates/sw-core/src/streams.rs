@@ -34,6 +34,11 @@ pub fn agent_stream_name(agent_id: &str) -> String {
     format!("agent:{agent_id}")
 }
 
+/// The name of the stream an agent's sensors draw noise from, `sense:<id>`.
+pub fn sense_stream_name(agent_id: &str) -> String {
+    format!("sense:{agent_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
