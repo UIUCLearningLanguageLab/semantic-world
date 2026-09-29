@@ -51,6 +51,8 @@ class Category:
     roles: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.int8))
     """The role of every free feature at this category, as :class:`Role` values."""
     children: list[Category] = field(default_factory=list)
+    scalars: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    """The category's value on every scalar dimension."""
 
     @property
     def is_leaf(self) -> bool:
@@ -125,6 +127,10 @@ class Tree:
     def free_matrix(self) -> np.ndarray:
         return np.stack([c.free_values for c in self.categories])
 
+    def scalar_matrix(self) -> np.ndarray:
+        """One row per category: its scalar values, shape ``(categories, scalars)``."""
+        return np.stack([c.scalars for c in self.categories])
+
     def isa_vector(self, category: Category) -> np.ndarray:
         """The ISA features of a category, in category order: 1 for the category and its
         ancestors, 0 otherwise."""
@@ -159,6 +165,7 @@ class _TreeBuilder:
         self.streams = streams
         self.base_rates = self.features.base_rates
         self.n_free = len(self.base_rates)
+        self.n_scalars = config.scalars.count
         self.depth = config.taxonomy.depth
         self.warnings: list[str] = []
         self.categories: list[Category] = []
@@ -208,7 +215,9 @@ class _TreeBuilder:
             else:
                 free_values, values = self._bounded_superordinate(label, bound, accepted_scope, rng)
                 accepted_scope.append(values[self.scope_columns])
-            accepted.append(Category(label, (index,), 1, None, free_values, values))
+            category = Category(label, (index,), 1, None, free_values, values)
+            category.scalars = self._superordinate_scalars()
+            accepted.append(category)
         if bound is not None and len(accepted_scope) >= 2:
             sims = cross_similarity(
                 np.stack(accepted_scope), np.stack(accepted_scope), bound.metric
@@ -330,6 +339,7 @@ class _TreeBuilder:
                 free_values,
                 self._compute(free_values),
             )
+            child.scalars = self._child_scalars(category)
             children.append(child)
         category.children = children
         for child in children:
@@ -366,6 +376,21 @@ class _TreeBuilder:
         undiagnostic = parent.roles == Role.UNDIAGNOSTIC
         values[undiagnostic] = (u[undiagnostic] < self.base_rates[undiagnostic]).astype(np.uint8)
         return values
+
+    # Scalars ------------------------------------------------------------------------------------
+
+    def _superordinate_scalars(self) -> np.ndarray:
+        """Standard normal draws from the ``scalars`` stream, one per dimension."""
+        if self.n_scalars == 0:
+            return np.zeros(0)
+        return self.streams.scalars.normal(size=self.n_scalars)
+
+    def _child_scalars(self, parent: Category) -> np.ndarray:
+        """The parent's values plus normal noise with the drift of the parent's level."""
+        if self.n_scalars == 0:
+            return np.zeros(0)
+        drift = self.config.scalars.drift[parent.level - 1]
+        return parent.scalars + self.streams.scalars.normal(0.0, drift, size=self.n_scalars)
 
     def _check_leaf(self, leaf: Category, rng: np.random.Generator) -> None:
         inheritance = self.config.inheritance

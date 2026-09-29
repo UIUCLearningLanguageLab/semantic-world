@@ -10,7 +10,7 @@ stream, so changing the instance count never changes the rules or the tree.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -31,6 +31,8 @@ class Instances:
     """The index of each instance's leaf in ``tree.categories``."""
     values: np.ndarray
     """The feature matrix over the non-ISA features, shape ``(instances, features)``, uint8."""
+    scalars: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    """The scalar values, shape ``(instances, scalars)``, float."""
 
     def __len__(self) -> int:
         return len(self.labels)
@@ -56,7 +58,10 @@ class Instances:
 def generate_instances(config: Config, rules: RuleSet, tree: Tree, streams: Streams) -> Instances:
     """Generate the instances of every leaf, in category order."""
     rng = streams.instances
+    scalar_rng = streams.scalar_instances
     features = rules.features
+    n_scalars = features.scalar_count
+    instance_drift = config.scalars.instance_drift
     base_rates = features.base_rates
     copy_probability = config.instances.characteristic_probability
     per_leaf = config.instances.per_leaf
@@ -64,6 +69,7 @@ def generate_instances(config: Config, rules: RuleSet, tree: Tree, streams: Stre
     leaf_labels: list[str] = []
     leaf_index: list[int] = []
     free_rows: list[np.ndarray] = []
+    scalar_rows: list[np.ndarray] = []
     for index, category in enumerate(tree.categories):
         if not category.is_leaf:
             continue
@@ -73,14 +79,22 @@ def generate_instances(config: Config, rules: RuleSet, tree: Tree, streams: Stre
             leaf_labels.append(category.label)
             leaf_index.append(index)
             free_rows.append(instance_free_values(category, copy_probability, base_rates, rng))
+            if n_scalars:
+                scalar_rows.append(
+                    category.scalars + scalar_rng.normal(0.0, instance_drift, size=n_scalars)
+                )
     free_matrix = (
         np.stack(free_rows) if free_rows else np.zeros((0, len(base_rates)), dtype=np.uint8)
+    )
+    scalar_matrix = (
+        np.stack(scalar_rows) if scalar_rows else np.zeros((len(labels), n_scalars), dtype=float)
     )
     return Instances(
         tuple(labels),
         tuple(leaf_labels),
         np.array(leaf_index, dtype=np.intp),
         rules.compute(free_matrix),
+        scalar_matrix,
     )
 
 

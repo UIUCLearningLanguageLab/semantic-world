@@ -126,19 +126,27 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
     labels = vectors.feature_labels
     category_labels = [c.label for c in tree.categories]
 
+    k = features.scalar_count
+    scalar_labels = list(features.scalar_labels)
     features_frame = pl.DataFrame(
         {
-            "label": list(labels),
-            "type": ["isa"] * vectors.isa_count + [f.type for f in features.features],
+            "label": list(labels) + scalar_labels,
+            "type": ["isa"] * vectors.isa_count
+            + [f.type for f in features.features]
+            + ["scalar"] * k,
             "kind": ["determined"] * vectors.isa_count
-            + ["free" if f.free else "determined" for f in features.features],
+            + ["free" if f.free else "determined" for f in features.features]
+            + ["free"] * k,
             "layer": pl.Series(
-                [float("nan")] * vectors.isa_count + [float(f.layer) for f in features.features],
+                [float("nan")] * vectors.isa_count
+                + [float(f.layer) for f in features.features]
+                + [0.0] * k,
                 dtype=pl.Float64,
             ),
             "base_rate": pl.Series(
                 [float("nan")] * vectors.isa_count
-                + [float("nan") if f.base_rate is None else f.base_rate for f in features.features],
+                + [float("nan") if f.base_rate is None else f.base_rate for f in features.features]
+                + [float("nan")] * k,
                 dtype=pl.Float64,
             ),
         }
@@ -181,14 +189,23 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
             role_rows["fixed_test"].append(test)
     roles_frame = pl.DataFrame(role_rows)
 
+    all_labels = tuple(labels) + tuple(scalar_labels)
     generative = _matrix_frame(
         "label",
         category_labels,
-        labels,
-        [vectors.generative[:, j].astype(np.int64).tolist() for j in range(len(labels))],
+        all_labels,
+        [vectors.generative[:, j].astype(np.int64).tolist() for j in range(len(labels))]
+        + _means(vectors.scalar_generative),
     )
-    defining = _matrix_frame("label", category_labels, labels, _binary_or_nan(vectors.defining))
-    mean = _matrix_frame("label", category_labels, labels, _means(vectors.mean))
+    defining = _matrix_frame(
+        "label",
+        category_labels,
+        all_labels,
+        _binary_or_nan(vectors.defining) + _means(vectors.scalar_defining),
+    )
+    mean = _matrix_frame(
+        "label", category_labels, all_labels, _means(vectors.mean) + _means(vectors.scalar_mean)
+    )
 
     full = instances.full_matrix(tree).astype(np.int64)
     instance_data: dict[str, Any] = {
@@ -197,9 +214,18 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
     }
     for j, label in enumerate(labels):
         instance_data[label] = full[:, j].tolist()
+    for j, label in enumerate(scalar_labels):
+        instance_data[label] = _means(instances.scalars[:, j : j + 1])[0]
     instances_frame = pl.DataFrame(
         instance_data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
     )
+
+    extra: dict[str, pl.DataFrame] = {}
+    bins = result.config.scalars.thermometer_bins
+    if k and bins:
+        extra["instances_scalar_codes.csv"] = thermometer_frame(
+            list(instances.labels), scalar_labels, instances.scalars, bins
+        )
 
     return {
         "features.csv": features_frame,
@@ -211,7 +237,22 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         "instances.csv": instances_frame,
         "similarity.csv": result.similarity,
         "feature_stats.csv": result.feature_stats,
+        **extra,
     }
+
+
+def thermometer_frame(
+    instance_labels: list[str], scalar_labels: list[str], values: np.ndarray, bins: int
+) -> pl.DataFrame:
+    """Thermometer codes: for each scalar, ``bins`` binary columns ``SC.<n>>q<j>``, one per
+    quantile ``j / (bins + 1)`` of the realized instance values, 1 where the value exceeds it."""
+    data: dict[str, Any] = {"label": instance_labels}
+    for j, label in enumerate(scalar_labels):
+        column = values[:, j]
+        for b in range(1, bins + 1):
+            cut = np.quantile(column, b / (bins + 1)) if len(column) else np.nan
+            data[f"{label}>q{b}"] = (column > cut).astype(np.int64).tolist()
+    return pl.DataFrame(data, schema_overrides={"label": pl.Utf8})
 
 
 # ---------------------------------------------------------------------------------------------

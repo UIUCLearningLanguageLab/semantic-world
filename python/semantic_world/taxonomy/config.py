@@ -21,6 +21,7 @@ SEED_MAX = 2**64 - 1
 
 FEATURE_TYPES = ("is", "has", "can")
 FREE_FEATURE_TYPES = ("is", "has")
+INPUT_TYPES = ("is", "has", "scalar")
 OPERATORS = ("AND", "OR", "XOR")
 SHJ_TYPES = ("I", "II", "III", "IV", "V", "VI")
 ARITY_3_FAMILIES = SHJ_TYPES + ("compositional",)
@@ -145,8 +146,13 @@ class RuleSampling:
 
     @property
     def input_types(self) -> tuple[str, ...]:
-        """The input feature types with nonzero weight, in ``(is, has)`` order."""
+        """The binary input feature types with nonzero weight, in ``(is, has)`` order."""
         return tuple(t for t in FREE_FEATURE_TYPES if self.input_type_weights[t] > 0)
+
+    @property
+    def scalar_weight(self) -> float:
+        """The weight of scalar threshold literals in the input pool (no effect without scalars)."""
+        return self.input_type_weights.get("scalar", 1.0)
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -218,6 +224,28 @@ class AnalysisConfig:
 
 
 @dataclass(frozen=True)
+class ScalarsConfig:
+    """Scalar dimensions (``docs/specs/TAXONOMY_RELATIONS.md``, Part A)."""
+
+    count: int
+    drift: tuple[float, ...]
+    """The standard deviation of a child's change from its parent, for parent levels 1 to
+    ``depth - 1``."""
+    instance_drift: float
+    threshold_quantiles: tuple[float, float]
+    thermometer_bins: int
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        return tuple(f"SC.{i}" for i in range(1, self.count + 1))
+
+    def fixed_below(self, level: int) -> bool:
+        """Whether a scalar is fixed for the members of a category at ``level``: every drift
+        below that level, including the instance drift, is 0."""
+        return all(d == 0 for d in self.drift[level - 1 :]) and self.instance_drift == 0
+
+
+@dataclass(frozen=True)
 class Config:
     """A fully validated and resolved run configuration."""
 
@@ -230,6 +258,7 @@ class Config:
     inheritance: InheritanceConfig
     instances: InstancesConfig
     analysis: AnalysisConfig
+    scalars: ScalarsConfig
     source: str
     """Where the configuration came from: the file path, or a label for an in-memory mapping."""
 
@@ -313,6 +342,13 @@ class Config:
                 "similarity_features": self.analysis.similarity_features,
                 "max_pairs": self.analysis.max_pairs,
             },
+            "scalars": {
+                "count": self.scalars.count,
+                "drift": _list_schedule(self.scalars.drift),
+                "instance_drift": self.scalars.instance_drift,
+                "threshold_quantiles": list(self.scalars.threshold_quantiles),
+                "thermometer_bins": self.scalars.thermometer_bins,
+            },
         }
 
     def to_yaml(self) -> str:
@@ -346,7 +382,7 @@ DEFAULT_SAMPLING = RuleSampling(
     negation_probability=0.2,
     arity_3_families={"I": 1, "II": 1, "III": 1, "IV": 1, "V": 1, "VI": 1, "compositional": 1},
     nesting_depth={1: 0.5, 2: 0.5},
-    input_type_weights={"is": 1, "has": 1},
+    input_type_weights={"is": 1, "has": 1, "scalar": 1},
 )
 
 DEFAULT_SIMILARITY_BOUND = {
@@ -707,10 +743,17 @@ def _read_sampling(node: _Node, base: RuleSampling) -> RuleSampling:
             "arity_3_families", base.arity_3_families, allowed=ARITY_3_FAMILIES
         ),
         nesting_depth=node.weights("nesting_depth", base.nesting_depth, int_keys=True),
-        input_type_weights=node.weights(
-            "input_type_weights", base.input_type_weights, allowed=FREE_FEATURE_TYPES
-        ),
+        input_type_weights=_read_input_type_weights(node, base),
     )
+
+
+def _read_input_type_weights(node: _Node, base: RuleSampling) -> dict[str, float]:
+    """``is`` and ``has`` weights, plus a ``scalar`` weight that defaults to 1 when absent."""
+    weights = node.weights("input_type_weights", base.input_type_weights, allowed=INPUT_TYPES)
+    if all(weights.get(t, 0) == 0 for t in FREE_FEATURE_TYPES):
+        raise node.error("input_type_weights", "at least one of is and has must be positive")
+    weights.setdefault("scalar", 1.0)
+    return {t: weights[t] for t in INPUT_TYPES}
 
 
 def _check_arity_pool(
@@ -840,6 +883,33 @@ def _read_instances(node: _Node) -> InstancesConfig:
     return InstancesConfig(per_leaf, probability)
 
 
+def _read_scalars(node: _Node, depth: int) -> ScalarsConfig:
+    count = node.int("count", 0, min=0)
+    drift = node.schedule("drift", 0.5, depth - 1)
+    for level, value in enumerate(drift, start=1):
+        if value < 0:
+            raise node.error(
+                "drift", f"must be non-negative at every level; level {level} is {value}"
+            )
+    instance_drift = node.number("instance_drift", 0.2, min=0)
+    quantiles = _read_open_interval(node, "threshold_quantiles", [0.2, 0.8])
+    bins = node.int("thermometer_bins", 0, min=0)
+    node.finish()
+    return ScalarsConfig(count, drift, instance_drift, quantiles, bins)
+
+
+def _read_open_interval(node: _Node, key: str, default: Any) -> tuple[float, float]:
+    """A pair ``[low, high]`` of quantiles inside (0, 1) with ``low < high``."""
+    value = node.get(key, default)
+    if not isinstance(value, list) or len(value) != 2:
+        raise node.error(key, f"expected a pair [low, high], found {_describe(value)}")
+    low = node.check_number(key, value[0])
+    high = node.check_number(key, value[1])
+    if not 0 < low < high < 1:
+        raise node.error(key, f"expected 0 < low < high < 1, found [{low}, {high}]")
+    return (low, high)
+
+
 def _read_analysis(node: _Node) -> AnalysisConfig:
     metric = node.choice("similarity_metric", "cosine", SIMILARITY_METRICS)
     feature_set = node.choice("similarity_features", "non_isa", SIMILARITY_FEATURE_SETS)
@@ -878,6 +948,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     inheritance = _read_inheritance(root.mapping("inheritance"), taxonomy.depth)
     instances = _read_instances(root.mapping("instances"))
     analysis = _read_analysis(root.mapping("analysis"))
+    scalars = _read_scalars(root.mapping("scalars"), taxonomy.depth)
     root.finish()
     return Config(
         name=name,
@@ -889,6 +960,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         inheritance=inheritance,
         instances=instances,
         analysis=analysis,
+        scalars=scalars,
         source=source,
     )
 

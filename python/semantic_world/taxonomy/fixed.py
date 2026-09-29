@@ -16,11 +16,12 @@ marks a feature fixed when it is not, but it can miss a fixed feature.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from semantic_world.taxonomy.boolean import settings_array
+from semantic_world.taxonomy.config import ScalarsConfig
 from semantic_world.taxonomy.instances import Instances
 from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT, RuleSet, evaluate_feature
 from semantic_world.taxonomy.tree import Category, Tree
@@ -46,6 +47,14 @@ class NodeVectors:
     """Shape ``(categories, non-ISA features)``, bool: determined features fixed by rule."""
     fixed_test: np.ndarray
     """Shape ``(categories, non-ISA features)``, int8: which test marked the feature fixed."""
+    scalar_labels: tuple[str, ...] = ()
+    scalar_generative: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    """Shape ``(categories, scalars)``: each category's scalar values."""
+    scalar_defining: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    """The category's value where the scalar is fixed for its members (all drift below is 0),
+    NaN otherwise."""
+    scalar_mean: np.ndarray = field(default_factory=lambda: np.zeros((0, 0)))
+    """The mean scalar values over the instances below each category."""
 
     def category_defining(self, index: int) -> np.ndarray:
         return self.defining[index]
@@ -55,8 +64,11 @@ def all_feature_labels(rules: RuleSet, tree: Tree) -> tuple[str, ...]:
     return tuple(f"ISA.{c.label}" for c in tree.categories) + rules.features.labels
 
 
-def compute_node_vectors(rules: RuleSet, tree: Tree, instances: Instances) -> NodeVectors:
-    """The generative, defining, and mean vectors of every category."""
+def compute_node_vectors(
+    rules: RuleSet, tree: Tree, instances: Instances, scalars: ScalarsConfig | None = None
+) -> NodeVectors:
+    """The generative, defining, and mean vectors of every category. ``scalars`` is needed
+    for the scalar columns when the feature set has scalar dimensions."""
     features = rules.features
     categories = tree.categories
     n_cat = len(categories)
@@ -82,8 +94,32 @@ def compute_node_vectors(rules: RuleSet, tree: Tree, instances: Instances) -> No
         if len(below):
             mean[ci] = full[below].mean(axis=0)
 
+    n_scalars = features.scalar_count
+    scalar_generative = tree.scalar_matrix() if n_scalars else np.zeros((n_cat, 0))
+    scalar_defining = np.full((n_cat, n_scalars), np.nan)
+    scalar_mean = np.full((n_cat, n_scalars), np.nan)
+    if n_scalars:
+        if scalars is None:
+            raise ValueError("the scalar configuration is needed when there are scalar dimensions")
+        for ci, category in enumerate(categories):
+            if scalars.fixed_below(category.level):
+                scalar_defining[ci] = category.scalars
+            below = instances.below(category, tree)
+            if len(below):
+                scalar_mean[ci] = instances.scalars[below].mean(axis=0)
+
     return NodeVectors(
-        all_feature_labels(rules, tree), n_cat, generative, defining, mean, fixed, fixed_test
+        all_feature_labels(rules, tree),
+        n_cat,
+        generative,
+        defining,
+        mean,
+        fixed,
+        fixed_test,
+        features.scalar_labels,
+        scalar_generative,
+        scalar_defining,
+        scalar_mean,
     )
 
 

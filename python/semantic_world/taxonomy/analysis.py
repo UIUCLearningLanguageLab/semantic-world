@@ -197,6 +197,7 @@ def feature_stats_table(
 
     # Mutual information with the category at each level.
     mi_columns: dict[str, list[float]] = {}
+    assignments: dict[int, np.ndarray] = {}
     for level in range(1, config.taxonomy.depth + 1):
         level_labels = [c.label for c in tree.at_level(level)]
         level_index = {label: i for i, label in enumerate(level_labels)}
@@ -207,6 +208,7 @@ def feature_stats_table(
             ],
             dtype=np.intp,
         )
+        assignments[level] = assignment
         mi_columns[f"mi_level_{level}"] = [
             mutual_information(full[:, j].astype(np.intp), assignment, len(level_labels))
             for j in range(len(labels))
@@ -223,7 +225,58 @@ def feature_stats_table(
     data.update(role_counts)
     for name, values in mi_columns.items():
         data[name] = pl.Series(values, dtype=pl.Float64)
+    if features.scalar_count:
+        _add_scalar_stats(data, features.scalar_labels, instances.scalars, assignments)
     return pl.DataFrame(data)
+
+
+def eta_squared(x: np.ndarray, categories: np.ndarray, n_categories: int) -> float:
+    """The proportion of variance of ``x`` explained by a category assignment (η²)."""
+    if len(x) == 0:
+        return math.nan
+    total = float(((x - x.mean()) ** 2).sum())
+    if total == 0.0:
+        return math.nan
+    counts = np.bincount(categories, minlength=n_categories)
+    sums = np.bincount(categories, weights=x, minlength=n_categories)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        means = np.where(counts > 0, sums / np.maximum(counts, 1), 0.0)
+    between = float((counts * (means - x.mean()) ** 2).sum())
+    return between / total
+
+
+def _add_scalar_stats(
+    data: dict[str, Any],
+    scalar_labels: tuple[str, ...],
+    scalar_values: np.ndarray,
+    assignments: dict[int, np.ndarray],
+) -> None:
+    """Append one row per scalar and the scalar-only columns (mean, standard deviation, and
+    η² per level). Binary-only columns are NaN for scalar rows (empty for the integer role
+    counts), and scalar-only columns are NaN for binary rows."""
+    n_binary = len(data["feature"])
+    k = len(scalar_labels)
+    data["feature"] = list(data["feature"]) + list(scalar_labels)
+    data["type"] = list(data["type"]) + ["scalar"] * k
+    data["kind"] = list(data["kind"]) + ["free"] * k
+    data["layer"] = pl.Series(list(data["layer"]) + [0.0] * k, dtype=pl.Float64)
+    data["proportion_true"] = pl.Series(
+        list(data["proportion_true"]) + [math.nan] * k, dtype=pl.Float64
+    )
+    data["entropy"] = pl.Series(list(data["entropy"]) + [math.nan] * k, dtype=pl.Float64)
+    for name in ROLE_COLUMNS:
+        data[name] = pl.Series(list(data[name]) + [None] * k, dtype=pl.Int64)
+    for name in [key for key in data if key.startswith("mi_level_")]:
+        data[name] = pl.Series(list(data[name]) + [math.nan] * k, dtype=pl.Float64)
+    n = scalar_values.shape[0]
+    means = [float(scalar_values[:, j].mean()) if n else math.nan for j in range(k)]
+    stds = [float(scalar_values[:, j].std()) if n else math.nan for j in range(k)]
+    data["mean"] = pl.Series([math.nan] * n_binary + means, dtype=pl.Float64)
+    data["std"] = pl.Series([math.nan] * n_binary + stds, dtype=pl.Float64)
+    for level, assignment in assignments.items():
+        n_groups = int(assignment.max()) + 1 if len(assignment) else 0
+        values = [eta_squared(scalar_values[:, j], assignment, n_groups) for j in range(k)]
+        data[f"eta2_level_{level}"] = pl.Series([math.nan] * n_binary + values, dtype=pl.Float64)
 
 
 # ---------------------------------------------------------------------------------------------

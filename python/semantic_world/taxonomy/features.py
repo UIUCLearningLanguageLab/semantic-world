@@ -44,6 +44,9 @@ class FeatureSet:
     features: tuple[Feature, ...]
     max_chain_depth: int
     warnings: tuple[str, ...]
+    scalar_count: int = 0
+    """The number of scalar dimensions ``SC.1`` to ``SC.<count>``. Scalars are not in
+    ``features``: they are always free, have no rules, and live in separate float arrays."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_by_label", {f.label: f for f in self.features})
@@ -64,6 +67,10 @@ class FeatureSet:
     @property
     def labels(self) -> tuple[str, ...]:
         return tuple(f.label for f in self.features)
+
+    @property
+    def scalar_labels(self) -> tuple[str, ...]:
+        return tuple(f"SC.{i}" for i in range(1, self.scalar_count + 1))
 
     def of_type(self, feature_type: str) -> tuple[Feature, ...]:
         return tuple(f for f in self.features if f.type == feature_type)
@@ -196,7 +203,12 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
             )
         )
         position += 1
-    return FeatureSet(tuple(features), max_chain_depth=depth, warnings=tuple(warnings))
+    return FeatureSet(
+        tuple(features),
+        max_chain_depth=depth,
+        warnings=tuple(warnings),
+        scalar_count=config.scalars.count,
+    )
 
 
 def _even_split(total: int, parts: int) -> list[int]:

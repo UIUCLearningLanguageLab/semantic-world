@@ -15,7 +15,13 @@ import polars as pl
 import pytest
 import yaml
 
-from semantic_world.taxonomy import TaxonomyResult, config_from_mapping, generate, load_config
+from semantic_world.taxonomy import (
+    STREAM_NAMES,
+    TaxonomyResult,
+    config_from_mapping,
+    generate,
+    load_config,
+)
 from semantic_world.taxonomy.analysis import binary_entropy, mutual_information
 from semantic_world.taxonomy.io import CSV_FILES, OUTPUT_FILES, default_output_dir, git_commit
 from semantic_world.taxonomy.similarity import cross_similarity, similarity_matrix
@@ -207,10 +213,7 @@ def test_config_yaml_is_resolved_and_loads_back(
     assert data["taxonomy"]["branching"] == {"schedule": "list", "values": [[2, 4], [2, 4]]}
     provenance = data["provenance"]
     assert set(provenance) == {"git_commit", "git_dirty", "package_version", "stream_seeds"}
-    assert list(provenance["stream_seeds"]) == [
-        f"taxonomy:{n}"
-        for n in ("base_rates", "rules", "superordinates", "tree", "instances", "analysis")
-    ]
+    assert list(provenance["stream_seeds"]) == [f"taxonomy:{n}" for n in STREAM_NAMES]
     commit, dirty = git_commit()
     assert provenance["git_commit"] == commit
     assert provenance["git_dirty"] == dirty

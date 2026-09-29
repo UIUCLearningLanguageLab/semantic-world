@@ -40,7 +40,7 @@ def test_stream_seed_rejects_bad_master_seeds() -> None:
         stream_seed(True, "taxonomy:rules")
 
 
-def test_streams_have_the_six_named_generators() -> None:
+def test_streams_have_the_named_generators() -> None:
     streams = Streams(1)
     assert STREAM_NAMES == (
         "base_rates",
@@ -49,6 +49,8 @@ def test_streams_have_the_six_named_generators() -> None:
         "tree",
         "instances",
         "analysis",
+        "scalars",
+        "scalar_instances",
     )
     for name in STREAM_NAMES:
         assert isinstance(getattr(streams, name), np.random.Generator)

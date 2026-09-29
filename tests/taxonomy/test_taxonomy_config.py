@@ -145,6 +145,7 @@ def test_resolved_configuration_has_the_specified_sections_in_order() -> None:
         "inheritance",
         "instances",
         "analysis",
+        "scalars",
     ]
 
 

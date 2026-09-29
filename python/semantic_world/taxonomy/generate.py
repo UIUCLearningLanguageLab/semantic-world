@@ -57,7 +57,7 @@ def generate(config: Config) -> TaxonomyResult:
     rules = generate_rules(config, streams)
     tree = generate_tree(config, rules, streams)
     instances = generate_instances(config, rules, tree, streams)
-    vectors = compute_node_vectors(rules, tree, instances)
+    vectors = compute_node_vectors(rules, tree, instances, config.scalars)
     similarity = similarity_table(config, tree, instances, vectors, streams.analysis)
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
     warnings = tuple(rules.warnings) + tuple(tree.warnings)

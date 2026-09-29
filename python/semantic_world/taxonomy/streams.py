@@ -25,6 +25,8 @@ STREAM_NAMES = (
     "tree",
     "instances",
     "analysis",
+    "scalars",
+    "scalar_instances",
 )
 """The short names of the generator's streams. The full name is ``taxonomy:<short name>``."""
 
@@ -57,6 +59,8 @@ class Streams:
     tree: np.random.Generator
     instances: np.random.Generator
     analysis: np.random.Generator
+    scalars: np.random.Generator
+    scalar_instances: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed
