@@ -1,6 +1,6 @@
 # Proposal: the per-level form of `taxonomy.branching`
 
-September 29, 2026. Raised while building stage 1 of `docs/specs/TAXONOMY_GENERATOR.md`. Status: waiting for Jon.
+September 29, 2026. Raised while building stage 1 of `docs/specs/TAXONOMY_GENERATOR.md`. Status: decided. Jon chose option 1 on September 29, 2026.
 
 ## The question
 
