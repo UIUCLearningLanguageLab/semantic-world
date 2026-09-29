@@ -22,7 +22,8 @@ rust-version = "1.85"
 # Versions are pinned to the minor version, as checked on 2026-09-27 (MILESTONE_1.md, "Technology").
 # Upgrade deliberately, in a separate commit.
 [workspace.dependencies]
-bevy_ecs = "0.19"
+# bevy_ecs on its own: no reflection, no task executor.
+bevy_ecs = { version = "0.19", default-features = false, features = ["std"] }
 glam = "0.33"
 rand = "0.10"
 rand_chacha = "0.10"
