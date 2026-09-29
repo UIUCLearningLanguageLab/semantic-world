@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Run outputs and large data (kept in Box, on the cluster, or in cloud storage)
+/runs/
+*.rrd
+/assets/large/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+*.swp
