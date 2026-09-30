@@ -106,6 +106,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{synthesis['synthesized']} synthesized, {synthesis['read_from_cache']} read from "
             f"the cache"
         )
+        check = synthesis["duration_check"]
+        print(
+            f"duration check: {check['retried']} clips tried again, "
+            f"{check['still_over_limit']} still over the limit"
+        )
     return 0
 
 

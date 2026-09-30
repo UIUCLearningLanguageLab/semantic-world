@@ -99,16 +99,19 @@ Two text-to-speech engines receive phoneme input directly, so no English spellin
 
 The installed Piper API should be checked when stage 2 starts, because the API changed at version 1.3.0.
 
+`piper.voice_dir` is the folder that holds the Piper voice files. The voice is downloaded once, with `python -m piper.download_voices`, and the pipeline never downloads a voice by itself. `espeak.speakers` is the number of espeak-ng speakers. The default is one speaker for each variant, and with more speakers the variants repeat, each time with a newly drawn pitch and rate.
+
 A third engine, a parametric formant synthesizer, comes in stage 8. Until then, exact acoustic control comes from manipulating the Piper and espeak-ng audio (see "Augmentation and acoustic manipulation").
 
 ### Speakers and tokens
 
 - A configured number of speakers is drawn for each engine. A configured proportion of speakers is held out: held-out speakers never train a learned encoder, and never contribute to word embeddings. Held-out speakers test generalization to new voices.
 - Every word is synthesized by every speaker, with a configured number of tokens per speaker. Tokens differ through the engine's own variability and through small seeded perturbations of rate and pitch.
+- A neural engine now and then stretches a word far beyond its usual length. After synthesis, the pipeline compares each clip's duration with the median duration of the same word across all tokens. A clip longer than `duration_check.max_ratio` times its word's median (1.8 by default) is synthesized again with a new perturbation seed, up to `duration_check.max_tries` tries in all (5 by default). When no try passes, the shortest try is kept. `tokens.csv` records the number of tries, and the run's summary records how many clips were tried again and how many still exceed the limit.
 
 ### Audio
 
-Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
+Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. Every clip is then scaled to a target RMS level (`level.rms_db`, in dB relative to full scale, −24 by default), so that clips from different engines and speakers are equally loud. A peak guard limits the scaling: when the scaled clip's peak would exceed `level.max_peak` (0.9 by default), the clip is scaled to that peak instead. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
 
 ### Reproducibility
 
@@ -157,7 +160,7 @@ Every embedding configuration is evaluated in the same way:
 
 ### Novel words
 
-`SoundEmbeddings.embed(forms, speakers)` runs a new word form through the same pipeline: synthesis, the front end, and the frozen encoder. The result for a form already in the lexicon must equal the stored embedding for the same speaker and settings, within numerical tolerance.
+`SoundEmbeddings.embed(forms, speakers)` runs a new word form through the same pipeline: synthesis, the front end, and the frozen encoder. The result for a form already in the lexicon must equal the stored embedding for the same speaker and settings, within numerical tolerance. `embed` must look up the audio cache before synthesizing, because Piper cannot reproduce a clip on demand.
 
 ## Using the embeddings in other models
 
@@ -221,11 +224,13 @@ synthesis:
   cache_dir: runs/wordforms/cache
   sample_rate: 16000
   trim: {threshold_db: -40, margin_ms: 20}
+  level: {rms_db: -24, max_peak: 0.9}
+  duration_check: {max_ratio: 1.8, max_tries: 5}   # null turns the check off
   tokens_per_speaker: 2
   held_out_speaker_proportion: 0.2
   engines:
-    piper:  {voice: en_US-libritts_r-medium, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
-    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], pitch: [35, 65], rate: [150, 190]}
+    piper:  {voice: en_US-libritts_r-medium, voice_dir: runs/wordforms/voices, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
+    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], speakers: 5, pitch: [35, 65], rate: [150, 190]}
   token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
 
 frontends:
@@ -257,7 +262,7 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
 | `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
-| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, cache path, SHA-256 hash. |
+| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
 | `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. |
 | `eval/embeddings.csv` | Evaluation results for every embedding, and every layer for pretrained models. |

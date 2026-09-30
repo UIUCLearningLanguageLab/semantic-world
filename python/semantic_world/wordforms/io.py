@@ -49,6 +49,9 @@ TOKEN_COLUMNS = (
     "pitch_semitones",
     "augmentation",
     "duration",
+    "tries",
+    "peak",
+    "rms_db",
     "cache_path",
     "sha256",
 )
@@ -161,6 +164,9 @@ def write_tokens(synthesis: Synthesis, path: Path) -> None:
         "pitch_semitones": pl.Float64,
         "augmentation": pl.String,
         "duration": pl.Float64,
+        "tries": pl.Int64,
+        "peak": pl.Float64,
+        "rms_db": pl.Float64,
         "cache_path": pl.String,
         "sha256": pl.String,
     }

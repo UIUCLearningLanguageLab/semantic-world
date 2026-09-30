@@ -90,6 +90,7 @@ def check_clips(synthesis: Synthesis, config) -> None:
     import soundfile
 
     trim = config.synthesis.trim
+    level = config.synthesis.level
     margin = int(round(trim.margin_ms * RATE / 1000))
     assert synthesis.tokens
     for token in synthesis.tokens:
@@ -100,8 +101,17 @@ def check_clips(synthesis: Synthesis, config) -> None:
         assert clip.ndim == 1 and clip.dtype == np.float32
         assert token.duration == pytest.approx(len(clip) / RATE, abs=1e-6)
         assert 0.05 < token.duration < 3.0
+        # unclipped: the peak is within the limit, and the RMS level is the target unless the
+        # peak limit held the clip down
         peak = float(np.abs(clip).max())
-        assert peak == pytest.approx(audio_tools.PEAK, abs=1e-3) and peak < 1.0
+        rms = audio_tools.rms_db(clip)
+        assert peak <= level.max_peak + 1e-4
+        assert rms == pytest.approx(level.rms_db, abs=0.05) or (
+            rms < level.rms_db and peak == pytest.approx(level.max_peak, abs=1e-3)
+        )
+        assert token.peak == pytest.approx(peak, abs=1e-5)
+        assert token.rms_db == pytest.approx(rms, abs=1e-3)
+        assert 1 <= token.tries <= 5
         before, after = audio_tools.silence_margins(clip, trim.threshold_db)
         assert before <= margin + 1 and after <= margin + 1
         assert token.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
@@ -157,18 +167,34 @@ def test_trim_removes_silence_and_keeps_the_margin():
         audio_tools.trim(silence, RATE, -40, 20)
 
 
-def test_normalize_peak():
-    clip = audio_tools.normalize_peak(tone(440, 0.1, RATE, amplitude=0.2))
-    assert float(np.abs(clip).max()) == pytest.approx(audio_tools.PEAK)
+def test_set_level_reaches_the_target_rms():
+    clip = audio_tools.set_level(tone(440, 0.1, RATE, amplitude=0.2), -24, 0.9)
+    assert clip.dtype == np.float32
+    assert audio_tools.rms_db(clip) == pytest.approx(-24, abs=1e-3)
+    assert audio_tools.peak(clip) == pytest.approx(10 ** (-24 / 20) * np.sqrt(2), rel=1e-3)
+    assert audio_tools.rms_db(tone(440, 0.1, RATE, amplitude=1.0)) == pytest.approx(-3.01, abs=0.01)
     with pytest.raises(audio_tools.AudioError):
-        audio_tools.normalize_peak(np.zeros(10, dtype=np.float32))
+        audio_tools.set_level(np.zeros(10, dtype=np.float32), -24, 0.9)
+
+
+def test_set_level_peak_guard():
+    # a click in quiet noise has a high peak for its RMS level
+    rng = np.random.default_rng(0)
+    clip = (0.001 * rng.normal(size=8000)).astype(np.float32)
+    clip[4000] = 0.5
+    out = audio_tools.set_level(clip, -24, 0.9)
+    assert audio_tools.peak(out) == pytest.approx(0.9, abs=1e-6)
+    assert audio_tools.rms_db(out) < -24
+    # a louder target than the peak allows is held down too
+    loud = audio_tools.set_level(tone(440, 0.1, RATE), -1, 0.9)
+    assert audio_tools.peak(loud) == pytest.approx(0.9, abs=1e-6)
 
 
 @needs_audio
 def test_flac_round_trip(tmp_path):
     import soundfile
 
-    clip = audio_tools.normalize_peak(tone(440, 0.2, RATE))
+    clip = audio_tools.set_level(tone(440, 0.2, RATE), -24, 0.9)
     path = tmp_path / "a" / "clip.flac"
     audio_tools.write_flac(path, clip, RATE)
     back, rate = audio_tools.read_flac(path)
@@ -245,6 +271,11 @@ def test_token_perturbations_are_small_seeded_and_stable(tmp_path):
     ]
     assert all(0.95 <= rate <= 1.05 and -0.5 <= pitch <= 0.5 for rate, pitch in draws)
     assert len(set(draws)) == len(draws)
+    # a new try draws a new perturbation
+    first = token_perturbation(config, streams, words[0], speakers[0], 1)
+    assert first == token_perturbation(config, streams, words[0], speakers[0], 1, 1)
+    retries = {token_perturbation(config, streams, words[0], speakers[0], 1, t) for t in (2, 3, 4)}
+    assert len(retries | {first}) == 4
     again = token_perturbation(config, Streams(config.seed), words[2], speakers[1], 2)
     assert again == token_perturbation(config, streams, words[2], speakers[1], 2)
     assert again != token_perturbation(config, Streams(9), words[2], speakers[1], 2)
@@ -268,12 +299,18 @@ def test_cache_key_depends_on_everything_that_shapes_the_clip(default_config):
         cache_key(default_config, "espeak", "k'at", {**settings, "rate": 171}, 0.1, 1),
         cache_key(default_config, "espeak", "k'at", settings, 0.2, 1),
         cache_key(default_config, "espeak", "k'at", settings, 0.1, 2),
+        cache_key(default_config, "espeak", "k'at", settings, 0.1, 1, 2),
         cache_key(
             parse_config({"synthesis": {"trim": {"margin_ms": 30}}}, "x"),
             "espeak", "k'at", settings, 0.1, 1,
         ),
+        cache_key(
+            parse_config({"synthesis": {"level": {"rms_db": -20}}}, "x"),
+            "espeak", "k'at", settings, 0.1, 1,
+        ),
     ]  # fmt: skip
-    assert len({key, *others}) == 7
+    assert len({key, *others}) == 9
+    assert key == cache_key(default_config, "espeak", "k'at", settings, 0.1, 1, 1)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -378,6 +415,112 @@ def test_second_run_reads_the_cache_without_synthesizing(tmp_path):
     assert third.tokens[:36] == first.tokens
 
 
+class StretchEngine(ToneEngine):
+    """Makes chosen clips three times too long, like a neural engine that now and then stretches
+    a word. ``long_scales`` holds the duration scales of the tries to stretch; each try has its
+    own perturbation, so its own scale."""
+
+    def __init__(self, phonemes: str, voice: str, long_scales: set[float]) -> None:
+        super().__init__()
+        self.target = (phonemes, voice)
+        self.long_scales = long_scales
+
+    def synthesize(self, phonemes, settings):
+        clip, rate = super().synthesize(phonemes, settings)
+        if (phonemes, settings["voice"]) == self.target and settings["scale"] in self.long_scales:
+            return np.concatenate([clip[:2205], np.tile(clip[2205:-4410], 3), clip[-4410:]]), rate
+        return clip, rate
+
+
+def stretch_run(tmp_path, long_tries, **duration_check):
+    data = espeak_only(tmp_path).resolved()
+    if duration_check.get("off"):
+        data["synthesis"]["duration_check"] = None
+    elif duration_check:
+        data["synthesis"]["duration_check"] = duration_check
+    config = parse_config(data, "stretch")
+    run = run_forms(config)
+    speakers = draw_speakers(config, run.streams)
+    word = run.lexicon.words[1]
+    long_scales = set()
+    for k in (1, 2):
+        for attempt in range(1, min(long_tries, 10) + 1):
+            rate, pitch = token_perturbation(config, run.streams, word, speakers[0], k, attempt)
+            long_scales.add(round(2.0 ** (pitch / 12.0) / rate, 6))
+    engine = StretchEngine(word.espeak, speakers[0].identity, long_scales)
+    synthesis = synthesize_lexicon(
+        config, run.streams, run.lexicon.words, engines={"espeak": engine}, check=False
+    )
+    target = [t for t in synthesis.tokens if t.word == word.label and t.speaker == "S.1"]
+    others = [t for t in synthesis.tokens if t not in target]
+    return config, run, engine, synthesis, target, others
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+def test_a_long_clip_is_synthesized_again(tmp_path):
+    config, run, engine, synthesis, target, others = stretch_run(tmp_path, long_tries=1)
+    assert len(target) == 2 and all(t.tries == 2 for t in target)
+    assert all(t.tries == 1 for t in others)
+    median = float(np.median([t.duration for t in synthesis.tokens if t.word == target[0].word]))
+    assert all(t.duration <= 1.8 * median for t in synthesis.tokens if t.word == target[0].word)
+    assert engine.calls == 36 + 2 and synthesis.synthesized == 38
+    assert synthesis.over_limit == 0
+    check = synthesis.summary()["duration_check"]
+    assert check == {"retried": 2, "still_over_limit": 0, "tries": {"1": 34, "2": 2}}
+    check_clips(synthesis, config)
+    # the labels and the order of the tokens are unchanged
+    assert [t.label for t in synthesis.tokens][:3] == ["W.1.S.1.1", "W.1.S.1.2", "W.1.S.2.1"]
+    # a second run takes every try from the cache and makes the same choices
+    again = synthesize_lexicon(
+        config, Streams(config.seed), run.lexicon.words, engines={"espeak": engine}, check=False
+    )
+    assert engine.calls == 38 and again.synthesized == 0 and again.cached == 38
+    assert again.tokens == synthesis.tokens
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+def test_the_shortest_try_is_kept_when_none_passes(tmp_path):
+    config, run, engine, synthesis, target, others = stretch_run(tmp_path, long_tries=99)
+    assert all(t.tries == 5 for t in target)
+    assert synthesis.over_limit == 2
+    assert synthesis.summary()["duration_check"]["still_over_limit"] == 2
+    assert synthesis.summary()["duration_check"]["tries"] == {"1": 34, "5": 2}
+    assert engine.calls == 36 + 2 * 4
+    # the kept clip is the shortest of the five tries
+    speaker = synthesis.speakers[0]
+    word = run.lexicon.words[1]
+    for k, token in zip((1, 2), target, strict=True):
+        rates = [
+            token_perturbation(config, run.streams, word, speaker, k, t)[0] for t in range(1, 6)
+        ]
+        assert token.rate_factor == max(rates)  # the fastest try is the shortest
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+def test_duration_check_settings(tmp_path):
+    _, _, engine, synthesis, target, _ = stretch_run(tmp_path / "off", long_tries=99, off=True)
+    assert all(t.tries == 1 for t in synthesis.tokens) and engine.calls == 36
+    assert synthesis.over_limit == 0
+    _, _, engine, synthesis, target, _ = stretch_run(
+        tmp_path / "one", long_tries=99, max_ratio=1.8, max_tries=1
+    )
+    assert all(t.tries == 1 for t in synthesis.tokens) and synthesis.over_limit == 2
+    _, _, engine, synthesis, target, _ = stretch_run(
+        tmp_path / "loose", long_tries=99, max_ratio=4.0, max_tries=5
+    )
+    assert all(t.tries == 1 for t in synthesis.tokens) and synthesis.over_limit == 0
+    _, _, engine, synthesis, target, _ = stretch_run(
+        tmp_path / "three", long_tries=2, max_ratio=1.8, max_tries=5
+    )
+    assert [t.tries for t in target] == [3, 3] and synthesis.over_limit == 0
+
+
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -418,6 +561,8 @@ def test_run_folder_with_synthesis(tmp_path):
     tokens = pl.read_csv(folder / "tokens.csv")
     assert tokens.columns == list(TOKEN_COLUMNS) and tokens.height == 36
     assert tokens["label"][0] == "W.1.S.1.1"
+    assert tokens["tries"].to_list() == [1] * 36
+    assert tokens["rms_db"].max() <= -23.9 and tokens["peak"].max() <= 0.9
     assert set(tokens["word"]) == {f"W.{i}" for i in range(1, 7)}
     assert yaml.safe_load(tokens["settings"][0])["voice"].startswith("espeak/en-us+m1")
     assert all((tmp_path / "cache" / p).exists() for p in tokens["cache_path"])
@@ -426,6 +571,10 @@ def test_run_folder_with_synthesis(tmp_path):
     assert summary["tokens"] == 36 and summary["synthesized"] == 36
     assert summary["engines"] == {"espeak": {"speakers": 3, "held_out": 1}}
     assert summary["reproducibility"]["espeak"]["same_settings_identical"] is True
+    assert summary["duration_check"] == {"retried": 0, "still_over_limit": 0, "tries": {"1": 36}}
+    levels = summary["levels"]["espeak"]
+    assert levels["clips"] == 36 and set(levels["peak"]) == {"min", "p01", "median", "p99", "max"}
+    assert levels["rms_db"]["median"] == pytest.approx(-24, abs=0.05)
     written = yaml.safe_load((folder / "config.yaml").read_text())
     assert written["provenance"]["models"] == {"espeak": {"program": "tone"}}
     # a second write from the cache gives identical token and speaker tables

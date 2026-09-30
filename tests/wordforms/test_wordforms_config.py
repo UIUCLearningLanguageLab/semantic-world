@@ -70,6 +70,31 @@ def test_an_engine_that_is_off_stays_off_when_the_resolved_config_reloads():
     assert piper.voice_dir == "runs/wordforms/voices"
 
 
+def test_level_and_duration_check_settings(default_config):
+    synthesis = default_config.synthesis
+    assert (synthesis.level.rms_db, synthesis.level.max_peak) == (-24, 0.9)
+    assert (synthesis.duration_check.max_ratio, synthesis.duration_check.max_tries) == (1.8, 5)
+    off = parse_config({"synthesis": {"duration_check": None}}, "x")
+    assert off.synthesis.duration_check is None
+    assert off.resolved()["synthesis"]["duration_check"] is None
+    assert parse_config(off.resolved(), "x").synthesis.duration_check is None
+    changed = parse_config(
+        {"synthesis": {"level": {"rms_db": -20}, "duration_check": {"max_tries": 3}}}, "x"
+    )
+    assert changed.synthesis.level.rms_db == -20 and changed.synthesis.level.max_peak == 0.9
+    assert changed.synthesis.duration_check.max_ratio == 1.8
+    for data, field in (
+        ({"level": {"rms_db": 3}}, "synthesis.level.rms_db"),
+        ({"level": {"max_peak": 1.5}}, "synthesis.level.max_peak"),
+        ({"level": {"peak": 0.9}}, "synthesis.level.peak"),
+        ({"duration_check": {"max_ratio": 1}}, "synthesis.duration_check.max_ratio"),
+        ({"duration_check": {"max_tries": 0}}, "synthesis.duration_check.max_tries"),
+    ):
+        with pytest.raises(ConfigError) as info:
+            parse_config({"synthesis": data}, "x")
+        assert info.value.field == field
+
+
 def test_seed_override():
     config = load_config(DATA / "default.yaml", seed=7)
     assert config.seed == 7

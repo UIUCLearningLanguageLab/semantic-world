@@ -17,11 +17,13 @@ synthesis:
   cache_dir: runs/wordforms/cache
   sample_rate: 16000
   trim: {threshold_db: -40, margin_ms: 20}
+  level: {rms_db: -24, max_peak: 0.9}            # every clip's RMS level, with a peak limit
+  duration_check: {max_ratio: 1.8, max_tries: 5} # retry clips far longer than their word's median
   tokens_per_speaker: 2
   held_out_speaker_proportion: 0.2
   engines:
-    piper: {voice: en_US-libritts_r-medium, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
-    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], pitch: [35, 65], rate: [150, 190]}
+    piper: {voice: en_US-libritts_r-medium, voice_dir: runs/wordforms/voices, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
+    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], speakers: 5, pitch: [35, 65], rate: [150, 190]}
   token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
 
 frontends:

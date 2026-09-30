@@ -1,6 +1,7 @@
 """Audio processing for synthesized clips: resampling, trimming, level, and FLAC files.
 
-Audio is mono, 16 kHz, and 32-bit float in memory, and 16-bit FLAC on disk. A clip is always
+Audio is mono, 16 kHz, and 32-bit float in memory, and 16-bit FLAC on disk. Every clip has the
+same RMS level, unless its peak would then exceed the configured limit. A clip is always
 returned as read back from its file, so a clip is the same whether it was just synthesized or
 came from the cache.
 """
@@ -12,9 +13,6 @@ from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
-
-PEAK = 0.9
-"""Every clip is scaled so that its largest absolute sample is this value."""
 
 
 class AudioError(RuntimeError):
@@ -47,11 +45,26 @@ def trim(audio: np.ndarray, rate: int, threshold_db: float, margin_ms: float) ->
     return audio[start:end]
 
 
-def normalize_peak(audio: np.ndarray, peak: float = PEAK) -> np.ndarray:
-    largest = float(np.max(np.abs(audio))) if audio.size else 0.0
-    if largest <= 0.0:
+def rms_db(audio: np.ndarray) -> float:
+    """The RMS level of a clip in dB relative to full scale."""
+    power = float(np.mean(np.square(audio, dtype=np.float64))) if audio.size else 0.0
+    if power <= 0.0:
         raise AudioError("the clip is silent")
-    return (audio * (peak / largest)).astype(np.float32)
+    return 10.0 * float(np.log10(power))
+
+
+def peak(audio: np.ndarray) -> float:
+    return float(np.max(np.abs(audio))) if audio.size else 0.0
+
+
+def set_level(audio: np.ndarray, target_rms_db: float, max_peak: float) -> np.ndarray:
+    """Scale a clip to the target RMS level. When the scaled clip's peak would exceed
+    ``max_peak``, the clip is scaled to that peak instead, and its RMS level is lower."""
+    gain = 10.0 ** ((target_rms_db - rms_db(audio)) / 20.0)
+    largest = peak(audio)
+    if largest * gain > max_peak:
+        gain = max_peak / largest
+    return (audio * gain).astype(np.float32)
 
 
 def silence_margins(audio: np.ndarray, threshold_db: float) -> tuple[int, int]:

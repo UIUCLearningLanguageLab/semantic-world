@@ -6,13 +6,19 @@ perturbation is the same for both engines: the engine speaks slower or faster, a
 then read at a slightly different sample rate, which shifts its pitch and restores the wanted
 duration.
 
+A neural engine now and then stretches a word far beyond its usual length. After synthesis, each
+clip's duration is compared with the median duration of its word's tokens. A clip longer than
+``duration_check.max_ratio`` times that median is synthesized again with a new perturbation seed,
+up to ``duration_check.max_tries`` tries in all, and the shortest try is kept when none passes.
+
 Synthesis happens once. Each clip goes into the cache folder as a 16 kHz mono FLAC file, named
-by a hash of its phoneme string, engine, speaker, settings, perturbation, and token number.
-Every later step reads from the cache.
+by a hash of its phoneme string, engine, speaker, settings, perturbation, token number, and try
+number. Every later step reads from the cache.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Callable
@@ -28,8 +34,8 @@ from semantic_world.wordforms.streams import Streams
 from semantic_world.wordforms.synth import audio as audio_tools
 from semantic_world.wordforms.synth.speakers import Speaker, draw_speakers
 
-CACHE_VERSION = 1
-"""Part of every cache key. Raise it when the processing of clips changes."""
+CACHE_VERSION = 2
+"""Part of every cache key and cache path. Raise it when the processing of clips changes."""
 
 
 class Engine(Protocol):
@@ -62,6 +68,11 @@ class Token:
     cache_path: str
     """The clip's path inside the cache folder."""
     sha256: str
+    tries: int = 1
+    """How many times the token was synthesized before its duration passed the check (or the
+    try limit, when none passed)."""
+    peak: float = 0.0
+    rms_db: float = 0.0
 
     def record(self) -> dict[str, Any]:
         return {
@@ -75,6 +86,9 @@ class Token:
             "pitch_semitones": self.pitch_semitones,
             "augmentation": "",
             "duration": self.duration,
+            "tries": self.tries,
+            "peak": self.peak,
+            "rms_db": self.rms_db,
             "cache_path": self.cache_path,
             "sha256": self.sha256,
         }
@@ -92,6 +106,8 @@ class Synthesis:
     cached: int = 0
     reproducibility: dict[str, dict[str, Any]] = field(default_factory=dict)
     engines: dict[str, dict[str, Any]] = field(default_factory=dict)
+    over_limit: int = 0
+    """Tokens whose kept clip is still longer than the duration limit."""
 
     def audio(self, token: Token) -> np.ndarray:
         """The token's clip: mono, float32, at ``sample_rate``."""
@@ -119,29 +135,69 @@ class Synthesis:
             }
             if len(durations)
             else {},
+            "duration_check": {
+                "retried": sum(t.tries > 1 for t in self.tokens),
+                "still_over_limit": self.over_limit,
+                "tries": {
+                    str(k): sum(t.tries == k for t in self.tokens)
+                    for k in sorted({t.tries for t in self.tokens})
+                },
+            },
+            "levels": {
+                name: _level_summary([t for t in self.tokens if t.engine == name])
+                for name in by_engine
+            },
             "reproducibility": self.reproducibility,
             "models": self.engines,
         }
 
 
+def _level_summary(tokens: list[Token]) -> dict[str, Any]:
+    """The distribution of peaks and RMS levels of an engine's clips."""
+    if not tokens:
+        return {}
+    summary: dict[str, Any] = {"clips": len(tokens)}
+    for name, values in (
+        ("peak", [t.peak for t in tokens]),
+        ("rms_db", [t.rms_db for t in tokens]),
+    ):
+        array = np.array(values, dtype=np.float64)
+        quantiles = np.percentile(array, [0, 1, 50, 99, 100])
+        summary[name] = {
+            key: round(float(q), 4)
+            for key, q in zip(("min", "p01", "median", "p99", "max"), quantiles, strict=True)
+        }
+    return summary
+
+
 def token_perturbation(
-    config: Config, streams: Streams, word: WordForm, speaker: Speaker, k: int
+    config: Config, streams: Streams, word: WordForm, speaker: Speaker, k: int, attempt: int = 1
 ) -> tuple[float, float]:
     """The rate factor and the pitch shift in semitones of one token. The draw depends only on
-    the master seed, the word's phonemes, the speaker's voice, and the token number, so adding
-    words or speakers never changes the other tokens."""
+    the master seed, the word's phonemes, the speaker's voice, the token number, and the try
+    number, so adding words or speakers never changes the other tokens."""
     perturbation = config.synthesis.token_perturbation
-    rng = streams.substream("synthesis", f"{word.arpabet}|{speaker.identity}|{k}")
+    key = f"{word.arpabet}|{speaker.identity}|{k}"
+    if attempt > 1:
+        key += f"|try{attempt}"
+    rng = streams.substream("synthesis", key)
     rate = 1.0 + float(rng.uniform(-perturbation.rate, perturbation.rate))
     pitch = float(rng.uniform(-perturbation.pitch_semitones, perturbation.pitch_semitones))
     return round(rate, 6), round(pitch, 6)
 
 
 def cache_key(
-    config: Config, engine: str, phonemes: str, settings: dict, pitch: float, k: int
+    config: Config,
+    engine: str,
+    phonemes: str,
+    settings: dict,
+    pitch: float,
+    k: int,
+    attempt: int = 1,
 ) -> str:
     """The name of a clip in the cache: a hash of everything that shapes the clip."""
     trim = config.synthesis.trim
+    level = config.synthesis.level
     description = {
         "version": CACHE_VERSION,
         "engine": engine,
@@ -149,9 +205,10 @@ def cache_key(
         "settings": settings,
         "pitch_semitones": pitch,
         "token": k,
+        "try": attempt,
         "sample_rate": config.synthesis.sample_rate,
         "trim": [trim.threshold_db, trim.margin_ms],
-        "peak": audio_tools.PEAK,
+        "level": [level.rms_db, level.max_peak],
     }
     text = json.dumps(description, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -164,9 +221,10 @@ def finish_clip(config: Config, raw: np.ndarray, native_rate: int, pitch: float)
         raw = raw.mean(axis=1)
     factor = 2.0 ** (pitch / 12.0)
     trim = config.synthesis.trim
+    level = config.synthesis.level
     clip = audio_tools.resample(raw, native_rate * factor, config.synthesis.sample_rate)
     clip = audio_tools.trim(clip, config.synthesis.sample_rate, trim.threshold_db, trim.margin_ms)
-    return audio_tools.normalize_peak(clip)
+    return audio_tools.set_level(clip, level.rms_db, level.max_peak)
 
 
 def make_engines(config: Config, streams: Streams) -> dict[str, Engine]:
@@ -267,47 +325,80 @@ def synthesize_lexicon(
         if check and words and own:
             result.reproducibility[name] = check_reproducibility(engine, words, own, seed)
         engine.reset(seed)
+
+    def clip_for(word: WordForm, speaker: Speaker, k: int, attempt: int) -> Token:
+        """One try at a token: read from the cache, or synthesized and written to it."""
+        engine = engines[speaker.engine]
+        phonemes = engine.phonemes(word)
+        rate, pitch = token_perturbation(config, streams, word, speaker, k, attempt)
+        duration_scale = 2.0 ** (pitch / 12.0) / rate
+        clip_settings = engine.settings_for(speaker, duration_scale)
+        key = cache_key(config, engine.name, phonemes, clip_settings, pitch, k, attempt)
+        relative = Path(f"v{CACHE_VERSION}") / engine.name / key[:2] / f"{key}.flac"
+        path = cache_dir / relative
+        label = f"{word.label}.{speaker.label}.{k}"
+        if path.exists():
+            result.cached += 1
+        else:
+            raw, native_rate = engine.synthesize(phonemes, clip_settings)
+            try:
+                clip = finish_clip(config, raw, native_rate, pitch)
+            except audio_tools.AudioError as error:
+                raise audio_tools.AudioError(f"{label} ({phonemes}): {error}") from error
+            audio_tools.write_flac(path, clip, settings.sample_rate)
+            result.synthesized += 1
+        clip, _ = audio_tools.read_flac(path)
+        return Token(
+            label=label,
+            word=word.label,
+            speaker=speaker.label,
+            engine=engine.name,
+            phonemes=phonemes,
+            settings=clip_settings,
+            rate_factor=rate,
+            pitch_semitones=pitch,
+            duration=round(len(clip) / settings.sample_rate, 6),
+            cache_path=relative.as_posix(),
+            sha256=audio_tools.sha256_file(path),
+            tries=attempt,
+            peak=round(audio_tools.peak(clip), 6),
+            rms_db=round(audio_tools.rms_db(clip), 4),
+        )
+
+    # First, one try at every token.
     total = len(words) * len(speakers) * settings.tokens_per_speaker
-    done = 0
-    for word in words:
-        for speaker in speakers:
-            engine = engines[speaker.engine]
-            phonemes = engine.phonemes(word)
-            for k in range(1, settings.tokens_per_speaker + 1):
-                rate, pitch = token_perturbation(config, streams, word, speaker, k)
-                duration_scale = 2.0 ** (pitch / 12.0) / rate
-                clip_settings = engine.settings_for(speaker, duration_scale)
-                key = cache_key(config, engine.name, phonemes, clip_settings, pitch, k)
-                relative = Path(engine.name) / key[:2] / f"{key}.flac"
-                path = cache_dir / relative
-                label = f"{word.label}.{speaker.label}.{k}"
-                if path.exists():
-                    result.cached += 1
-                else:
-                    raw, native_rate = engine.synthesize(phonemes, clip_settings)
-                    try:
-                        clip = finish_clip(config, raw, native_rate, pitch)
-                    except audio_tools.AudioError as error:
-                        raise audio_tools.AudioError(f"{label} ({phonemes}): {error}") from error
-                    audio_tools.write_flac(path, clip, settings.sample_rate)
-                    result.synthesized += 1
-                clip, _ = audio_tools.read_flac(path)
-                result.tokens.append(
-                    Token(
-                        label=label,
-                        word=word.label,
-                        speaker=speaker.label,
-                        engine=engine.name,
-                        phonemes=phonemes,
-                        settings=clip_settings,
-                        rate_factor=rate,
-                        pitch_semitones=pitch,
-                        duration=round(len(clip) / settings.sample_rate, 6),
-                        cache_path=relative.as_posix(),
-                        sha256=audio_tools.sha256_file(path),
-                    )
-                )
-                done += 1
-                if progress is not None:
-                    progress(done, total)
+    plan = [
+        (word, speaker, k)
+        for word in words
+        for speaker in speakers
+        for k in range(1, settings.tokens_per_speaker + 1)
+    ]
+    for done, (word, speaker, k) in enumerate(plan, start=1):
+        result.tokens.append(clip_for(word, speaker, k, 1))
+        if progress is not None:
+            progress(done, total)
+
+    # Then the duration check: a clip much longer than its word's median is tried again.
+    check_settings = settings.duration_check
+    if check_settings is not None:
+        durations: dict[str, list[float]] = {}
+        for token in result.tokens:
+            durations.setdefault(token.word, []).append(token.duration)
+        limits = {
+            word: check_settings.max_ratio * float(np.median(values))
+            for word, values in durations.items()
+        }
+        for i, (word, speaker, k) in enumerate(plan):
+            best = result.tokens[i]
+            limit = limits[word.label]
+            attempt = 1
+            latest = best
+            while latest.duration > limit and attempt < check_settings.max_tries:
+                attempt += 1
+                latest = clip_for(word, speaker, k, attempt)
+                if latest.duration < best.duration:
+                    best = latest
+            kept = latest if latest.duration <= limit else best
+            result.tokens[i] = dataclasses.replace(kept, tries=attempt)
+            result.over_limit += int(kept.duration > limit)
     return result

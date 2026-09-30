@@ -95,6 +95,24 @@ class TrimConfig:
 
 
 @dataclass(frozen=True)
+class LevelConfig:
+    """Every clip is scaled to the RMS level ``rms_db`` (dB relative to full scale), or lower
+    when the scaled clip's peak would exceed ``max_peak``."""
+
+    rms_db: float
+    max_peak: float
+
+
+@dataclass(frozen=True)
+class DurationCheckConfig:
+    """A clip longer than ``max_ratio`` times the median duration of its word's tokens is
+    synthesized again, up to ``max_tries`` tries in all."""
+
+    max_ratio: float
+    max_tries: int
+
+
+@dataclass(frozen=True)
 class PiperConfig:
     voice: str
     speakers: int
@@ -145,6 +163,8 @@ class SynthesisConfig:
     cache_dir: str
     sample_rate: int
     trim: TrimConfig
+    level: LevelConfig
+    duration_check: DurationCheckConfig | None
     tokens_per_speaker: int
     held_out_speaker_proportion: float
     piper: PiperConfig | None
@@ -165,6 +185,13 @@ class SynthesisConfig:
             "cache_dir": self.cache_dir,
             "sample_rate": self.sample_rate,
             "trim": {"threshold_db": self.trim.threshold_db, "margin_ms": self.trim.margin_ms},
+            "level": {"rms_db": self.level.rms_db, "max_peak": self.level.max_peak},
+            "duration_check": None
+            if self.duration_check is None
+            else {
+                "max_ratio": self.duration_check.max_ratio,
+                "max_tries": self.duration_check.max_tries,
+            },
             "tokens_per_speaker": self.tokens_per_speaker,
             "held_out_speaker_proportion": self.held_out_speaker_proportion,
             "engines": engines,
@@ -561,6 +588,20 @@ def _read_synthesis(node: _Node) -> SynthesisConfig:
         margin_ms=trim.number("margin_ms", 20, min=0),
     )
     trim.finish()
+    level = node.mapping("level")
+    level_config = LevelConfig(
+        rms_db=level.number("rms_db", -24, max=0),
+        max_peak=level.number("max_peak", 0.9, min=0, max=1, exclusive_min=True),
+    )
+    level.finish()
+    duration_node = node.mapping("duration_check", nullable=True)
+    duration_check = None
+    if duration_node is not None:
+        duration_check = DurationCheckConfig(
+            max_ratio=duration_node.number("max_ratio", 1.8, min=1, exclusive_min=True),
+            max_tries=duration_node.int("max_tries", 5, min=1),
+        )
+        duration_node.finish()
     engines_value = node.get("engines", {"piper": {}, "espeak": {}})
     engines = _Node(node.source, node.field("engines"), engines_value)
     piper_node = engines.mapping("piper", nullable=True)
@@ -580,6 +621,8 @@ def _read_synthesis(node: _Node) -> SynthesisConfig:
         cache_dir=node.string("cache_dir", "runs/wordforms/cache"),
         sample_rate=node.int("sample_rate", 16000, min=1),
         trim=trim_config,
+        level=level_config,
+        duration_check=duration_check,
         tokens_per_speaker=node.int("tokens_per_speaker", 2, min=1),
         held_out_speaker_proportion=node.probability("held_out_speaker_proportion", 0.2),
         piper=piper,
