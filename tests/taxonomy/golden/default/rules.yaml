@@ -1,0 +1,446 @@
+- output: IS.31
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.11, IS.13, HAS.25, HAS.26]
+  relevant_inputs: [IS.11, IS.13, HAS.25, HAS.26]
+  expression: IS.13 AND IS.11 AND NOT HAS.25 AND HAS.26
+  truth_table: '0000000000000100'
+  min_dnf_literals: 4
+- output: IS.32
+  layer: 1
+  family: shj
+  shj_type: V
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.1, IS.10, IS.11]
+  relevant_inputs: [IS.1, IS.10, IS.11]
+  expression: (NOT IS.1 AND NOT IS.11) OR (IS.1 AND NOT IS.10 AND IS.11) OR (IS.10
+    AND NOT IS.11)
+  truth_table: '10100110'
+  min_dnf_literals: 7
+- output: IS.33
+  layer: 1
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.6, HAS.18]
+  relevant_inputs: [IS.6, HAS.18]
+  expression: IS.6 AND HAS.18
+  truth_table: '0001'
+  min_dnf_literals: 2
+- output: IS.34
+  layer: 1
+  family: literal
+  shj_type: null
+  arity: 1
+  nesting_depth: null
+  inputs: [IS.4]
+  relevant_inputs: [IS.4]
+  expression: IS.4
+  truth_table: '01'
+  min_dnf_literals: 1
+- output: IS.35
+  layer: 1
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.23, HAS.9]
+  relevant_inputs: [IS.23, HAS.9]
+  expression: IS.23 AND NOT HAS.9
+  truth_table: '0010'
+  min_dnf_literals: 2
+- output: IS.36
+  layer: 1
+  family: shj
+  shj_type: I
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.25, HAS.6, HAS.11]
+  relevant_inputs: [IS.25]
+  expression: NOT IS.25
+  truth_table: '11110000'
+  min_dnf_literals: 1
+- output: IS.37
+  layer: 1
+  family: shj
+  shj_type: VI
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.17, IS.19, HAS.24]
+  relevant_inputs: [IS.17, IS.19, HAS.24]
+  expression: (NOT IS.17 AND NOT IS.19 AND NOT HAS.24) OR (NOT IS.17 AND IS.19 AND
+    HAS.24) OR (IS.17 AND NOT IS.19 AND HAS.24) OR (IS.17 AND IS.19 AND NOT HAS.24)
+  truth_table: '10010110'
+  min_dnf_literals: 12
+- output: IS.38
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.4, IS.9, IS.21, IS.28]
+  relevant_inputs: [IS.4, IS.9, IS.21, IS.28]
+  expression: IS.4 XOR NOT IS.9 XOR IS.21 XOR IS.28
+  truth_table: '1001011001101001'
+  min_dnf_literals: 32
+- output: IS.39
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.11, IS.25, HAS.11, HAS.19]
+  relevant_inputs: [IS.11, IS.25, HAS.11, HAS.19]
+  expression: IS.11 XOR IS.25 XOR HAS.11 XOR NOT HAS.19
+  truth_table: '1001011001101001'
+  min_dnf_literals: 32
+- output: IS.40
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.2, IS.11, IS.21, HAS.24]
+  relevant_inputs: [IS.2, IS.11, IS.21, HAS.24]
+  expression: IS.2 XOR IS.11 XOR IS.21 XOR HAS.24
+  truth_table: '0110100110010110'
+  min_dnf_literals: 32
+- output: HAS.31
+  layer: 1
+  family: literal
+  shj_type: null
+  arity: 1
+  nesting_depth: null
+  inputs: [HAS.27]
+  relevant_inputs: [HAS.27]
+  expression: HAS.27
+  truth_table: '01'
+  min_dnf_literals: 1
+- output: HAS.32
+  layer: 1
+  family: shj
+  shj_type: IV
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.6, IS.11, IS.24]
+  relevant_inputs: [IS.6, IS.11, IS.24]
+  expression: (NOT IS.6 AND NOT IS.11) OR (NOT IS.6 AND NOT IS.24) OR (NOT IS.11 AND
+    NOT IS.24)
+  truth_table: '11101000'
+  min_dnf_literals: 6
+- output: HAS.33
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.8, IS.21, IS.22, HAS.27]
+  relevant_inputs: [IS.8, IS.21, IS.22, HAS.27]
+  expression: IS.22 XOR HAS.27 XOR IS.21 XOR IS.8
+  truth_table: '0110100110010110'
+  min_dnf_literals: 32
+- output: HAS.34
+  layer: 1
+  family: literal
+  shj_type: null
+  arity: 1
+  nesting_depth: null
+  inputs: [HAS.17]
+  relevant_inputs: [HAS.17]
+  expression: HAS.17
+  truth_table: '01'
+  min_dnf_literals: 1
+- output: HAS.35
+  layer: 1
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [HAS.23, HAS.30]
+  relevant_inputs: [HAS.23, HAS.30]
+  expression: HAS.23 AND HAS.30
+  truth_table: '0001'
+  min_dnf_literals: 2
+- output: HAS.36
+  layer: 1
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.8, HAS.13]
+  relevant_inputs: [IS.8, HAS.13]
+  expression: IS.8 AND HAS.13
+  truth_table: '0001'
+  min_dnf_literals: 2
+- output: HAS.37
+  layer: 1
+  family: shj
+  shj_type: III
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.14, IS.17, IS.25]
+  relevant_inputs: [IS.14, IS.17, IS.25]
+  expression: (NOT IS.14 AND IS.17) OR (NOT IS.17 AND IS.25)
+  truth_table: '01110100'
+  min_dnf_literals: 4
+- output: HAS.38
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 3
+  nesting_depth: 1
+  inputs: [IS.13, IS.23, HAS.8]
+  relevant_inputs: [IS.13, IS.23, HAS.8]
+  expression: IS.23 OR NOT HAS.8 OR IS.13
+  truth_table: '10111111'
+  min_dnf_literals: 3
+- output: HAS.39
+  layer: 1
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.12, HAS.23]
+  relevant_inputs: [IS.12, HAS.23]
+  expression: IS.12 XOR HAS.23
+  truth_table: '0110'
+  min_dnf_literals: 4
+- output: HAS.40
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.2, HAS.1, HAS.19, HAS.30]
+  relevant_inputs: [IS.2, HAS.1, HAS.19, HAS.30]
+  expression: IS.2 OR HAS.1 OR HAS.19 OR NOT HAS.30
+  truth_table: '1011111111111111'
+  min_dnf_literals: 4
+- output: CAN.1
+  layer: 2
+  family: shj
+  shj_type: II
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.7, IS.24, HAS.22]
+  relevant_inputs: [IS.7, HAS.22]
+  expression: (NOT IS.7 AND NOT HAS.22) OR (IS.7 AND HAS.22)
+  truth_table: '10100101'
+  min_dnf_literals: 4
+- output: CAN.2
+  layer: 2
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.8, HAS.27, HAS.38, HAS.40]
+  relevant_inputs: [IS.8, HAS.27, HAS.38, HAS.40]
+  expression: IS.8 OR HAS.27 OR HAS.38 OR HAS.40
+  truth_table: '0111111111111111'
+  min_dnf_literals: 4
+- output: CAN.3
+  layer: 2
+  family: shj
+  shj_type: VI
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.3, IS.34, HAS.12]
+  relevant_inputs: [IS.3, IS.34, HAS.12]
+  expression: (NOT IS.3 AND NOT IS.34 AND HAS.12) OR (NOT IS.3 AND IS.34 AND NOT HAS.12)
+    OR (IS.3 AND NOT IS.34 AND NOT HAS.12) OR (IS.3 AND IS.34 AND HAS.12)
+  truth_table: '01101001'
+  min_dnf_literals: 12
+- output: CAN.4
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.28, HAS.5]
+  relevant_inputs: [IS.28, HAS.5]
+  expression: NOT IS.28 XOR HAS.5
+  truth_table: '1001'
+  min_dnf_literals: 4
+- output: CAN.5
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.14, HAS.19]
+  relevant_inputs: [IS.14, HAS.19]
+  expression: NOT IS.14 XOR HAS.19
+  truth_table: '1001'
+  min_dnf_literals: 4
+- output: CAN.6
+  layer: 2
+  family: literal
+  shj_type: null
+  arity: 1
+  nesting_depth: null
+  inputs: [HAS.38]
+  relevant_inputs: [HAS.38]
+  expression: HAS.38
+  truth_table: '01'
+  min_dnf_literals: 1
+- output: CAN.7
+  layer: 2
+  family: shj
+  shj_type: III
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.23, IS.29, HAS.17]
+  relevant_inputs: [IS.23, IS.29, HAS.17]
+  expression: (NOT IS.23 AND IS.29) OR (NOT IS.29 AND NOT HAS.17)
+  truth_table: '10111000'
+  min_dnf_literals: 4
+- output: CAN.8
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.12, IS.29]
+  relevant_inputs: [IS.12, IS.29]
+  expression: NOT IS.12 XOR IS.29
+  truth_table: '1001'
+  min_dnf_literals: 4
+- output: CAN.9
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.28, HAS.29]
+  relevant_inputs: [IS.28, HAS.29]
+  expression: IS.28 AND HAS.29
+  truth_table: '0001'
+  min_dnf_literals: 2
+- output: CAN.10
+  layer: 2
+  family: shj
+  shj_type: IV
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.1, IS.17, HAS.36]
+  relevant_inputs: [IS.1, IS.17, HAS.36]
+  expression: (IS.1 AND IS.17) OR (IS.1 AND NOT HAS.36) OR (IS.17 AND NOT HAS.36)
+  truth_table: '00101011'
+  min_dnf_literals: 6
+- output: CAN.11
+  layer: 2
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.15, HAS.3, HAS.24, HAS.36]
+  relevant_inputs: [IS.15, HAS.3, HAS.24, HAS.36]
+  expression: NOT IS.15 OR NOT HAS.3 OR HAS.24 OR NOT HAS.36
+  truth_table: '1111111111111011'
+  min_dnf_literals: 4
+- output: CAN.12
+  layer: 2
+  family: shj
+  shj_type: III
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.13, HAS.20, HAS.31]
+  relevant_inputs: [IS.13, HAS.20, HAS.31]
+  expression: (IS.13 AND HAS.20) OR (NOT HAS.20 AND NOT HAS.31)
+  truth_table: '10001011'
+  min_dnf_literals: 4
+- output: CAN.13
+  layer: 2
+  family: shj
+  shj_type: V
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.5, IS.29, IS.33]
+  relevant_inputs: [IS.5, IS.29, IS.33]
+  expression: (NOT IS.5 AND NOT IS.29) OR (NOT IS.5 AND NOT IS.33) OR (IS.5 AND IS.29
+    AND IS.33)
+  truth_table: '11100001'
+  min_dnf_literals: 7
+- output: CAN.14
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [IS.5, IS.38]
+  relevant_inputs: [IS.5, IS.38]
+  expression: NOT IS.5 AND NOT IS.38
+  truth_table: '1000'
+  min_dnf_literals: 2
+- output: CAN.15
+  layer: 2
+  family: shj
+  shj_type: V
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.12, IS.16, HAS.15]
+  relevant_inputs: [IS.12, IS.16, HAS.15]
+  expression: (NOT IS.12 AND NOT IS.16) OR (NOT IS.12 AND NOT HAS.15) OR (IS.12 AND
+    IS.16 AND HAS.15)
+  truth_table: '11100001'
+  min_dnf_literals: 7
+- output: CAN.16
+  layer: 2
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.3, IS.9, HAS.10, HAS.20]
+  relevant_inputs: [IS.3, IS.9, HAS.10, HAS.20]
+  expression: IS.3 OR IS.9 OR HAS.10 OR HAS.20
+  truth_table: '0111111111111111'
+  min_dnf_literals: 4
+- output: CAN.17
+  layer: 2
+  family: shj
+  shj_type: I
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.14, HAS.17, HAS.24]
+  relevant_inputs: [IS.14]
+  expression: IS.14
+  truth_table: '00001111'
+  min_dnf_literals: 1
+- output: CAN.18
+  layer: 2
+  family: binary
+  shj_type: null
+  arity: 2
+  nesting_depth: null
+  inputs: [HAS.15, HAS.35]
+  relevant_inputs: [HAS.15, HAS.35]
+  expression: NOT HAS.15 AND HAS.35
+  truth_table: '0100'
+  min_dnf_literals: 2
+- output: CAN.19
+  layer: 2
+  family: shj
+  shj_type: I
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.10, IS.12, IS.18]
+  relevant_inputs: [IS.18]
+  expression: NOT IS.18
+  truth_table: '10101010'
+  min_dnf_literals: 1
+- output: CAN.20
+  layer: 2
+  family: shj
+  shj_type: III
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.26, HAS.1, HAS.20]
+  relevant_inputs: [IS.26, HAS.1, HAS.20]
+  expression: (NOT IS.26 AND NOT HAS.20) OR (IS.26 AND NOT HAS.1)
+  truth_table: '10101100'
+  min_dnf_literals: 4

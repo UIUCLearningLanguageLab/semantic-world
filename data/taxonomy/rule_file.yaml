@@ -1,0 +1,9 @@
+# The default configuration with rules drawn from the example rule file instead of the automatic
+# complexity parameters. Parameters not listed keep their defaults (see default.yaml).
+
+name: rule_file
+seed: 1
+
+rules:
+  source: file
+  file: rules/example.yaml

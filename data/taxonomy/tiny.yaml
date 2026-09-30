@@ -1,0 +1,18 @@
+# A taxonomy small enough to read by eye: 2 superordinates, depth 2, 8 IS, 8 HAS, 4 CAN,
+# and 3 instances per leaf. Parameters not listed keep their defaults (see default.yaml).
+
+name: tiny
+seed: 1
+
+features:
+  is:  {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  has: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  can: {count: 4}
+
+taxonomy:
+  superordinates: 2
+  depth: 2
+  branching: 2
+
+instances:
+  per_leaf: 3
