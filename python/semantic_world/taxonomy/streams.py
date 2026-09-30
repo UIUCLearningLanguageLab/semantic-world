@@ -28,6 +28,8 @@ STREAM_NAMES = (
     "scalars",
     "scalar_instances",
     "verb_tree",
+    "constraints",
+    "pairs",
 )
 """The short names of the generator's streams. The full name is ``taxonomy:<short name>``."""
 
@@ -63,6 +65,8 @@ class Streams:
     scalars: np.random.Generator
     scalar_instances: np.random.Generator
     verb_tree: np.random.Generator
+    constraints: np.random.Generator
+    pairs: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

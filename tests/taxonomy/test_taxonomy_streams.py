@@ -52,6 +52,8 @@ def test_streams_have_the_named_generators() -> None:
         "scalars",
         "scalar_instances",
         "verb_tree",
+        "constraints",
+        "pairs",
     )
     for name in STREAM_NAMES:
         assert isinstance(getattr(streams, name), np.random.Generator)

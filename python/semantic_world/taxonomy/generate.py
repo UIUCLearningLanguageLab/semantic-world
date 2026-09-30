@@ -10,6 +10,7 @@ import polars as pl
 
 from semantic_world.taxonomy.analysis import feature_stats_table, similarity_table, summary_stats
 from semantic_world.taxonomy.config import Config
+from semantic_world.taxonomy.constraints import Relations, generate_constraints
 from semantic_world.taxonomy.features import FeatureSet
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.instances import Instances, generate_instances
@@ -35,6 +36,8 @@ class TaxonomyResult:
     warnings: tuple[str, ...]
     verbs: VerbTaxonomy | None = None
     """The verb taxonomy, or None when ``verbs`` is null in the configuration."""
+    relations: Relations | None = None
+    """The constraints and relations, or None without verbs."""
 
     @property
     def features(self) -> FeatureSet:
@@ -64,6 +67,7 @@ def generate(config: Config) -> TaxonomyResult:
     similarity = similarity_table(config, tree, instances, vectors, streams.analysis)
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
     verbs = generate_verb_tree(config, streams)
+    relations = generate_constraints(config, rules.features, verbs, instances, streams)
     warnings = tuple(rules.warnings) + tuple(tree.warnings)
     if verbs is not None:
         warnings += tuple(verbs.tree.warnings)
@@ -80,4 +84,5 @@ def generate(config: Config) -> TaxonomyResult:
         summary=summary,
         warnings=warnings,
         verbs=verbs,
+        relations=relations,
     )

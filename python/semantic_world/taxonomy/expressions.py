@@ -129,13 +129,51 @@ class Gt(Expr):
             raise ExpressionError(f"no value for {self.key}") from None
 
 
+@dataclass(frozen=True)
+class Cmp(Expr):
+    """A scalar comparison between two arguments of a relation: the order ``a.SC.1 - p.SC.2 >
+    low`` when ``high`` is None, and the window ``low < a.SC.1 - p.SC.2 < high`` otherwise.
+    Margins are rounded to 4 decimal places."""
+
+    agent: str
+    patient: str
+    low: float
+    high: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "low", round(float(self.low), 4))
+        if self.high is not None:
+            object.__setattr__(self, "high", round(float(self.high), 4))
+            if self.high <= self.low:
+                raise ExpressionError(f"a window needs low < high, got {self.low} and {self.high}")
+
+    @property
+    def key(self) -> str:
+        if self.high is None:
+            return f"{self.agent}-{self.patient}>{self.low:.4f}"
+        return f"{self.low:.4f}<{self.agent}-{self.patient}<{self.high:.4f}"
+
+    def _atom_occurrences(self) -> list[Var | Gt]:
+        return [self]  # type: ignore[list-item]
+
+    def depth(self) -> int:
+        return 0
+
+    def evaluate(self, env: Mapping[str, np.ndarray]) -> np.ndarray:
+        try:
+            return np.asarray(env[self.key], dtype=bool)
+        except KeyError:
+            raise ExpressionError(f"no value for {self.key}") from None
+
+
 def atom_key(atom: str | Expr) -> str:
-    """The variable name of an atom: a label, a :class:`Var` name, or a :class:`Gt` key."""
+    """The variable name of an atom: a label, a :class:`Var` name, or the key of a :class:`Gt`
+    or :class:`Cmp`."""
     if isinstance(atom, str):
         return atom
     if isinstance(atom, Var):
         return atom.name
-    if isinstance(atom, Gt):
+    if isinstance(atom, Gt | Cmp):
         return atom.key
     raise TypeError(f"not an atom: {atom!r}")
 
@@ -210,12 +248,18 @@ def format_expression(expr: Expr, nested: bool = False) -> str:
         return expr.name
     if isinstance(expr, Gt):
         return f"{expr.scalar} > {expr.threshold:.4f}"
+    if isinstance(expr, Cmp):
+        if expr.high is None:
+            text = f"{expr.agent} - {expr.patient} > {expr.low:.4f}"
+        else:
+            text = f"{expr.low:.4f} < {expr.agent} - {expr.patient} < {expr.high:.4f}"
+        return f"({text})" if nested else text
     if isinstance(expr, Const):
         return "TRUE" if expr.value else "FALSE"
     if isinstance(expr, Not):
         if isinstance(expr.operand, Gt):
             return f"{expr.operand.scalar} <= {expr.operand.threshold:.4f}"
-        if isinstance(expr.operand, Op):
+        if isinstance(expr.operand, Op | Cmp):
             return f"NOT ({format_expression(expr.operand)})"
         return f"NOT {format_expression(expr.operand)}"
     if isinstance(expr, Op):
@@ -230,7 +274,7 @@ def format_expression(expr: Expr, nested: bool = False) -> str:
 
 _TOKEN = re.compile(
     r"\s*(?:(?P<lparen>\()|(?P<rparen>\))|(?P<word>[A-Za-z_][A-Za-z0-9_.]*)"
-    r"|(?P<op><=|>=|<|>)|(?P<number>-?\d+(?:\.\d+)?)|(?P<bad>\S))"
+    r"|(?P<number>-?\d+(?:\.\d+)?)|(?P<op><=|>=|<|>|-)|(?P<bad>\S))"
 )
 COMPARISONS = (">", "<=")
 
@@ -327,9 +371,13 @@ class _Parser:
         token = self.current
         if token.kind == "name":
             self.advance()
+            if self.current.kind == "op" and self.current.text == "-":
+                return self.parse_order(token.text)
             if self.current.kind == "op":
                 return self.parse_threshold(token.text)
             return Var(token.text)
+        if token.kind == "number":
+            return self.parse_window()
         if token.kind == "keyword" and token.text in ("TRUE", "FALSE"):
             self.advance()
             return Const(token.text == "TRUE")
@@ -341,6 +389,33 @@ class _Parser:
             self.advance()
             return expr
         raise self.error("expected a feature label, a constant, NOT, or an opening parenthesis")
+
+    def expect(self, kind: str, text: str | None, message: str) -> _Token:
+        if self.current.kind != kind or (text is not None and self.current.text != text):
+            raise self.error(message)
+        return self.advance()
+
+    def parse_order(self, agent: str) -> Expr:
+        """``a.SC.i - p.SC.j > low``."""
+        self.expect("op", "-", "expected -")
+        patient = self.expect("name", None, "expected the patient's scalar").text
+        self.expect("op", ">", "a comparison uses > after the difference")
+        low = self.expect("number", None, "expected a margin number").text
+        return Cmp(agent, patient, float(low))
+
+    def parse_window(self) -> Expr:
+        """``low < a.SC.i - p.SC.j < high``."""
+        low = self.advance().text
+        self.expect("op", "<", "a window uses < after the lower margin")
+        agent = self.expect("name", None, "expected the agent's scalar").text
+        self.expect("op", "-", "expected - between the two scalars")
+        patient = self.expect("name", None, "expected the patient's scalar").text
+        self.expect("op", "<", "a window uses < before the upper margin")
+        high = self.expect("number", None, "expected the upper margin").text
+        try:
+            return Cmp(agent, patient, float(low), float(high))
+        except ExpressionError as error:
+            raise ExpressionError(f"{error} in {self.text!r}") from None
 
     def parse_threshold(self, scalar: str) -> Expr:
         """``SC.n > x`` is a threshold literal; ``SC.n <= x`` is its negation."""

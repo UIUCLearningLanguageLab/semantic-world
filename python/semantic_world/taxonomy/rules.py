@@ -443,6 +443,61 @@ def build_rules(config: Config, features: FeatureSet, streams: Streams) -> RuleS
     return _Builder(config, features, streams.rules, rule_file).build()
 
 
+@dataclass(frozen=True)
+class FunctionDraw:
+    """A sampled Boolean function over given atoms: what the rule and constraint samplers share."""
+
+    expression: Expr
+    table: TruthTable
+    family: str
+    shj_type: str | None
+    nesting_depth: int | None
+
+
+def build_function(
+    rng: np.random.Generator, sampling: RuleSampling, atoms: Sequence[Expr], keys: Sequence[str]
+) -> FunctionDraw:
+    """Sample a function of the given atoms by their number: a literal, a binary function with
+    an operator from the mix, an SHJ type or a compositional formula for three, and a read-once
+    formula for more. Each input is negated with the negation probability."""
+    p = sampling.negation_probability
+    n = len(atoms)
+    if n == 1:
+        negated = bool(rng.random() < p)
+        return FunctionDraw(
+            literal(atoms[0], negated),
+            TruthTable.from_function(1, lambda x: x[0] ^ int(negated)),
+            "literal",
+            None,
+            None,
+        )
+    if n == 2:
+        operator = _draw(rng, sampling.operator_mix)
+        negated = [bool(v) for v in rng.random(2) < p]
+        expression = Op(
+            operator, tuple(literal(a, ng) for a, ng in zip(atoms, negated, strict=True))
+        )
+        table = TruthTable.from_function(
+            2,
+            lambda x: apply_operator(
+                operator, [v ^ int(ng) for v, ng in zip(x, negated, strict=True)]
+            ),
+        )
+        return FunctionDraw(expression, table, "binary", None, None)
+    if n == 3:
+        family = _draw(rng, sampling.arity_3_families)
+        if family != "compositional":
+            permutation = [int(i) for i in rng.permutation(3)]
+            negations = [bool(v) for v in rng.random(3) < p]
+            table = shj_function(family, permutation, negations)
+            return FunctionDraw(from_dnf(minimal_dnf(table), atoms), table, "shj", family, None)
+    depth = _draw(rng, sampling.nesting_depth)
+    expression = random_read_once(atoms, depth, sampling.operator_mix, p, rng)
+    return FunctionDraw(
+        expression, expression.truth_table(keys), "compositional", None, expression.depth()
+    )
+
+
 def _entry_layer(entry: Feature | int) -> int:
     """The layer of a pool entry: a scalar dimension is a layer-0 input."""
     return 0 if isinstance(entry, int) else entry.layer
@@ -709,17 +764,18 @@ class _Builder:
     def _automatic(self, output: Feature, sampling: RuleSampling) -> Rule:
         arity = _draw(self.rng, sampling.arity)
         inputs = self._choose_inputs(output, arity, sampling)
-        p = sampling.negation_probability
-        if arity == 1:
-            return self._literal(output, inputs, p)
-        if arity == 2:
-            return self._binary(output, inputs, _draw(self.rng, sampling.operator_mix), p, "binary")
-        if arity == 3:
-            family = _draw(self.rng, sampling.arity_3_families)
-            if family != "compositional":
-                return self._shj(output, inputs, family, p)
-        depth = _draw(self.rng, sampling.nesting_depth)
-        return self._compositional(output, inputs, depth, sampling.operator_mix, p)
+        draw = build_function(
+            self.rng, sampling, [input_atom(i) for i in inputs], [input_key(i) for i in inputs]
+        )
+        return self._finish(
+            output,
+            inputs,
+            draw.expression,
+            draw.table,
+            draw.family,
+            draw.shj_type,
+            draw.nesting_depth,
+        )
 
     def _from_template(self, output: Feature, sampling: RuleSampling) -> Rule:
         assert self.rule_file is not None

@@ -9,6 +9,12 @@ The generator is a standalone Python program. It does not use the Rust engine.
 
 from semantic_world.taxonomy.boolean import TruthTable
 from semantic_world.taxonomy.config import Config, ConfigError, config_from_mapping, load_config
+from semantic_world.taxonomy.constraints import (
+    Constraint,
+    Relation,
+    Relations,
+    generate_constraints,
+)
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import Expr, ExpressionError, parse_expression
 from semantic_world.taxonomy.features import Feature, FeatureSet, build_features
@@ -25,6 +31,7 @@ __all__ = [
     "Category",
     "Config",
     "ConfigError",
+    "Constraint",
     "Expr",
     "ExpressionError",
     "Feature",
@@ -32,6 +39,8 @@ __all__ = [
     "GenerationError",
     "Instances",
     "NodeVectors",
+    "Relation",
+    "Relations",
     "Role",
     "Rule",
     "RuleSet",
@@ -44,6 +53,7 @@ __all__ = [
     "compute_node_vectors",
     "config_from_mapping",
     "generate",
+    "generate_constraints",
     "generate_instances",
     "generate_rules",
     "generate_tree",

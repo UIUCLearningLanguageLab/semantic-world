@@ -32,8 +32,13 @@ def golden_configurations() -> list[str]:
     return sorted(p.name for p in GOLDEN.iterdir() if p.is_dir())
 
 
-def test_every_example_configuration_has_a_golden_folder() -> None:
-    examples = sorted(p.stem for p in DATA.glob("*.yaml"))
+def test_every_base_example_configuration_has_a_golden_folder() -> None:
+    """Configurations with scalars off and verbs null are the ones the rule protects."""
+    examples = []
+    for path in sorted(DATA.glob("*.yaml")):
+        config = load_config(path)
+        if config.scalars.count == 0 and config.verbs is None:
+            examples.append(path.stem)
     assert golden_configurations() == examples
 
 
