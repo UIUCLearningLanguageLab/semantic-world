@@ -23,6 +23,7 @@ from semantic_world.wordforms.closed_class import (
     function_candidates,
     join,
     shape_of,
+    vowel_collision,
 )
 from semantic_world.wordforms.config import (
     AFFIX_SHAPES,
@@ -75,7 +76,7 @@ def test_default_closed_class_has_function_words_and_affixes_and_inflects_nothin
         ("PROGRESSIVE", "suffix"),
     ]
     assert closed.affix_shapes == {"C": 0.4, "VC": 0.4, "V": 0.2}
-    assert closed.epenthesis is True and closed.inflect == ()
+    assert closed.epenthesis is True and closed.glide == "Y" and closed.inflect == ()
     assert load_config(DATA / "default.yaml").closed_class == closed
     assert parse_config({"closed_class": None}, "x").closed_class is None
     assert parse_config({"closed_class": None}, "x").resolved()["closed_class"] is None
@@ -267,7 +268,7 @@ def test_function_words_meet_every_rule(common_english):
             assert word.real_word is False and word.kind == "function"
             assert word.ipa and word.espeak and word.spelling
             assert word.spelling not in common_english.pattern_words
-            assert word.stem is None and word.affix is None and word.epenthesis is None
+            assert word.stem is None and word.affix is None and word.join is None
         for a in function:
             for b in function:
                 if a is not b:
@@ -358,13 +359,42 @@ def test_affixes_have_an_allowed_shape_and_are_distinct():
         assert len({a.phones for a in affixes}) == 5
 
 
-def test_joining_and_epenthesis():
+def test_joining_with_a_schwa_or_a_glide():
+    from semantic_world.wordforms.closed_class import glide_after, repair_join, vowel_collision
+
     suffix = Affix("AF.1", "S", "suffix", ("Z",), "z")
     prefix = Affix("AF.2", "P", "prefix", ("AH0", "N"), "ən")
     assert join(("K", "AE1", "T"), suffix) == ("K", "AE1", "T", "Z")
-    assert join(("K", "AE1", "T"), suffix, schwa=True) == ("K", "AE1", "T", SCHWA, "Z")
+    assert join(("K", "AE1", "T"), suffix, "schwa") == ("K", "AE1", "T", SCHWA, "Z")
     assert join(("K", "AE1", "T"), prefix) == ("AH0", "N", "K", "AE1", "T")
-    assert join(("K", "AE1", "T"), prefix, schwa=True) == ("AH0", "N", SCHWA, "K", "AE1", "T")
+    assert join(("K", "AE1", "T"), prefix, "schwa") == ("AH0", "N", SCHWA, "K", "AE1", "T")
+    # a glide goes only where a vowel meets a vowel: Y after a front vowel, W after a back or
+    # rounded one, and the configured default otherwise
+    vowel = Affix("AF.3", "V", "suffix", ("AH0",), "ə")
+    assert vowel_collision(("K", "AE1", "T"), vowel) is None
+    assert vowel_collision(("S", "IY1"), vowel) == "IY1"
+    assert vowel_collision(("S", "IY1"), suffix) is None
+    assert join(("K", "AE1", "T"), vowel, "glide") == ("K", "AE1", "T", "AH0")
+    assert join(("S", "IY1"), vowel, "glide") == ("S", "IY1", "Y", "AH0")
+    assert join(("S", "UW1"), vowel, "glide") == ("S", "UW1", "W", "AH0")
+    assert join(("S", "AA1"), vowel, "glide") == ("S", "AA1", "Y", "AH0")
+    assert join(("S", "AA1"), vowel, "glide", "W") == ("S", "AA1", "W", "AH0")
+    for front in ("IY", "IH1", "EY0", "EH", "AE"):
+        assert glide_after(front, "W") == "Y"
+    for back in ("UW", "UH1", "OW0", "AO", "AW"):
+        assert glide_after(back, "Y") == "W"
+    assert glide_after("AH0", "W") == "W" and glide_after("ER", "Y") == "Y"
+    # a vowel-final prefix before a vowel-initial stem
+    open_prefix = Affix("AF.4", "P", "prefix", ("AH0",), "ə")
+    assert vowel_collision(("AE1", "T"), open_prefix) == "AH0"
+    assert join(("AE1", "T"), open_prefix, "glide", "W") == ("AH0", "W", "AE1", "T")
+    assert join(("K", "AE1", "T"), open_prefix, "glide") == ("AH0", "K", "AE1", "T")
+    # an English affix is not repaired or checked
+    english = Affix("AF.5", "PLURAL", "suffix", ("Z",), "z", (("Z",), ("S",), ("IH0", "Z")))
+    assert repair_join(object(), ("K", "AE1", "T"), english, True) == (
+        ("K", "AE1", "T", "S"),
+        "none",
+    )
 
 
 def test_inflected_forms_pass_the_check_and_take_a_schwa_exactly_where_the_join_fails(
@@ -378,14 +408,25 @@ def test_inflected_forms_pass_the_check_and_take_a_schwa_exactly_where_the_join_
         report = run.lexicon.closed_class["inflected"]
         assert report["requested"] == 120 and report["made"] == len(inflected)
         assert report["made"] + len(report["skipped"]) == 120
-        assert report["with_schwa"] == sum(w.epenthesis for w in inflected)
+        joins = report["joins"]
+        assert set(joins) == {"none", "schwa", "glide"} and sum(joins.values()) == len(inflected)
+        for name in joins:
+            assert joins[name] == sum(w.join == name for w in inflected)
         for form in inflected:
             stem, affix = content[form.stem], affixes[form.affix]
             assert form.label == f"{stem.label}.{affix.label}" and form.kind == "inflected"
             assert common_english.phonotactic(form.phones)
+            # the repair applies exactly where the plain join fails: a glide where a vowel meets
+            # a vowel and the glide helps, and otherwise a schwa
             plain = join(stem.phones, affix)
-            assert form.epenthesis is (not common_english.phonotactic(plain))
-            assert form.phones == join(stem.phones, affix, schwa=form.epenthesis)
+            if common_english.phonotactic(plain):
+                assert form.join == "none" and form.phones == plain
+            elif vowel_collision(stem.phones, affix) and common_english.phonotactic(
+                join(stem.phones, affix, "glide")
+            ):
+                assert form.join == "glide" and form.phones == join(stem.phones, affix, "glide")
+            else:
+                assert form.join == "schwa" and form.phones == join(stem.phones, affix, "schwa")
             assert form.syllable_count == sum(is_vowel(p) for p in form.phones)
             assert form.ipa.startswith(stem.ipa) and form.ipa.endswith(affix.ipa)
             assert form.spelling.startswith(stem.spelling)
@@ -395,7 +436,8 @@ def test_inflected_forms_pass_the_check_and_take_a_schwa_exactly_where_the_join_
             if "common English word" in skip["reason"]:
                 continue
             assert not common_english.phonotactic(join(stem.phones, affix))
-            assert not common_english.phonotactic(join(stem.phones, affix, schwa=True))
+            assert not common_english.phonotactic(join(stem.phones, affix, "glide"))
+            assert not common_english.phonotactic(join(stem.phones, affix, "schwa"))
         # in word order, then affix order
         labels = [w.label for w in inflected]
         assert labels == sorted(labels, key=lambda s: (int(s.split(".")[1]), s.split(".")[3]))
@@ -448,15 +490,14 @@ def test_without_epenthesis_a_failing_join_is_skipped():
         )
     )
     assert [a.phones for a in on.lexicon.affixes] == [a.phones for a in off.lexicon.affixes]
-    schwa = [w for w in forms_of(on, "inflected") if w.epenthesis]
+    schwa = [w for w in forms_of(on, "inflected") if w.join == "schwa"]
     assert schwa
-    assert all(w.epenthesis is False for w in forms_of(off, "inflected"))
+    assert all(w.join != "schwa" for w in forms_of(off, "inflected"))
     skipped = {(s["stem"], s["affix"]) for s in off.lexicon.closed_class["inflected"]["skipped"]}
     assert {(w.stem, w.affix) for w in schwa} <= skipped
-    assert all(
-        "plain join" in s["reason"] or "common English" in s["reason"]
-        for s in off.lexicon.closed_class["inflected"]["skipped"]
-    )
+    for skip in off.lexicon.closed_class["inflected"]["skipped"]:
+        assert "phonotactic check" in skip["reason"] or "common English" in skip["reason"]
+        assert "schwa" not in skip["reason"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -625,11 +666,12 @@ def test_forms_command_writes_closed_class_forms(tmp_path, capsys):
     inflected = words.filter(pl.col("kind") == "inflected")
     assert inflected["stem"].str.starts_with("W.").all()
     assert inflected["affix"].str.starts_with("AF.").all()
-    assert inflected["epenthesis"].dtype == pl.Boolean and inflected["epenthesis"].null_count() == 0
+    assert set(inflected["join"].to_list()) <= {"none", "schwa", "glide"}
+    assert inflected["join"].null_count() == 0
     assert inflected["label"].to_list() == [
         f"{s}.{a}" for s, a in zip(inflected["stem"], inflected["affix"], strict=True)
     ]
-    assert words.filter(pl.col("kind") != "inflected")["epenthesis"].null_count() == 35
+    assert words.filter(pl.col("kind") != "inflected")["join"].null_count() == 35
     affixes = pl.read_csv(out / "affixes.csv")
     assert affixes.columns == list(AFFIX_COLUMNS)
     assert affixes["label"].to_list() == ["AF.1", "AF.2", "AF.3"]
@@ -659,7 +701,7 @@ def test_closed_class_null_writes_the_columns_but_no_affix_table(tmp_path):
     words = pl.read_csv(out / "words.csv")
     assert words.columns == list(WORD_COLUMNS) and words.height == 20
     assert words["kind"].to_list() == ["content"] * 20
-    for column in ("gloss", "stem", "affix", "epenthesis"):
+    for column in ("gloss", "stem", "affix", "join"):
         assert words[column].null_count() == 20
     assert "closed_class" not in yaml.safe_load((out / "summary.yaml").read_text())
 
@@ -737,9 +779,11 @@ def test_an_inflected_form_that_is_a_common_word_is_skipped(common_english):
         affixes = {a.label: a for a in run.lexicon.affixes}
         for skip in skipped:
             found = True
-            phones = join(content[skip["stem"]].phones, affixes[skip["affix"]])
-            if not common_english.phonotactic(phones):
-                phones = join(content[skip["stem"]].phones, affixes[skip["affix"]], schwa=True)
+            from semantic_world.wordforms.closed_class import repair_join
+
+            phones, _ = repair_join(
+                common_english, content[skip["stem"]].phones, affixes[skip["affix"]], True
+            )
             word = common_english.common_words_with_pronunciation(phones)[0]
             assert skip["reason"].endswith(f"{word!r}")
     assert found
@@ -792,7 +836,7 @@ def test_english_affixes_and_allomorphy(common_english):
         stem = content[form.stem]
         gloss = by_label[form.affix].gloss
         assert form.phones == stem.phones + english_allomorph(gloss, stem.phones)
-        assert form.epenthesis is False
+        assert form.join == "none"
         assert not common_english.is_common_pronunciation(form.phones)
     report = run.lexicon.closed_class
     assert report["affixes"] == {"source": "english", "count": 3}
@@ -831,3 +875,40 @@ def test_english_closed_class_in_the_run_folder(tmp_path):
     assert affixes["arpabet"].to_list() == ["Z / S / IH0 Z", "D / T / IH0 D", "IH0 NG"]
     reloaded = load_config(out / "config.yaml").closed_class
     assert reloaded.function_source == "english" and reloaded.affix_source == "english"
+
+
+def test_the_glide_repair_in_a_run(common_english):
+    """A vowel-final stem with a vowel-initial affix takes a glide where the plain join fails."""
+    from semantic_world.wordforms.closed_class import affix_candidates, skipped_share
+
+    config = config_with(
+        {
+            "affixes": {"items": [{"gloss": "A"}], "shapes": {"V": 1}},
+            "inflect": [{"words": "all", "affixes": ["A"]}],
+        },
+        count=200,
+    )
+    run = run_forms(config)
+    affix = run.lexicon.affixes[0]
+    assert affix.shape == "V"
+    content = {w.label: w for w in forms_of(run, "content")}
+    glided = [w for w in forms_of(run, "inflected") if w.join == "glide"]
+    for form in glided:
+        stem = content[form.stem]
+        vowel = stem.phones[-1]
+        assert is_vowel(vowel)
+        expected = "W" if vowel[:-1] in ("UW", "UH", "OW", "AO", "AW") else "Y"
+        assert form.phones == stem.phones + (expected,) + affix.phones
+        assert form.spelling.startswith(stem.spelling)
+    assert run.lexicon.closed_class["inflected"]["joins"]["glide"] == len(glided)
+    # the glide lets some VC suffix candidates pass the 10% rule
+    stems = list(content.values())
+    passing = [
+        p
+        for p, _ in affix_candidates(common_english, "VC", "suffix")
+        if skipped_share(common_english, p, "suffix", stems, True) <= 0.1
+    ]
+    assert passing and all(p[0] == "AH0" for p in passing)
+    with pytest.raises(ConfigError) as info:
+        config_with({"affixes": {"glide": "L"}})
+    assert info.value.field == "closed_class.affixes.glide"

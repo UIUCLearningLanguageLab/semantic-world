@@ -16,8 +16,9 @@ forms").
   ``max_skipped`` of the content words cannot take is rejected. With ``source: english``, the
   glosses PLURAL, PAST, and PROGRESSIVE become the English suffixes, with English allomorphy.
 - An **inflected form** is a stem joined to an affix. When the plain join fails the phonotactic
-  check, an unstressed schwa goes between the two. A pair that fails even then, or whose form is
-  a common English word, is skipped and reported.
+  check, a glide (``Y`` after a front vowel, ``W`` after a back or rounded vowel) goes between
+  a vowel and a vowel, and otherwise an unstressed schwa goes between the two. A pair that fails
+  even then, or whose form is a common English word, is skipped and reported.
 
 Every draw comes from the ``wordforms:closed_class`` stream, so closed-class forms never change a
 content word. A shape with no form left is drawn again from the other shapes, and the summary
@@ -51,6 +52,11 @@ from semantic_world.wordforms.streams import Streams
 
 SCHWA = "AH0"
 """The vowel that joins a stem and an affix when the plain join is not legal."""
+FRONT_VOWELS = frozenset(("IY", "IH", "EY", "EH", "AE"))
+"""Vowels after which the glide is ``Y``."""
+BACK_VOWELS = frozenset(("UW", "UH", "OW", "AO", "AW"))
+"""Vowels after which the glide is ``W``."""
+JOINS = ("none", "schwa", "glide")
 SHORT_SHARE = 0.5
 """The share of the function words, the most frequent ones, that get two-phoneme shapes."""
 
@@ -349,31 +355,82 @@ def english_function_words(
 # ---------------------------------------------------------------------------------------------
 
 
-def join(stem: tuple[str, ...], affix: Affix, schwa: bool = False) -> tuple[str, ...]:
-    """The phonemes of a stem with an affix, with or without a schwa between the two."""
-    middle = (SCHWA,) if schwa else ()
+def glide_after(vowel: str, default: str) -> str:
+    """The glide that follows a vowel: ``Y`` after a front vowel, ``W`` after a back or rounded
+    vowel, and ``default`` otherwise."""
+    if base(vowel) in FRONT_VOWELS:
+        return "Y"
+    if base(vowel) in BACK_VOWELS:
+        return "W"
+    return default
+
+
+def vowel_collision(stem: tuple[str, ...], affix: Affix) -> str | None:
+    """The vowel before the join when a vowel-initial suffix follows a vowel-final stem, or a
+    vowel-final prefix precedes a vowel-initial stem; None otherwise."""
+    phones = affix.select(stem)
+    if not phones:
+        return None
+    if affix.position == "prefix":
+        return phones[-1] if is_vowel(phones[-1]) and is_vowel(stem[0]) else None
+    return stem[-1] if is_vowel(stem[-1]) and is_vowel(phones[0]) else None
+
+
+def join(
+    stem: tuple[str, ...], affix: Affix, repair: str = "none", glide: str = "Y"
+) -> tuple[str, ...]:
+    """The phonemes of a stem with an affix: joined plainly (``none``), with a schwa between the
+    two (``schwa``), or with a glide between a vowel and a vowel (``glide``, ``Y`` after a front
+    vowel, ``W`` after a back or rounded vowel, and the configured ``glide`` otherwise)."""
+    if repair == "schwa":
+        middle: tuple[str, ...] = (SCHWA,)
+    elif repair == "glide":
+        vowel = vowel_collision(stem, affix)
+        middle = () if vowel is None else (glide_after(vowel, glide),)
+    else:
+        middle = ()
     phones = affix.select(stem)
     if affix.position == "prefix":
         return phones + middle + stem
     return stem + middle + phones
 
 
-def _can_take(english: English, stem: tuple[str, ...], affix: Affix, epenthesis: bool) -> bool:
-    """Whether a stem takes an affix: the plain join passes the phonotactic check, or the join
-    with a schwa does when epenthesis is on."""
-    if english.phonotactic(join(stem, affix)):
-        return True
-    return epenthesis and english.phonotactic(join(stem, affix, schwa=True))
+def repair_join(
+    english: English, stem: tuple[str, ...], affix: Affix, epenthesis: bool, glide: str = "Y"
+) -> tuple[tuple[str, ...], str] | None:
+    """The joined phonemes of a stem and an affix, with the repair that made them legal: the
+    plain join when it passes the phonotactic check; else a glide when a vowel meets a vowel;
+    else a schwa, when epenthesis is on. None when no join passes. An English affix takes its
+    allomorph and is not checked."""
+    phones = join(stem, affix)
+    if affix.allomorphs or english.phonotactic(phones):
+        return phones, "none"
+    if vowel_collision(stem, affix) is not None:
+        phones = join(stem, affix, "glide", glide)
+        if english.phonotactic(phones):
+            return phones, "glide"
+    if epenthesis:
+        phones = join(stem, affix, "schwa")
+        if english.phonotactic(phones):
+            return phones, "schwa"
+    return None
 
 
 def skipped_share(
-    english: English, phones: tuple[str, ...], position: str, content, epenthesis: bool
+    english: English,
+    phones: tuple[str, ...],
+    position: str,
+    content,
+    epenthesis: bool,
+    glide: str = "Y",
 ) -> float:
     """The share of the content words that cannot take an affix with these phonemes."""
     if not content:
         return 0.0
     trial = Affix("", "", position, phones, "")
-    failing = sum(not _can_take(english, stem.phones, trial, epenthesis) for stem in content)
+    failing = sum(
+        repair_join(english, stem.phones, trial, epenthesis, glide) is None for stem in content
+    )
     return failing / len(content)
 
 
@@ -409,7 +466,9 @@ def generate_affixes(
                 if phones not in used
             ]
             shares = {
-                phones: skipped_share(english, phones, item.position, content, settings.epenthesis)
+                phones: skipped_share(
+                    english, phones, item.position, content, settings.epenthesis, settings.glide
+                )
                 for phones, _ in fresh
             }
             key = f"{item.position} {shape}"
@@ -488,8 +547,8 @@ def inflect(
 ) -> tuple[list[tuple[WordForm, str]], list[dict[str, str]]]:
     """The inflected form of each pair, with its spelling, and the pairs that were skipped. The
     spelling is the stem's spelling with the affix's spelling, so that a reader sees the stem.
-    An English affix takes its allomorph for the stem, never a schwa, and no phonotactic check:
-    only the check that the form is not a common English word."""
+    An English affix takes its allomorph for the stem, no repair, and no phonotactic check: only
+    the check that the form is not a common English word."""
     forms: list[tuple[WordForm, str]] = []
     skipped: list[dict[str, str]] = []
 
@@ -497,19 +556,21 @@ def inflect(
         skipped.append({"stem": stem.label, "affix": affix.label, "reason": reason})
 
     for stem, affix in pairs:
-        phones = join(stem.phones, affix)
-        epenthesis = False
         # An English affix is regular English morphology, so its join is not checked against
         # the trigrams of the uninflected pattern words, which lack the inflectional endings.
-        if not affix.allomorphs and not english.phonotactic(phones):
-            if not settings.epenthesis:
-                skip(stem, affix, "the plain join fails the phonotactic check")
-                continue
-            phones = join(stem.phones, affix, schwa=True)
-            epenthesis = True
-            if not english.phonotactic(phones):
-                skip(stem, affix, "the join fails the phonotactic check with the schwa too")
-                continue
+        joined = repair_join(english, stem.phones, affix, settings.epenthesis, settings.glide)
+        if joined is None:
+            repairs = "the glide" if vowel_collision(stem.phones, affix) else ""
+            if settings.epenthesis:
+                repairs += " and the schwa" if repairs else "the schwa"
+            skip(
+                stem,
+                affix,
+                "the join fails the phonotactic check"
+                + (f" with {repairs} too" if repairs else ""),
+            )
+            continue
+        phones, repair = joined
         if english.is_common_pronunciation(phones):
             word = english.common_words_with_pronunciation(phones)[0]
             skip(stem, affix, f"the form is the common English word {word!r}")
@@ -521,14 +582,13 @@ def inflect(
             kind="inflected",
             stem=stem.label,
             affix=affix.label,
-            epenthesis=epenthesis,
+            join=repair,
         )
-        middle = (SCHWA,) if epenthesis else ()
-        selected = affix.select(stem.phones)
+        # the affix's spelling covers the repair too ("-al", "-ya")
         if affix.position == "prefix":
-            spelling = speller.spell(selected + middle) + stem.spelling
+            spelling = speller.spell(phones[: len(phones) - len(stem.phones)]) + stem.spelling
         else:
-            spelling = stem.spelling + speller.spell(middle + selected)
+            spelling = stem.spelling + speller.spell(phones[len(stem.phones) :])
         forms.append((form, spelling))
     return forms, skipped
 
@@ -590,7 +650,7 @@ def add_closed_class(
         "inflected": {
             "requested": len(pairs),
             "made": len(inflected),
-            "with_schwa": sum(bool(form.epenthesis) for form, _ in inflected),
+            "joins": {name: sum(form.join == name for form, _ in inflected) for name in JOINS},
             "skipped": skipped,
             "skipped_as_common_words": sum("common English" in s["reason"] for s in skipped),
         },

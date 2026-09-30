@@ -50,6 +50,7 @@ closed_class:                    # null: content words only
     source: pseudo               # english: the English suffixes -s, -ed, -ing
     shapes: {C: 0.4, VC: 0.4, V: 0.2}
     epenthesis: true
+    glide: Y                     # the glide between two vowels at a join when neither vowel decides
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 

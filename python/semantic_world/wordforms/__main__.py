@@ -129,7 +129,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"closed-class forms: {closed['function_words']['count']} function words, "
             f"{closed['affixes']['count']} affixes, {inflected['made']} inflected forms "
-            f"({inflected['with_schwa']} with a schwa, {len(inflected['skipped'])} pairs skipped)"
+            f"({inflected['joins']['schwa']} with a schwa, {inflected['joins']['glide']} with a "
+            f"glide, {len(inflected['skipped'])} pairs skipped)"
         )
     if "synthesis" in summary:
         synthesis = summary["synthesis"]

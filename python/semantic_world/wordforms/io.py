@@ -42,7 +42,7 @@ WORD_COLUMNS = (
     "gloss",
     "stem",
     "affix",
-    "epenthesis",
+    "join",
     "weak_forms",
 )
 AFFIX_COLUMNS = ("label", "gloss", "position", "arpabet", "ipa")
@@ -148,7 +148,7 @@ def words_frame(lexicon: Lexicon) -> pl.DataFrame:
             "gloss": pl.String,
             "stem": pl.String,
             "affix": pl.String,
-            "epenthesis": pl.Boolean,
+            "join": pl.String,
             "weak_forms": pl.String,
         },
     )

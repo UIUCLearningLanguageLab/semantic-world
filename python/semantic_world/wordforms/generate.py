@@ -69,8 +69,8 @@ class WordForm:
     """The label of an inflected form's stem."""
     affix: str | None = None
     """The label of an inflected form's affix."""
-    epenthesis: bool | None = None
-    """Whether a schwa stands between an inflected form's stem and affix."""
+    join: str | None = None
+    """How an inflected form's stem and affix were joined: ``none``, ``schwa``, or ``glide``."""
     weak_forms: tuple[str, ...] = ()
     """The other dictionary pronunciations of an English function word (ARPAbet), for connected
     speech later."""
@@ -115,7 +115,7 @@ class WordForm:
             "gloss": self.gloss,
             "stem": self.stem,
             "affix": self.affix,
-            "epenthesis": self.epenthesis,
+            "join": self.join,
             "weak_forms": "; ".join(self.weak_forms) if self.weak_forms else None,
         }
 

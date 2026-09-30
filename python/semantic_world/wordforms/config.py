@@ -29,6 +29,7 @@ FUNCTION_SHAPES = ("CV", "CVC", "VC", "V")
 """The shapes of a function word: one syllable with at most one consonant on each side."""
 AFFIX_SHAPES = ("C", "VC", "V")
 AFFIX_POSITIONS = ("suffix", "prefix")
+GLIDES = ("Y", "W")
 CLOSED_CLASS_SOURCES = ("pseudo", "english")
 DEFAULT_FUNCTION_WORDS = (
     "the", "and", "a", "is", "that", "it", "with", "not", "all", "can", "has", "no", "some",
@@ -371,6 +372,9 @@ class ClosedClassConfig:
     """``pseudo``: generated forms; ``english``: the English suffixes with their allomorphs."""
     affix_shapes: dict[str, float]
     epenthesis: bool
+    glide: str
+    """The glide inserted where a vowel meets a vowel at the join and neither vowel decides:
+    ``Y`` or ``W``."""
     max_skipped: float
     """A generated affix is rejected when more than this share of the content words cannot take
     it."""
@@ -393,6 +397,7 @@ class ClosedClassConfig:
                 "source": self.affix_source,
                 "shapes": dict(self.affix_shapes),
                 "epenthesis": self.epenthesis,
+                "glide": self.glide,
                 "max_skipped": self.max_skipped,
             },
             "inflect": [entry.resolved() for entry in self.inflect],
@@ -1018,6 +1023,7 @@ def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None
         affix_source=affix_source,
         affix_shapes=_read_shapes(affix_node, DEFAULT_AFFIX_SHAPES, AFFIX_SHAPES),
         epenthesis=affix_node.bool("epenthesis", True),
+        glide=affix_node.choice("glide", "Y", GLIDES),
         max_skipped=affix_node.probability("max_skipped", 0.1),
         inflect=inflect,
         request=request,

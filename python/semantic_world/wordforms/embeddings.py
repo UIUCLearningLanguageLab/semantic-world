@@ -396,7 +396,7 @@ class SoundEmbeddings:
             form.gloss = row.get("gloss")
             form.stem = row.get("stem")
             form.affix = row.get("affix")
-            form.epenthesis = row.get("epenthesis")
+            form.join = row.get("join")
             weak = row.get("weak_forms")
             form.weak_forms = tuple(weak.split("; ")) if weak else ()
             forms.append(form)
