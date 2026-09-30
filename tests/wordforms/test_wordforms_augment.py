@@ -746,7 +746,11 @@ def test_achieved_values_are_recorded_beside_their_targets(tmp_path):
     run.write(tmp_path / "run")
     table = pl.read_csv(tmp_path / "run" / "tokens.csv")
     assert "achieved" in table.columns
-    assert json.loads(table.filter(pl.col("augmentation").is_not_null())["achieved"][0])
+    augmented_rows = table.filter(pl.col("augmentation").fill_null("") != "")
+    assert json.loads(augmented_rows["achieved"][0])
+    assert (
+        table.filter(pl.col("augmentation").fill_null("") == "")["achieved"].fill_null("") == ""
+    ).all()
     again = stand_in_run(tmp_path, stand_in_config(tmp_path, recipes, proportion=0.4))
     assert again.synthesis.augmentation["read_from_cache"] == len(
         [t for t in synthesis.tokens if t.augmentation]
