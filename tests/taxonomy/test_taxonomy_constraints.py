@@ -244,15 +244,22 @@ def test_verb_relations_include_true_features_and_the_own_constraint(
 # ---------------------------------------------------------------------------------------------
 
 
+_CACHE: dict[int, TaxonomyResult] = {}
+
+
 def _all_constraints(seeds=range(4)):
     for seed in seeds:
-        result = generate(
-            config_from_mapping(
-                {"scalars": {"count": 2}, "verbs": {"features": {"count": 20, "expected_true": 5}}},
-                seed=seed,
+        if seed not in _CACHE:
+            _CACHE[seed] = generate(
+                config_from_mapping(
+                    {
+                        "scalars": {"count": 2},
+                        "verbs": {"features": {"count": 20, "expected_true": 5}},
+                    },
+                    seed=seed,
+                )
             )
-        )
-        yield from result.relations.constraints
+        yield from _CACHE[seed].relations.constraints
 
 
 def test_constraint_expressions_parse_back_and_records_are_consistent() -> None:

@@ -220,7 +220,16 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         instance_data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
     )
 
+    if result.projections is not None:
+        for name, column in result.projections.exposed_columns().items():
+            instance_data[name] = column.astype(np.int64).tolist()
+        instances_frame = pl.DataFrame(
+            instance_data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
+        )
+
     extra: dict[str, pl.DataFrame] = {}
+    if result.projections is not None:
+        extra["projections.csv"] = projections_frame(list(instances.labels), result.projections)
     bins = result.config.scalars.thermometer_bins
     if k and bins:
         extra["instances_scalar_codes.csv"] = thermometer_frame(
@@ -239,6 +248,18 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         "feature_stats.csv": result.feature_stats,
         **extra,
     }
+
+
+def projections_frame(instance_labels: list[str], projections) -> pl.DataFrame:
+    """``projections.csv``: every intensional projection, the approximate flag, and every
+    extensional projection, one row per instance."""
+    data: dict[str, Any] = {"label": instance_labels}
+    for name, column in projections.all_columns().items():
+        if isinstance(column, str):
+            data[name] = [column] * len(instance_labels)
+        else:
+            data[name] = np.asarray(column).astype(np.int64).tolist()
+    return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "approximate": pl.Utf8})
 
 
 def thermometer_frame(

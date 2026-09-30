@@ -393,7 +393,11 @@ def test_verb_tree_is_deterministic_and_uses_only_its_stream() -> None:
 def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Path) -> None:
     off = generate(config_from_mapping({"scalars": {"count": 2}}))
     baseline = _noun_snapshot(off)
-    variants = [VERBS, LARGE_VERBS, {"verbs": {"taxonomy": {"depth": 1, "superordinates": 5}}}]
+    variants = [
+        VERBS,
+        {"verbs": {"taxonomy": {"superordinates": 3, "depth": 3, "branching": 3}}},
+        {"verbs": {"taxonomy": {"depth": 1, "superordinates": 5}}},
+    ]
     for overrides in variants:
         result = generate(config_from_mapping({"scalars": {"count": 2}, **overrides}))
         assert result.verbs is not None
@@ -402,9 +406,19 @@ def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Pat
     folder_on = generate(config_from_mapping({"scalars": {"count": 2}, **VERBS})).write(
         tmp_path / "on"
     )
+    import polars as pl
+
     for file in folder_off.iterdir():
-        if file.name != "config.yaml":
-            assert file.read_bytes() == (folder_on / file.name).read_bytes(), file.name
+        if file.name == "config.yaml":
+            continue
+        if file.name == "instances.csv":
+            # With verbs on, instances.csv also carries the exposed projections (stage 11).
+            on = pl.read_csv(folder_on / file.name)
+            projections = [c for c in on.columns if c.startswith(("CAN.V", "CANBE.V"))]
+            assert projections
+            assert on.drop(projections).equals(pl.read_csv(file))
+            continue
+        assert file.read_bytes() == (folder_on / file.name).read_bytes(), file.name
 
 
 def test_verb_settings_do_not_change_the_noun_streams() -> None:

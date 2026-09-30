@@ -19,7 +19,7 @@ Constraint sampling draws from the ``taxonomy:constraints`` stream.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from statistics import NormalDist
 from typing import Any
@@ -172,18 +172,38 @@ class Constraint:
         """The constraint for aligned pairs ``(agents[k], patients[k])``, as a bool array."""
         agents = np.asarray(agents, dtype=np.intp)
         patients = np.asarray(patients, dtype=np.intp)
-        columns = []
+        return self.evaluate(values[agents], scalars[agents], values[patients], scalars[patients])
+
+    def evaluate(
+        self,
+        agent_values: np.ndarray,
+        agent_scalars: np.ndarray,
+        patient_values: np.ndarray,
+        patient_scalars: np.ndarray,
+    ) -> np.ndarray:
+        """The constraint for aligned rows of agent and patient feature and scalar matrices."""
+        columns = {}
         for item in self.literals:
             if isinstance(item, ScalarComparison):
-                columns.append(
-                    item.pair_values(scalars[agents], scalars[patients]).astype(np.uint8)
-                )
+                columns[item.key] = item.pair_values(agent_scalars, patient_scalars)
+            elif item.role == "a":
+                columns[item.key] = item.instance_values(agent_values, agent_scalars)
             else:
-                column = item.instance_values(values, scalars)
-                columns.append(column[agents if item.role == "a" else patients].astype(np.uint8))
-        if not columns:
-            return np.full(len(agents), bool(self.table.bits[0]))
-        return self.table.evaluate(np.stack(columns, axis=1)).astype(bool)
+                columns[item.key] = item.instance_values(patient_values, patient_scalars)
+        return self.evaluate_columns(columns, agent_values.shape[0])
+
+    def evaluate_columns(self, columns: Mapping[str, np.ndarray], rows: int) -> np.ndarray:
+        """The skeleton over given literal columns, keyed by literal key."""
+        if not self.literals:
+            return np.full(rows, bool(self.table.bits[0]))
+        stacked = np.stack(
+            [
+                np.broadcast_to(np.asarray(columns[key], dtype=np.uint8), (rows,))
+                for key in self.keys
+            ],
+            axis=1,
+        )
+        return self.table.evaluate(stacked).astype(bool)
 
     def matrix(self, values: np.ndarray, scalars: np.ndarray, agents: np.ndarray) -> np.ndarray:
         """The constraint for every pair of an agent in ``agents`` and any instance as patient:

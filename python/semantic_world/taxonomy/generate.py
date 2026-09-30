@@ -14,6 +14,7 @@ from semantic_world.taxonomy.constraints import Relations, generate_constraints
 from semantic_world.taxonomy.features import FeatureSet
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.instances import Instances, generate_instances
+from semantic_world.taxonomy.projections import Projections, compute_projections
 from semantic_world.taxonomy.rules import RuleSet, generate_rules
 from semantic_world.taxonomy.streams import Streams
 from semantic_world.taxonomy.tree import Tree, generate_tree
@@ -38,6 +39,8 @@ class TaxonomyResult:
     """The verb taxonomy, or None when ``verbs`` is null in the configuration."""
     relations: Relations | None = None
     """The constraints and relations, or None without verbs."""
+    projections: Projections | None = None
+    """The agent and patient projections, or None without verbs."""
 
     @property
     def features(self) -> FeatureSet:
@@ -68,6 +71,11 @@ def generate(config: Config) -> TaxonomyResult:
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
     verbs = generate_verb_tree(config, streams)
     relations = generate_constraints(config, rules.features, verbs, instances, streams)
+    projections = (
+        None
+        if relations is None
+        else compute_projections(config, rules, relations, instances, streams.constraints)
+    )
     warnings = tuple(rules.warnings) + tuple(tree.warnings)
     if verbs is not None:
         warnings += tuple(verbs.tree.warnings)
@@ -85,4 +93,5 @@ def generate(config: Config) -> TaxonomyResult:
         warnings=warnings,
         verbs=verbs,
         relations=relations,
+        projections=projections,
     )

@@ -21,6 +21,7 @@ from semantic_world.taxonomy.features import Feature, FeatureSet, build_features
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.generate import TaxonomyResult, generate
 from semantic_world.taxonomy.instances import Instances, generate_instances
+from semantic_world.taxonomy.projections import Projections, compute_projections
 from semantic_world.taxonomy.rules import Rule, RuleSet, generate_rules
 from semantic_world.taxonomy.streams import STREAM_NAMES, Streams, stream_seed
 from semantic_world.taxonomy.tree import Category, Role, Tree, generate_tree
@@ -39,6 +40,7 @@ __all__ = [
     "GenerationError",
     "Instances",
     "NodeVectors",
+    "Projections",
     "Relation",
     "Relations",
     "Role",
@@ -51,6 +53,7 @@ __all__ = [
     "VerbTaxonomy",
     "build_features",
     "compute_node_vectors",
+    "compute_projections",
     "config_from_mapping",
     "generate",
     "generate_constraints",
