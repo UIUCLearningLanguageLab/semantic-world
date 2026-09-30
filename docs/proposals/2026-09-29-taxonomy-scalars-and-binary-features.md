@@ -1,6 +1,6 @@
 # Proposal: which binary features scalar settings leave unchanged
 
-September 29, 2026. Raised while building stage 8 of `docs/specs/TAXONOMY_RELATIONS.md`. Status: waiting for Jon.
+September 29, 2026. Raised while building stage 8 of `docs/specs/TAXONOMY_RELATIONS.md`. Status: decided. Jon chose option 1 on September 29, 2026.
 
 ## The question
 
