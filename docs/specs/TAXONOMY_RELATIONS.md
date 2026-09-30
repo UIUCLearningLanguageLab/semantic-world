@@ -196,7 +196,11 @@ verbs:
   rules: {}                      # overrides of the rule-complexity settings for constraints; default: the top-level rules settings
   projections: {expose_agent: 1.0, expose_patient: 0.25}
   pairs: {sampled_true: 1000, sampled_false: 1000, max_exact_pairs: 50000000}
+  density: {min: 0.01, max: 0.3, max_tries: 200}   # the allowed range of leaf-pair density for every verb; null turns the check off
+  constraint_min_density: 0.1                      # the smallest leaf-pair density of any single constraint; null turns the check off
 ```
+
+A verb's leaf-pair density is the proportion of ordered pairs of leaves of the noun tree, including a leaf paired with itself, for which the verb's relation holds between the leaves' generative vectors, with each leaf's own scalar values. The generator resamples constraints and redraws verbs' non-defining verb features until every verb lies inside `density`, and warns about every verb it cannot bring inside. See `docs/proposals/2026-09-29-taxonomy-verb-density.md`.
 
 The `comparison` family has no effect when `scalars.count` is 0, and its weight is ignored. Validation adds, at least: every schedule has the right length; quantile ranges lie inside (0, 1) with low below high; at least one constraint family has a positive weight that can be used with the current settings.
 
@@ -212,6 +216,8 @@ The separate streams give these properties, and tests check each one:
 - changing the instance count never changes the rules, the thresholds, the verb tree, or the constraints;
 - changing the verb settings never changes any noun output;
 - the same configuration and seed give byte-identical output folders.
+
+Constraints depend on the noun tree. The density checks (see "Configuration") measure every constraint and every verb over the leaves of the noun tree, so a change to the noun tree can change which constraints are kept and which verb features are redrawn. The noun tree is fixed before any verb is generated, and the instances play no part in the checks, so the properties above still hold.
 
 ## Outputs
 
