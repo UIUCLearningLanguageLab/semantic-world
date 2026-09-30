@@ -132,7 +132,7 @@ Each front end turns a clip into a matrix of frames by channels. The front ends 
 | `waveform` | The trimmed audio itself, for encoders that take waveforms. | 16 kHz |
 | `logmel` | Log-mel spectrogram, the standard input of speech recognition models. | 80 mel bands, 25 ms windows, 10 ms hops |
 | `cochleagram` | A model of the cochlea: a bank of filters spaced on the ERB scale, envelope extraction, power-law compression, and downsampling. | 64 channels, 50 Hz to 8 kHz, compression exponent 0.3, 100 frames per second |
-| `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales. | rates 2–32 Hz, scales 0.25–8 cycles per octave |
+| `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales, averaged in frequency bands. | rates 2–32 Hz, scales 0.25–4 cycles per octave (up to half the cochleagram's channels per octave), 8 bands; off by default |
 
 The cochleagram is a NumPy implementation, inside the package, of the filter bank of `pycochleagram` and `chcochleagram`, both from the McDermott lab. Neither package is on PyPI, so the pipeline does not depend on them. A test compares the implementation with saved outputs of `chcochleagram` (`tests/wordforms/fixtures/cochleagram_reference.npz`). The 64 channels are 62 band-pass filters plus the low-pass and high-pass filters that complete the bank.
 
@@ -271,6 +271,12 @@ Stage 5 adds seeded transformations of cached audio:
 
 Augmented tokens are new tokens with their own records. Augmentation is off by default.
 
+The configuration lists **recipes**. A recipe names the transformations it applies, in the order manipulation, speed and pitch, reverberation, noise, and gives each setting as a range that a value is drawn from (or one number). Every recipe is applied to a seeded share (`proportion`) of the eligible tokens (`speakers`: all, training, or held-out speakers). An augmented token keeps its source's word and speaker, takes the label `<source token>.A.<recipe number>` (`W.12.S.3.2.A.1`), and records its recipe and every drawn value in the `augmentation` column of `tokens.csv`. Its clip goes in the audio cache under a hash of the source clip and the drawn values. The draws come from a substream of `wordforms:augment` named by the source token and the recipe, so augmenting one token never changes another. The signal-to-noise ratio is set by the ratio of powers over the whole clip, before the mixture is leveled like every other clip. Speech-shaped noise takes the long-term average spectrum of the run's own clips; babble adds a configured number of other tokens. Reverberation simulates a shoebox room with random dimensions, source, and microphone positions for the drawn reverberation time. Augmented tokens go through the front ends, the embeddings, and the evaluation like any token, and count in word embeddings when their speaker is a training speaker; `SoundEmbeddings.token_augmented` marks them, and `embed` returns synthesized tokens only.
+
+The Praat tools (`praat.py`) work on any clip, whole or within a time range in seconds, so that later work on connected speech (`docs/specs/CONNECTED_SPEECH.md`) can apply them to an aligned span: measuring the median pitch and pitch range; moving the pitch median and scaling the range through Praat's pitch tier; stretching a span through the duration tier; and Praat's "Change gender" (formant shift, pitch median, pitch range, duration) on a span, spliced back. Praat's pitch analysis uses a floor of 75 Hz and a ceiling of 600 Hz.
+
+The modulation front end (`frontends.modulation`) filters the cochleagram with two-dimensional Gabor filters at the configured temporal rates (Hz) and spectral scales (cycles per octave), and averages the magnitude of the response within a configured number of frequency bands, so a frame has rates × scales × bands channels. The cochleagram's 64 channels sample the frequency axis about 8.6 times per octave, so scales above 4.3 cycles per octave cannot be resolved with the default cochleagram: the default scales stop at 4 (0.25, 0.5, 1, 2, 4), and finer scales need more cochleagram channels. The front end is off by default.
+
 ## Configuration
 
 A run is defined by one YAML file. Unknown keys are errors, and every error names the file and the field. The example shows the main parameters with their defaults.
@@ -309,6 +315,7 @@ frontends:
   waveform: {store: false}       # true also stores the waveforms, which repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
+  modulation: null               # for example {rates: [2, 4, 8, 16, 32], scales: [0.25, 0.5, 1, 2, 4], bands: 8}
 
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
@@ -331,7 +338,14 @@ closed_class:                    # null: content words only
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
-augmentation: null
+augmentation: null               # off; a recipe list turns it on, for example:
+#  recipes:
+#    - {name: noisy, noise: {kinds: [white, pink, speech, babble], snr_db: [0, 20], babble_voices: 6}}
+#    - {name: room, reverberation: {rt60: [0.2, 0.8], room_m: [3, 8]}}
+#    - {name: shifted, speed_pitch: {speed: [0.9, 1.1], pitch_semitones: [-2, 2]}}
+#    - {name: voice, manipulation: {pitch_median_hz: [100, 250], pitch_range_factor: [0.5, 2], formant_shift_ratio: [0.85, 1.2], duration_factor: [0.8, 1.25]}}
+#  proportion: 1.0                # the share of the eligible tokens each recipe is applied to
+#  speakers: all                  # all, train, or held_out
 assignment: {mode: arbitrary, meanings: null}
 device: auto                     # cpu, cuda, mps, or auto
 ```

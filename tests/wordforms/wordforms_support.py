@@ -63,6 +63,16 @@ def _whisper_cached() -> bool:
     return _model_cached("openai/whisper-small.en")
 
 
+needs_parselmouth = pytest.mark.skipif(
+    importlib.util.find_spec("parselmouth") is None,
+    reason="the praat-parselmouth package is not installed (the 'speech' extra)",
+)
+
+needs_pyroomacoustics = pytest.mark.skipif(
+    importlib.util.find_spec("pyroomacoustics") is None,
+    reason="the pyroomacoustics package is not installed (the 'speech' extra)",
+)
+
 needs_torch = pytest.mark.skipif(
     importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None,
     reason="the torch and transformers packages are not installed (the 'speech' extra)",

@@ -144,6 +144,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"duration check: {check['retried']} clips tried again, "
             f"{check['still_over_limit']} still over the limit"
         )
+        if "augmentation" in synthesis:
+            augmentation = synthesis["augmentation"]
+            print(
+                f"augmentation: {augmentation['tokens']} augmented tokens, "
+                f"{augmentation['computed']} computed, {augmentation['read_from_cache']} read "
+                f"from the cache, {len(augmentation['skipped'])} skipped"
+            )
     for name, frontend in summary.get("frontends", {}).items():
         state = "already stored" if frontend["reused"] else "computed"
         print(

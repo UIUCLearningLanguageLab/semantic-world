@@ -21,7 +21,6 @@ SEED_MAX = 2**64 - 1
 
 SOURCES = ("pseudowords", "english", "mixed")
 ENGINES = ("piper", "espeak")
-FRONTENDS = ("waveform", "logmel", "cochleagram")
 ENCODERS = ("fixed", "pretrained")
 POOLINGS = ("mean",)
 ASSIGNMENT_MODES = ("arbitrary",)
@@ -46,11 +45,12 @@ across speakers in the stage 4 layer sweep."""
 DEVICES = ("auto", "cpu", "cuda", "mps")
 
 LATER_STAGES = {
-    "frontends.modulation": "stage 5",
-    "augmentation": "stage 5",
     "encoders.learned": "stage 6",
     "assignment.modes": "stage 7",
 }
+FRONTENDS = ("waveform", "logmel", "cochleagram", "modulation")
+NOISE_KINDS = ("white", "pink", "speech", "babble")
+AUGMENTED_SPEAKERS = ("all", "train", "held_out")
 
 
 class ConfigError(ValueError):
@@ -257,9 +257,24 @@ class CochleagramConfig:
 
 
 @dataclass(frozen=True)
+class ModulationConfig:
+    """Spectrotemporal modulation over the cochleagram: Gabor filters at temporal ``rates`` (Hz)
+    and spectral ``scales`` (cycles per octave), with the response averaged in ``bands`` bands of
+    cochleagram channels."""
+
+    rates: tuple[float, ...]
+    scales: tuple[float, ...]
+    bands: int
+
+    def resolved(self) -> dict[str, Any]:
+        return {"rates": list(self.rates), "scales": list(self.scales), "bands": self.bands}
+
+
+@dataclass(frozen=True)
 class FrontendsConfig:
     logmel: LogmelConfig | None
     cochleagram: CochleagramConfig | None
+    modulation: ModulationConfig | None = None
     store_waveform: bool = False
     """Whether a run stores the waveform front end. Stored waveforms repeat the audio cache."""
 
@@ -271,6 +286,8 @@ class FrontendsConfig:
             names.append("logmel")
         if self.cochleagram is not None:
             names.append("cochleagram")
+        if self.modulation is not None:
+            names.append("modulation")
         return tuple(names)
 
     def resolved(self) -> dict[str, Any]:
@@ -278,6 +295,7 @@ class FrontendsConfig:
             "waveform": {"store": self.store_waveform},
             "logmel": None if self.logmel is None else self.logmel.resolved(),
             "cochleagram": None if self.cochleagram is None else self.cochleagram.resolved(),
+            "modulation": None if self.modulation is None else self.modulation.resolved(),
         }
 
 
@@ -406,6 +424,112 @@ class ClosedClassConfig:
 
 
 @dataclass(frozen=True)
+class NoiseConfig:
+    kinds: tuple[str, ...]
+    """The noise kinds a recipe draws from: white, pink, speech (shaped like the run's own
+    speech), or babble (other tokens of the run mixed together)."""
+    snr_db: tuple[float, float]
+    """The signal-to-noise ratio, drawn uniformly from this range."""
+    babble_voices: int
+    """How many other tokens make up babble."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "kinds": list(self.kinds),
+            "snr_db": list(self.snr_db),
+            "babble_voices": self.babble_voices,
+        }
+
+
+@dataclass(frozen=True)
+class ReverberationConfig:
+    rt60: tuple[float, float]
+    """The reverberation time in seconds, drawn uniformly from this range."""
+    room_m: tuple[float, float]
+    """Each side of the (shoebox) room, in meters, drawn uniformly from this range."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {"rt60": list(self.rt60), "room_m": list(self.room_m)}
+
+
+@dataclass(frozen=True)
+class SpeedPitchConfig:
+    """Speed and pitch perturbation of a cached clip."""
+
+    speed: tuple[float, float]
+    """The speed factor (a faster clip is shorter and higher), drawn from this range."""
+    pitch_semitones: tuple[float, float]
+    """A pitch shift in semitones at the same speed, drawn from this range."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {"speed": list(self.speed), "pitch_semitones": list(self.pitch_semitones)}
+
+
+@dataclass(frozen=True)
+class ManipulationConfig:
+    """Praat manipulation, as in Praat's "Change gender" command. Each setting is a range that
+    the value is drawn from, or None to leave that dimension alone."""
+
+    pitch_median_hz: tuple[float, float] | None
+    pitch_range_factor: tuple[float, float] | None
+    formant_shift_ratio: tuple[float, float] | None
+    duration_factor: tuple[float, float] | None
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "pitch_median_hz": None if self.pitch_median_hz is None else list(self.pitch_median_hz),
+            "pitch_range_factor": None
+            if self.pitch_range_factor is None
+            else list(self.pitch_range_factor),
+            "formant_shift_ratio": None
+            if self.formant_shift_ratio is None
+            else list(self.formant_shift_ratio),
+            "duration_factor": None if self.duration_factor is None else list(self.duration_factor),
+        }
+
+
+@dataclass(frozen=True)
+class RecipeConfig:
+    """One augmentation: the transformations applied, in the order manipulation, speed and
+    pitch, reverberation, noise."""
+
+    name: str
+    noise: NoiseConfig | None
+    reverberation: ReverberationConfig | None
+    speed_pitch: SpeedPitchConfig | None
+    manipulation: ManipulationConfig | None
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "noise": None if self.noise is None else self.noise.resolved(),
+            "reverberation": None if self.reverberation is None else self.reverberation.resolved(),
+            "speed_pitch": None if self.speed_pitch is None else self.speed_pitch.resolved(),
+            "manipulation": None if self.manipulation is None else self.manipulation.resolved(),
+        }
+
+
+@dataclass(frozen=True)
+class AugmentationConfig:
+    """Seeded transformations of cached audio. Every recipe is applied to a seeded share of the
+    tokens, and each result is a new token with its own record."""
+
+    recipes: tuple[RecipeConfig, ...]
+    proportion: float
+    """The share of the eligible tokens that each recipe is applied to."""
+    speakers: str
+    """Which tokens are eligible: those of all speakers, of training speakers, or of held-out
+    speakers."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "recipes": [r.resolved() for r in self.recipes],
+            "proportion": self.proportion,
+            "speakers": self.speakers,
+        }
+
+
+@dataclass(frozen=True)
 class Config:
     source: str
     """The configuration file, for messages."""
@@ -417,7 +541,8 @@ class Config:
     embeddings: tuple[EmbeddingConfig, ...]
     closed_class: ClosedClassConfig | None
     """None: the run has content words only."""
-    augmentation: None
+    augmentation: AugmentationConfig | None
+    """None: no augmented tokens."""
     assignment: AssignmentConfig
     device: str
 
@@ -431,7 +556,7 @@ class Config:
             "frontends": self.frontends.resolved(),
             "embeddings": [e.resolved() for e in self.embeddings],
             "closed_class": None if self.closed_class is None else self.closed_class.resolved(),
-            "augmentation": self.augmentation,
+            "augmentation": None if self.augmentation is None else self.augmentation.resolved(),
             "assignment": self.assignment.resolved(),
             "device": self.device,
         }
@@ -603,6 +728,45 @@ class _Node:
         if low > high:
             raise self.error(key, f"the range minimum {low} exceeds the maximum {high}")
         return low, high
+
+    def numbers(
+        self,
+        key: str,
+        default: Any,
+        *,
+        min: float | None = None,
+        max: float | None = None,
+        exclusive_min: bool = False,
+    ) -> tuple[float, ...]:
+        """A non-empty list of distinct numbers, in ascending order."""
+        value = self.get(key, default)
+        if not isinstance(value, list) or not value:
+            raise self.error(key, f"expected a non-empty list of numbers, found {_describe(value)}")
+        numbers = tuple(
+            float(self.check_number(key, item, min=min, max=max, exclusive_min=exclusive_min))
+            for item in value
+        )
+        if len(set(numbers)) != len(numbers) or list(numbers) != sorted(numbers):
+            raise self.error(key, "the numbers must be distinct and in ascending order")
+        return numbers
+
+    def range(
+        self, key: str, default: Any, *, min: float | None = None, exclusive_min: bool = False
+    ) -> tuple[float, float]:
+        """A range ``[low, high]`` of numbers with ``low <= high``, or one number for a fixed
+        value."""
+        value = self.get(key, default)
+        if _is_number(value):
+            value = [value, value]
+        if not isinstance(value, list) or len(value) != 2:
+            raise self.error(
+                key, f"expected a number or a range [low, high], found {_describe(value)}"
+            )
+        low = self.check_number(key, value[0], min=min, exclusive_min=exclusive_min)
+        high = self.check_number(key, value[1], min=min, exclusive_min=exclusive_min)
+        if low > high:
+            raise self.error(key, f"the range minimum {low} exceeds the maximum {high}")
+        return float(low), float(high)
 
     def strings(self, key: str, default: Any) -> tuple[str, ...]:
         """A non-empty list of distinct non-empty strings."""
@@ -784,8 +948,46 @@ def _read_frontends(node: _Node, sample_rate: int) -> FrontendsConfig:
             raise cochleagram_node.error(
                 "frame_rate", f"must divide the sample rate ({sample_rate})"
             )
-    node.finish({"modulation": LATER_STAGES["frontends.modulation"]})
-    return FrontendsConfig(logmel=logmel, cochleagram=cochleagram, store_waveform=store_waveform)
+    # the modulation front end is off unless configured
+    modulation_node = None
+    if node.get("modulation", None, nullable=True) is not None:
+        modulation_node = node.mapping("modulation")
+    modulation = None
+    if modulation_node is not None:
+        if cochleagram is None:
+            raise node.error("modulation", "needs the cochleagram front end")
+        modulation = ModulationConfig(
+            rates=modulation_node.numbers("rates", [2, 4, 8, 16, 32], min=0, exclusive_min=True),
+            scales=modulation_node.numbers(
+                "scales", [0.25, 0.5, 1, 2, 4], min=0, exclusive_min=True
+            ),
+            bands=modulation_node.int("bands", 8, min=1, max=cochleagram.channels),
+        )
+        modulation_node.finish()
+        if max(modulation.rates) > cochleagram.frame_rate / 2:
+            raise modulation_node.error(
+                "rates",
+                f"must be at most half the cochleagram frame rate ({cochleagram.frame_rate})",
+            )
+        # the cochleagram samples the frequency axis about (channels - 1) / log2(high / low)
+        # times per octave, and a scale above half that cannot be resolved
+        per_octave = (cochleagram.channels - 1) / math.log2(
+            cochleagram.high_hz / cochleagram.low_hz
+        )
+        if max(modulation.scales) > per_octave / 2:
+            raise modulation_node.error(
+                "scales",
+                f"must be at most {per_octave / 2:.2f} cycles per octave, half the cochleagram's "
+                f"{per_octave:.1f} channels per octave; use more cochleagram channels for finer "
+                f"scales",
+            )
+    node.finish()
+    return FrontendsConfig(
+        logmel=logmel,
+        cochleagram=cochleagram,
+        modulation=modulation,
+        store_waveform=store_waveform,
+    )
 
 
 def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[EmbeddingConfig, ...]:
@@ -1035,6 +1237,100 @@ def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None
     return config
 
 
+def _optional_range(node: _Node, key: str, *, min: float | None = None, exclusive_min=False):
+    value = node.get(key, None, nullable=True)
+    if value is None:
+        return None
+    return node.range(key, value, min=min, exclusive_min=exclusive_min)
+
+
+def _section(node: _Node, key: str) -> _Node | None:
+    """A recipe's transformation section: absent or null means the transformation is off."""
+    if key not in node.data:
+        return None
+    return node.mapping(key, nullable=True)
+
+
+def _read_recipe(node: _Node) -> RecipeConfig:
+    name = node.string("name", _MISSING)
+    noise_node = _section(node, "noise")
+    noise = None
+    if noise_node is not None:
+        kinds = noise_node.strings("kinds", ["white", "pink", "speech", "babble"])
+        for kind in kinds:
+            if kind not in NOISE_KINDS:
+                raise noise_node.error(
+                    "kinds", f"unknown noise {kind!r}; the kinds are {', '.join(NOISE_KINDS)}"
+                )
+        noise = NoiseConfig(
+            kinds=kinds,
+            snr_db=noise_node.range("snr_db", [0, 20]),
+            babble_voices=noise_node.int("babble_voices", 6, min=1),
+        )
+        noise_node.finish()
+    reverb_node = _section(node, "reverberation")
+    reverberation = None
+    if reverb_node is not None:
+        reverberation = ReverberationConfig(
+            rt60=reverb_node.range("rt60", [0.2, 0.8], min=0.05),
+            room_m=reverb_node.range("room_m", [3, 6], min=1.5),
+        )
+        reverb_node.finish()
+    speed_node = _section(node, "speed_pitch")
+    speed_pitch = None
+    if speed_node is not None:
+        speed_pitch = SpeedPitchConfig(
+            speed=speed_node.range("speed", [0.9, 1.1], min=0, exclusive_min=True),
+            pitch_semitones=speed_node.range("pitch_semitones", [-2, 2]),
+        )
+        speed_node.finish()
+    manipulation_node = _section(node, "manipulation")
+    manipulation = None
+    if manipulation_node is not None:
+        manipulation = ManipulationConfig(
+            pitch_median_hz=_optional_range(
+                manipulation_node, "pitch_median_hz", min=0, exclusive_min=True
+            ),
+            pitch_range_factor=_optional_range(manipulation_node, "pitch_range_factor", min=0),
+            formant_shift_ratio=_optional_range(
+                manipulation_node, "formant_shift_ratio", min=0, exclusive_min=True
+            ),
+            duration_factor=_optional_range(
+                manipulation_node, "duration_factor", min=0, exclusive_min=True
+            ),
+        )
+        manipulation_node.finish()
+        if all(v is None for v in manipulation.resolved().values()):
+            raise node.error("manipulation", "sets nothing; give at least one range")
+    node.finish()
+    if noise is None and reverberation is None and speed_pitch is None and manipulation is None:
+        raise node.error("name", f"the recipe {name!r} applies no transformation")
+    return RecipeConfig(name, noise, reverberation, speed_pitch, manipulation)
+
+
+def _read_augmentation(root: _Node) -> AugmentationConfig | None:
+    """The augmentation section; absent or null means no augmented tokens."""
+    if root.get("augmentation", None, nullable=True) is None:
+        return None
+    node = root.mapping("augmentation")
+    value = node.get("recipes", _MISSING)
+    if not isinstance(value, list) or not value:
+        raise node.error("recipes", f"expected a non-empty list, found {_describe(value)}")
+    recipes = []
+    for i, item in enumerate(value):
+        recipes.append(_read_recipe(_Node(node.source, node.field(f"recipes[{i}]"), item)))
+    names = [r.name for r in recipes]
+    if len(set(names)) != len(names):
+        raise node.error("recipes", "the recipe names must be distinct")
+    config = AugmentationConfig(
+        recipes=tuple(recipes),
+        proportion=node.probability("proportion", 1.0),
+        speakers=node.choice("speakers", "all", AUGMENTED_SPEAKERS),
+    )
+    node.finish()
+    return config
+
+
 def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     """Validate a loaded YAML document and fill in the defaults. ``source`` names the file in
     error messages. ``seed`` overrides the file's master seed."""
@@ -1052,12 +1348,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     frontends = _read_frontends(root.mapping("frontends"), synthesis.sample_rate)
     embeddings = _read_embeddings(root, frontends)
     closed_class = _read_closed_class(root, wordforms.count)
-    augmentation = root.get("augmentation", None, nullable=True)
-    if augmentation is not None:
-        raise root.error(
-            "augmentation",
-            f"must be null; augmentation is not available until {LATER_STAGES['augmentation']}",
-        )
+    augmentation = _read_augmentation(root)
     assignment = _read_assignment(root.mapping("assignment"))
     device = root.choice("device", "auto", DEVICES)
     root.get("provenance", None, nullable=True)  # written by a run; ignored when read back
@@ -1071,7 +1362,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         frontends=frontends,
         embeddings=embeddings,
         closed_class=closed_class,
-        augmentation=None,
+        augmentation=augmentation,
         assignment=assignment,
         device=device,
     )

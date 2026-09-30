@@ -73,6 +73,9 @@ class Token:
     try limit, when none passed)."""
     peak: float = 0.0
     rms_db: float = 0.0
+    augmentation: str = ""
+    """For an augmented token, the recipe and every drawn value, as JSON, with the source
+    token's label; empty for a synthesized token."""
 
     def record(self) -> dict[str, Any]:
         return {
@@ -84,7 +87,7 @@ class Token:
             "settings": json.dumps(self.settings, sort_keys=True),
             "rate_factor": self.rate_factor,
             "pitch_semitones": self.pitch_semitones,
-            "augmentation": "",
+            "augmentation": self.augmentation,
             "duration": self.duration,
             "tries": self.tries,
             "peak": self.peak,
@@ -110,6 +113,8 @@ class Synthesis:
     """Tokens whose kept clip is still longer than the duration limit."""
     long_synthesis: dict[str, Any] = field(default_factory=dict)
     """The long-word rule and the words that it flags, when Piper is an engine."""
+    augmentation: dict[str, Any] | None = None
+    """What the augmentation did, when the run has augmented tokens."""
 
     def audio(self, token: Token) -> np.ndarray:
         """The token's clip: mono, float32, at ``sample_rate``."""
@@ -123,7 +128,7 @@ class Synthesis:
             counts = by_engine.setdefault(speaker.engine, {"speakers": 0, "held_out": 0})
             counts["speakers"] += 1
             counts["held_out"] += int(speaker.held_out)
-        return {
+        summary: dict[str, Any] = {
             "speakers": len(self.speakers),
             "engines": by_engine,
             "tokens": len(self.tokens),
@@ -153,6 +158,10 @@ class Synthesis:
             "reproducibility": self.reproducibility,
             "models": self.engines,
         }
+        if self.augmentation is not None:
+            summary["augmented_tokens"] = self.augmentation["tokens"]
+            summary["augmentation"] = self.augmentation
+        return summary
 
 
 def _level_summary(tokens: list[Token]) -> dict[str, Any]:

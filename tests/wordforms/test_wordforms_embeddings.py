@@ -543,7 +543,14 @@ def test_sound_embeddings_interface(tmp_path):
     tensors = sounds.to_torch()
     import torch
 
-    assert set(tensors) == {"types", "tokens", "token_words", "token_speakers", "token_held_out"}
+    assert set(tensors) == {
+        "types",
+        "tokens",
+        "token_words",
+        "token_speakers",
+        "token_held_out",
+        "token_augmented",
+    }
     assert all(isinstance(t, torch.Tensor) for t in tensors.values())
     assert tensors["types"].shape == (6, 8) and tensors["types"].dtype == torch.float32
     assert (
@@ -935,7 +942,7 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
     # a second run finds everything stored, and gives the same table
     assert main(["eval", str(path), "--out", str(run)]) == 0
     text = capsys.readouterr().out
-    assert text.count("already stored") == 4 and "0 synthesized" in text
+    assert text.count("already stored") == 5 and "0 synthesized" in text
     assert "closed-class forms: 15 function words, 3 affixes" in text
     assert "cochleagram_fixed" in text and "held-out" in text
     assert pl.read_csv(run / "eval" / "embeddings.csv").equals(table)

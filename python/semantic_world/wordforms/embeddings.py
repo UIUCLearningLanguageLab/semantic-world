@@ -278,8 +278,8 @@ class SoundEmbeddings:
 
     - ``types``: word embeddings, one row per word, in the order of ``words``;
     - ``tokens``: token embeddings, with ``token_words`` and ``token_speakers`` giving each
-      token's row in ``words`` and in ``speakers``, and ``token_held_out`` marking the tokens of
-      held-out speakers;
+      token's row in ``words`` and in ``speakers``, ``token_held_out`` marking the tokens of
+      held-out speakers, and ``token_augmented`` marking augmented tokens;
     - ``words``, ``speakers``: the word table and the speaker table. The word table holds the
       content words, then the function words, then the inflected forms, and ``word_kinds`` gives
       the kind of each row;
@@ -315,15 +315,20 @@ class SoundEmbeddings:
         self.token_speakers = np.array([speaker_index[s] for s in self.token_table["speaker"]])
         held_out = (self.speakers["split"] == "held_out").to_numpy()
         self.token_held_out = held_out[self.token_speakers]
+        self.token_augmented = self.token_table["augmentation"].fill_null("").to_numpy() != ""
         self._encoder: Any = None
         self._lexicon: dict[str, str] = {}
         for label, arpabet in self.words.select("label", "arpabet").iter_rows():
             self._lexicon.setdefault(arpabet, label)  # of two forms that sound alike, the first
+        # the synthesized tokens by word, speaker, and token number; augmented tokens are
+        # not a form's own recording, so ``embed`` never returns them
+        augmented = self.token_table["augmentation"].fill_null("").to_numpy()
         self._stored = {
             (word, speaker, int(label.rsplit(".", 1)[1])): i
             for i, (label, word, speaker) in enumerate(
                 self.token_table.select("label", "word", "speaker").iter_rows()
             )
+            if not augmented[i]
         }
 
     @classmethod
@@ -519,4 +524,5 @@ class SoundEmbeddings:
             "token_words": torch.from_numpy(self.token_words),
             "token_speakers": torch.from_numpy(self.token_speakers),
             "token_held_out": torch.from_numpy(self.token_held_out),
+            "token_augmented": torch.from_numpy(self.token_augmented),
         }

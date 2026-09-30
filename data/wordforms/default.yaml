@@ -32,6 +32,7 @@ frontends:
   waveform: {store: false}                       # stored waveforms would repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
+  modulation: null                               # e.g. {rates: [2, 4, 8, 16, 32], scales: [0.25, 0.5, 1, 2, 4], bands: 8}
 
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
@@ -54,6 +55,6 @@ closed_class:                    # null: content words only
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
-augmentation: null
+augmentation: null                               # e.g. {recipes: [{name: noisy, noise: {kinds: [babble], snr_db: [5, 15]}}]}
 assignment: {mode: arbitrary, meanings: null}
 device: auto

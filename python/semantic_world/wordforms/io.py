@@ -76,6 +76,8 @@ PACKAGES = (
     "onnxruntime",
     "torch",
     "transformers",
+    "praat-parselmouth",
+    "pyroomacoustics",
 )
 
 

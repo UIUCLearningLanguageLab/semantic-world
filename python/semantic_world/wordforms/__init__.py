@@ -3,7 +3,8 @@
 See ``docs/specs/WORDFORM_PIPELINE.md``. Stages 1 to 4 provide the word forms, their audio, the
 auditory front ends, and the sound embeddings with their evaluation and the ``SoundEmbeddings``
 interface; stage 4a adds the closed-class forms (function words, affixes, and inflected forms);
-the later stages add augmentation, learned encoders, and sound-meaning assignment.
+stage 5 adds augmentation, Praat manipulation, and the modulation front end; the later stages
+add learned encoders and sound-meaning assignment.
 """
 
 from __future__ import annotations
@@ -111,13 +112,18 @@ def run_forms(config: Config) -> Run:
 
 
 def run_synthesis(run: Run, progress=None) -> Run:
-    """Synthesize the run's word forms (layer 2). Needs the ``speech`` extra's audio packages,
-    and each configured engine's tool."""
+    """Synthesize the run's word forms (layer 2), and augment the tokens when the configuration
+    asks for it. Needs the ``speech`` extra's audio packages, and each configured engine's
+    tool."""
     from semantic_world.wordforms.synth import synthesize_lexicon
 
     run.synthesis = synthesize_lexicon(
         run.config, run.streams, run.lexicon.words, progress=progress
     )
+    if run.config.augmentation is not None:
+        from semantic_world.wordforms.augment import augment_synthesis
+
+        augment_synthesis(run.config, run.streams, run.synthesis, progress=progress)
     return run
 
 

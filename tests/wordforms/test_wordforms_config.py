@@ -239,7 +239,6 @@ def test_unknown_keys_name_the_file_and_the_field(data, field, tmp_path):
             "frontends.cochleagram.high_hz",
             "more than",
         ),
-        ({"frontends": {"modulation": {}}}, "frontends.modulation", "stage 5"),
         ({"embeddings": {"name": "a"}}, "embeddings", "expected a list"),
         (
             {"embeddings": [{"encoder": "fixed", "frontend": "logmel"}]},
@@ -270,7 +269,7 @@ def test_unknown_keys_name_the_file_and_the_field(data, field, tmp_path):
             "embeddings[0].model",
             "required",
         ),
-        ({"augmentation": {"noise": {}}}, "augmentation", "stage 5"),
+        ({"augmentation": {"noise": {}}}, "augmentation.recipes", "required"),
         ({"assignment": {"mode": "branch_markers"}}, "assignment.mode", "stage 7"),
         ({"device": "tpu"}, "device", "expected one of"),
         ({"wordforms": 3}, "wordforms", "expected a mapping"),

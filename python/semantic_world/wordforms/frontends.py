@@ -6,6 +6,11 @@
   envelopes, downsampling, and power-law compression. The lowest and highest channels are the
   low-pass and high-pass filters that complete the filter bank, so the center frequencies run
   from ``low_hz`` to ``high_hz``.
+- ``modulation``: spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma
+  (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates (Hz)
+  and spectral scales (cycles per octave), with the response magnitude averaged in bands of
+  cochleagram channels. The output has ``rates x scales x bands`` channels, at the cochleagram's
+  frame rate.
 
 The cochleagram is a NumPy implementation of the filter bank of the McDermott lab's
 ``pycochleagram`` and ``chcochleagram`` packages (Feather et al.), written here so that the
@@ -35,7 +40,12 @@ import numpy as np
 import polars as pl
 import yaml
 
-from semantic_world.wordforms.config import CochleagramConfig, Config, LogmelConfig
+from semantic_world.wordforms.config import (
+    CochleagramConfig,
+    Config,
+    LogmelConfig,
+    ModulationConfig,
+)
 from semantic_world.wordforms.synth import Synthesis
 
 LOG_FLOOR = 1e-10
@@ -295,6 +305,113 @@ class Cochleagram(Frontend):
         }
 
 
+GABOR_SIGMA_CYCLES = 0.5
+"""The width of a Gabor filter's Gaussian window, in cycles of the filter's modulation
+frequency: half a cycle on each side, which gives a bandwidth of about an octave."""
+GABOR_EXTENT = 3.0
+"""Where the Gaussian window is cut, in standard deviations."""
+
+
+def gabor(sigma: float, cycles_per_sample: float, complex_valued: bool) -> np.ndarray:
+    """A Gabor filter: a Gaussian window of width ``sigma`` (samples) times a complex exponential
+    (``complex_valued``) or a cosine at ``cycles_per_sample``. The filter has zero mean, so it
+    passes no constant, and unit gain at its own frequency, so a matching ripple of amplitude 1
+    gives a response of 1."""
+    half = int(math.ceil(GABOR_EXTENT * sigma))
+    n = np.arange(-half, half + 1, dtype=np.float64)
+    window = np.exp(-0.5 * (n / sigma) ** 2)
+    phase = 2.0 * np.pi * cycles_per_sample * n
+    carrier = np.exp(1j * phase) if complex_valued else np.cos(phase)
+    kernel = window * carrier
+    kernel = kernel - window * (kernel.sum() / window.sum())
+    gain = np.abs(np.sum(kernel * np.exp(-1j * phase)))
+    return kernel / gain
+
+
+class Modulation(Frontend):
+    """Spectrotemporal modulation of the cochleagram.
+
+    For each temporal rate ``r`` (Hz) and spectral scale ``s`` (cycles per octave), the
+    cochleagram is filtered along time with a complex Gabor filter at ``r`` and along frequency
+    with a cosine Gabor filter at ``s``. The magnitude of the complex response is the strength
+    of modulation at that rate and scale, whichever direction the ripple moves in. The
+    magnitudes are averaged within ``bands`` equal bands of cochleagram channels, so a frame has
+    ``rates x scales x bands`` channels, ordered by rate, then scale, then band. The frequency
+    axis is the cochleagram's channel index, whose spacing is close to ``log2(high / low)
+    divided by (channels - 1)`` octaves per channel.
+    """
+
+    name = "modulation"
+
+    def __init__(
+        self, settings: ModulationConfig, cochleagram: CochleagramConfig, sample_rate: int
+    ) -> None:
+        self.config = settings
+        self.cochleagram = Cochleagram(cochleagram, sample_rate)
+        self.sample_rate = sample_rate
+        self.frame_rate = self.cochleagram.frame_rate
+        self.rates = tuple(settings.rates)
+        self.scales = tuple(settings.scales)
+        self.bands = settings.bands
+        self.channels = len(self.rates) * len(self.scales) * self.bands
+        self.octaves_per_channel = math.log2(cochleagram.high_hz / cochleagram.low_hz) / (
+            cochleagram.channels - 1
+        )
+        """The frequency spacing of the cochleagram channels, in octaves."""
+        self.temporal = [
+            gabor(GABOR_SIGMA_CYCLES * self.frame_rate / r, r / self.frame_rate, True)
+            for r in self.rates
+        ]
+        self.spectral = [
+            gabor(
+                GABOR_SIGMA_CYCLES / (s * self.octaves_per_channel),
+                s * self.octaves_per_channel,
+                False,
+            )
+            for s in self.scales
+        ]
+        self.band_edges = np.linspace(0, cochleagram.channels, self.bands + 1).astype(int)
+
+    def frame_count(self, samples: int) -> int:
+        return self.cochleagram.frame_count(samples)
+
+    def responses(self, frames: np.ndarray) -> np.ndarray:
+        """The modulation magnitudes of a cochleagram (frames by channels): an array of frames by
+        rates by scales by cochleagram channels."""
+        from scipy.signal import fftconvolve
+
+        data = np.asarray(frames, dtype=np.float64)
+        data = data - data.mean(axis=0, keepdims=True)
+        out = np.zeros((len(data), len(self.rates), len(self.scales), data.shape[1]))
+        for i, temporal in enumerate(self.temporal):
+            in_time = fftconvolve(data, temporal[:, None], mode="same", axes=0)
+            for j, spectral in enumerate(self.spectral):
+                both = fftconvolve(in_time, spectral[None, :], mode="same", axes=1)
+                out[:, i, j, :] = np.abs(both)
+        return out
+
+    def compute(self, clip: np.ndarray) -> np.ndarray:
+        responses = self.responses(self.cochleagram.compute(clip))
+        bands = np.stack(
+            [
+                responses[..., self.band_edges[b] : self.band_edges[b + 1]].mean(axis=-1)
+                for b in range(self.bands)
+            ],
+            axis=-1,
+        )
+        return np.ascontiguousarray(bands.reshape(len(responses), self.channels), dtype=np.float32)
+
+    def settings(self) -> dict[str, Any]:
+        return {
+            **self.config.resolved(),
+            "cochleagram": self.cochleagram.settings(),
+            "octaves_per_channel": round(self.octaves_per_channel, 6),
+            "window": f"Gaussian, {GABOR_SIGMA_CYCLES} cycles wide, cut at {GABOR_EXTENT} sigma",
+            "response": "magnitude of the complex temporal response, mean over each band",
+            "channel_order": "rate, then scale, then band",
+        }
+
+
 def make_frontends(config: Config) -> dict[str, Frontend]:
     """The front ends of a configuration, by name: ``waveform`` always, and the others that are
     configured."""
@@ -304,6 +421,10 @@ def make_frontends(config: Config) -> dict[str, Frontend]:
         frontends["logmel"] = LogMel(config.frontends.logmel, rate)
     if config.frontends.cochleagram is not None:
         frontends["cochleagram"] = Cochleagram(config.frontends.cochleagram, rate)
+    if config.frontends.modulation is not None:
+        frontends["modulation"] = Modulation(
+            config.frontends.modulation, config.frontends.cochleagram, rate
+        )
     return frontends
 
 
