@@ -1,7 +1,8 @@
 """Writing the output folder of a run.
 
 A run writes one folder, by default ``runs/wordforms/<name>_seed<seed>/``. Stage 1 writes
-``config.yaml`` (the resolved configuration with provenance) and ``words.csv``. Stage 2 adds
+``config.yaml`` (the resolved configuration with provenance) and ``words.csv``, and
+``affixes.csv`` when the run has closed-class forms. Stage 2 adds
 ``speakers.csv`` and ``tokens.csv``; the audio itself stays in the shared cache. Real numbers are
 written with 6 decimal places, and the same configuration, seed, and cache give byte-identical
 files, apart from the provenance in ``config.yaml``.
@@ -37,7 +38,13 @@ WORD_COLUMNS = (
     "lexicon_neighbors",
     "real_word",
     "long_synthesis",
+    "kind",
+    "gloss",
+    "stem",
+    "affix",
+    "epenthesis",
 )
+AFFIX_COLUMNS = ("label", "gloss", "position", "arpabet", "ipa")
 SPEAKER_COLUMNS = ("label", "engine", "voice", "speaker_id", "variant", "pitch", "rate", "split")
 TOKEN_COLUMNS = (
     "label",
@@ -133,13 +140,27 @@ def write_config(
 def words_frame(lexicon: Lexicon) -> pl.DataFrame:
     records = [w.record() for w in lexicon.words]
     frame = pl.DataFrame(
-        records, schema_overrides={"log_probability": pl.Float64, "long_synthesis": pl.Boolean}
+        records,
+        schema_overrides={
+            "log_probability": pl.Float64,
+            "long_synthesis": pl.Boolean,
+            "gloss": pl.String,
+            "stem": pl.String,
+            "affix": pl.String,
+            "epenthesis": pl.Boolean,
+        },
     )
     return frame.select(WORD_COLUMNS)
 
 
 def write_words(lexicon: Lexicon, path: Path) -> None:
     words_frame(lexicon).write_csv(path, float_precision=6)
+
+
+def write_affixes(lexicon: Lexicon, path: Path) -> None:
+    schema = {name: pl.String for name in AFFIX_COLUMNS}
+    frame = pl.DataFrame([a.record() for a in lexicon.affixes], schema=schema)
+    frame.write_csv(path)
 
 
 def write_speakers(synthesis: Synthesis, path: Path) -> None:

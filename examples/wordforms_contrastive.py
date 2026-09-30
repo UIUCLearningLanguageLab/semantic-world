@@ -98,10 +98,12 @@ def main(argv: list[str] | None = None) -> dict[str, float]:
     tokens = (tokens - tokens.mean(dim=0)) / (tokens.std(dim=0) + 1e-6)
 
     ids, features = taxonomy_meanings(args.meanings)
-    assignment = assign_arbitrary(sounds.lexicon_forms(), ids, features, rng)
+    # meanings go to content words; function words and inflected forms get none
+    content = [form for form in sounds.lexicon_forms() if form.kind == "content"]
+    assignment = assign_arbitrary(content, ids, features, rng)
     print(
         f"{len(ids)} meanings with {features.shape[1]} features, assigned at random to "
-        f"{len(ids)} of {len(sounds.words)} words (sound-meaning correlation "
+        f"{len(ids)} of {len(content)} content words (sound-meaning correlation "
         f"{assignment.summary['correlation']})"
     )
     word_rows = {label: i for i, label in enumerate(sounds.words["label"])}

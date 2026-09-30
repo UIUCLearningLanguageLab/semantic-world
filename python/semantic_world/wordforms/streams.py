@@ -13,7 +13,16 @@ from semantic_world.taxonomy.streams import stream_seed
 
 STREAM_PREFIX = "wordforms:"
 
-STREAM_NAMES = ("generate", "speakers", "synthesis", "augment", "train", "assign", "eval")
+STREAM_NAMES = (
+    "generate",
+    "speakers",
+    "synthesis",
+    "augment",
+    "train",
+    "assign",
+    "eval",
+    "closed_class",
+)
 """The short names of the pipeline's streams. The full name is ``wordforms:<short name>``."""
 
 
@@ -28,6 +37,8 @@ class Streams:
     assign: np.random.Generator
     eval: np.random.Generator
     """The sample of tokens that the evaluation uses, when a run has too many for all pairs."""
+    closed_class: np.random.Generator
+    """Function words and affixes, which never draw from the stream of the content words."""
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

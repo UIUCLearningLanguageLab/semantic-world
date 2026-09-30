@@ -165,15 +165,20 @@ def compute_embedding(
                 progress(i + 1, count)
         (folder / "projection.npz").unlink(missing_ok=True)
         if embedding.pca_dims is not None:
-            projection = fit_pca(features[train], embedding.pca_dims)
+            # The projection is fitted on the content words, so that closed-class forms never
+            # change a content word's embedding.
+            content = np.array([word.kind == "content" for word in words], dtype=bool)
+            fitted = train & content[token_words]
+            projection = fit_pca(features[fitted], embedding.pca_dims)
             projection.save(folder / "projection.npz")
             tokens = projection.apply(features)
-            total = float(np.var(features[train].astype(np.float64), axis=0, ddof=1).sum())
+            total = float(np.var(features[fitted].astype(np.float64), axis=0, ddof=1).sum())
             kept = float(projection.explained_variance.sum())
             meta["projection"] = {
                 "kind": "pca",
-                "fitted_on": "training-speaker tokens",
-                "fitted_tokens": int(train.sum()),
+                "fitted_on": "training-speaker tokens"
+                + ("" if content.all() else " of content words"),
+                "fitted_tokens": int(fitted.sum()),
                 "dims": projection.dims,
                 "explained_variance": round(kept / total, 6) if total > 0 else None,
             }
@@ -275,7 +280,9 @@ class SoundEmbeddings:
     - ``tokens``: token embeddings, with ``token_words`` and ``token_speakers`` giving each
       token's row in ``words`` and in ``speakers``, and ``token_held_out`` marking the tokens of
       held-out speakers;
-    - ``words``, ``speakers``: the word table and the speaker table;
+    - ``words``, ``speakers``: the word table and the speaker table. The word table holds the
+      content words, then the function words, then the inflected forms, and ``word_kinds`` gives
+      the kind of each row;
     - ``embed``: embeddings for new word forms, through the same synthesis, front end, and
       frozen encoder;
     - ``to_torch``: the arrays as PyTorch tensors.
@@ -309,9 +316,9 @@ class SoundEmbeddings:
         held_out = (self.speakers["split"] == "held_out").to_numpy()
         self.token_held_out = held_out[self.token_speakers]
         self._encoder: Any = None
-        self._lexicon = {
-            arpabet: label for label, arpabet in self.words.select("label", "arpabet").iter_rows()
-        }
+        self._lexicon: dict[str, str] = {}
+        for label, arpabet in self.words.select("label", "arpabet").iter_rows():
+            self._lexicon.setdefault(arpabet, label)  # of two forms that sound alike, the first
         self._stored = {
             (word, speaker, int(label.rsplit(".", 1)[1])): i
             for i, (label, word, speaker) in enumerate(
@@ -380,8 +387,21 @@ class SoundEmbeddings:
                 row["label"], row["arpabet"], self.config.wordforms.english_min_zipf
             )
             form.spelling = row["spelling"]
+            # a run from before the closed-class forms has content words only
+            form.kind = row.get("kind") or "content"
+            form.gloss = row.get("gloss")
+            form.stem = row.get("stem")
+            form.affix = row.get("affix")
+            form.epenthesis = row.get("epenthesis")
             forms.append(form)
         return forms
+
+    @property
+    def word_kinds(self) -> np.ndarray:
+        """The kind of each word: ``content``, ``function``, or ``inflected``."""
+        if "kind" not in self.words.columns:
+            return np.full(len(self.words), "content")
+        return self.words["kind"].to_numpy()
 
     def word_forms(self, forms) -> list[WordForm]:
         """Word forms from :class:`WordForm` objects or ARPAbet strings such as ``K AE1 T``."""

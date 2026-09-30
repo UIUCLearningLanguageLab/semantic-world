@@ -37,6 +37,18 @@ embeddings:
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
 
+closed_class:                    # null: content words only
+  request: null                  # a request file, in place of glosses, items, and inflect
+  function_words:
+    glosses: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
+    shapes: {CV: 0.4, CVC: 0.3, VC: 0.2, V: 0.1}
+    min_distance: 2
+  affixes:
+    items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
+    shapes: {C: 0.4, VC: 0.4, V: 0.2}
+    epenthesis: true
+  inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
+
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}
 device: auto

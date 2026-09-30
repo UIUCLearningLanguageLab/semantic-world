@@ -185,7 +185,7 @@ The corpus generator (`docs/specs/CORPUS_GENERATOR.md`) needs three kinds of for
 The closed-class forms a run needs are listed in a closed-class request, given in the configuration or in a separate YAML file named there. The corpus generator will write such a file. The request lists glosses, which are names for human readers, and says which words to inflect:
 
 ```yaml
-function_words: [a, the, all, most, some, no, not, can, is, has, with, without, and, that, it]
+function_words: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
 affixes:
   - {gloss: PLURAL, position: suffix}
   - {gloss: PAST, position: suffix}
@@ -313,7 +313,7 @@ embeddings:
 closed_class:                    # null: content words only
   request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
   function_words:
-    glosses: [a, the, all, most, some, no, not, can, is, has, with, without, and, that, it]
+    glosses: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
     shapes: {CV: 0.4, CVC: 0.3, VC: 0.2, V: 0.1}
     min_distance: 2
   affixes:

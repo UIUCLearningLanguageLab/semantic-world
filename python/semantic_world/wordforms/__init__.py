@@ -2,7 +2,8 @@
 
 See ``docs/specs/WORDFORM_PIPELINE.md``. Stages 1 to 4 provide the word forms, their audio, the
 auditory front ends, and the sound embeddings with their evaluation and the ``SoundEmbeddings``
-interface; the later stages add augmentation, learned encoders, and sound-meaning assignment.
+interface; stage 4a adds the closed-class forms (function words, affixes, and inflected forms);
+the later stages add augmentation, learned encoders, and sound-meaning assignment.
 """
 
 from __future__ import annotations
@@ -83,6 +84,8 @@ class Run:
                 }
         io.write_config(self.config, self.streams, folder / "config.yaml", models)
         io.write_words(self.lexicon, folder / "words.csv")
+        if self.config.closed_class is not None:
+            io.write_affixes(self.lexicon, folder / "affixes.csv")
         if self.synthesis is not None:
             io.write_speakers(self.synthesis, folder / "speakers.csv")
             io.write_tokens(self.synthesis, folder / "tokens.csv")
@@ -97,9 +100,13 @@ class Run:
 
 
 def run_forms(config: Config) -> Run:
-    """Generate the word forms of a configuration."""
+    """Generate the word forms of a configuration: the content words, and the closed-class forms
+    when the configuration has them."""
+    from semantic_world.wordforms.closed_class import add_closed_class
+
     streams = Streams(config.seed)
     lexicon = generate_lexicon(config, streams.generate)
+    add_closed_class(config, streams, lexicon)
     return Run(config, streams, lexicon)
 
 
@@ -168,14 +175,14 @@ def run_evaluation(
 
 
 def run_assignment(run: Run) -> Run:
-    """Assign word forms to the meanings of ``assignment.meanings``. Without a meanings table,
-    nothing is assigned."""
+    """Assign the content words to the meanings of ``assignment.meanings``. Without a meanings
+    table, nothing is assigned."""
     from semantic_world.wordforms.assign import assign_arbitrary, load_meanings
 
     if run.config.assignment.meanings is None:
         return run
     meanings, features = load_meanings(run.config.assignment.meanings)
-    run.assignment = assign_arbitrary(run.lexicon.words, meanings, features, run.streams.assign)
+    run.assignment = assign_arbitrary(run.lexicon.content, meanings, features, run.streams.assign)
     return run
 
 

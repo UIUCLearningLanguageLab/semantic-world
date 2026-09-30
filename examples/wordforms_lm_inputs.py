@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> dict[str, float]:
     parser.add_argument("--run", default=None, help="the run's folder")
     parser.add_argument("--embedding", default="cochleagram_fixed")
     parser.add_argument("--novel", default="Z AE1 M P IH0 K", help="a new word form, in ARPAbet")
-    parser.add_argument("--steps", type=int, default=300)
+    parser.add_argument("--steps", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(argv)
 

@@ -70,7 +70,8 @@ class ToneEngine:
 
 
 def espeak_only(tmp_path, **wordforms):
-    """A small configuration with the espeak-ng engine only and a cache in ``tmp_path``."""
+    """A small configuration with the espeak-ng engine only, content words only, and a cache in
+    ``tmp_path``."""
     return parse_config(
         {
             "name": "synth_test",
@@ -82,6 +83,7 @@ def espeak_only(tmp_path, **wordforms):
                 "engines": {"piper": None, "espeak": {"variants": ["m1", "m3", "f2"]}},
             },
             "embeddings": [],
+            "closed_class": None,
         },
         "synth_test",
     )
@@ -718,6 +720,7 @@ def piper_only(tmp_path):
                 "engines": {"piper": {"speakers": 3, "voice_dir": str(VOICE_DIR)}, "espeak": None},
             },
             "embeddings": [],
+            "closed_class": None,
         },
         "piper_test",
     )
@@ -780,16 +783,22 @@ def test_synth_command_on_the_tiny_configuration(tmp_path, capsys):
     path.write_text(yaml.safe_dump(data))
     out = tmp_path / "run"
     assert main(["synth", str(path), "--out", str(out)]) == 0
-    assert "120 synthesized, 0 read from the cache" in capsys.readouterr().out
     words = pl.read_csv(out / "words.csv")
-    assert words["long_synthesis"].dtype == pl.Boolean and words["long_synthesis"].null_count() == 0
+    # the tiny configuration has 20 content words, 15 function words, and the inflected forms
+    assert (
+        words.height > 35 and words["kind"].to_list()[:35] == ["content"] * 20 + ["function"] * 15
+    )
+    assert f"{words.height * 6} synthesized, 0 read from the cache" in capsys.readouterr().out
+    content = words.filter(pl.col("kind") == "content")
+    assert words["long_synthesis"].dtype == pl.Boolean
+    assert content["long_synthesis"].null_count() == 0
     speakers = pl.read_csv(out / "speakers.csv")
     assert speakers["engine"].to_list() == ["piper"] * 3 + ["espeak"] * 3
     assert speakers["split"].to_list().count("held_out") == 2
     tokens = pl.read_csv(out / "tokens.csv")
-    assert tokens.height == 20 * 6 * 1
+    assert tokens.height == words.height * 6 * 1
     summary = yaml.safe_load((out / "summary.yaml").read_text())["synthesis"]
     assert set(summary["reproducibility"]) == {"piper", "espeak"}
     assert main(["all", str(path), "--out", str(out)]) == 0
-    assert "0 synthesized, 120 read from the cache" in capsys.readouterr().out
+    assert f"0 synthesized, {tokens.height} read from the cache" in capsys.readouterr().out
     assert pl.read_csv(out / "tokens.csv").equals(tokens)

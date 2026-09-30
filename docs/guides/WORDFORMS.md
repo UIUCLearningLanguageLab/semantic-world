@@ -4,7 +4,7 @@ The word-form pipeline makes the spoken words of Semantic World's language. It g
 
 This guide covers setup, running the pipeline, the ideas behind each layer, the output files, the evaluation table, and the Python interface. The design is specified in `docs/specs/WORDFORM_PIPELINE.md`.
 
-**Status.** Stages 1 to 4 are complete: word forms, synthesis, auditory front ends, and sound embeddings with their evaluation. Augmentation, encoders trained on the world's own audio, and systematic sound–meaning assignment (stages 5 to 7) are not built yet.
+**Status.** Stages 1 to 4 and 4a are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, and closed-class forms (function words, affixes, and inflected forms). Augmentation, encoders trained on the world's own audio, and systematic sound–meaning assignment (stages 5 to 7) are not built yet.
 
 ## Setup
 
@@ -130,6 +130,20 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 
 The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained.
 
+## Closed-class forms
+
+Content words are an open class. A corpus also needs function words and affixes, a closed class with short, simple forms. The `closed_class` section of the configuration asks for them; `closed_class: null` gives a run of content words only.
+
+- **Function words** have one syllable of a simple shape (CV, CVC, VC, or V), drawn from the sounds of common English monosyllables. A function word is never an English word, never a content word, and never within one phoneme of another function word. Each one has a gloss for human readers, such as `the`, and the label `F.<n>`. The default configuration makes 15: for example *sot* (a), *muh* (the), *reth* (all), *fah* (most), *eece* (some).
+- **Affixes** are bound forms of shape C, VC, or V with an unstressed vowel, such as `-AH0` or `-N`. They are never synthesized alone. The default makes three suffixes, glossed `PLURAL`, `PAST`, and `PROGRESSIVE`; `position: prefix` makes a prefix. Their labels are `AF.<n>`.
+- **Inflected forms** join a stem to an affix, labeled `W.<n>.AF.<m>`. When the plain join fails the phonotactic check, a schwa goes between stem and affix (`W.2.AF.2`: *jorts* + `N` becomes *jortsen*), and `words.csv` records where that happened (`epenthesis`). A pair that fails even with the schwa is skipped and listed in `summary.yaml`. Inflecting 500 words with 3 affixes quadruples the audio, so the default inflects nothing (`inflect: []`), and the tiny configuration inflects every word with every affix.
+
+The request can come from a separate YAML file instead (`closed_class.request`), which the corpus generator will write. It lists `function_words` (glosses), `affixes` (glosses and positions), and `inflect` entries; the shapes and the other settings stay in the configuration.
+
+Closed-class forms never change a content word. They come from their own random stream, their audio is synthesized after the content words, the projection of a fixed embedding is fitted on content words only, and the content words' evaluation rows are the same with and without them. `words.csv` gains the columns `kind` (`content`, `function`, or `inflected`), `gloss`, `stem`, `affix`, and `epenthesis`, and a run with closed-class forms also writes `affixes.csv`.
+
+The evaluation reports every measure for each kind separately and for all forms together (the `kind` column), each kind on its own sample of tokens. Inflected forms add the **stem AUC**: the probability that an inflected form's embedding is closer to its own stem's than to another stem's. It says how visible morphology is in an embedding. On the tiny configuration, the fixed embeddings reach 0.84 to 0.90.
+
 ## What the evaluation shows
 
 `eval/embeddings.csv` evaluates every embedding on a sample of 5,000 tokens. The main measures:
@@ -160,14 +174,15 @@ Every result appears twice, with and without the `long_synthesis` words. Leaving
 | --- | --- |
 | `config.yaml` | The resolved configuration, all seeds, and each model's name and revision. |
 | `summary.yaml` | Counts, rejections, synthesis statistics, duration retries, and the flagged words. |
-| `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors`, `real_word`, and `long_synthesis`. |
+| `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors` (content words one phoneme away), `real_word`, `long_synthesis`, `kind`, `gloss`, `stem`, `affix`, and `epenthesis`. Content words come first, then function words, then inflected forms. |
+| `affixes.csv` | One row per affix: `label`, `gloss`, `position`, `arpabet`, and `ipa`. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: engine, voice, speaker ID or variant, and `split` (`train` or `held_out`). |
 | `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, duration, retries, level, cache path, and SHA-256 hash. |
 | `frontends/<name>/` | `frames.npy` (all tokens' frames, one after another), `index.csv` (each token's first frame and frame count), and `meta.yaml`. |
 | `embeddings/<name>/` | `tokens.npy` (one row per token, in `tokens.csv` order), `types.npy` (one row per word, in `words.csv` order), and `meta.yaml`. |
 | `eval/embeddings.csv` | The evaluation table. |
 
-Labels follow the project convention: words `W.12`, speakers `S.3`, and tokens `W.12.S.3.2` (token 2 of word 12 by speaker 3).
+Labels follow the project convention: words `W.12`, speakers `S.3`, and tokens `W.12.S.3.2` (token 2 of word 12 by speaker 3). Function words are `F.2`, affixes `AF.1`, and inflected forms `W.12.AF.1`; their tokens extend the labels the same way.
 
 ## Using the embeddings from Python
 
@@ -183,6 +198,7 @@ emb.token_words    # each token's row in emb.words
 emb.token_speakers # each token's row in emb.speakers
 emb.token_held_out # True for tokens of held-out speakers
 emb.words          # the word table, as a polars data frame
+emb.word_kinds     # each word's kind: content, function, or inflected
 tensors = emb.to_torch()
 ```
 
@@ -200,7 +216,7 @@ A form already in the lexicon returns its stored embedding. A new form is synthe
 - `examples/wordforms_lm_inputs.py`: a small transformer language model that takes sound embeddings through a learned projection in place of an embedding table. The same projected embeddings form the output layer, so the model can score a word it has never seen from its sound alone.
 - `examples/wordforms_contrastive.py`: a CLIP-style model that aligns sound embeddings with meaning vectors from the taxonomy generator, and tests retrieval for held-out speakers and novel words.
 
-Both run on the tiny configuration in about 10 seconds on a CPU. They are demonstrations, not experiments.
+Both run on the tiny configuration in under half a minute on a CPU. They are demonstrations, not experiments.
 
 ## Assigning words to meanings
 
@@ -223,6 +239,7 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `synthesis.held_out_speaker_proportion` | 0.2 | Share of speakers held out. |
 | `synthesis.cache_dir` | `runs/wordforms/cache` | Where the audio lives. |
 | `embeddings` | three embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
+| `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 
 To turn an engine off, set it to null, for example `espeak: null` under `synthesis.engines`. Leaving an engine out keeps it on, with its defaults.
@@ -233,6 +250,7 @@ To turn an engine off, set it to null, for example `espeak: null` under `synthes
 - **"espeak-ng is not installed".** `brew install espeak-ng`, or set `synthesis.engines.espeak` to null.
 - **Relative paths.** The cache and voice paths are relative to the folder the command runs in. Run from the root of the repository, as the examples do.
 - **Tests skip.** Tests never download anything. They skip with a message when the voice or a model is missing.
+- **A gloss reads as a boolean.** YAML reads a bare `no`, `yes`, `on`, or `off` as a boolean. Write such a gloss in quotes: `"no"`.
 
 ## Reference
 

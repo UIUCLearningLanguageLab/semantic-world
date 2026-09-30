@@ -11,7 +11,7 @@ file and the dotted field path, for example ``data/wordforms/x.yaml: wordforms.c
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,15 @@ FRONTENDS = ("waveform", "logmel", "cochleagram")
 ENCODERS = ("fixed", "pretrained")
 POOLINGS = ("mean",)
 ASSIGNMENT_MODES = ("arbitrary",)
+FUNCTION_SHAPES = ("CV", "CVC", "VC", "V")
+"""The shapes of a function word: one syllable with at most one consonant on each side."""
+AFFIX_SHAPES = ("C", "VC", "V")
+AFFIX_POSITIONS = ("suffix", "prefix")
+DEFAULT_FUNCTION_WORDS = (
+    "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
+    "and", "that", "it",
+)  # fmt: skip
+DEFAULT_AFFIXES = (("PLURAL", "suffix"), ("PAST", "suffix"), ("PROGRESSIVE", "suffix"))
 DEFAULT_PRETRAINED_LAYER = 8
 """The default layer of a pretrained model: the best HuBERT base layer for telling words apart
 across speakers in the stage 4 layer sweep."""
@@ -317,6 +326,62 @@ class AssignmentConfig:
 
 
 @dataclass(frozen=True)
+class AffixItem:
+    gloss: str
+    position: str
+    """``suffix`` or ``prefix``."""
+
+
+@dataclass(frozen=True)
+class InflectEntry:
+    """Which words take which affixes."""
+
+    words: str | tuple[str, ...]
+    """``all``, ``none``, or the labels of content words."""
+    affixes: tuple[str, ...]
+    """The glosses of the affixes."""
+
+    def resolved(self) -> dict[str, Any]:
+        words = self.words if isinstance(self.words, str) else list(self.words)
+        return {"words": words, "affixes": list(self.affixes)}
+
+
+@dataclass(frozen=True)
+class ClosedClassConfig:
+    """Function words, affixes, and inflected forms. The glosses, the affix items, and the
+    inflect entries are the closed-class request, given inline or read from a request file."""
+
+    glosses: tuple[str, ...]
+    """The glosses of the function words, in label order."""
+    function_shapes: dict[str, float]
+    """The weights of the function-word shapes, normalized to sum to 1."""
+    min_distance: int
+    affixes: tuple[AffixItem, ...]
+    affix_shapes: dict[str, float]
+    epenthesis: bool
+    inflect: tuple[InflectEntry, ...]
+    request: str | None = field(default=None, compare=False)
+    """The request file that the request was read from. The resolved configuration holds the
+    request inline, so this field takes no part in comparisons."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "request": None,
+            "function_words": {
+                "glosses": list(self.glosses),
+                "shapes": dict(self.function_shapes),
+                "min_distance": self.min_distance,
+            },
+            "affixes": {
+                "items": [{"gloss": a.gloss, "position": a.position} for a in self.affixes],
+                "shapes": dict(self.affix_shapes),
+                "epenthesis": self.epenthesis,
+            },
+            "inflect": [entry.resolved() for entry in self.inflect],
+        }
+
+
+@dataclass(frozen=True)
 class Config:
     source: str
     """The configuration file, for messages."""
@@ -326,6 +391,8 @@ class Config:
     synthesis: SynthesisConfig
     frontends: FrontendsConfig
     embeddings: tuple[EmbeddingConfig, ...]
+    closed_class: ClosedClassConfig | None
+    """None: the run has content words only."""
     augmentation: None
     assignment: AssignmentConfig
     device: str
@@ -339,6 +406,7 @@ class Config:
             "synthesis": self.synthesis.resolved(),
             "frontends": self.frontends.resolved(),
             "embeddings": [e.resolved() for e in self.embeddings],
+            "closed_class": None if self.closed_class is None else self.closed_class.resolved(),
             "augmentation": self.augmentation,
             "assignment": self.assignment.resolved(),
             "device": self.device,
@@ -757,6 +825,179 @@ def _read_assignment(node: _Node) -> AssignmentConfig:
     return config
 
 
+def _read_shapes(node: _Node, default: dict[str, float], allowed: tuple[str, ...]):
+    """The weights of the shapes of a function word or an affix, normalized to sum to 1, in the
+    order of ``allowed``."""
+    value = node.get("shapes", default)
+    if not isinstance(value, dict) or not value:
+        raise node.error("shapes", f"expected a mapping of weights, found {_describe(value)}")
+    inner = _Node(node.source, node.field("shapes"), value)
+    weights: dict[str, float] = {}
+    for key, weight in value.items():
+        if key not in allowed:
+            raise inner.error(key, f"unknown shape; the shapes are {', '.join(allowed)}")
+        weights[key] = inner.check_number(key, weight, min=0)
+    total = sum(weights.values())
+    if total <= 0:
+        raise node.error("shapes", "at least one weight must be positive")
+    return {k: weights[k] / total for k in allowed if k in weights}
+
+
+def _gloss(source: str, field_name: str, value: Any) -> str:
+    if isinstance(value, bool):
+        word = "no" if value is False else "yes"
+        raise ConfigError(
+            source,
+            field_name,
+            f"expected a gloss, found {_describe(value)}; YAML reads a bare word such as "
+            f'{word} as a boolean, so write it in quotes ("{word}")',
+        )
+    if not isinstance(value, str) or not value:
+        raise ConfigError(source, field_name, f"expected a gloss, found {_describe(value)}")
+    return value
+
+
+def _read_glosses(source: str, field_name: str, value: Any) -> tuple[str, ...]:
+    """The glosses of the function words: a list of distinct strings, which may be empty."""
+    if not isinstance(value, list):
+        raise ConfigError(source, field_name, f"expected a list, found {_describe(value)}")
+    glosses = tuple(_gloss(source, f"{field_name}[{i}]", item) for i, item in enumerate(value))
+    if len(set(glosses)) != len(glosses):
+        raise ConfigError(source, field_name, "the glosses must be distinct")
+    return glosses
+
+
+def _read_affix_items(source: str, field_name: str, value: Any) -> tuple[AffixItem, ...]:
+    if not isinstance(value, list):
+        raise ConfigError(source, field_name, f"expected a list, found {_describe(value)}")
+    items = []
+    for i, item in enumerate(value):
+        node = _Node(source, f"{field_name}[{i}]", item)
+        gloss = _gloss(source, node.field("gloss"), node.get("gloss"))
+        items.append(AffixItem(gloss, node.choice("position", "suffix", AFFIX_POSITIONS)))
+        node.finish()
+    if len({item.gloss for item in items}) != len(items):
+        raise ConfigError(source, field_name, "the glosses must be distinct")
+    return tuple(items)
+
+
+def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntry, ...]:
+    if not isinstance(value, list):
+        raise ConfigError(source, field_name, f"expected a list, found {_describe(value)}")
+    entries = []
+    for i, item in enumerate(value):
+        node = _Node(source, f"{field_name}[{i}]", item)
+        words = node.get("words")
+        if isinstance(words, list):
+            for word in words:
+                if not isinstance(word, str):
+                    raise node.error("words", f"expected word labels, found {_describe(word)}")
+            words = tuple(words)
+        elif words not in ("all", "none"):
+            raise node.error(
+                "words", f"expected all, none, or a list of word labels, found {_describe(words)}"
+            )
+        affixes = node.get("affixes")
+        if not isinstance(affixes, list) or not affixes:
+            raise node.error(
+                "affixes", f"expected a non-empty list of glosses, found {_describe(affixes)}"
+            )
+        glosses = tuple(
+            _gloss(source, f"{node.field('affixes')}[{k}]", a) for k, a in enumerate(affixes)
+        )
+        entries.append(InflectEntry(words, glosses))
+        node.finish()
+    return tuple(entries)
+
+
+def _read_request(path: str, config_source: str):
+    """The closed-class request of a request file: the glosses of the function words, the affix
+    items, and the inflect entries."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as error:
+        raise ConfigError(
+            config_source,
+            "closed_class.request",
+            f"cannot read the request file {path}: {error.strerror}",
+        ) from error
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as error:
+        raise ConfigError(path, "<file>", f"invalid YAML: {error}") from error
+    node = _Node(path, "", {} if data is None else data)
+    glosses = _read_glosses(path, "function_words", node.get("function_words", []))
+    items = _read_affix_items(path, "affixes", node.get("affixes", []))
+    inflect = _read_inflect(path, "inflect", node.get("inflect", []))
+    node.finish()
+    return glosses, items, inflect
+
+
+def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None:
+    node = root.mapping("closed_class", nullable=True)
+    if node is None:
+        return None
+    request = node.string("request", None, nullable=True)
+    function_node = node.mapping("function_words")
+    affix_node = node.mapping("affixes")
+    default_items = [{"gloss": g, "position": p} for g, p in DEFAULT_AFFIXES]
+    if request is not None:
+        for owner, key in ((function_node, "glosses"), (affix_node, "items"), (node, "inflect")):
+            if key in owner.data:
+                raise owner.error(
+                    key, "must not be given together with closed_class.request, which replaces it"
+                )
+        owner_source = request
+        glosses, items, inflect = _read_request(request, root.source)
+        inflect_field = "inflect"
+    else:
+        owner_source = root.source
+        glosses = _read_glosses(
+            root.source,
+            function_node.field("glosses"),
+            function_node.get("glosses", list(DEFAULT_FUNCTION_WORDS)),
+        )
+        items = _read_affix_items(
+            root.source, affix_node.field("items"), affix_node.get("items", default_items)
+        )
+        inflect_field = node.field("inflect")
+        inflect = _read_inflect(root.source, inflect_field, node.get("inflect", []))
+    known = {item.gloss for item in items}
+    for i, entry in enumerate(inflect):
+        for gloss in entry.affixes:
+            if gloss not in known:
+                raise ConfigError(
+                    owner_source,
+                    f"{inflect_field}[{i}].affixes",
+                    f"{gloss!r} is not the gloss of an affix",
+                )
+        if isinstance(entry.words, tuple):
+            for label in entry.words:
+                number = label[2:] if label.startswith("W.") else ""
+                if not (number.isdecimal() and 1 <= int(number) <= word_count):
+                    raise ConfigError(
+                        owner_source,
+                        f"{inflect_field}[{i}].words",
+                        f"{label!r} is not the label of a content word (W.1 to W.{word_count})",
+                    )
+    config = ClosedClassConfig(
+        glosses=glosses,
+        function_shapes=_read_shapes(
+            function_node, {"CV": 0.4, "CVC": 0.3, "VC": 0.2, "V": 0.1}, FUNCTION_SHAPES
+        ),
+        min_distance=function_node.int("min_distance", 2, min=1),
+        affixes=items,
+        affix_shapes=_read_shapes(affix_node, {"C": 0.4, "VC": 0.4, "V": 0.2}, AFFIX_SHAPES),
+        epenthesis=affix_node.bool("epenthesis", True),
+        inflect=inflect,
+        request=request,
+    )
+    function_node.finish()
+    affix_node.finish()
+    node.finish()
+    return config
+
+
 def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     """Validate a loaded YAML document and fill in the defaults. ``source`` names the file in
     error messages. ``seed`` overrides the file's master seed."""
@@ -773,6 +1014,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     synthesis = _read_synthesis(root.mapping("synthesis"))
     frontends = _read_frontends(root.mapping("frontends"), synthesis.sample_rate)
     embeddings = _read_embeddings(root, frontends)
+    closed_class = _read_closed_class(root, wordforms.count)
     augmentation = root.get("augmentation", None, nullable=True)
     if augmentation is not None:
         raise root.error(
@@ -791,6 +1033,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         synthesis=synthesis,
         frontends=frontends,
         embeddings=embeddings,
+        closed_class=closed_class,
         augmentation=None,
         assignment=assignment,
         device=device,

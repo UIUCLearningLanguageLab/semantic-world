@@ -902,6 +902,7 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
     path, run = tiny_run
     names = sorted(p.name for p in run.iterdir())
     assert names == [
+        "affixes.csv",
         "config.yaml",
         "embeddings",
         "eval",
@@ -912,20 +913,30 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
         "words.csv",
     ]
     table = pl.read_csv(run / "eval" / "embeddings.csv")
-    assert table["embedding"].to_list() == ["cochleagram_fixed", "logmel_fixed"]
+    assert table["embedding"].to_list() == ["cochleagram_fixed"] * 4 + ["logmel_fixed"] * 4
+    assert table["kind"].to_list() == ["content", "function", "inflected", "all"] * 2
     for row in table.iter_rows(named=True):
-        # same-different average precision is above chance for every embedding
-        assert row["ap_across_train"] > row["chance_across_train"] == pytest.approx(0.05)
-        assert row["ap_held_out"] > row["chance_held_out"] == pytest.approx(0.05)
+        # same-different average precision is above chance for every embedding and kind
+        assert row["ap_across_train"] > row["chance_across_train"]
+        assert row["ap_held_out"] > row["chance_held_out"]
         # one token per speaker: there is no same-word pair within a speaker
         assert row["ap_within_speaker"] is None
-        assert row["dims"] == 16 and row["tokens_evaluated"] == 120
+        assert row["dims"] == 16 and row["tokens_evaluated"] == 6 * row["words_evaluated"]
+        if row["kind"] == "content":
+            assert row["chance_across_train"] == pytest.approx(0.05)
+            assert row["tokens_evaluated"] == 120
+        # the stem AUC is reported for every embedding, and is far above chance
+        if row["kind"] in ("inflected", "all"):
+            assert row["stem_auc"] > 0.7 and row["stem_auc_forms"] > 40
+        else:
+            assert row["stem_auc"] is None
     summary = yaml.safe_load((run / "summary.yaml").read_text())
     assert set(summary["embeddings"]) == {"cochleagram_fixed", "logmel_fixed"}
     # a second run finds everything stored, and gives the same table
     assert main(["eval", str(path), "--out", str(run)]) == 0
     text = capsys.readouterr().out
     assert text.count("already stored") == 4 and "0 synthesized" in text
+    assert "closed-class forms: 15 function words, 3 affixes" in text
     assert "cochleagram_fixed" in text and "held-out" in text
     assert pl.read_csv(run / "eval" / "embeddings.csv").equals(table)
 
@@ -939,12 +950,14 @@ def test_embed_with_the_real_engines(tiny_run):
         # stored words: from the cache, never from an engine (Piper cannot repeat a clip)
         sounds.engines = {}
         arpabet = sounds.words["arpabet"].to_list()
+        words = sounds.words["label"].to_list()
         labels = sounds.speakers["label"].to_list()
         embedded = sounds.embed(arpabet, labels)
-        assert embedded.shape == (20, 6, 16)
-        for w in range(20):
+        assert embedded.shape == (len(words), 6, 16) and len(words) > 35
+        assert list(sounds.word_kinds[:35]) == ["content"] * 20 + ["function"] * 15
+        for w, word in enumerate(words):
             for s in range(6):
-                row = sounds._stored[(f"W.{w + 1}", labels[s], 1)]
+                row = sounds._stored[(word, labels[s], 1)]
                 assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-5)
         assert np.allclose(sounds.embed_types(arpabet), sounds.types, atol=1e-5)
     # a novel word is synthesized by both engines, and then comes from the cache
@@ -991,7 +1004,9 @@ def test_examples_run_on_the_tiny_configuration(tiny_run, capsys):
     text = capsys.readouterr().out
     language = results["wordforms_lm_inputs"]
     assert language["last_loss"] < language["uniform"] < language["first_loss"]
-    assert language["last_loss"] < language["entropy"] + 0.5
+    # the tiny run's 86 forms include inflected forms whose sounds barely differ from their
+    # stems, so the model gets less close to the bigram entropy than with content words alone
+    assert language["last_loss"] < language["entropy"] + 1.0
     assert np.isfinite(language["novel_log_probability"])
     assert "novel word 'Z AE1 M P IH0 K'" in text
     contrastive = results["wordforms_contrastive"]

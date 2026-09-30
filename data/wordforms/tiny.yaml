@@ -1,5 +1,5 @@
 # A small configuration for fast tests: 20 words, 3 speakers per engine, 1 token per speaker,
-# fixed embeddings only.
+# fixed embeddings only. Every word is inflected with every affix.
 name: tiny
 seed: 1
 
@@ -16,3 +16,7 @@ synthesis:
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 16}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 16}
+
+closed_class:
+  inflect:
+    - {words: all, affixes: [PLURAL, PAST, PROGRESSIVE]}

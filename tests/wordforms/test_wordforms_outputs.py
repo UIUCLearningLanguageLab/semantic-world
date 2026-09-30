@@ -15,21 +15,36 @@ pytestmark = [needs_cmudict, needs_wordfreq]
 def test_forms_writes_the_run_folder(tmp_path):
     out = tmp_path / "run"
     assert main(["forms", str(DATA / "tiny.yaml"), "--out", str(out)]) == 0
-    assert sorted(p.name for p in out.iterdir()) == ["config.yaml", "summary.yaml", "words.csv"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "affixes.csv",
+        "config.yaml",
+        "summary.yaml",
+        "words.csv",
+    ]
     words = pl.read_csv(out / "words.csv")
     assert words.columns == list(WORD_COLUMNS)
-    assert words.height == 20
-    assert words["label"].to_list() == [f"W.{i}" for i in range(1, 21)]
+    content = words.filter(pl.col("kind") == "content")
+    assert content.height == 20 and words.height > 35
+    assert content["label"].to_list() == [f"W.{i}" for i in range(1, 21)]
     assert words["real_word"].dtype == pl.Boolean and not words["real_word"].any()
     assert words["log_probability"].dtype == pl.Float64
-    assert words["long_synthesis"].null_count() == 20  # unknown until Piper has synthesized
+    assert words["long_synthesis"].null_count() == words.height  # unknown until Piper has run
     config = yaml.safe_load((out / "config.yaml").read_text())
     assert config["name"] == "tiny" and config["seed"] == 1
     assert config["wordforms"]["count"] == 20
     assert config["synthesis"]["engines"]["piper"]["speakers"] == 3
     assert list(config["provenance"]["stream_seeds"]) == [
         f"wordforms:{n}"
-        for n in ("generate", "speakers", "synthesis", "augment", "train", "assign", "eval")
+        for n in (
+            "generate",
+            "speakers",
+            "synthesis",
+            "augment",
+            "train",
+            "assign",
+            "eval",
+            "closed_class",
+        )
     ]
     assert "cmudict" in config["provenance"]["packages"]
     assert "wordfreq" in config["provenance"]["packages"]
