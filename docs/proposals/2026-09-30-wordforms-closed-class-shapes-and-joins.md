@@ -1,6 +1,6 @@
 # Proposal: the shapes of function words, and the stem and affix pairs that cannot join
 
-September 30, 2026. Raised while building stage 4a of `docs/specs/WORDFORM_PIPELINE.md` (closed-class forms) on the branch `wordforms-stage-4a`. Status: open. The stage is built to the specification as written. Each question below says what the specification's rules produce, and what could change. Nothing here changes a content word.
+September 30, 2026. Raised while building stage 4a of `docs/specs/WORDFORM_PIPELINE.md` (closed-class forms) on the branch `wordforms-stage-4a`. Status: decided. Jon decided on September 30, 2026, and the decisions were built as stage 4b on the branch `wordforms-stage-4b`. Each question below says what the stage 4a rules produced, and what could change; the decisions follow at the end. Nothing here changes a content word, except the first decision, which changes the words the sound patterns are learned from.
 
 ## Question 1: the shapes of function words
 
@@ -78,3 +78,12 @@ The specification rejects a function word that is a dictionary word, but says no
 ### Recommendation
 
 Option 1. An inflected form is a stem plus an affix, and the stem is a pseudoword; that the combination happens to be a name in the dictionary is not what the phonotactic rules are protecting against. The report is enough.
+
+## Decisions (September 30, 2026)
+
+1. **Function words.** Option 2 with new weights: candidates are rejected against the common words only (Zipf 3 or above), and the default weights are CV 0.3, CVC 0.4, VC 0.3. Two additions: the request's function-word list is read as a frequency rank, the default list is reordered by English frequency (the, and, a, is, that, it, with, not, all, can, has, no, some, most, without), and the most frequent half of the words get two-phoneme shapes (CV or VC).
+2. **Skipped joins.** Option 2: an affix that more than `closed_class.affixes.max_skipped` (default 0.1) of the content words cannot take is rejected. And the root cause is treated in the content words: the sound patterns are now learned from uninflected words only. Every common word that is a regular inflection of another dictionary word (-s, -es, -ed, -ing, -er, -est, -ly, allowing for a dropped final e, a doubled consonant, and y to i, and pronounced as the base plus the ending) is dropped before the onset, rime, and trigram counts, 9,651 of the 28,872 common words. Real-word rejection still uses the whole dictionary. In the default 500 words, the share ending in `IH0 NG` fell from 8% to 0%, and the share ending in a consonant plus s or z from 19% to 6%; the shares ending in a consonant plus d or t (15%) and in unstressed `ER0` (3%) did not change, because uninflected words end that way too ("first", "hand", "water"). `wordforms.exclude_inflections: false` restores the stage 4 patterns.
+3. **Homophones.** A stem and affix pair whose form is a common English word is skipped and reported; a form that is only a rare word or a name stays, and the summary lists it.
+4. **English options** (new): `closed_class.function_words.source` and `closed_class.affixes.source`, each `pseudo` (the default) or `english`. With `english`, a function word is its gloss's CMUdict citation pronunciation, with the weak forms recorded, and the affixes PLURAL, PAST, and PROGRESSIVE are the English suffixes with English allomorphy. A gloss with no English equivalent is an error that names it.
+
+The specification records the decisions in "Closed-class forms" and in decision 9 of "Decisions to confirm".

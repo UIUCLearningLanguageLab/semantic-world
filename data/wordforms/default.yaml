@@ -12,6 +12,7 @@ wordforms:
   min_english_distance: 1
   min_lexicon_distance: 1
   english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
+  exclude_inflections: true      # leave regular inflections (-s, -ed, -ing, -er, -est, -ly) out of the patterns
 
 synthesis:
   cache_dir: runs/wordforms/cache
@@ -40,13 +41,16 @@ embeddings:
 closed_class:                    # null: content words only
   request: null                  # a request file, in place of glosses, items, and inflect
   function_words:
-    glosses: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
-    shapes: {CV: 0.4, CVC: 0.3, VC: 0.2, V: 0.1}
+    glosses: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
+    source: pseudo               # english: each gloss's English pronunciation
+    shapes: {CV: 0.3, CVC: 0.4, VC: 0.3}
     min_distance: 2
   affixes:
     items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
+    source: pseudo               # english: the English suffixes -s, -ed, -ing
     shapes: {C: 0.4, VC: 0.4, V: 0.2}
     epenthesis: true
+    max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
 augmentation: null

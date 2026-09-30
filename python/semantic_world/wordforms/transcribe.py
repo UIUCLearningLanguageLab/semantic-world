@@ -134,7 +134,7 @@ def whisper_check(
         synthesis=dataclasses.replace(synthesis, piper=piper, espeak=espeak, tokens_per_speaker=1),
     )
     streams = Streams(config.seed)
-    english = load_english(config.wordforms.english_min_zipf)
+    english = load_english(config.wordforms.english_min_zipf, config.wordforms.exclude_inflections)
     chosen = common_words(english, words, config.seed)
     forms = real_word_forms(chosen, english)
     result = synthesize_lexicon(check_config, streams, forms, engines=engines, check=False)

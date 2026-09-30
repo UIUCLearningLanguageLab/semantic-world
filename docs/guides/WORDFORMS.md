@@ -79,7 +79,7 @@ Each subcommand runs the layers up to its name:
 
 ### 1. Word forms
 
-Word forms are English-like pseudowords. The generator learns English sound patterns from the CMU Pronouncing Dictionary, restricted to its common words (Zipf frequency 3 or above, about 29,000 words). Restricting to common words keeps out the unusual sound clusters of proper names.
+Word forms are English-like pseudowords. The generator learns English sound patterns from the CMU Pronouncing Dictionary, restricted to its common words (Zipf frequency 3 or above, about 29,000 words) without their regular inflections (about 19,000 words remain). Restricting to common words keeps out the unusual sound clusters of proper names, and leaving out the inflections (*walked*, *walking*, *walks*) keeps the pseudowords from ending in what sounds like an English affix: with the inflections in, 8% of the default words ended in *-ing*.
 
 A word is built syllable by syllable. The number of syllables and the stress pattern are drawn first. Each syllable then gets an onset (the consonants before the vowel) and a rime (the vowel plus the consonants after it), drawn from counts for that position in the word. A candidate is rejected when:
 
@@ -134,9 +134,9 @@ The fixed embeddings involve no learning. HuBERT was trained on human speech, so
 
 Content words are an open class. A corpus also needs function words and affixes, a closed class with short, simple forms. The `closed_class` section of the configuration asks for them; `closed_class: null` gives a run of content words only.
 
-- **Function words** have one syllable of a simple shape (CV, CVC, VC, or V), drawn from the sounds of common English monosyllables. A function word is never an English word, never a content word, and never within one phoneme of another function word. Each one has a gloss for human readers, such as `the`, and the label `F.<n>`. The default configuration makes 15: for example *sot* (a), *muh* (the), *reth* (all), *fah* (most), *eece* (some).
-- **Affixes** are bound forms of shape C, VC, or V with an unstressed vowel, such as `-AH0` or `-N`. They are never synthesized alone. The default makes three suffixes, glossed `PLURAL`, `PAST`, and `PROGRESSIVE`; `position: prefix` makes a prefix. Their labels are `AF.<n>`.
-- **Inflected forms** join a stem to an affix, labeled `W.<n>.AF.<m>`. When the plain join fails the phonotactic check, a schwa goes between stem and affix (`W.2.AF.2`: *jorts* + `N` becomes *jortsen*), and `words.csv` records where that happened (`epenthesis`). A pair that fails even with the schwa is skipped and listed in `summary.yaml`. Inflecting 500 words with 3 affixes quadruples the audio, so the default inflects nothing (`inflect: []`), and the tiny configuration inflects every word with every affix.
+- **Function words** have one syllable of a simple shape (CV, CVC, or VC), drawn from the sounds of common English monosyllables. A function word is never a common English word, never a content word, and never within one phoneme of another function word. The glosses are listed most frequent first, and the most frequent half get two-phoneme forms. Each one has a gloss for human readers, such as `the`, and the label `F.<n>`. The default configuration makes 15: for example *iss* (the), *muh* (and), *rau* (a), *gea* (is), *eep* (that). With `source: english`, each gloss is its English word instead, with its weak forms recorded.
+- **Affixes** are bound forms of shape C, VC, or V with an unstressed vowel, such as `-AH0` or `-L`. They are never synthesized alone. An affix that more than 10% of the words cannot take is drawn again. The default makes three suffixes, glossed `PLURAL`, `PAST`, and `PROGRESSIVE`; `position: prefix` makes a prefix. Their labels are `AF.<n>`. With `source: english`, the three glosses are the English suffixes *-s*, *-ed*, and *-ing*, with English allomorphy (*cats*, *dogs*, *buses*).
+- **Inflected forms** join a stem to an affix, labeled `W.<n>.AF.<m>`. When the plain join fails the phonotactic check, a schwa goes between stem and affix (*rosk* + `L` becomes *roskal*), and `words.csv` records where that happened (`epenthesis`). A pair that fails even with the schwa, or whose form is a common English word, is skipped and listed in `summary.yaml`. Inflecting 500 words with 3 affixes quadruples the audio, so the default inflects nothing (`inflect: []`), and the tiny configuration inflects every word with every affix.
 
 The request can come from a separate YAML file instead (`closed_class.request`), which the corpus generator will write. It lists `function_words` (glosses), `affixes` (glosses and positions), and `inflect` entries; the shapes and the other settings stay in the configuration.
 
@@ -174,7 +174,7 @@ Every result appears twice, with and without the `long_synthesis` words. Leaving
 | --- | --- |
 | `config.yaml` | The resolved configuration, all seeds, and each model's name and revision. |
 | `summary.yaml` | Counts, rejections, synthesis statistics, duration retries, and the flagged words. |
-| `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors` (content words one phoneme away), `real_word`, `long_synthesis`, `kind`, `gloss`, `stem`, `affix`, and `epenthesis`. Content words come first, then function words, then inflected forms. |
+| `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors` (content words one phoneme away), `real_word`, `long_synthesis`, `kind`, `gloss`, `stem`, `affix`, `epenthesis`, and `weak_forms` (an English function word's other pronunciations). Content words come first, then function words, then inflected forms. |
 | `affixes.csv` | One row per affix: `label`, `gloss`, `position`, `arpabet`, and `ipa`. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: engine, voice, speaker ID or variant, and `split` (`train` or `held_out`). |
 | `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, duration, retries, level, cache path, and SHA-256 hash. |
@@ -233,13 +233,14 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `wordforms.syllables` | `{1: 0.3, 2: 0.5, 3: 0.2}` | Weights over syllable counts. |
 | `wordforms.min_lexicon_distance` | 1 | Minimum phoneme distance between words. 1 allows minimal pairs, and 2 forbids them. |
 | `wordforms.english_min_zipf` | 3.0 | Frequency floor for the words the sound patterns are learned from. Null uses the whole dictionary. |
+| `wordforms.exclude_inflections` | true | Leave regular inflections (*-s*, *-ed*, *-ing*, *-er*, *-est*, *-ly*) out of those words. |
 | `synthesis.engines.piper.speakers` | 40 | Number of Piper speakers. |
 | `synthesis.engines.espeak.variants` | m1, m3, m7, f2, f4 | espeak-ng voice variants. |
 | `synthesis.tokens_per_speaker` | 2 | Recordings of each word by each speaker. |
 | `synthesis.held_out_speaker_proportion` | 0.2 | Share of speakers held out. |
 | `synthesis.cache_dir` | `runs/wordforms/cache` | Where the audio lives. |
 | `embeddings` | three embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
-| `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. |
+| `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 
 To turn an engine off, set it to null, for example `espeak: null` under `synthesis.engines`. Leaving an engine out keeps it on, with its defaults.

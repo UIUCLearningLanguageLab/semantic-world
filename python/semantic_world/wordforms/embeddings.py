@@ -383,8 +383,12 @@ class SoundEmbeddings:
 
         forms = []
         for row in self.words.iter_rows(named=True):
+            settings = self.config.wordforms
             form = word_form_from_arpabet(
-                row["label"], row["arpabet"], self.config.wordforms.english_min_zipf
+                row["label"],
+                row["arpabet"],
+                settings.english_min_zipf,
+                settings.exclude_inflections,
             )
             form.spelling = row["spelling"]
             # a run from before the closed-class forms has content words only
@@ -393,6 +397,8 @@ class SoundEmbeddings:
             form.stem = row.get("stem")
             form.affix = row.get("affix")
             form.epenthesis = row.get("epenthesis")
+            weak = row.get("weak_forms")
+            form.weak_forms = tuple(weak.split("; ")) if weak else ()
             forms.append(form)
         return forms
 
@@ -412,9 +418,10 @@ class SoundEmbeddings:
             if isinstance(form, WordForm):
                 result.append(form)
             else:
+                settings = self.config.wordforms
                 result.append(
                     word_form_from_arpabet(
-                        f"N.{i + 1}", form, self.config.wordforms.english_min_zipf
+                        f"N.{i + 1}", form, settings.english_min_zipf, settings.exclude_inflections
                     )
                 )
         return result

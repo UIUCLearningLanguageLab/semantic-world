@@ -13,6 +13,13 @@ that begins at least 1 in every :data:`ONSET_WORD_RATIO` pattern words (20 words
 dictionary, 5 of the default common words). The floor keeps the onsets of the few remaining
 names from splitting words like *atlas* and *pizza* wrongly.
 
+The pattern words leave out the regular inflections of other dictionary words (plural and
+third-person *-s*, past *-ed*, *-ing*, comparative *-er* and *-est*, and adverbial *-ly*), so
+that the sound patterns come from uninflected words and the pseudowords do not end in what
+sounds like an English affix. A word counts as an inflection when its spelling is a base word
+plus one of the endings, allowing for a dropped final *e*, a doubled consonant, and *y* to *i*,
+and its pronunciation is the base's pronunciation plus the ending's sounds.
+
 From the syllabified pattern words this module counts, by type frequency, onsets and rimes by
 syllable position and stress, and phoneme trigrams with word boundaries. The real words of the
 ``english`` and ``mixed`` sources are drawn from the pattern words too. The whole dictionary
@@ -177,6 +184,62 @@ class Neighbors:
     """The number of dictionary words at edit distance exactly 1."""
 
 
+INFLECTIONS: dict[str, tuple[tuple[str, ...], ...]] = {
+    "s": (("S",), ("Z",), ("IH", "Z"), ("AH", "Z")),
+    "ed": (("T",), ("D",), ("IH", "D"), ("AH", "D")),
+    "ing": (("IH", "NG"),),
+    "er": (("ER",),),
+    "est": (("AH", "S", "T"), ("IH", "S", "T")),
+    "ly": (("L", "IY"),),
+}
+"""The regular endings, each with the sounds it can add to a base."""
+
+
+def inflection_bases(word: str) -> list[tuple[str, str]]:
+    """The spellings that ``word`` could be a regular inflection of, with the ending: the word
+    without the ending, the same with a final *e* restored, with a doubled consonant undone, and
+    with *i* turned back into *y*."""
+    result = []
+    for ending in INFLECTIONS:
+        stems = []
+        if ending == "s" and word.endswith("es"):
+            stems.append(word[:-2])
+        if ending == "s" and word.endswith("ies"):
+            stems.append(word[:-3] + "y")
+        if not word.endswith(ending):
+            continue
+        stem = word[: -len(ending)]
+        stems.append(stem)
+        if ending != "s":
+            stems.append(stem + "e")
+            if len(stem) > 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+                stems.append(stem[:-1])
+            if stem.endswith("i"):
+                stems.append(stem[:-1] + "y")
+        for stem in stems:
+            if len(stem) >= 2 and (stem, ending) not in result:
+                result.append((stem, ending))
+    return result
+
+
+def inflection_of(
+    word: str, words: dict[str, tuple[tuple[str, ...], ...]]
+) -> tuple[str, str] | None:
+    """The base word and the ending when ``word`` is a regular inflection of another dictionary
+    word, spelled and pronounced as such, or None."""
+    for stem, ending in inflection_bases(word):
+        if stem == word or stem not in words:
+            continue
+        bases = {strip_stress(p) for p in words[stem]}
+        for pron in words[word]:
+            stripped = strip_stress(pron)
+            for suffix in INFLECTIONS[ending]:
+                if len(stripped) > len(suffix) and stripped[-len(suffix) :] == suffix:
+                    if stripped[: -len(suffix)] in bases:
+                        return stem, ending
+    return None
+
+
 def zipf_frequencies(words) -> dict[str, float]:
     """The Zipf frequency of each word in ``wordfreq``'s large English list."""
     try:
@@ -192,12 +255,20 @@ def zipf_frequencies(words) -> dict[str, float]:
 class English:
     """The syllabified, counted CMU Pronouncing Dictionary. Build it with :func:`load_english`.
 
-    ``min_zipf`` selects the pattern words, from which the legal onsets, the onset and rime
-    counts, and the trigram model are learned. ``None`` uses every word.
+    ``min_zipf`` selects the common words: ``None`` takes every word. The pattern words, from
+    which the legal onsets, the onset and rime counts, and the trigram model are learned, are the
+    common words without their regular inflections, or all the common words with
+    ``exclude_inflections=False``.
     """
 
-    def __init__(self, entries: dict[str, list[list[str]]], min_zipf: float | None = None) -> None:
+    def __init__(
+        self,
+        entries: dict[str, list[list[str]]],
+        min_zipf: float | None = None,
+        exclude_inflections: bool = True,
+    ) -> None:
         self.min_zipf = min_zipf
+        self.exclude_inflections = exclude_inflections
         self.words: dict[str, tuple[tuple[str, ...], ...]] = {}
         for word in sorted(entries):
             if WORD_PATTERN.fullmatch(word) is None:
@@ -206,22 +277,38 @@ class English:
             if prons:
                 self.words[word] = prons
         if min_zipf is None:
-            self.pattern_words: frozenset[str] = frozenset(self.words)
+            self.common_words: frozenset[str] = frozenset(self.words)
         else:
             zipf = zipf_frequencies(self.words)
-            self.pattern_words = frozenset(w for w in self.words if zipf[w] >= min_zipf)
+            self.common_words = frozenset(w for w in self.words if zipf[w] >= min_zipf)
+        """The words with a Zipf frequency of at least ``min_zipf``, or every word."""
+        self.inflections: dict[str, tuple[str, str]] = {}
+        """Common words that are regular inflections of another dictionary word, with the base
+        word and the ending; they are left out of the pattern words."""
+        if exclude_inflections:
+            for word in sorted(self.common_words):
+                found = inflection_of(word, self.words)
+                if found is not None:
+                    self.inflections[word] = found
+        self.pattern_words: frozenset[str] = self.common_words - frozenset(self.inflections)
         """The words the sound patterns are learned from."""
         self.pronunciations: dict[tuple[str, ...], tuple[str, ...]] = {}
         """Stress-stripped pronunciation to the sorted words that have it."""
+        self.common_pronunciations: dict[tuple[str, ...], tuple[str, ...]] = {}
+        """The same, for the common words only."""
         by_pron: dict[tuple[str, ...], set[str]] = {}
+        by_common_pron: dict[tuple[str, ...], set[str]] = {}
         initial: Counter[tuple[str, ...]] = Counter()
         for word, prons in self.words.items():
             for pron in prons:
                 by_pron.setdefault(strip_stress(pron), set()).add(word)
+                if word in self.common_words:
+                    by_common_pron.setdefault(strip_stress(pron), set()).add(word)
                 if word in self.pattern_words:
                     first_vowel = next(i for i, p in enumerate(pron) if is_vowel(p))
                     initial[pron[:first_vowel]] += 1
         self.pronunciations = {k: tuple(sorted(v)) for k, v in by_pron.items()}
+        self.common_pronunciations = {k: tuple(sorted(v)) for k, v in by_common_pron.items()}
         self.onsets: frozenset[tuple[str, ...]] = frozenset(
             o for o, n in initial.items() if n * ONSET_WORD_RATIO >= len(self.pattern_words)
         )
@@ -272,6 +359,13 @@ class English:
 
     def words_with_pronunciation(self, phones: tuple[str, ...]) -> tuple[str, ...]:
         return self.pronunciations.get(strip_stress(phones), ())
+
+    def is_common_pronunciation(self, phones: tuple[str, ...]) -> bool:
+        """Whether the sequence (stress ignored) is the pronunciation of a common word."""
+        return strip_stress(phones) in self.common_pronunciations
+
+    def common_words_with_pronunciation(self, phones: tuple[str, ...]) -> tuple[str, ...]:
+        return self.common_pronunciations.get(strip_stress(phones), ())
 
     def phonotactic(self, phones: tuple[str, ...]) -> bool:
         """Whether every phoneme trigram of the sequence, with word boundaries, occurs in the
@@ -327,6 +421,9 @@ class English:
             "words": len(self.words),
             "pronunciations": len(self.pronunciations),
             "english_min_zipf": self.min_zipf,
+            "common_words": len(self.common_words),
+            "exclude_inflections": self.exclude_inflections,
+            "inflections_dropped": len(self.inflections),
             "pattern_words": len(self.pattern_words),
             "pattern_pronunciations": self.pattern_pronunciations,
             "legal_onsets": len(self.onsets),
@@ -411,13 +508,15 @@ def _levenshtein_rows(query: np.ndarray, rows: np.ndarray) -> np.ndarray:
 
 
 @lru_cache(maxsize=4)
-def load_english(min_zipf: float | None = None) -> English:
-    """Load and syllabify the CMU Pronouncing Dictionary, once per process for each ``min_zipf``
-    (the smallest Zipf frequency of the pattern words; ``None`` uses the whole dictionary)."""
+def load_english(min_zipf: float | None = None, exclude_inflections: bool = True) -> English:
+    """Load and syllabify the CMU Pronouncing Dictionary, once per process for each setting.
+    ``min_zipf`` is the smallest Zipf frequency of the common words (``None`` uses the whole
+    dictionary), and ``exclude_inflections`` leaves their regular inflections out of the pattern
+    words."""
     try:
         import cmudict
     except ImportError as error:  # pragma: no cover - depends on the environment
         raise ImportError(
             "the word-form pipeline needs the cmudict package; install the 'speech' extra"
         ) from error
-    return English(cmudict.dict(), min_zipf)
+    return English(cmudict.dict(), min_zipf, exclude_inflections)

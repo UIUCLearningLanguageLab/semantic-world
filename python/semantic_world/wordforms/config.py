@@ -29,10 +29,14 @@ FUNCTION_SHAPES = ("CV", "CVC", "VC", "V")
 """The shapes of a function word: one syllable with at most one consonant on each side."""
 AFFIX_SHAPES = ("C", "VC", "V")
 AFFIX_POSITIONS = ("suffix", "prefix")
+CLOSED_CLASS_SOURCES = ("pseudo", "english")
 DEFAULT_FUNCTION_WORDS = (
-    "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-    "and", "that", "it",
+    "the", "and", "a", "is", "that", "it", "with", "not", "all", "can", "has", "no", "some",
+    "most", "without",
 )  # fmt: skip
+"""The default function-word glosses, in order of English frequency (wordfreq, large list)."""
+DEFAULT_FUNCTION_SHAPES = {"CV": 0.3, "CVC": 0.4, "VC": 0.3}
+DEFAULT_AFFIX_SHAPES = {"C": 0.4, "VC": 0.4, "V": 0.2}
 DEFAULT_AFFIXES = (("PLURAL", "suffix"), ("PAST", "suffix"), ("PROGRESSIVE", "suffix"))
 DEFAULT_PRETRAINED_LAYER = 8
 """The default layer of a pretrained model: the best HuBERT base layer for telling words apart
@@ -76,6 +80,9 @@ class WordformsConfig:
     english_min_zipf: float | None
     """The smallest Zipf frequency of the words that the sound patterns are learned from; None
     uses the whole dictionary."""
+    exclude_inflections: bool = True
+    """Whether the regular inflections of other dictionary words are left out of the words that
+    the sound patterns are learned from."""
 
     @property
     def english_count(self) -> int:
@@ -97,6 +104,7 @@ class WordformsConfig:
             "min_english_distance": self.min_english_distance,
             "min_lexicon_distance": self.min_lexicon_distance,
             "english_min_zipf": self.english_min_zipf,
+            "exclude_inflections": self.exclude_inflections,
         }
 
 
@@ -352,13 +360,20 @@ class ClosedClassConfig:
     inflect entries are the closed-class request, given inline or read from a request file."""
 
     glosses: tuple[str, ...]
-    """The glosses of the function words, in label order."""
+    """The glosses of the function words, most frequent first; the order is the label order."""
+    function_source: str
+    """``pseudo``: generated forms; ``english``: each gloss's English pronunciation."""
     function_shapes: dict[str, float]
     """The weights of the function-word shapes, normalized to sum to 1."""
     min_distance: int
     affixes: tuple[AffixItem, ...]
+    affix_source: str
+    """``pseudo``: generated forms; ``english``: the English suffixes with their allomorphs."""
     affix_shapes: dict[str, float]
     epenthesis: bool
+    max_skipped: float
+    """A generated affix is rejected when more than this share of the content words cannot take
+    it."""
     inflect: tuple[InflectEntry, ...]
     request: str | None = field(default=None, compare=False)
     """The request file that the request was read from. The resolved configuration holds the
@@ -369,13 +384,16 @@ class ClosedClassConfig:
             "request": None,
             "function_words": {
                 "glosses": list(self.glosses),
+                "source": self.function_source,
                 "shapes": dict(self.function_shapes),
                 "min_distance": self.min_distance,
             },
             "affixes": {
                 "items": [{"gloss": a.gloss, "position": a.position} for a in self.affixes],
+                "source": self.affix_source,
                 "shapes": dict(self.affix_shapes),
                 "epenthesis": self.epenthesis,
+                "max_skipped": self.max_skipped,
             },
             "inflect": [entry.resolved() for entry in self.inflect],
         }
@@ -616,6 +634,7 @@ def _read_wordforms(node: _Node) -> WordformsConfig:
         min_english_distance=node.int("min_english_distance", 1, min=1),
         min_lexicon_distance=node.int("min_lexicon_distance", 1, min=1),
         english_min_zipf=min_zipf,
+        exclude_inflections=node.bool("exclude_inflections", True),
     )
     node.finish()
     return config
@@ -980,15 +999,26 @@ def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None
                         f"{inflect_field}[{i}].words",
                         f"{label!r} is not the label of a content word (W.1 to W.{word_count})",
                     )
+    affix_source = affix_node.choice("source", "pseudo", CLOSED_CLASS_SOURCES)
+    if affix_source == "english":
+        for i, item in enumerate(items):
+            if item.position != "suffix":
+                raise ConfigError(
+                    owner_source,
+                    f"{'affixes' if request else affix_node.field('items')}[{i}].position",
+                    f"English has no {item.gloss} prefix; with source english, every affix is "
+                    f"a suffix",
+                )
     config = ClosedClassConfig(
         glosses=glosses,
-        function_shapes=_read_shapes(
-            function_node, {"CV": 0.4, "CVC": 0.3, "VC": 0.2, "V": 0.1}, FUNCTION_SHAPES
-        ),
+        function_source=function_node.choice("source", "pseudo", CLOSED_CLASS_SOURCES),
+        function_shapes=_read_shapes(function_node, DEFAULT_FUNCTION_SHAPES, FUNCTION_SHAPES),
         min_distance=function_node.int("min_distance", 2, min=1),
         affixes=items,
-        affix_shapes=_read_shapes(affix_node, {"C": 0.4, "VC": 0.4, "V": 0.2}, AFFIX_SHAPES),
+        affix_source=affix_source,
+        affix_shapes=_read_shapes(affix_node, DEFAULT_AFFIX_SHAPES, AFFIX_SHAPES),
         epenthesis=affix_node.bool("epenthesis", True),
+        max_skipped=affix_node.probability("max_skipped", 0.1),
         inflect=inflect,
         request=request,
     )

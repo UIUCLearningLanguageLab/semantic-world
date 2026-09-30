@@ -788,7 +788,11 @@ def test_synth_command_on_the_tiny_configuration(tmp_path, capsys):
     assert (
         words.height > 35 and words["kind"].to_list()[:35] == ["content"] * 20 + ["function"] * 15
     )
-    assert f"{words.height * 6} synthesized, 0 read from the cache" in capsys.readouterr().out
+    # every token is synthesized (a clip that the duration check tries again counts twice)
+    summary = yaml.safe_load((out / "summary.yaml").read_text())["synthesis"]
+    retried = sum((int(k) - 1) * n for k, n in summary["duration_check"]["tries"].items())
+    assert summary["synthesized"] == words.height * 6 + retried
+    assert f"{summary['synthesized']} synthesized, 0 read from the cache" in capsys.readouterr().out
     content = words.filter(pl.col("kind") == "content")
     assert words["long_synthesis"].dtype == pl.Boolean
     assert content["long_synthesis"].null_count() == 0
@@ -797,8 +801,7 @@ def test_synth_command_on_the_tiny_configuration(tmp_path, capsys):
     assert speakers["split"].to_list().count("held_out") == 2
     tokens = pl.read_csv(out / "tokens.csv")
     assert tokens.height == words.height * 6 * 1
-    summary = yaml.safe_load((out / "summary.yaml").read_text())["synthesis"]
     assert set(summary["reproducibility"]) == {"piper", "espeak"}
     assert main(["all", str(path), "--out", str(out)]) == 0
-    assert f"0 synthesized, {tokens.height} read from the cache" in capsys.readouterr().out
+    assert f"0 synthesized, {summary['synthesized']} read from the cache" in capsys.readouterr().out
     assert pl.read_csv(out / "tokens.csv").equals(tokens)

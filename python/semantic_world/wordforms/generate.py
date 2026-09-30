@@ -71,6 +71,9 @@ class WordForm:
     """The label of an inflected form's affix."""
     epenthesis: bool | None = None
     """Whether a schwa stands between an inflected form's stem and affix."""
+    weak_forms: tuple[str, ...] = ()
+    """The other dictionary pronunciations of an English function word (ARPAbet), for connected
+    speech later."""
 
     @property
     def phones(self) -> tuple[str, ...]:
@@ -113,6 +116,7 @@ class WordForm:
             "stem": self.stem,
             "affix": self.affix,
             "epenthesis": self.epenthesis,
+            "weak_forms": "; ".join(self.weak_forms) if self.weak_forms else None,
         }
 
 
@@ -266,7 +270,7 @@ def generate_lexicon(
     """Generate the word table of a configuration from the ``wordforms:generate`` stream.
     ``english`` defaults to the dictionary with the configuration's ``english_min_zipf``."""
     settings = config.wordforms
-    english = english or load_english(settings.english_min_zipf)
+    english = english or load_english(settings.english_min_zipf, settings.exclude_inflections)
     sampler = _Sampler(english)
     ipa_table, espeak_table = load_tables()
     speller = Speller.load()
@@ -379,7 +383,9 @@ def _add_statistics(
         )
 
 
-def word_form_from_arpabet(label: str, arpabet: str, english_min_zipf: float | None) -> WordForm:
+def word_form_from_arpabet(
+    label: str, arpabet: str, english_min_zipf: float | None, exclude_inflections: bool = True
+) -> WordForm:
     """A word form from an ARPAbet string with stress digits on its vowels, such as
     ``K AE1 T``: syllabified, with its IPA and espeak-ng strings and its spelling."""
     from semantic_world.wordforms.english import PHONEMES, base, is_vowel, syllabify
@@ -391,7 +397,7 @@ def word_form_from_arpabet(label: str, arpabet: str, english_min_zipf: float | N
     unstressed = [p for p in phones if is_vowel(p) and not p[-1].isdigit()]
     if unstressed:
         raise ValueError(f"vowels need a stress digit (0, 1, or 2): {' '.join(unstressed)}")
-    english = load_english(english_min_zipf)
+    english = load_english(english_min_zipf, exclude_inflections)
     ipa_table, espeak_table = load_tables()
     syllables = syllabify(phones, english.onsets)
     form = WordForm(label, syllables, real_word=english.is_pronunciation(phones))

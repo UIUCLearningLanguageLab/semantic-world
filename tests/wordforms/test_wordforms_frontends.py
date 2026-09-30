@@ -374,5 +374,5 @@ def test_frontends_command_on_the_tiny_configuration(tmp_path, capsys):
     # a second run reads the audio cache and finds the front ends already stored
     assert main(["all", str(path), "--out", str(out)]) == 0
     text = capsys.readouterr().out
-    assert f"0 synthesized, {tokens.height} read from the cache" in text
+    assert f"0 synthesized, {summary['synthesis']['synthesized']} read from the cache" in text
     assert text.count("already stored") == 2

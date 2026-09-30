@@ -43,6 +43,7 @@ WORD_COLUMNS = (
     "stem",
     "affix",
     "epenthesis",
+    "weak_forms",
 )
 AFFIX_COLUMNS = ("label", "gloss", "position", "arpabet", "ipa")
 SPEAKER_COLUMNS = ("label", "engine", "voice", "speaker_id", "variant", "pitch", "rate", "split")
@@ -148,6 +149,7 @@ def words_frame(lexicon: Lexicon) -> pl.DataFrame:
             "stem": pl.String,
             "affix": pl.String,
             "epenthesis": pl.Boolean,
+            "weak_forms": pl.String,
         },
     )
     return frame.select(WORD_COLUMNS)

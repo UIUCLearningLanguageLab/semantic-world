@@ -46,9 +46,9 @@ Tokens of function words and inflected forms extend their labels the same way: `
 
 The English source is the CMU Pronouncing Dictionary (CMUdict), in ARPAbet with stress marks.
 
-The sound patterns of English are learned from common words only. The pattern words are the CMUdict words whose Zipf frequency in the `wordfreq` package is at least `english_min_zipf` (3.0 by default). CMUdict holds many proper names, loanwords, and rare words, and their sound sequences do not belong in English-like pseudowords. With `english_min_zipf: null`, every CMUdict word is a pattern word. See `docs/proposals/2026-09-30-wordforms-common-words-and-spelling.md`.
+The sound patterns of English are learned from common, uninflected words only. The common words are the CMUdict words whose Zipf frequency in the `wordfreq` package is at least `english_min_zipf` (3.0 by default). CMUdict holds many proper names, loanwords, and rare words, and their sound sequences do not belong in English-like pseudowords. With `english_min_zipf: null`, every CMUdict word is a common word. See `docs/proposals/2026-09-30-wordforms-common-words-and-spelling.md`. The pattern words are the common words without their regular inflections: a word is dropped when it is another CMUdict word plus plural or third-person -s or -es, past -ed, -ing, comparative -er or -est, or adverbial -ly, allowing for a dropped final e, a doubled consonant, and y to i, and when its pronunciation is the base's pronunciation plus the ending's sounds. Otherwise the pseudowords end in what sounds like an English affix (decided September 30, 2026: before the change, 8% of the default words ended in -ing and 19% in a consonant plus s or z). With `exclude_inflections: false`, the inflections stay. The default drops 9,651 of the 28,872 common words.
 
-The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin at least 1 in every 6,300 pattern words (5 words with the default, and 20 words with the whole dictionary). From the syllabified pattern words, the pipeline counts, by type frequency:
+The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin at least 1 in every 6,300 pattern words (4 words with the default, and 16 words with the whole dictionary without its inflections). From the syllabified pattern words, the pipeline counts, by type frequency:
 
 - onsets, by syllable position (initial, medial, final) and stress;
 - rimes (the vowel plus the coda, kept together as one unit), by syllable position and stress;
@@ -185,7 +185,7 @@ The corpus generator (`docs/specs/CORPUS_GENERATOR.md`) needs three kinds of for
 The closed-class forms a run needs are listed in a closed-class request, given in the configuration or in a separate YAML file named there. The corpus generator will write such a file. The request lists glosses, which are names for human readers, and says which words to inflect:
 
 ```yaml
-function_words: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
+function_words: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
 affixes:
   - {gloss: PLURAL, position: suffix}
   - {gloss: PAST, position: suffix}
@@ -198,22 +198,26 @@ inflect:
 
 ### Function words
 
-A function word has one syllable. Its shape is drawn from configured weights over simple shapes: consonant and vowel (CV), CVC, VC, and V. The onset is at most one consonant, and so is the coda. Consonants and vowels are drawn from the common-word counts that content words use, restricted to these simple shapes, so function words use the most frequent sounds of English. A candidate function word is rejected when:
+A function word has one syllable. Its shape is drawn from configured weights over simple shapes: consonant and vowel (CV), CVC, VC, and V. The default weights are CV 0.3, CVC 0.4, and VC 0.3; the shape V has no form that is not an English word. The onset is at most one consonant, and so is the coda. Consonants and vowels are drawn from the common-word counts that content words use, restricted to these simple shapes, so function words use the most frequent sounds of English. The request lists the function words in order of frequency, most frequent first, and the most frequent half of them (rounded up) get two-phoneme shapes, CV or VC, as English gives its most frequent words its shortest forms. A candidate function word is rejected when:
 
 - it fails the phonotactic check;
-- it is a real English word, checked against the whole dictionary, as for content words;
+- it is a common English word (Zipf 3 or above). Content words are checked against the whole dictionary, but the whole dictionary leaves too few short forms (every single vowel is a word, and 22 CV forms remain). A function word may therefore sound like a rare word or a name, and the run's summary lists such cases;
 - it lies closer than `function_words.min_distance` (default 2) to another function word;
 - it is identical to a content word.
 
 The default distance of 2 keeps function words from being minimal pairs of each other. Function words are short and frequent, so confusions between them would be costly for a learner.
 
+With `function_words.source: english`, each gloss takes its English word instead: the CMUdict citation pronunciation (the first pronunciation with primary stress), with the dictionary's other pronunciations recorded in `words.csv` as `weak_forms`, for connected speech later. A gloss that is not in the dictionary is an error that names it.
+
 Function words are synthesized and embedded like content words, by every speaker. Synthesis gives the citation form, spoken alone. The reduced forms of running speech ("the" as "thuh") are out of scope until sentences are synthesized as wholes.
 
 ### Affixes
 
-An affix is a bound form: it never occurs alone, and it is never synthesized alone. Its shape is drawn from configured weights over C (one consonant, like English -s), VC (like -ing), and V (like -y). Suffixes are the default, and `position: prefix` makes a prefix. Two affixes must differ in at least one phoneme. An affix's vowel is unstressed.
+An affix is a bound form: it never occurs alone, and it is never synthesized alone. Its shape is drawn from configured weights over C (one consonant, like English -s), VC (like -ing), and V (like -y). Suffixes are the default, and `position: prefix` makes a prefix. Two affixes must differ in at least one phoneme. An affix's vowel is unstressed. An affix that more than `affixes.max_skipped` (default 0.1) of the content words cannot take, even with the schwa below, is rejected and drawn again, so that no affix leaves large gaps in the paradigm.
 
-**Joining.** An inflected form is the stem's phonemes followed by the affix's phonemes (or the reverse, for a prefix). When the join creates a sequence that fails the phonotactic check, an unstressed schwa (AH0) is inserted between stem and affix. English does the same with the plural of "bus". The rule gives affixes a simple, learnable variant, and the word table records where it applied. When a form still fails the check after the schwa is inserted, that stem and affix pair is skipped and reported.
+With `affixes.source: english`, the glosses PLURAL, PAST, and PROGRESSIVE become the English suffixes with English allomorphy: -s is `IH0 Z` after a sibilant, `S` after another voiceless consonant, and `Z` otherwise; -ed is `IH0 D` after `T` or `D`, `T` after another voiceless consonant, and `D` otherwise; -ing is `IH0 NG`. `affixes.csv` lists the allomorphs. Any other gloss, or a prefix, is an error that names it.
+
+**Joining.** An inflected form is the stem's phonemes followed by the affix's phonemes (or the reverse, for a prefix). When the join creates a sequence that fails the phonotactic check, an unstressed schwa (AH0) is inserted between stem and affix. English does the same with the plural of "bus". The rule gives affixes a simple, learnable variant, and the word table records where it applied. When a form still fails the check after the schwa is inserted, that stem and affix pair is skipped and reported. An English affix takes its allomorph for the stem instead, with no schwa and no phonotactic check, because the check's trigrams come from uninflected words. A pair whose form is a common English word (Zipf 3 or above) is skipped and reported too; a form that is only a rare word or a name is kept and listed in the summary.
 
 ### Inflected forms
 
@@ -285,6 +289,7 @@ wordforms:
   min_english_distance: 1
   min_lexicon_distance: 1
   english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
+  exclude_inflections: true      # leave regular inflections out of the words the patterns come from
 
 synthesis:
   cache_dir: runs/wordforms/cache
@@ -313,13 +318,16 @@ embeddings:
 closed_class:                    # null: content words only
   request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
   function_words:
-    glosses: [a, the, all, most, some, "no", not, can, is, has, with, without, and, that, it]
-    shapes: {CV: 0.4, CVC: 0.3, VC: 0.2, V: 0.1}
+    glosses: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
+    source: pseudo               # english: each gloss's English pronunciation
+    shapes: {CV: 0.3, CVC: 0.4, VC: 0.3}
     min_distance: 2
   affixes:
     items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
+    source: pseudo               # english: the English suffixes with their allomorphs
     shapes: {C: 0.4, VC: 0.4, V: 0.2}
     epenthesis: true
+    max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
 augmentation: null
@@ -340,8 +348,8 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), and `stem`, `affix`, and `epenthesis` (inflected forms). |
-| `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. Written when the run has closed-class forms. |
+| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), `stem`, `affix`, and `epenthesis` (inflected forms), and `weak_forms` (the other dictionary pronunciations of an English function word). |
+| `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. An English affix lists its allomorphs. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
@@ -408,6 +416,7 @@ These choices were made while writing this specification. Each one is the workin
 6. Until stage 8, exact acoustic control comes from Praat manipulation of synthesized audio.
 7. Real English words are available as a source, for comparison with language-model embeddings.
 8. Function words have one syllable of a simple shape and differ from each other by at least two phonemes. Affixes join with an inserted schwa where the plain join would be illegal. The default configuration makes function words and affixes but inflects nothing.
+9. Decided September 30, 2026, after stage 4a (`docs/proposals/2026-09-30-wordforms-closed-class-shapes-and-joins.md`): the sound patterns come from uninflected words; function words are rejected against the common words only, with the default weights CV 0.3, CVC 0.4, VC 0.3, and the most frequent half get two phonemes; an affix that more than 10% of the words cannot take is rejected; a stem and affix pair whose form is a common English word is skipped; and `source: english` gives English function words (with weak forms) and English affixes (with allomorphy).
 
 ## References
 

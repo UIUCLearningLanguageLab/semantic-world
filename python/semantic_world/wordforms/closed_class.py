@@ -6,13 +6,18 @@ forms").
 
 - A **function word** has one syllable of a simple shape (CV, CVC, VC, or V). Its consonant and
   its rime are drawn from the counts that a stressed monosyllabic content word uses, restricted
-  to single consonants. A form is never a dictionary word, never a content word, passes the
-  phonotactic check, and lies at least ``min_distance`` from every other function word.
+  to single consonants. A form is never a common English word, never a content word, passes the
+  phonotactic check, and lies at least ``min_distance`` from every other function word. The
+  glosses come in order of frequency, and the most frequent half get two-phoneme shapes. With
+  ``source: english``, each gloss takes its English citation pronunciation instead, and the
+  dictionary's other pronunciations are recorded as its weak forms.
 - An **affix** is a bound form of shape C, VC, or V, with an unstressed vowel. A suffix is drawn
-  from the ends of the pattern words, and a prefix from their beginnings.
+  from the ends of the pattern words, and a prefix from their beginnings. An affix that more than
+  ``max_skipped`` of the content words cannot take is rejected. With ``source: english``, the
+  glosses PLURAL, PAST, and PROGRESSIVE become the English suffixes, with English allomorphy.
 - An **inflected form** is a stem joined to an affix. When the plain join fails the phonotactic
-  check, an unstressed schwa goes between the two. A pair that fails even then is skipped and
-  reported.
+  check, an unstressed schwa goes between the two. A pair that fails even then, or whose form is
+  a common English word, is skipped and reported.
 
 Every draw comes from the ``wordforms:closed_class`` stream, so closed-class forms never change a
 content word. A shape with no form left is drawn again from the other shapes, and the summary
@@ -21,6 +26,7 @@ records each time that happens.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -31,6 +37,7 @@ from semantic_world.wordforms.config import ClosedClassConfig, Config
 from semantic_world.wordforms.english import (
     English,
     Syllable,
+    base,
     edit_distance,
     is_vowel,
     load_english,
@@ -44,11 +51,39 @@ from semantic_world.wordforms.streams import Streams
 
 SCHWA = "AH0"
 """The vowel that joins a stem and an affix when the plain join is not legal."""
+SHORT_SHARE = 0.5
+"""The share of the function words, the most frequent ones, that get two-phoneme shapes."""
+
+SIBILANTS = frozenset(("S", "Z", "SH", "ZH", "CH", "JH"))
+VOICELESS = frozenset(("P", "T", "K", "F", "TH", "S", "SH", "CH"))
+ENGLISH_AFFIXES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "PLURAL": (("Z",), ("S",), ("IH0", "Z")),
+    "PAST": (("D",), ("T",), ("IH0", "D")),
+    "PROGRESSIVE": (("IH0", "NG"),),
+}
+"""The English suffixes and their allomorphs, the most general first."""
+
+
+def english_allomorph(gloss: str, stem: tuple[str, ...]) -> tuple[str, ...]:
+    """The English suffix for a stem: *-s* is ``IH0 Z`` after a sibilant, ``S`` after another
+    voiceless consonant, and ``Z`` otherwise; *-ed* is ``IH0 D`` after ``T`` or ``D``, ``T`` after
+    another voiceless consonant, and ``D`` otherwise."""
+    last = base(stem[-1])
+    if gloss == "PLURAL":
+        if last in SIBILANTS:
+            return ("IH0", "Z")
+        return ("S",) if last in VOICELESS else ("Z",)
+    if gloss == "PAST":
+        if last in ("T", "D"):
+            return ("IH0", "D")
+        return ("T",) if last in VOICELESS else ("D",)
+    return ENGLISH_AFFIXES[gloss][0]
 
 
 @dataclass(frozen=True)
 class Affix:
-    """A bound form. Phonemes are ARPAbet, and the vowel is unstressed."""
+    """A bound form. Phonemes are ARPAbet, and the vowel is unstressed. An English affix has
+    several allomorphs, and ``phones`` is the most general one."""
 
     label: str
     gloss: str
@@ -56,14 +91,26 @@ class Affix:
     """``suffix`` or ``prefix``."""
     phones: tuple[str, ...]
     ipa: str
+    allomorphs: tuple[tuple[str, ...], ...] = ()
+    """Every form of an English affix; empty for a generated affix."""
 
     @property
     def arpabet(self) -> str:
-        return " ".join(self.phones)
+        return " / ".join(" ".join(p) for p in self.forms)
+
+    @property
+    def forms(self) -> tuple[tuple[str, ...], ...]:
+        return self.allomorphs or (self.phones,)
 
     @property
     def shape(self) -> str:
         return shape_of(self.phones)
+
+    def select(self, stem: tuple[str, ...]) -> tuple[str, ...]:
+        """The affix's phonemes for a stem."""
+        if self.allomorphs:
+            return english_allomorph(self.gloss, stem)
+        return self.phones
 
     def record(self) -> dict[str, Any]:
         return {
@@ -146,10 +193,16 @@ def _draw(rng: np.random.Generator, items: list[tuple[Any, float]]) -> Any:
     return items[int(rng.choice(len(items), p=weights / weights.sum()))][0]
 
 
-def _draw_shape(rng: np.random.Generator, weights: dict[str, float], used_up: set[str]):
-    """A shape drawn by weight among the shapes that are not used up, or None when every shape
-    with a positive weight is used up."""
-    remaining = [(s, w) for s, w in weights.items() if w > 0 and s not in used_up]
+def _draw_shape(
+    rng: np.random.Generator, weights: dict[str, float], used_up: set[str], allowed=None
+):
+    """A shape drawn by weight among the shapes that are not used up (and are in ``allowed``,
+    when given), or None when every such shape with a positive weight is used up."""
+    remaining = [
+        (s, w)
+        for s, w in weights.items()
+        if w > 0 and s not in used_up and (allowed is None or s in allowed)
+    ]
     return _draw(rng, remaining) if remaining else None
 
 
@@ -198,21 +251,25 @@ def generate_function_words(
     english: English,
     content: list[WordForm],
 ) -> tuple[list[WordForm], dict[str, Any]]:
-    """One function word for each gloss, without statistics, and a report of the draws."""
+    """One function word for each gloss, without statistics, and a report of the draws. The
+    glosses are in order of frequency, and the first ``SHORT_SHARE`` of them (rounded up) take
+    two-phoneme shapes when a two-phoneme shape has weight."""
     content_forms = {w.stripped for w in content}
     pools: dict[str, list[tuple[Syllable, float]]] = {}
     candidates: dict[str, dict[str, int]] = {}
     for shape in settings.function_shapes:
         possible = function_candidates(english, shape)
         legal = [(s, w) for s, w in possible if english.phonotactic(s.phones)]
-        free = [(s, w) for s, w in legal if not english.is_pronunciation(s.phones)]
+        free = [(s, w) for s, w in legal if not english.is_common_pronunciation(s.phones)]
         pools[shape] = [(s, w) for s, w in free if strip_stress(s.phones) not in content_forms]
         candidates[shape] = {
             "possible": len(possible),
             "pass_the_phonotactic_check": len(legal),
-            "not_english_words": len(free),
+            "not_common_english_words": len(free),
             "not_content_words": len(pools[shape]),
         }
+    two_phoneme = {s for s in settings.function_shapes if len(s) == 2}
+    short = math.ceil(SHORT_SHARE * len(settings.glosses))
     words: list[WordForm] = []
     accepted: list[tuple[str, ...]] = []
     shapes: Counter[str] = Counter()
@@ -220,8 +277,12 @@ def generate_function_words(
     for index, gloss in enumerate(settings.glosses):
         label = f"F.{index + 1}"
         used_up: set[str] = set()
+        allowed = two_phoneme if index < short and two_phoneme else None
         while True:
-            shape = _draw_shape(rng, settings.function_shapes, used_up)
+            shape = _draw_shape(rng, settings.function_shapes, used_up, allowed)
+            if shape is None and allowed is not None:
+                allowed = None  # the two-phoneme shapes are used up: any shape will do
+                continue
             if shape is None:
                 raise GenerationError(
                     f"no form is left for the function word {label} ({gloss}): every shape is "
@@ -243,7 +304,9 @@ def generate_function_words(
         accepted.append(strip_stress(syllable.phones))
         shapes[shape] += 1
     report = {
+        "source": "pseudo",
         "count": len(words),
+        "two_phoneme_words": min(short, len(words)),
         "shapes": {s: shapes[s] for s in settings.function_shapes if shapes[s]},
         "shape_redraws": {s: redraws[s] for s in settings.function_shapes if redraws[s]},
         "candidates": candidates,
@@ -251,19 +314,84 @@ def generate_function_words(
     return words, report
 
 
+def english_function_words(
+    settings: ClosedClassConfig, english: English
+) -> tuple[list[WordForm], dict[str, Any]]:
+    """Each gloss's English word: its citation pronunciation (the first dictionary pronunciation
+    with primary stress, or else the first), with the other pronunciations as weak forms."""
+    words: list[WordForm] = []
+    for index, gloss in enumerate(settings.glosses):
+        prons = english.words.get(gloss)
+        if prons is None:
+            raise GenerationError(
+                f"the function word {gloss!r} has no English pronunciation in the dictionary; "
+                f"with closed_class.function_words.source english, every gloss must be an "
+                f"English word"
+            )
+        citation = next((p for p in prons if any(x.endswith("1") for x in p)), prons[0])
+        weak = tuple(" ".join(p) for p in prons if p != citation)
+        words.append(
+            WordForm(
+                f"F.{index + 1}",
+                english.syllables[citation],
+                real_word=True,
+                english_word=gloss,
+                kind="function",
+                gloss=gloss,
+                weak_forms=weak,
+            )
+        )
+    return words, {"source": "english", "count": len(words)}
+
+
 # ---------------------------------------------------------------------------------------------
 # Affixes and inflected forms
 # ---------------------------------------------------------------------------------------------
 
 
+def join(stem: tuple[str, ...], affix: Affix, schwa: bool = False) -> tuple[str, ...]:
+    """The phonemes of a stem with an affix, with or without a schwa between the two."""
+    middle = (SCHWA,) if schwa else ()
+    phones = affix.select(stem)
+    if affix.position == "prefix":
+        return phones + middle + stem
+    return stem + middle + phones
+
+
+def _can_take(english: English, stem: tuple[str, ...], affix: Affix, epenthesis: bool) -> bool:
+    """Whether a stem takes an affix: the plain join passes the phonotactic check, or the join
+    with a schwa does when epenthesis is on."""
+    if english.phonotactic(join(stem, affix)):
+        return True
+    return epenthesis and english.phonotactic(join(stem, affix, schwa=True))
+
+
+def skipped_share(
+    english: English, phones: tuple[str, ...], position: str, content, epenthesis: bool
+) -> float:
+    """The share of the content words that cannot take an affix with these phonemes."""
+    if not content:
+        return 0.0
+    trial = Affix("", "", position, phones, "")
+    failing = sum(not _can_take(english, stem.phones, trial, epenthesis) for stem in content)
+    return failing / len(content)
+
+
 def generate_affixes(
-    settings: ClosedClassConfig, rng: np.random.Generator, english: English, ipa: PhonemeTable
+    settings: ClosedClassConfig,
+    rng: np.random.Generator,
+    english: English,
+    ipa: PhonemeTable,
+    content: list[WordForm] | None = None,
 ) -> tuple[list[Affix], dict[str, Any]]:
-    """One affix for each item. Two affixes never have the same phonemes."""
+    """One affix for each item. Two affixes never have the same phonemes, and an affix that more
+    than ``max_skipped`` of the content words cannot take is rejected."""
+    content = content or []
     affixes: list[Affix] = []
     used: set[tuple[str, ...]] = set()
     shapes: Counter[str] = Counter()
     redraws: Counter[str] = Counter()
+    rejected: dict[str, int] = {}
     for index, item in enumerate(settings.affixes):
         label = f"AF.{index + 1}"
         used_up: set[str] = set()
@@ -272,13 +400,22 @@ def generate_affixes(
             if shape is None:
                 raise GenerationError(
                     f"no form is left for the affix {label} ({item.gloss}); give another shape "
-                    f"weight in closed_class.affixes.shapes, or ask for fewer affixes"
+                    f"weight in closed_class.affixes.shapes, raise closed_class.affixes."
+                    f"max_skipped, or ask for fewer affixes"
                 )
-            live = [
+            fresh = [
                 (phones, w)
                 for phones, w in affix_candidates(english, shape, item.position)
                 if phones not in used
             ]
+            shares = {
+                phones: skipped_share(english, phones, item.position, content, settings.epenthesis)
+                for phones, _ in fresh
+            }
+            key = f"{item.position} {shape}"
+            if key not in rejected:
+                rejected[key] = sum(share > settings.max_skipped for share in shares.values())
+            live = [(p, w) for p, w in fresh if shares[p] <= settings.max_skipped]
             if live:
                 break
             used_up.add(shape)
@@ -290,19 +427,40 @@ def generate_affixes(
             Affix(label, item.gloss, item.position, phones, "".join(ipa.phone(p) for p in phones))
         )
     report = {
+        "source": "pseudo",
         "count": len(affixes),
         "shapes": {s: shapes[s] for s in settings.affix_shapes if shapes[s]},
         "shape_redraws": {s: redraws[s] for s in settings.affix_shapes if redraws[s]},
+        "max_skipped": settings.max_skipped,
+        "candidates_rejected_for_skipped_stems": rejected,
     }
     return affixes, report
 
 
-def join(stem: tuple[str, ...], affix: Affix, schwa: bool = False) -> tuple[str, ...]:
-    """The phonemes of a stem with an affix, with or without a schwa between the two."""
-    middle = (SCHWA,) if schwa else ()
-    if affix.position == "prefix":
-        return affix.phones + middle + stem
-    return stem + middle + affix.phones
+def english_affixes(
+    settings: ClosedClassConfig, ipa: PhonemeTable
+) -> tuple[list[Affix], dict[str, Any]]:
+    """The English suffixes for the glosses PLURAL, PAST, and PROGRESSIVE."""
+    affixes = []
+    for index, item in enumerate(settings.affixes):
+        allomorphs = ENGLISH_AFFIXES.get(item.gloss)
+        if allomorphs is None:
+            raise GenerationError(
+                f"the affix {item.gloss!r} has no English equivalent; with "
+                f"closed_class.affixes.source english, the glosses are "
+                f"{', '.join(ENGLISH_AFFIXES)}"
+            )
+        affixes.append(
+            Affix(
+                f"AF.{index + 1}",
+                item.gloss,
+                item.position,
+                allomorphs[0],
+                " / ".join("".join(ipa.phone(p) for p in form) for form in allomorphs),
+                allomorphs,
+            )
+        )
+    return affixes, {"source": "english", "count": len(affixes)}
 
 
 def inflection_pairs(
@@ -329,33 +487,33 @@ def inflect(
     pairs: list[tuple[WordForm, Affix]],
 ) -> tuple[list[tuple[WordForm, str]], list[dict[str, str]]]:
     """The inflected form of each pair, with its spelling, and the pairs that were skipped. The
-    spelling is the stem's spelling with the affix's spelling, so that a reader sees the stem."""
+    spelling is the stem's spelling with the affix's spelling, so that a reader sees the stem.
+    An English affix takes its allomorph for the stem, never a schwa, and no phonotactic check:
+    only the check that the form is not a common English word."""
     forms: list[tuple[WordForm, str]] = []
     skipped: list[dict[str, str]] = []
+
+    def skip(stem: WordForm, affix: Affix, reason: str) -> None:
+        skipped.append({"stem": stem.label, "affix": affix.label, "reason": reason})
+
     for stem, affix in pairs:
         phones = join(stem.phones, affix)
         epenthesis = False
-        if not english.phonotactic(phones):
+        # An English affix is regular English morphology, so its join is not checked against
+        # the trigrams of the uninflected pattern words, which lack the inflectional endings.
+        if not affix.allomorphs and not english.phonotactic(phones):
             if not settings.epenthesis:
-                skipped.append(
-                    {
-                        "stem": stem.label,
-                        "affix": affix.label,
-                        "reason": "the plain join fails the phonotactic check",
-                    }
-                )
+                skip(stem, affix, "the plain join fails the phonotactic check")
                 continue
             phones = join(stem.phones, affix, schwa=True)
             epenthesis = True
             if not english.phonotactic(phones):
-                skipped.append(
-                    {
-                        "stem": stem.label,
-                        "affix": affix.label,
-                        "reason": "the join fails the phonotactic check with the schwa too",
-                    }
-                )
+                skip(stem, affix, "the join fails the phonotactic check with the schwa too")
                 continue
+        if english.is_common_pronunciation(phones):
+            word = english.common_words_with_pronunciation(phones)[0]
+            skip(stem, affix, f"the form is the common English word {word!r}")
+            continue
         form = WordForm(
             f"{stem.label}.{affix.label}",
             syllabify(phones, english.onsets),
@@ -366,10 +524,11 @@ def inflect(
             epenthesis=epenthesis,
         )
         middle = (SCHWA,) if epenthesis else ()
+        selected = affix.select(stem.phones)
         if affix.position == "prefix":
-            spelling = speller.spell(affix.phones + middle) + stem.spelling
+            spelling = speller.spell(selected + middle) + stem.spelling
         else:
-            spelling = stem.spelling + speller.spell(middle + affix.phones)
+            spelling = stem.spelling + speller.spell(middle + selected)
         forms.append((form, spelling))
     return forms, skipped
 
@@ -388,23 +547,31 @@ def add_closed_class(
     settings = config.closed_class
     if settings is None:
         return lexicon
-    english = english or load_english(config.wordforms.english_min_zipf)
+    english = english or load_english(
+        config.wordforms.english_min_zipf, config.wordforms.exclude_inflections
+    )
     tables = load_tables()
     speller = Speller.load()
     content = lexicon.content
     content_forms = [w.stripped for w in content]
     spellings = {w.spelling for w in content}
 
-    function_words, function_report = generate_function_words(
-        settings, streams.substream("closed_class", "function_words"), english, content
-    )
+    if settings.function_source == "english":
+        function_words, function_report = english_function_words(settings, english)
+    else:
+        function_words, function_report = generate_function_words(
+            settings, streams.substream("closed_class", "function_words"), english, content
+        )
     for word in function_words:
-        spelling = speller.spell_avoiding(word.phones, english.pattern_words)
+        spelling = word.english_word or speller.spell_avoiding(word.phones, english.pattern_words)
         _add_statistics(word, spelling, english, tables, content_forms, spellings)
 
-    affixes, affix_report = generate_affixes(
-        settings, streams.substream("closed_class", "affixes"), english, tables[0]
-    )
+    if settings.affix_source == "english":
+        affixes, affix_report = english_affixes(settings, tables[0])
+    else:
+        affixes, affix_report = generate_affixes(
+            settings, streams.substream("closed_class", "affixes"), english, tables[0], content
+        )
     pairs = inflection_pairs(settings, content, affixes)
     inflected, skipped = inflect(settings, english, speller, pairs)
     for form, spelling in inflected:
@@ -425,13 +592,14 @@ def add_closed_class(
             "made": len(inflected),
             "with_schwa": sum(bool(form.epenthesis) for form, _ in inflected),
             "skipped": skipped,
+            "skipped_as_common_words": sum("common English" in s["reason"] for s in skipped),
         },
         # forms that sound the same as another form of the run, or as a dictionary word
         "identical_forms": [labels for labels in by_form.values() if len(labels) > 1],
         "english_words": {
             word.label: english.words_with_pronunciation(word.phones)[0]
             for word in added
-            if english.is_pronunciation(word.phones)
+            if not word.real_word and english.is_pronunciation(word.phones)
         },
     }
     return lexicon
