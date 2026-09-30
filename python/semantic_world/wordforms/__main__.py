@@ -1,8 +1,9 @@
 """The command line: ``python -m semantic_world.wordforms <subcommand> ...``.
 
 Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms; ``synth`` also
-synthesizes them; ``frontends`` also computes the auditory front ends; ``all`` runs every built
-layer (in stage 3, the same as ``frontends``);
+synthesizes them; ``frontends`` also computes the auditory front ends; ``embed`` also computes
+the sound embeddings; ``eval`` also evaluates them; ``assign`` generates the word forms and
+assigns them to meanings; ``all`` runs every layer;
 ``check-ipa [--sample N] [--seed N]`` reports the agreement between the IPA table and espeak-ng;
 and ``check-whisper CONFIG`` reports how well a Whisper model recognizes real words synthesized
 from their phonemes.
@@ -17,7 +18,16 @@ from pathlib import Path
 
 import yaml
 
-from semantic_world.wordforms import load_config, run_forms, run_frontends, run_synthesis
+from semantic_world.wordforms import (
+    load_config,
+    run_assignment,
+    run_embeddings,
+    run_evaluation,
+    run_forms,
+    run_frontends,
+    run_synthesis,
+)
+from semantic_world.wordforms.assign import AssignmentError
 from semantic_world.wordforms.config import ConfigError
 from semantic_world.wordforms.generate import GenerationError
 from semantic_world.wordforms.phonemes import IPA_TABLE, PhonemeTable, espeak_path, ipa_agreement
@@ -33,6 +43,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         ("forms", "generate the word forms"),
         ("synth", "generate the word forms and synthesize them"),
         ("frontends", "word forms, synthesis, and the auditory front ends"),
+        ("embed", "word forms, synthesis, front ends, and the sound embeddings"),
+        ("eval", "everything up to the evaluation of the embeddings"),
+        ("assign", "word forms and their assignment to meanings"),
         ("all", "run every layer that is built"),
     ):
         sub = subparsers.add_parser(name, help=help_text)
@@ -89,12 +102,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_config(args.config, seed=args.seed)
         run = run_forms(config)
-        if args.command in ("synth", "frontends", "all"):
+        if args.command in ("synth", "frontends", "embed", "eval", "all"):
             run_synthesis(run, progress=_progress)
-        if args.command in ("frontends", "all"):
+        if args.command in ("frontends", "embed", "eval", "all"):
             run_frontends(run, args.out, progress=_frontend_progress)
+        if args.command in ("embed", "eval", "all"):
+            run_embeddings(run, args.out, progress=_frontend_progress)
+        if args.command in ("eval", "all"):
+            run_evaluation(run, args.out)
+        if args.command in ("assign", "all"):
+            run_assignment(run)
         folder = run.write(args.out)
-    except (ConfigError, GenerationError, RuntimeError, ValueError) as error:
+    except (ConfigError, GenerationError, AssignmentError, RuntimeError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     summary = run.summary()
@@ -121,7 +140,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"front end {name}: {frontend['frames']} frames of {frontend['channels']} channels "
             f"at {frontend['frame_rate']:g} per second, {state}"
         )
+    for name, embedding in summary.get("embeddings", {}).items():
+        state = "already stored" if embedding["reused"] else "computed"
+        kind = "pretrained" if embedding["pretrained"] else embedding["encoder"]
+        print(f"embedding {name} ({kind}): {embedding['dims']} dimensions, {state}")
+    if run.evaluation is not None:
+        print(f"evaluation: {folder / 'eval' / 'embeddings.csv'}")
+        print(_evaluation_text(run.evaluation))
+    if "assignment" in summary:
+        assignment = summary["assignment"]
+        print(
+            f"assignment ({assignment['mode']}): {assignment['meanings']} meanings, "
+            f"sound-meaning correlation {assignment['correlation']} "
+            f"(null mean {assignment['null']['mean']}, p = {assignment['null']['p_value']})"
+        )
     return 0
+
+
+def _evaluation_text(table) -> str:
+    """The configured rows of the evaluation table, as aligned text."""
+    lines = [
+        f"  {'embedding':24s} {'dims':>5s}  {'within':>7s} {'across':>7s} {'held-out':>8s}  "
+        f"{'fidelity':>8s}"
+    ]
+    for row in table.filter(table["configured"]).iter_rows(named=True):
+        name = row["embedding"] + ("" if row["layer"] is None else f" (layer {row['layer']})")
+        values = [row["ap_within_speaker"], row["ap_across_train"], row["ap_held_out"]]
+        shown = ["   n/a " if v is None else f"{v:7.3f}" for v in values]
+        fidelity = row["fidelity_spearman"]
+        lines.append(
+            f"  {name:24s} {row['dims']:5d}  {shown[0]} {shown[1]} {shown[2]:>8s}  "
+            + ("     n/a" if fidelity is None else f"{fidelity:8.3f}")
+        )
+    return "\n".join(lines)
 
 
 def _frontend_progress(name: str, done: int, total: int) -> None:

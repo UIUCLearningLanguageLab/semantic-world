@@ -48,7 +48,7 @@ needs_piper = pytest.mark.skipif(
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
-def _whisper_cached() -> bool:
+def _model_cached(model: str) -> bool:
     if (
         importlib.util.find_spec("transformers") is None
         or importlib.util.find_spec("torch") is None
@@ -56,7 +56,25 @@ def _whisper_cached() -> bool:
         return False
     from huggingface_hub import try_to_load_from_cache
 
-    return isinstance(try_to_load_from_cache("openai/whisper-small.en", "config.json"), str)
+    return isinstance(try_to_load_from_cache(model, "config.json"), str)
+
+
+def _whisper_cached() -> bool:
+    return _model_cached("openai/whisper-small.en")
+
+
+needs_torch = pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None,
+    reason="the torch and transformers packages are not installed (the 'speech' extra)",
+)
+
+needs_hubert = pytest.mark.skipif(
+    not _model_cached("facebook/hubert-base-ls960"),
+    reason=(
+        "torch, transformers, or the cached model facebook/hubert-base-ls960 is missing (run: "
+        "python -m semantic_world.wordforms embed data/wordforms/default.yaml)"
+    ),
+)
 
 
 needs_whisper = pytest.mark.skipif(

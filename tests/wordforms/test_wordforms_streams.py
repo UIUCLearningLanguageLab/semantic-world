@@ -18,6 +18,7 @@ def test_stream_names_match_the_spec():
         "pca",
         "train",
         "assign",
+        "eval",
     )
     assert list(Streams(1).seeds()) == [f"wordforms:{n}" for n in STREAM_NAMES]
 

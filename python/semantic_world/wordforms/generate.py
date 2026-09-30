@@ -347,3 +347,25 @@ def _add_statistics(
             and abs(len(other) - len(stripped[i])) <= 1
             and edit_distance(stripped[i], other) == 1
         )
+
+
+def word_form_from_arpabet(label: str, arpabet: str, english_min_zipf: float | None) -> WordForm:
+    """A word form from an ARPAbet string with stress digits on its vowels, such as
+    ``K AE1 T``: syllabified, with its IPA and espeak-ng strings and its spelling."""
+    from semantic_world.wordforms.english import PHONEMES, base, is_vowel, syllabify
+
+    phones = tuple(arpabet.split())
+    unknown = [p for p in phones if base(p) not in PHONEMES]
+    if unknown or not phones:
+        raise ValueError(f"not ARPAbet phonemes: {' '.join(unknown) or arpabet!r}")
+    unstressed = [p for p in phones if is_vowel(p) and not p[-1].isdigit()]
+    if unstressed:
+        raise ValueError(f"vowels need a stress digit (0, 1, or 2): {' '.join(unstressed)}")
+    english = load_english(english_min_zipf)
+    ipa_table, espeak_table = load_tables()
+    syllables = syllabify(phones, english.onsets)
+    form = WordForm(label, syllables, real_word=english.is_pronunciation(phones))
+    form.ipa = ipa_table.render(syllables)
+    form.espeak = espeak_table.render(syllables)
+    form.spelling = Speller.load().spell(phones)
+    return form

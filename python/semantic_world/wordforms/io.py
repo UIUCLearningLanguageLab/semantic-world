@@ -67,6 +67,7 @@ PACKAGES = (
     "piper-tts",
     "onnxruntime",
     "torch",
+    "transformers",
 )
 
 
