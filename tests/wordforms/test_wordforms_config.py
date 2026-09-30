@@ -95,6 +95,29 @@ def test_level_and_duration_check_settings(default_config):
         assert info.value.field == field
 
 
+def test_frontend_settings_are_checked_against_the_sample_rate():
+    config = parse_config({}, "x")
+    assert config.frontends.store_waveform is False
+    assert config.resolved()["frontends"]["waveform"] == {"store": False}
+    stored = parse_config({"frontends": {"waveform": {"store": True}}}, "x")
+    assert stored.frontends.store_waveform is True
+    assert parse_config(stored.resolved(), "x").frontends.store_waveform is True
+    for data, field, message in (
+        ({"cochleagram": {"frame_rate": 300}}, "frontends.cochleagram.frame_rate", "divide"),
+        ({"cochleagram": {"high_hz": 9000}}, "frontends.cochleagram.high_hz", "half the sample"),
+        ({"cochleagram": {"channels": 2}}, "frontends.cochleagram.channels", "at least 3"),
+        ({"logmel": {"window_ms": 5, "hop_ms": 10}}, "frontends.logmel.window_ms", "hop_ms"),
+        ({"waveform": {"keep": True}}, "frontends.waveform.keep", "unknown key"),
+    ):
+        with pytest.raises(ConfigError) as info:
+            parse_config({"frontends": data}, "x")
+        assert info.value.field == field and message in str(info.value)
+    # a lower sample rate lowers the highest allowed frequency
+    with pytest.raises(ConfigError) as info:
+        parse_config({"synthesis": {"sample_rate": 8000}}, "x")
+    assert info.value.field == "frontends.cochleagram.high_hz"
+
+
 def test_seed_override():
     config = load_config(DATA / "default.yaml", seed=7)
     assert config.seed == 7

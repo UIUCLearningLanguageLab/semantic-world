@@ -234,6 +234,8 @@ class CochleagramConfig:
 class FrontendsConfig:
     logmel: LogmelConfig | None
     cochleagram: CochleagramConfig | None
+    store_waveform: bool = False
+    """Whether a run stores the waveform front end. Stored waveforms repeat the audio cache."""
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -247,6 +249,7 @@ class FrontendsConfig:
 
     def resolved(self) -> dict[str, Any]:
         return {
+            "waveform": {"store": self.store_waveform},
             "logmel": None if self.logmel is None else self.logmel.resolved(),
             "cochleagram": None if self.cochleagram is None else self.cochleagram.resolved(),
         }
@@ -633,7 +636,10 @@ def _read_synthesis(node: _Node) -> SynthesisConfig:
     return config
 
 
-def _read_frontends(node: _Node) -> FrontendsConfig:
+def _read_frontends(node: _Node, sample_rate: int) -> FrontendsConfig:
+    waveform_node = node.mapping("waveform")
+    store_waveform = waveform_node.bool("store", False)
+    waveform_node.finish()
     logmel_node = node.mapping("logmel", nullable=True)
     logmel = None
     if logmel_node is not None:
@@ -643,21 +649,33 @@ def _read_frontends(node: _Node) -> FrontendsConfig:
             hop_ms=logmel_node.number("hop_ms", 10, min=0, exclusive_min=True),
         )
         logmel_node.finish()
+        if logmel.window_ms < logmel.hop_ms:
+            raise logmel_node.error("window_ms", "must be at least hop_ms")
+        if round(logmel.hop_ms * sample_rate / 1000.0) < 1:
+            raise logmel_node.error("hop_ms", "is shorter than one sample")
     cochleagram_node = node.mapping("cochleagram", nullable=True)
     cochleagram = None
     if cochleagram_node is not None:
         low = cochleagram_node.number("low_hz", 50, min=0, exclusive_min=True)
         high = cochleagram_node.number("high_hz", 8000, min=low, exclusive_min=True)
         cochleagram = CochleagramConfig(
-            channels=cochleagram_node.int("channels", 64, min=1),
+            channels=cochleagram_node.int("channels", 64, min=3),
             low_hz=low,
             high_hz=high,
             compression=cochleagram_node.number("compression", 0.3, min=0, exclusive_min=True),
             frame_rate=cochleagram_node.int("frame_rate", 100, min=1),
         )
         cochleagram_node.finish()
+        if cochleagram.high_hz > sample_rate / 2:
+            raise cochleagram_node.error(
+                "high_hz", f"must be at most half the sample rate ({sample_rate / 2:g} Hz)"
+            )
+        if sample_rate % cochleagram.frame_rate != 0:
+            raise cochleagram_node.error(
+                "frame_rate", f"must divide the sample rate ({sample_rate})"
+            )
     node.finish({"modulation": LATER_STAGES["frontends.modulation"]})
-    return FrontendsConfig(logmel=logmel, cochleagram=cochleagram)
+    return FrontendsConfig(logmel=logmel, cochleagram=cochleagram, store_waveform=store_waveform)
 
 
 def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[EmbeddingConfig, ...]:
@@ -735,7 +753,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         file_seed = seed
     wordforms = _read_wordforms(root.mapping("wordforms"))
     synthesis = _read_synthesis(root.mapping("synthesis"))
-    frontends = _read_frontends(root.mapping("frontends"))
+    frontends = _read_frontends(root.mapping("frontends"), synthesis.sample_rate)
     embeddings = _read_embeddings(root, frontends)
     augmentation = root.get("augmentation", None, nullable=True)
     if augmentation is not None:

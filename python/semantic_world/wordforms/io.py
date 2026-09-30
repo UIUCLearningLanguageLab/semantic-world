@@ -65,6 +65,8 @@ PACKAGES = (
     "soundfile",
     "piper-tts",
     "onnxruntime",
+    "torch",
+    "chcochleagram",
 )
 
 

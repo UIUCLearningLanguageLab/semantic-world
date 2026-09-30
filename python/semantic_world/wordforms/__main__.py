@@ -1,7 +1,8 @@
 """The command line: ``python -m semantic_world.wordforms <subcommand> ...``.
 
 Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms; ``synth`` also
-synthesizes them; ``all`` runs every built layer (in stage 2, the same as ``synth``);
+synthesizes them; ``frontends`` also computes the auditory front ends; ``all`` runs every built
+layer (in stage 3, the same as ``frontends``);
 ``check-ipa [--sample N] [--seed N]`` reports the agreement between the IPA table and espeak-ng;
 and ``check-whisper CONFIG`` reports how well a Whisper model recognizes real words synthesized
 from their phonemes.
@@ -16,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from semantic_world.wordforms import load_config, run_forms, run_synthesis
+from semantic_world.wordforms import load_config, run_forms, run_frontends, run_synthesis
 from semantic_world.wordforms.config import ConfigError
 from semantic_world.wordforms.generate import GenerationError
 from semantic_world.wordforms.phonemes import IPA_TABLE, PhonemeTable, espeak_path, ipa_agreement
@@ -31,6 +32,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name, help_text in (
         ("forms", "generate the word forms"),
         ("synth", "generate the word forms and synthesize them"),
+        ("frontends", "word forms, synthesis, and the auditory front ends"),
         ("all", "run every layer that is built"),
     ):
         sub = subparsers.add_parser(name, help=help_text)
@@ -87,10 +89,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_config(args.config, seed=args.seed)
         run = run_forms(config)
-        if args.command in ("synth", "all"):
+        if args.command in ("synth", "frontends", "all"):
             run_synthesis(run, progress=_progress)
+        if args.command in ("frontends", "all"):
+            run_frontends(run, args.out, progress=_frontend_progress)
         folder = run.write(args.out)
-    except (ConfigError, GenerationError, RuntimeError) as error:
+    except (ConfigError, GenerationError, RuntimeError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     summary = run.summary()
@@ -111,7 +115,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"duration check: {check['retried']} clips tried again, "
             f"{check['still_over_limit']} still over the limit"
         )
+    for name, frontend in summary.get("frontends", {}).items():
+        state = "already stored" if frontend["reused"] else "computed"
+        print(
+            f"front end {name}: {frontend['frames']} frames of {frontend['channels']} channels "
+            f"at {frontend['frame_rate']:g} per second, {state}"
+        )
     return 0
+
+
+def _frontend_progress(name: str, done: int, total: int) -> None:
+    if done % 5000 == 0 or done == total:
+        print(f"  {name}: {done} of {total} tokens", file=sys.stderr)
 
 
 def _progress(done: int, total: int) -> None:

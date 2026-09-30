@@ -46,6 +46,8 @@ speech = [
     "piper-tts>=1.8,<1.9",
     "torch>=2.14,<2.15",
     "transformers>=5.17,<5.18",
+    # The cochleagram front end. chcochleagram (MIT) is not on PyPI, so it is pinned to a commit.
+    "chcochleagram @ git+https://github.com/jenellefeather/chcochleagram@731387778e40ee0298fdb13ac72789802f8e3cbb",
 ]
 
 [project.urls]
