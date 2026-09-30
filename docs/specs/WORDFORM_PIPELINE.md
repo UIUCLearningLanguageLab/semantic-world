@@ -34,6 +34,11 @@ Labels follow the taxonomy generator's convention: formal labels, indices starti
 | Word | `W.<n>` | `W.12` |
 | Speaker | `S.<n>` | `S.3` |
 | Token (one recording) | `W.<n>.S.<m>.<k>` | `W.12.S.3.2` is token 2 of word 12 by speaker 3 |
+| Function word | `F.<n>`, with a gloss | `F.2`, gloss `the` |
+| Affix | `AF.<n>`, with a gloss | `AF.1`, gloss `PLURAL` |
+| Inflected form | `W.<n>.AF.<m>` | `W.12.AF.1` is word 12 with affix 1 |
+
+Tokens of function words and inflected forms extend their labels the same way: `F.2.S.3.1`, `W.12.AF.1.S.3.2`.
 
 ## Layer 1: word forms
 
@@ -171,6 +176,57 @@ When some words are flagged `long_synthesis`, every row of the evaluation is giv
 
 `SoundEmbeddings.embed(forms, speakers)` runs a new word form through the same pipeline: synthesis, the front end, and the frozen encoder. The result for a form already in the lexicon must equal the stored embedding for the same speaker and settings, within numerical tolerance. `embed` must look up the audio cache before synthesizing, because Piper cannot reproduce a clip on demand.
 
+## Closed-class forms: function words, affixes, and inflected forms
+
+The corpus generator (`docs/specs/CORPUS_GENERATOR.md`) needs three kinds of form beside content words. Content words are an open class: a language keeps adding them. Function words and affixes are a closed class: a small, fixed set used constantly. Real languages give closed-class items short, simple forms, and the pipeline does the same.
+
+### The request
+
+The closed-class forms a run needs are listed in a closed-class request, given in the configuration or in a separate YAML file named there. The corpus generator will write such a file. The request lists glosses, which are names for human readers, and says which words to inflect:
+
+```yaml
+function_words: [a, the, all, most, some, no, not, can, is, has, with, without, and, that, it]
+affixes:
+  - {gloss: PLURAL, position: suffix}
+  - {gloss: PAST, position: suffix}
+  - {gloss: PROGRESSIVE, position: suffix}
+inflect:
+  - {words: all, affixes: [PLURAL]}
+```
+
+`words` in an `inflect` entry is `all`, `none`, or a list of word labels. With `closed_class: null`, a run has content words only, as before.
+
+### Function words
+
+A function word has one syllable. Its shape is drawn from configured weights over simple shapes: consonant and vowel (CV), CVC, VC, and V. The onset is at most one consonant, and so is the coda. Consonants and vowels are drawn from the common-word counts that content words use, restricted to these simple shapes, so function words use the most frequent sounds of English. A candidate function word is rejected when:
+
+- it fails the phonotactic check;
+- it is a real English word, checked against the whole dictionary, as for content words;
+- it lies closer than `function_words.min_distance` (default 2) to another function word;
+- it is identical to a content word.
+
+The default distance of 2 keeps function words from being minimal pairs of each other. Function words are short and frequent, so confusions between them would be costly for a learner.
+
+Function words are synthesized and embedded like content words, by every speaker. Synthesis gives the citation form, spoken alone. The reduced forms of running speech ("the" as "thuh") are out of scope until sentences are synthesized as wholes.
+
+### Affixes
+
+An affix is a bound form: it never occurs alone, and it is never synthesized alone. Its shape is drawn from configured weights over C (one consonant, like English -s), VC (like -ing), and V (like -y). Suffixes are the default, and `position: prefix` makes a prefix. Two affixes must differ in at least one phoneme. An affix's vowel is unstressed.
+
+**Joining.** An inflected form is the stem's phonemes followed by the affix's phonemes (or the reverse, for a prefix). When the join creates a sequence that fails the phonotactic check, an unstressed schwa (AH0) is inserted between stem and affix. English does the same with the plural of "bus". The rule gives affixes a simple, learnable variant, and the word table records where it applied. When a form still fails the check after the schwa is inserted, that stem and affix pair is skipped and reported.
+
+### Inflected forms
+
+Every stem and affix pair named by an `inflect` entry becomes an inflected form, labeled `W.<n>.AF.<m>`. Inflected forms are synthesized, cached, and embedded like any word, by every speaker. Inflection multiplies synthesis: inflecting 500 words with 3 affixes quadruples the audio. The default configuration therefore inflects nothing, and the tiny configuration inflects every word with every affix.
+
+### Independence from content words
+
+Adding closed-class forms never changes a content word's form, audio, or embedding. Closed-class forms draw from their own stream, `wordforms:closed_class`. A token's rate and pitch perturbation must not depend on which other tokens exist in the run. If the current synthesis draws perturbations in a way that depends on the other tokens, stop and write a proposal before changing it, because changing it would change the audio of existing runs.
+
+### Evaluation by kind
+
+The evaluation reports every measure for each kind of form separately (`kind`: `content`, `function`, or `inflected`), as well as for all forms together. It adds one measure for inflected forms, the **stem AUC**: the probability that an inflected form's embedding is closer to its own stem's embedding than to a randomly chosen other stem's. The stem AUC measures how visible morphology is in each embedding. A high stem AUC means a model reading the embeddings could notice that "blick" and "blicks" share a stem.
+
 ## Using the embeddings in other models
 
 The Python interface is a `SoundEmbeddings` object with:
@@ -254,6 +310,18 @@ embeddings:
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
 
+closed_class:                    # null: content words only
+  request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
+  function_words:
+    glosses: [a, the, all, most, some, no, not, can, is, has, with, without, and, that, it]
+    shapes: {CV: 0.4, CVC: 0.3, VC: 0.2, V: 0.1}
+    min_distance: 2
+  affixes:
+    items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
+    shapes: {C: 0.4, VC: 0.4, V: 0.2}
+    epenthesis: true
+  inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
+
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}
 device: auto                     # cpu, cuda, mps, or auto
@@ -263,7 +331,7 @@ Also add `data/wordforms/tiny.yaml` (20 words, 3 speakers per engine, 1 token pe
 
 ## Determinism
 
-Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:train`, `wordforms:assign`, and `wordforms:eval`. The principal component projection of the fixed encoder is exact and needs no stream. The `wordforms:eval` stream draws the evaluation's sample of tokens. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
+Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:train`, `wordforms:assign`, `wordforms:eval`, and `wordforms:closed_class`. The principal component projection of the fixed encoder is exact and needs no stream. The `wordforms:eval` stream draws the evaluation's sample of tokens. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
 
 ## Outputs
 
@@ -272,7 +340,8 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). |
+| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), and `stem`, `affix`, and `epenthesis` (inflected forms). |
+| `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
@@ -314,7 +383,7 @@ The repository is Apache-2.0. `piper-tts` (since version 1.3.0), espeak-ng, and 
 
 Work on a branch for each stage (`wordforms-stage-1`, and so on), each branched from the previous stage's branch unless Jon has merged it into `main`. Each stage ends with its tests passing, the full check list in `CLAUDE.md` passing, and a commit.
 
-Stages 1–4 are the fast path to usable embeddings.
+Stages 1–4 are the fast path to usable embeddings. Stage 4a, closed-class forms, comes after stage 4 and before stage 5; it is described after the list.
 
 1. **Word forms.** CMUdict loading, syllabification, counts, the trigram model, the generator, the filters, statistics, spelling, and the two mapping tables. *Accept:* the syllabifier matches a hand-checked list of 30 words; every generated form passes the phonotactic check; with real words excluded, no form is a CMUdict pronunciation; every pair of forms respects `min_lexicon_distance`; the syllable counts match the configured distribution within tolerance; the same seed gives identical word tables; the agreement between the IPA table and espeak-ng's IPA is reported.
 2. **Synthesis.** Both engines, speakers, tokens, trimming, and the cache. *Accept:* every clip is mono, 16 kHz, unclipped, and trimmed; a second run reads the cache without synthesizing; the reproducibility of each engine is tested and recorded; a Whisper model (`openai/whisper-small.en`) transcribes 200 common real English words synthesized from their phonemes, and the accuracy is reported for each engine (provisional thresholds: 80% for Piper, 60% for espeak-ng; if a threshold is missed, report the miss rather than tuning to pass).
@@ -324,6 +393,8 @@ Stages 1–4 are the fast path to usable embeddings.
 6. **Learned encoders.** The contrastive acoustic word encoder and the self-supervised encoder, trained on the world's own audio. *Accept:* training on a CPU with a fixed seed is reproducible; evaluation results, including held-out speakers, are reported beside the fixed and pretrained encoders.
 7. **Sound–meaning assignment.** Target correlation, branch markers, and acoustic mapping. *Accept:* arbitrary assignments have a mean correlation near 0 over seeds; target-correlation assignments reach their target within a tolerance or report the closest value reached; every word in a branch carries the branch marker; acoustic mapping produces the configured shifts, as measured.
 8. **Parametric formant synthesizer.** A Klatt-style synthesizer driven by the same phoneme sequences, with every acoustic dimension controllable. The detailed design will be written after stages 1–7, and may need its own specification. Do not start stage 8 without it.
+
+**Stage 4a: closed-class forms.** Function words, affixes, joining, inflected forms, the request file, and the evaluation by kind. *Accept:* every function word has one syllable and an allowed shape, passes the phonotactic check, is not an English word, and respects the minimum distances; every affix has an allowed shape; every inflected form passes the phonotactic check, and a schwa is inserted exactly where the plain join fails it; with `closed_class: null`, every existing output is unchanged except for added columns; turning closed-class forms on changes no content word's form, audio, or embedding; the stem AUC is reported for every embedding. Report the function words with their spellings, the affixes, and 20 sampled inflected forms, so Jon can judge them.
 
 ## Decisions to confirm
 
@@ -336,6 +407,7 @@ These choices were made while writing this specification. Each one is the workin
 5. A word's embedding is the mean over its training-speaker tokens.
 6. Until stage 8, exact acoustic control comes from Praat manipulation of synthesized audio.
 7. Real English words are available as a source, for comparison with language-model embeddings.
+8. Function words have one syllable of a simple shape and differ from each other by at least two phonemes. Affixes join with an inserted schwa where the plain join would be illegal. The default configuration makes function words and affixes but inflects nothing.
 
 ## References
 
