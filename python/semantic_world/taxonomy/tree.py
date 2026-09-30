@@ -14,7 +14,7 @@ from enum import IntEnum
 
 import numpy as np
 
-from semantic_world.taxonomy.config import Config, SimilarityBound
+from semantic_world.taxonomy.config import Config, SimilarityBound, TreeSettings
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.rules import RuleSet
 from semantic_world.taxonomy.similarity import cross_similarity
@@ -147,8 +147,22 @@ class Tree:
 
 
 def generate_tree(config: Config, rules: RuleSet, streams: Streams) -> Tree:
-    """Generate the categories: superordinates, roles, children, and leaves."""
-    return _TreeBuilder(config, rules, streams).build()
+    """Generate the noun categories: superordinates, roles, children, and leaves."""
+    return build_tree(
+        config.tree_settings(), rules, streams.superordinates, streams.tree, streams.scalars
+    )
+
+
+def build_tree(
+    settings: TreeSettings,
+    rules: RuleSet,
+    rng_superordinates: np.random.Generator,
+    rng_tree: np.random.Generator,
+    rng_scalars: np.random.Generator | None = None,
+) -> Tree:
+    """Generate a tree from explicit settings and streams. The verb tree uses this with its own
+    settings, an empty rule set over the verb features, and the ``verb_tree`` stream."""
+    return _TreeBuilder(settings, rules, rng_superordinates, rng_tree, rng_scalars).build()
 
 
 def stochastic_round(x: float, rng: np.random.Generator) -> int:
@@ -158,21 +172,30 @@ def stochastic_round(x: float, rng: np.random.Generator) -> int:
 
 
 class _TreeBuilder:
-    def __init__(self, config: Config, rules: RuleSet, streams: Streams) -> None:
-        self.config = config
+    def __init__(
+        self,
+        settings: TreeSettings,
+        rules: RuleSet,
+        rng_superordinates: np.random.Generator,
+        rng_tree: np.random.Generator,
+        rng_scalars: np.random.Generator | None,
+    ) -> None:
+        self.settings = settings
         self.rules = rules
         self.features = rules.features
-        self.streams = streams
+        self.rng_superordinates = rng_superordinates
+        self.rng_tree = rng_tree
+        self.rng_scalars = rng_scalars
         self.base_rates = self.features.base_rates
         self.n_free = len(self.base_rates)
-        self.n_scalars = config.scalars.count
-        self.depth = config.taxonomy.depth
+        self.n_scalars = 0 if settings.scalars is None else settings.scalars.count
+        self.depth = settings.taxonomy.depth
         self.warnings: list[str] = []
         self.categories: list[Category] = []
         self.leaf_vectors: dict[bytes, str] = {}
         self.tries = 0
         self.similarity_range: tuple[float, float] | None = None
-        bound = config.similarity_bound
+        bound = settings.similarity_bound
         self.scope_columns = self._scope_columns(bound.scope) if bound is not None else None
 
     def _scope_columns(self, scope: str) -> np.ndarray:
@@ -203,12 +226,12 @@ class _TreeBuilder:
     # Superordinates ------------------------------------------------------------------------------
 
     def _superordinates(self) -> list[Category]:
-        rng = self.streams.superordinates
-        bound = self.config.similarity_bound
+        rng = self.rng_superordinates
+        bound = self.settings.similarity_bound
         accepted: list[Category] = []
         accepted_scope: list[np.ndarray] = []
-        for index in range(1, self.config.taxonomy.superordinates + 1):
-            label = f"C{index}"
+        for index in range(1, self.settings.taxonomy.superordinates + 1):
+            label = f"{self.settings.prefix}{index}"
             scalars = self._superordinate_scalars()
             if bound is None:
                 free_values = (rng.random(self.n_free) < self.base_rates).astype(np.uint8)
@@ -324,14 +347,14 @@ class _TreeBuilder:
 
     def _visit(self, category: Category) -> None:
         self.categories.append(category)
-        rng = self.streams.tree
+        rng = self.rng_tree
         level = category.level
-        inheritance = self.config.inheritance
+        inheritance = self.settings.inheritance
         category.roles = self._assign_roles(category, level, rng)
         if level == self.depth:
             self._check_leaf(category, rng)
             return
-        branching = self.config.taxonomy.branching[level - 1]
+        branching = self.settings.taxonomy.branching[level - 1]
         count = int(rng.integers(branching.min, branching.max + 1))
         copy_probability = inheritance.characteristic_probability[level - 1]
         children = []
@@ -353,7 +376,7 @@ class _TreeBuilder:
             self._visit(child)
 
     def _assign_roles(self, category: Category, level: int, rng: np.random.Generator) -> np.ndarray:
-        inheritance = self.config.inheritance
+        inheritance = self.settings.inheritance
         roles = np.full(self.n_free, Role.UNDIAGNOSTIC, dtype=np.int8)
         if category.parent is not None:
             roles[category.parent.defining_mask()] = Role.DEFINING_INHERITED
@@ -388,19 +411,19 @@ class _TreeBuilder:
 
     def _superordinate_scalars(self) -> np.ndarray:
         """Standard normal draws from the ``scalars`` stream, one per dimension."""
-        if self.n_scalars == 0:
+        if self.n_scalars == 0 or self.rng_scalars is None:
             return np.zeros(0)
-        return self.streams.scalars.normal(size=self.n_scalars)
+        return self.rng_scalars.normal(size=self.n_scalars)
 
     def _child_scalars(self, parent: Category) -> np.ndarray:
         """The parent's values plus normal noise with the drift of the parent's level."""
-        if self.n_scalars == 0:
+        if self.n_scalars == 0 or self.rng_scalars is None or self.settings.scalars is None:
             return np.zeros(0)
-        drift = self.config.scalars.drift[parent.level - 1]
-        return parent.scalars + self.streams.scalars.normal(0.0, drift, size=self.n_scalars)
+        drift = self.settings.scalars.drift[parent.level - 1]
+        return parent.scalars + self.rng_scalars.normal(0.0, drift, size=self.n_scalars)
 
     def _check_leaf(self, leaf: Category, rng: np.random.Generator) -> None:
-        inheritance = self.config.inheritance
+        inheritance = self.settings.inheritance
         if not inheritance.require_distinct_leaves:
             return
         parent = leaf.parent

@@ -16,6 +16,7 @@ from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.rules import RuleSet, generate_rules
 from semantic_world.taxonomy.streams import Streams
 from semantic_world.taxonomy.tree import Tree, generate_tree
+from semantic_world.taxonomy.verbs import VerbTaxonomy, generate_verb_tree
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ class TaxonomyResult:
     feature_stats: pl.DataFrame
     summary: dict[str, Any]
     warnings: tuple[str, ...]
+    verbs: VerbTaxonomy | None = None
+    """The verb taxonomy, or None when ``verbs`` is null in the configuration."""
 
     @property
     def features(self) -> FeatureSet:
@@ -60,7 +63,10 @@ def generate(config: Config) -> TaxonomyResult:
     vectors = compute_node_vectors(rules, tree, instances, config.scalars)
     similarity = similarity_table(config, tree, instances, vectors, streams.analysis)
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
+    verbs = generate_verb_tree(config, streams)
     warnings = tuple(rules.warnings) + tuple(tree.warnings)
+    if verbs is not None:
+        warnings += tuple(verbs.tree.warnings)
     summary = summary_stats(rules, tree, instances, warnings)
     return TaxonomyResult(
         config=config,
@@ -73,4 +79,5 @@ def generate(config: Config) -> TaxonomyResult:
         feature_stats=feature_stats,
         summary=summary,
         warnings=warnings,
+        verbs=verbs,
     )

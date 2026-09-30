@@ -30,6 +30,7 @@ SIMILARITY_SCOPES = ("free", "is_has", "all")
 SIMILARITY_FEATURE_SETS = ("non_isa", "all")
 RULE_SOURCES = ("automatic", "file")
 SCHEDULE_KINDS = ("linear", "exponential", "list")
+CONSTRAINT_FAMILIES = ("agent", "patient", "cross", "key_lock", "comparison")
 
 
 class ConfigError(ValueError):
@@ -252,6 +253,90 @@ class ScalarsConfig:
 
 
 @dataclass(frozen=True)
+class TreeSettings:
+    """What the tree builder needs: the shape, the inheritance schedules, the superordinate
+    bound, the scalar settings (None for a tree without scalars), and the label prefix."""
+
+    taxonomy: TaxonomyConfig
+    inheritance: InheritanceConfig
+    similarity_bound: SimilarityBound | None
+    scalars: ScalarsConfig | None
+    prefix: str
+
+
+@dataclass(frozen=True)
+class ComparisonConfig:
+    window_probability: float
+    cross_dimension_probability: float
+    margin_quantiles: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class VerbsConfig:
+    """Transitive verbs and the verb taxonomy (``docs/specs/TAXONOMY_RELATIONS.md``, Part B)."""
+
+    feature_count: int
+    expected_true: float
+    taxonomy: TaxonomyConfig
+    similarity_bound: SimilarityBound | None
+    inheritance: InheritanceConfig
+    own_constraint: bool
+    constraint_families: dict[str, float]
+    key_lock_pairs: dict[int, float]
+    comparison: ComparisonConfig
+    rules: RuleSampling
+    """The rule-complexity settings for constraints: the top-level settings with the
+    ``verbs.rules`` overrides applied."""
+    expose_agent: float
+    expose_patient: float
+    sampled_true: int
+    sampled_false: int
+    max_exact_pairs: int
+
+    @property
+    def base_rate(self) -> float | None:
+        """The base rate shared by the verb features, or None without verb features."""
+        return self.expected_true / self.feature_count if self.feature_count else None
+
+    @property
+    def feature_labels(self) -> tuple[str, ...]:
+        return tuple(f"VF.{i}" for i in range(1, self.feature_count + 1))
+
+    def tree_settings(self) -> TreeSettings:
+        return TreeSettings(self.taxonomy, self.inheritance, self.similarity_bound, None, "V")
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "features": {"count": self.feature_count, "expected_true": self.expected_true},
+            "taxonomy": {
+                "superordinates": self.taxonomy.superordinates,
+                "depth": self.taxonomy.depth,
+                "branching": _list_schedule([r.resolved() for r in self.taxonomy.branching]),
+            },
+            "superordinates": {"similarity_bound": _resolved_bound(self.similarity_bound)},
+            "inheritance": _resolved_inheritance(self.inheritance),
+            "own_constraint": self.own_constraint,
+            "constraint_families": dict(self.constraint_families),
+            "key_lock_pairs": dict(self.key_lock_pairs),
+            "comparison": {
+                "window_probability": self.comparison.window_probability,
+                "cross_dimension_probability": self.comparison.cross_dimension_probability,
+                "margin_quantiles": list(self.comparison.margin_quantiles),
+            },
+            "rules": self.rules.resolved(),
+            "projections": {
+                "expose_agent": self.expose_agent,
+                "expose_patient": self.expose_patient,
+            },
+            "pairs": {
+                "sampled_true": self.sampled_true,
+                "sampled_false": self.sampled_false,
+                "max_exact_pairs": self.max_exact_pairs,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class Config:
     """A fully validated and resolved run configuration."""
 
@@ -265,8 +350,14 @@ class Config:
     instances: InstancesConfig
     analysis: AnalysisConfig
     scalars: ScalarsConfig
+    verbs: VerbsConfig | None
     source: str
     """Where the configuration came from: the file path, or a label for an in-memory mapping."""
+
+    def tree_settings(self) -> TreeSettings:
+        return TreeSettings(
+            self.taxonomy, self.inheritance, self.similarity_bound, self.scalars, "C"
+        )
 
     def rule_file_path(self) -> Path | None:
         """The rule file, resolved relative to the configuration file's folder."""
@@ -314,31 +405,8 @@ class Config:
                 "depth": self.taxonomy.depth,
                 "branching": _list_schedule([r.resolved() for r in self.taxonomy.branching]),
             },
-            "superordinates": {
-                "similarity_bound": (
-                    None
-                    if self.similarity_bound is None
-                    else {
-                        "metric": self.similarity_bound.metric,
-                        "scope": self.similarity_bound.scope,
-                        "min": self.similarity_bound.min,
-                        "max": self.similarity_bound.max,
-                        "max_tries": self.similarity_bound.max_tries,
-                        "local_search": self.similarity_bound.local_search,
-                    }
-                ),
-            },
-            "inheritance": {
-                "proportion_defining": _list_schedule(self.inheritance.proportion_defining),
-                "proportion_characteristic": _list_schedule(
-                    self.inheritance.proportion_characteristic
-                ),
-                "characteristic_probability": _list_schedule(
-                    self.inheritance.characteristic_probability
-                ),
-                "require_distinct_leaves": self.inheritance.require_distinct_leaves,
-                "distinct_max_tries": self.inheritance.distinct_max_tries,
-            },
+            "superordinates": {"similarity_bound": _resolved_bound(self.similarity_bound)},
+            "inheritance": _resolved_inheritance(self.inheritance),
             "instances": {
                 "per_leaf": self.instances.per_leaf.resolved(),
                 "characteristic_probability": self.instances.characteristic_probability,
@@ -355,6 +423,7 @@ class Config:
                 "threshold_quantiles": list(self.scalars.threshold_quantiles),
                 "thermometer_bins": self.scalars.thermometer_bins,
             },
+            "verbs": None if self.verbs is None else self.verbs.resolved(),
         }
 
     def to_yaml(self) -> str:
@@ -372,6 +441,29 @@ def _resolved_free_type(cfg: FreeFeatureTypeConfig) -> dict[str, Any]:
 
 def _list_schedule(values) -> dict[str, Any]:
     return {"schedule": "list", "values": list(values)}
+
+
+def _resolved_bound(bound: SimilarityBound | None) -> dict[str, Any] | None:
+    if bound is None:
+        return None
+    return {
+        "metric": bound.metric,
+        "scope": bound.scope,
+        "min": bound.min,
+        "max": bound.max,
+        "max_tries": bound.max_tries,
+        "local_search": bound.local_search,
+    }
+
+
+def _resolved_inheritance(inheritance: InheritanceConfig) -> dict[str, Any]:
+    return {
+        "proportion_defining": _list_schedule(inheritance.proportion_defining),
+        "proportion_characteristic": _list_schedule(inheritance.proportion_characteristic),
+        "characteristic_probability": _list_schedule(inheritance.characteristic_probability),
+        "require_distinct_leaves": inheritance.require_distinct_leaves,
+        "distinct_max_tries": inheritance.distinct_max_tries,
+    }
 
 
 def _round_half_up(x: float) -> int:
@@ -843,17 +935,23 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
     )
 
 
-def _read_taxonomy(node: _Node) -> TaxonomyConfig:
-    superordinates = node.int("superordinates", 4, min=1)
-    depth = node.int("depth", 3, min=1)
+def _read_taxonomy(node: _Node, defaults: tuple[int, int, Any] = (4, 3, [2, 4])) -> TaxonomyConfig:
+    superordinates = node.int("superordinates", defaults[0], min=1)
+    depth = node.int("depth", defaults[1], min=1)
     branching = resolve_branching(
-        node.get("branching", [2, 4]), depth, node.source, node.field("branching")
+        node.get("branching", defaults[2]), depth, node.source, node.field("branching")
     )
     node.finish()
     return TaxonomyConfig(superordinates, depth, branching)
 
 
-def _read_similarity_bound(node: _Node) -> SimilarityBound | None:
+def _read_similarity_bound(node: _Node, default_on: bool = True) -> SimilarityBound | None:
+    """The superordinate similarity bound. The noun tree's default is the bound of the
+    specification; ``default_on=False`` (the verb tree) defaults to no bound."""
+    if not default_on and node.data.get("similarity_bound") is None:
+        node.seen.add("similarity_bound")
+        node.finish()
+        return None
     bound = node.mapping("similarity_bound", nullable=True)
     node.finish()
     if bound is None:
@@ -871,10 +969,12 @@ def _read_similarity_bound(node: _Node) -> SimilarityBound | None:
     return SimilarityBound(metric, scope, low, high, max_tries, local_search)
 
 
-def _read_inheritance(node: _Node, depth: int) -> InheritanceConfig:
-    defining = node.schedule("proportion_defining", 0.1, depth)
-    characteristic = node.schedule("proportion_characteristic", 0.5, depth)
-    copy_probability = node.schedule("characteristic_probability", 0.9, depth)
+def _read_inheritance(
+    node: _Node, depth: int, defaults: tuple[float, float, float] = (0.1, 0.5, 0.9)
+) -> InheritanceConfig:
+    defining = node.schedule("proportion_defining", defaults[0], depth)
+    characteristic = node.schedule("proportion_characteristic", defaults[1], depth)
+    copy_probability = node.schedule("characteristic_probability", defaults[2], depth)
     require_distinct = node.bool("require_distinct_leaves", True)
     max_tries = node.int("distinct_max_tries", 1000, min=1)
     node.finish()
@@ -947,6 +1047,79 @@ def _read_analysis(node: _Node) -> AnalysisConfig:
 # ---------------------------------------------------------------------------------------------
 
 
+def _read_verbs(root: _Node, rules: RulesConfig, scalars: ScalarsConfig) -> VerbsConfig | None:
+    """The ``verbs`` block; null (the default) means no verbs."""
+    if root.data.get("verbs") is None:
+        root.seen.add("verbs")
+        return None
+    node = root.mapping("verbs")
+    features = node.mapping("features")
+    count = features.int("count", 12, min=0)
+    expected_true = features.number("expected_true", 3, min=0)
+    features.finish()
+    if count and expected_true > count:
+        raise features.error(
+            "expected_true",
+            f"must be at most the number of verb features ({count}), found {expected_true}",
+        )
+    taxonomy = _read_taxonomy(node.mapping("taxonomy"), defaults=(3, 2, [2, 3]))
+    similarity_bound = _read_similarity_bound(node.mapping("superordinates"), default_on=False)
+    inheritance = _read_inheritance(
+        node.mapping("inheritance"), taxonomy.depth, defaults=(0.4, 0.4, 0.9)
+    )
+    own_constraint = node.bool("own_constraint", True)
+    families = node.weights(
+        "constraint_families",
+        {"agent": 1, "patient": 1, "cross": 1, "key_lock": 1, "comparison": 1},
+        allowed=CONSTRAINT_FAMILIES,
+    )
+    usable = [f for f, w in families.items() if w > 0 and (f != "comparison" or scalars.count > 0)]
+    if not usable:
+        raise node.error(
+            "constraint_families",
+            "no constraint family with positive weight can be used: the comparison family needs "
+            "scalars.count above 0",
+        )
+    key_lock_pairs = node.weights("key_lock_pairs", {1: 0.5, 2: 0.3, 3: 0.2}, int_keys=True)
+    comparison_node = node.mapping("comparison")
+    comparison = ComparisonConfig(
+        comparison_node.probability("window_probability", 0.3),
+        comparison_node.probability("cross_dimension_probability", 0.2),
+        _read_open_interval(comparison_node, "margin_quantiles", [0.1, 0.9]),
+    )
+    comparison_node.finish()
+    rules_node = node.mapping("rules")
+    constraint_rules = _read_sampling(rules_node, rules.sampling)
+    rules_node.finish()
+    projections = node.mapping("projections")
+    expose_agent = projections.probability("expose_agent", 1.0)
+    expose_patient = projections.probability("expose_patient", 0.25)
+    projections.finish()
+    pairs = node.mapping("pairs")
+    sampled_true = pairs.int("sampled_true", 1000, min=0)
+    sampled_false = pairs.int("sampled_false", 1000, min=0)
+    max_exact_pairs = pairs.int("max_exact_pairs", 50_000_000, min=1)
+    pairs.finish()
+    node.finish()
+    return VerbsConfig(
+        feature_count=count,
+        expected_true=expected_true,
+        taxonomy=taxonomy,
+        similarity_bound=similarity_bound,
+        inheritance=inheritance,
+        own_constraint=own_constraint,
+        constraint_families=families,
+        key_lock_pairs=key_lock_pairs,
+        comparison=comparison,
+        rules=constraint_rules,
+        expose_agent=expose_agent,
+        expose_patient=expose_patient,
+        sampled_true=sampled_true,
+        sampled_false=sampled_false,
+        max_exact_pairs=max_exact_pairs,
+    )
+
+
 def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | None = None) -> Config:
     """Build a configuration from an already parsed mapping.
 
@@ -973,6 +1146,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     inheritance = _read_inheritance(root.mapping("inheritance"), taxonomy.depth)
     instances = _read_instances(root.mapping("instances"))
     analysis = _read_analysis(root.mapping("analysis"))
+    verbs = _read_verbs(root, rules, scalars)
     root.finish()
     return Config(
         name=name,
@@ -985,6 +1159,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         instances=instances,
         analysis=analysis,
         scalars=scalars,
+        verbs=verbs,
         source=source,
     )
 

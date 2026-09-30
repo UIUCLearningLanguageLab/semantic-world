@@ -18,6 +18,7 @@ from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.rules import Rule, RuleSet, generate_rules
 from semantic_world.taxonomy.streams import STREAM_NAMES, Streams, stream_seed
 from semantic_world.taxonomy.tree import Category, Role, Tree, generate_tree
+from semantic_world.taxonomy.verbs import VerbTaxonomy, generate_verb_tree
 
 __all__ = [
     "STREAM_NAMES",
@@ -38,6 +39,7 @@ __all__ = [
     "TaxonomyResult",
     "Tree",
     "TruthTable",
+    "VerbTaxonomy",
     "build_features",
     "compute_node_vectors",
     "config_from_mapping",
@@ -45,6 +47,7 @@ __all__ = [
     "generate_instances",
     "generate_rules",
     "generate_tree",
+    "generate_verb_tree",
     "load_config",
     "parse_expression",
     "stream_seed",
