@@ -112,7 +112,7 @@ A third engine, a parametric formant synthesizer, comes in stage 8. Until then, 
 
 ### Audio
 
-Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. Every clip is then scaled to a target RMS level (`level.rms_db`, in dB relative to full scale, −24 by default), so that clips from different engines and speakers are equally loud. A peak guard limits the scaling: when the scaled clip's peak would exceed `level.max_peak` (0.9 by default), the clip is scaled to that peak instead. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
+Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. The trim margin holds within 16-bit rounding: a clip is trimmed before it is stored as 16-bit audio, so about 0.6% of stored clips exceed the margin, most of them by under 5 milliseconds and the longest by 90 milliseconds in the default run. Every clip is then scaled to a target RMS level (`level.rms_db`, in dB relative to full scale, −24 by default), so that clips from different engines and speakers are equally loud. A peak guard limits the scaling: when the scaled clip's peak would exceed `level.max_peak` (0.9 by default), the clip is scaled to that peak instead. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
 
 ### Reproducibility
 
