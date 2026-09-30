@@ -50,7 +50,12 @@ cargo run -p sw-schema -- schemas                                # regenerate sc
 cargo run -p sw-schema -- check data/experiments/m1_smoke.yaml   # load and resolve an experiment
 python -m semantic_world.taxonomy data/taxonomy/default.yaml [--seed N] [--out DIR]   # run the taxonomy generator
 pytest tests/taxonomy                                            # the taxonomy generator's tests alone
+python -m semantic_world.wordforms forms data/wordforms/default.yaml [--seed N] [--out DIR]   # generate word forms
+python -m semantic_world.wordforms check-ipa                      # compare the IPA table with espeak-ng
+pytest tests/wordforms                                           # the word-form pipeline's tests alone
 ```
+
+The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).
 
 The taxonomy generator needs only NumPy, polars, and PyYAML: `PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/tiny.yaml` runs without the Rust core built.
 

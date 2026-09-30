@@ -35,6 +35,12 @@ dev = [
     "rerun-sdk>=0.38,<0.39",
 ]
 
+# The word-form pipeline (docs/specs/WORDFORM_PIPELINE.md). The taxonomy generator does not need
+# this extra. espeak-ng is a system program: brew install espeak-ng.
+speech = [
+    "cmudict>=1.1,<2",
+]
+
 [project.urls]
 Repository = "https://github.com/UIUCLearningLanguageLab/semantic-world"
 
