@@ -39,13 +39,19 @@ Labels follow the taxonomy generator's convention: formal labels, indices starti
 
 ### English source
 
-The English source is the CMU Pronouncing Dictionary (CMUdict), in ARPAbet with stress marks. The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin some CMUdict word. From the syllabified dictionary, the pipeline counts, by type frequency:
+The English source is the CMU Pronouncing Dictionary (CMUdict), in ARPAbet with stress marks.
+
+The sound patterns of English are learned from common words only. The pattern words are the CMUdict words whose Zipf frequency in the `wordfreq` package is at least `english_min_zipf` (3.0 by default). CMUdict holds many proper names, loanwords, and rare words, and their sound sequences do not belong in English-like pseudowords. With `english_min_zipf: null`, every CMUdict word is a pattern word. See `docs/proposals/2026-09-30-wordforms-common-words-and-spelling.md`.
+
+The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin at least 1 in every 6,300 pattern words (5 words with the default, and 20 words with the whole dictionary). From the syllabified pattern words, the pipeline counts, by type frequency:
 
 - onsets, by syllable position (initial, medial, final) and stress;
 - rimes (the vowel plus the coda, kept together as one unit), by syllable position and stress;
 - phoneme trigrams, with word boundaries, over whole pronunciations.
 
 Keeping the rime as a unit preserves the constraints between vowels and codas in English.
+
+Rejecting real words, and counting English neighbors, still use the whole dictionary. Real words for the `english` and `mixed` sources come from the pattern words.
 
 ### Generating pseudowords
 
@@ -57,13 +63,13 @@ A word form is built syllable by syllable:
 
 A candidate is rejected when:
 
-- it contains a phoneme trigram that never occurs in CMUdict (the phonotactic check);
+- it contains a phoneme trigram that occurs in no pattern word (the phonotactic check);
 - it is the pronunciation of a CMUdict word, or lies closer to one than `min_english_distance` (phoneme edit distance), when real words are excluded;
 - it lies closer than `min_lexicon_distance` to a word form already accepted.
 
 With `min_lexicon_distance: 1`, minimal pairs are allowed. With 2, no two words differ by only one phoneme.
 
-The source can also be `english` (real CMUdict words, drawn by syllable count) or `mixed` (a configured proportion of each). Real words let us compare the sound embeddings of real words with language-model embeddings of the same words.
+The source can also be `english` (real words, drawn by syllable count from the pattern words) or `mixed` (a configured proportion of each). Real words let us compare the sound embeddings of real words with language-model embeddings of the same words.
 
 ### Word-form statistics
 
@@ -76,7 +82,7 @@ Every word form records:
 - English neighbors: the number of CMUdict words at phoneme edit distance 1, and the nearest CMUdict word;
 - lexicon neighbors: the number of other word forms at edit distance 1.
 
-The readable spelling comes from a fixed table of common English spellings for each phoneme. The spelling is for human readers only. When two words would get the same spelling, the later word's spelling gets a numeric suffix.
+The readable spelling comes from a table of common English spellings for each phoneme, chosen by position in the word. For example, the vowel of "my" is written "y" at the end of a word, and "i" with a silent "e" before a final consonant. A consonant is doubled after a stressed short vowel. The table is a data file, and the contexts that the table refers to are defined in code. The spelling is for human readers only. A real English word keeps its dictionary spelling. When a pseudoword's spelling equals the spelling of a pattern word, the pseudoword gets its next-best spelling instead (for example, "roum" and not "room" for `R UH1 M`). When two words would get the same spelling, the later word's spelling gets a numeric suffix.
 
 ### Phoneme mappings
 
@@ -93,16 +99,20 @@ Two text-to-speech engines receive phoneme input directly, so no English spellin
 
 The installed Piper API should be checked when stage 2 starts, because the API changed at version 1.3.0.
 
+`piper.voice_dir` is the folder that holds the Piper voice files. The voice is downloaded once, with `python -m piper.download_voices`, and the pipeline never downloads a voice by itself. `espeak.speakers` is the number of espeak-ng speakers. The default is one speaker for each variant, and with more speakers the variants repeat, each time with a newly drawn pitch and rate.
+
 A third engine, a parametric formant synthesizer, comes in stage 8. Until then, exact acoustic control comes from manipulating the Piper and espeak-ng audio (see "Augmentation and acoustic manipulation").
 
 ### Speakers and tokens
 
 - A configured number of speakers is drawn for each engine. A configured proportion of speakers is held out: held-out speakers never train a learned encoder, and never contribute to word embeddings. Held-out speakers test generalization to new voices.
 - Every word is synthesized by every speaker, with a configured number of tokens per speaker. Tokens differ through the engine's own variability and through small seeded perturbations of rate and pitch.
+- A neural engine now and then stretches a word far beyond its usual length. After synthesis, the pipeline compares each clip's duration with the median duration of the same word across all tokens. A clip longer than `duration_check.max_ratio` times its word's median (1.8 by default) is synthesized again with a new perturbation seed, up to `duration_check.max_tries` tries in all (5 by default). When no try passes, the shortest try is kept. `tokens.csv` records the number of tries, and the run's summary records how many clips were tried again and how many still exceed the limit.
+- Piper also stretches a few words for most speakers, and the retry rule does not catch those words. `words.csv` marks them with the flag `long_synthesis`. A word is flagged when the median duration of its Piper tokens is more than `long_synthesis_ratio` times (1.6 by default) the median for words with the same number of syllables. The flag does not change the audio. Later analyses can leave the flagged words out.
 
 ### Audio
 
-Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
+Audio is mono, 16 kHz, 32-bit float in memory, and FLAC on disk. Leading and trailing silence is trimmed with a configured threshold, keeping a configured margin. The trim margin holds within 16-bit rounding: a clip is trimmed before it is stored as 16-bit audio, so about 0.6% of stored clips exceed the margin, most of them by under 5 milliseconds and the longest by 90 milliseconds in the default run. Every clip is then scaled to a target RMS level (`level.rms_db`, in dB relative to full scale, −24 by default), so that clips from different engines and speakers are equally loud. A peak guard limits the scaling: when the scaled clip's peak would exceed `level.max_peak` (0.9 by default), the clip is scaled to that peak instead. Synthesis happens once. Audio goes into a cache folder, indexed by a hash of the phoneme string, engine, speaker, and settings. Every later step reads from the cache.
 
 ### Reproducibility
 
@@ -119,7 +129,7 @@ Each front end turns a clip into a matrix of frames by channels. The front ends 
 | `cochleagram` | A model of the cochlea: a bank of filters spaced on the ERB scale, envelope extraction, power-law compression, and downsampling. | 64 channels, 50 Hz to 8 kHz, compression exponent 0.3, 100 frames per second |
 | `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales. | rates 2–32 Hz, scales 0.25–8 cycles per octave |
 
-For the cochleagram, the pipeline uses `pycochleagram` (NumPy) or `chcochleagram` (PyTorch), both from the McDermott lab. The choice is an engineering decision, after checking licenses.
+The cochleagram is a NumPy implementation, inside the package, of the filter bank of `pycochleagram` and `chcochleagram`, both from the McDermott lab. Neither package is on PyPI, so the pipeline does not depend on them. A test compares the implementation with saved outputs of `chcochleagram` (`tests/wordforms/fixtures/cochleagram_reference.npz`). The 64 channels are 62 band-pass filters plus the low-pass and high-pass filters that complete the bank.
 
 Front-end output is stored as one float32 array per front end, with all clips concatenated along the frame axis, plus an index of each token's first frame and number of frames. That layout loads with memory mapping and needs no extra dependency.
 
@@ -131,6 +141,10 @@ Each embedding configuration names an encoder, and the encoder's output is one v
 
 - **Fixed.** A front end's frames are averaged within a configured number of equal time bins, and the bins are concatenated. An optional principal component projection, fitted on training-speaker tokens, reduces the dimension. No learning is involved beyond the projection.
 - **Pretrained.** A pretrained speech model from Hugging Face `transformers`: HuBERT (`facebook/hubert-base-ls960`), wav2vec 2.0, WavLM, or the Whisper encoder. The configuration names the model and the layer. The layer's frame outputs are mean-pooled over the clip. Pretrained models were trained on human speech, so pretrained embeddings stand for an adult English listener. Every output labels them as pretrained.
+
+  The default layer of HuBERT base is layer 8. In the stage 4 layer sweep (default configuration, 500 words, 45 speakers), layer 8 has the highest same-different average precision across training speakers (0.57) and with held-out speakers (0.57), against 0.39 and 0.32 for layer 6. Use layer 3 when graded similarity across the whole range of phoneme distances matters (it has the highest rank correlation with edit distance); otherwise use layer 8. In the sweep, the Spearman correlation between embedding distance and phoneme edit distance is 0.25 for layer 3 and 0.13 for layer 8. The neighbor AUC measures favor the later layers: distance 1 against distance 3 or more gives 0.945 for layer 3 and 0.990 for layer 8, and distance 1 against distance 2 gives 0.840 for layer 3 and 0.892 for layer 8.
+
+  A run stores the configured layer only. With `store_layers: true`, the run also stores the pooled output of every layer (`layers.npy`), which is large (1.8 GB for the default configuration).
 - **Learned on the world's audio** (stage 6). Two kinds:
   - a contrastive acoustic word encoder, trained so that tokens of the same word from different speakers lie close together (in the manner of Kamper et al., 2016). The contrastive encoder uses word identity as supervision;
   - a self-supervised encoder trained by prediction alone, in the manner of contrastive predictive coding (van den Oord et al., 2018), with no word labels. Its frame outputs are mean-pooled like a pretrained model's.
@@ -146,12 +160,16 @@ A word's embedding is the mean of its tokens' embeddings over training speakers.
 Every embedding configuration is evaluated in the same way:
 
 - **Same-different average precision.** Over pairs of tokens, rank pairs by embedding distance, and compute the average precision for detecting pairs of the same word. Reported for pairs within a speaker, across training speakers, and involving held-out speakers. This is the standard evaluation for acoustic word embeddings.
-- **Phonological fidelity.** The correlation between embedding distance and phoneme edit distance across word pairs.
-- **Layer sweep.** For pretrained models, the evaluation runs over every layer, so the default layer can be chosen from evidence.
+- **Phonological fidelity.** Two measures on the word embeddings. The first is the correlation (Pearson and Spearman) between embedding distance and phoneme edit distance across word pairs. The second is the neighbor AUC: for a word, the probability that a word at phoneme edit distance 1 is closer in embedding space than a word at distance 3 or more, averaged over the words that have a neighbor at distance 1. The neighbor AUC is near its ceiling for every embedding, so a harder version stands beside it: distance 1 against distance 2 exactly, averaged over the words that have neighbors at both distances. The table gives the number of words behind each AUC. The correlation measures graded similarity over the whole lexicon. The two AUC measures ask whether minimal pairs sound alike.
+- **Layer sweep.** For pretrained models, the evaluation runs over every layer, so the default layer can be chosen from evidence. The sweep runs the model on the evaluation sample, so a run does not have to store every layer. In a sweep row, a word's embedding is the mean over the word's training-speaker tokens in the sample.
+
+Embedding distance is cosine distance. A run with many tokens has too many pairs, so the evaluation uses a seeded sample of 5,000 tokens, drawn from the `wordforms:eval` stream. Every embedding is evaluated on the same sample. Chance for the average precision is the proportion of same-word pairs.
+
+When some words are flagged `long_synthesis`, every row of the evaluation is given twice: for all words, and without the flagged words.
 
 ### Novel words
 
-`SoundEmbeddings.embed(forms, speakers)` runs a new word form through the same pipeline: synthesis, the front end, and the frozen encoder. The result for a form already in the lexicon must equal the stored embedding for the same speaker and settings, within numerical tolerance.
+`SoundEmbeddings.embed(forms, speakers)` runs a new word form through the same pipeline: synthesis, the front end, and the frozen encoder. The result for a form already in the lexicon must equal the stored embedding for the same speaker and settings, within numerical tolerance. `embed` must look up the audio cache before synthesizing, because Piper cannot reproduce a clip on demand.
 
 ## Using the embeddings in other models
 
@@ -160,7 +178,8 @@ The Python interface is a `SoundEmbeddings` object with:
 - `types`: an array of word embeddings, one row per word;
 - `tokens`: an array of token embeddings, with arrays giving each token's word and speaker;
 - `words`: the word table;
-- `embed(...)`: embeddings for new forms;
+- `embed(forms, speakers)`: token embeddings for new forms, one for each form and speaker;
+- `embed_types(forms)`: word embeddings for new forms, the mean over every token of every training speaker, as for the words of the lexicon;
 - `to_torch()`: the arrays as PyTorch tensors.
 
 Two example scripts go in `examples/`, as plumbing demonstrations rather than experiments:
@@ -209,26 +228,31 @@ wordforms:
   exclude_real_words: true
   min_english_distance: 1
   min_lexicon_distance: 1
+  english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
 
 synthesis:
   cache_dir: runs/wordforms/cache
   sample_rate: 16000
   trim: {threshold_db: -40, margin_ms: 20}
+  level: {rms_db: -24, max_peak: 0.9}
+  duration_check: {max_ratio: 1.8, max_tries: 5}   # null turns the check off
+  long_synthesis_ratio: 1.6                        # null turns the flag off
   tokens_per_speaker: 2
   held_out_speaker_proportion: 0.2
   engines:
-    piper:  {voice: en_US-libritts_r-medium, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
-    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], pitch: [35, 65], rate: [150, 190]}
+    piper:  {voice: en_US-libritts_r-medium, voice_dir: runs/wordforms/voices, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
+    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], speakers: 5, pitch: [35, 65], rate: [150, 190]}
   token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
 
 frontends:
+  waveform: {store: false}       # true also stores the waveforms, which repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
 
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
-  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 6, pooling: mean}
+  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
 
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}
@@ -239,7 +263,7 @@ Also add `data/wordforms/tiny.yaml` (20 words, 3 speakers per engine, 1 token pe
 
 ## Determinism
 
-Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:pca`, `wordforms:train`, and `wordforms:assign`. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
+Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:train`, `wordforms:assign`, and `wordforms:eval`. The principal component projection of the fixed encoder is exact and needs no stream. The `wordforms:eval` stream draws the evaluation's sample of tokens. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
 
 ## Outputs
 
@@ -248,12 +272,12 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word. |
+| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
-| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, cache path, SHA-256 hash. |
+| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
-| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. |
-| `eval/embeddings.csv` | Evaluation results for every embedding, and every layer for pretrained models. |
+| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. |
+| `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`). |
 | `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. |
 
 ## Python package
@@ -266,7 +290,8 @@ python/semantic_world/wordforms/
   __main__.py        # command line with subcommands: forms, synth, frontends, embed, eval, assign, all
   config.py
   english.py         # CMUdict, syllabification, counts, trigram model
-  generate.py        # pseudowords, filters, statistics, spelling
+  generate.py        # pseudowords, filters, statistics
+  spelling.py        # readable spellings by position in the word
   phonemes.py        # loading the mapping tables
   synth/             # piper.py, espeak.py, cache.py, and later formant.py
   augment.py         # noise, reverberation, perturbation, Praat manipulation
@@ -279,7 +304,7 @@ data/wordforms/      # default.yaml, tiny.yaml, arpabet_ipa.yaml, arpabet_espeak
 examples/            # wordforms_lm_inputs.py, wordforms_contrastive.py
 ```
 
-Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `cmudict`, a cochleagram package, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
+Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `scipy`, `cmudict`, `wordfreq`, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
 
 ### Licenses
 
@@ -304,10 +329,10 @@ Stages 1–4 are the fast path to usable embeddings.
 
 These choices were made while writing this specification. Each one is the working design unless Jon changes it.
 
-1. CMUdict is the English source, and the generator samples onsets and rimes by syllable position and stress.
+1. CMUdict is the English source, and the generator samples onsets and rimes by syllable position and stress. The sound patterns are learned from common words only (decided September 30, 2026).
 2. Piper's multi-speaker LibriTTS-R voice is the main voice set, and espeak-ng is the second engine.
 3. GPL tools are optional extras, imported only where used, and never vendored.
-4. HuBERT base, layer 6, is the default pretrained embedding until the stage 4 layer sweep picks a layer.
+4. HuBERT base, layer 8, is the default pretrained embedding. Jon chose layer 8 from the stage 4 layer sweep on September 30, 2026. Layer 3 is for graded similarity across the whole range of phoneme distances.
 5. A word's embedding is the mean over its training-speaker tokens.
 6. Until stage 8, exact acoustic control comes from Praat manipulation of synthesized audio.
 7. Real English words are available as a source, for comparison with language-model embeddings.

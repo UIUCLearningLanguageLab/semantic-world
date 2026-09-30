@@ -1,0 +1,18 @@
+# A small configuration for fast tests: 20 words, 3 speakers per engine, 1 token per speaker,
+# fixed embeddings only.
+name: tiny
+seed: 1
+
+wordforms:
+  count: 20
+
+synthesis:
+  tokens_per_speaker: 1
+  held_out_speaker_proportion: 0.34
+  engines:
+    piper: {speakers: 3}
+    espeak: {variants: [m1, m3, f2]}
+
+embeddings:
+  - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 16}
+  - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 16}

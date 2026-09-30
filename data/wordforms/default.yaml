@@ -1,0 +1,42 @@
+# The default word-form pipeline configuration (docs/specs/WORDFORM_PIPELINE.md).
+name: default
+seed: 1
+
+wordforms:
+  source: pseudowords
+  mixed_proportion_english: 0.5
+  count: 500
+  syllables: {1: 0.3, 2: 0.5, 3: 0.2}
+  initial_stress_probability: 0.8
+  exclude_real_words: true
+  min_english_distance: 1
+  min_lexicon_distance: 1
+  english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
+
+synthesis:
+  cache_dir: runs/wordforms/cache
+  sample_rate: 16000
+  trim: {threshold_db: -40, margin_ms: 20}
+  level: {rms_db: -24, max_peak: 0.9}            # every clip's RMS level, with a peak limit
+  duration_check: {max_ratio: 1.8, max_tries: 5} # retry clips far longer than their word's median
+  long_synthesis_ratio: 1.6                      # flag words whose Piper tokens are long for their syllable count
+  tokens_per_speaker: 2
+  held_out_speaker_proportion: 0.2
+  engines:
+    piper: {voice: en_US-libritts_r-medium, voice_dir: runs/wordforms/voices, speakers: 40, noise_scale: 0.667, length_scale: 1.0, noise_w: 0.8}
+    espeak: {voice: en-us, variants: [m1, m3, m7, f2, f4], speakers: 5, pitch: [35, 65], rate: [150, 190]}
+  token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
+
+frontends:
+  waveform: {store: false}                       # stored waveforms would repeat the audio cache
+  logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
+  cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
+
+embeddings:
+  - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
+  - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
+  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
+
+augmentation: null
+assignment: {mode: arbitrary, meanings: null}
+device: auto

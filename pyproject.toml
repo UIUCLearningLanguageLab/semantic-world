@@ -35,6 +35,19 @@ dev = [
     "rerun-sdk>=0.38,<0.39",
 ]
 
+# The word-form pipeline (docs/specs/WORDFORM_PIPELINE.md). The taxonomy generator does not need
+# this extra. espeak-ng is a system program: brew install espeak-ng. piper-tts is GPL-3.0; it is
+# imported only in python/semantic_world/wordforms/synth/piper.py.
+speech = [
+    "cmudict>=1.1,<1.2",
+    "wordfreq>=3.1,<3.2",
+    "scipy>=1.18,<1.19",
+    "soundfile>=0.14,<0.15",
+    "piper-tts>=1.8,<1.9",
+    "torch>=2.14,<2.15",
+    "transformers>=5.17,<5.18",
+]
+
 [project.urls]
 Repository = "https://github.com/UIUCLearningLanguageLab/semantic-world"
 

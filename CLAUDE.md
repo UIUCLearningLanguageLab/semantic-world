@@ -50,7 +50,19 @@ cargo run -p sw-schema -- schemas                                # regenerate sc
 cargo run -p sw-schema -- check data/experiments/m1_smoke.yaml   # load and resolve an experiment
 python -m semantic_world.taxonomy data/taxonomy/default.yaml [--seed N] [--out DIR]   # run the taxonomy generator
 pytest tests/taxonomy                                            # the taxonomy generator's tests alone
+python -m semantic_world.wordforms forms data/wordforms/default.yaml [--seed N] [--out DIR]   # generate word forms
+python -m semantic_world.wordforms synth data/wordforms/tiny.yaml [--seed N] [--out DIR]      # word forms and their audio
+python -m semantic_world.wordforms frontends data/wordforms/tiny.yaml [--seed N] [--out DIR]  # also the auditory front ends
+python -m semantic_world.wordforms all data/wordforms/tiny.yaml [--seed N] [--out DIR]        # every layer: forms, audio, front ends, embeddings, evaluation
+python examples/wordforms_lm_inputs.py                            # sound embeddings as language-model inputs (tiny configuration)
+python examples/wordforms_contrastive.py                          # sound embeddings aligned with meaning vectors (tiny configuration)
+python -m semantic_world.wordforms check-ipa                      # compare the IPA table with espeak-ng
+python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml   # transcribe real words synthesized from phonemes
+python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/wordforms/voices   # fetch the Piper voice once
+pytest tests/wordforms                                           # the word-form pipeline's tests alone
 ```
+
+The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).
 
 The taxonomy generator needs only NumPy, polars, and PyYAML: `PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/tiny.yaml` runs without the Rust core built.
 
