@@ -25,3 +25,41 @@ needs_wordfreq = pytest.mark.skipif(
 needs_espeak = pytest.mark.skipif(
     shutil.which("espeak-ng") is None, reason="espeak-ng is not installed (brew install espeak-ng)"
 )
+
+VOICE_DIR = REPO / "runs" / "wordforms" / "voices"
+PIPER_VOICE = "en_US-libritts_r-medium"
+
+needs_audio = pytest.mark.skipif(
+    importlib.util.find_spec("soundfile") is None or importlib.util.find_spec("scipy") is None,
+    reason="the soundfile and scipy packages are not installed (the 'speech' extra)",
+)
+
+needs_piper = pytest.mark.skipif(
+    importlib.util.find_spec("piper") is None
+    or not (VOICE_DIR / f"{PIPER_VOICE}.onnx").exists()
+    or not (VOICE_DIR / f"{PIPER_VOICE}.onnx.json").exists(),
+    reason=(
+        "piper-tts or its voice is missing (the 'speech' extra, then: python -m "
+        f"piper.download_voices {PIPER_VOICE} --download-dir runs/wordforms/voices)"
+    ),
+)
+
+
+def _whisper_cached() -> bool:
+    if (
+        importlib.util.find_spec("transformers") is None
+        or importlib.util.find_spec("torch") is None
+    ):
+        return False
+    from huggingface_hub import try_to_load_from_cache
+
+    return isinstance(try_to_load_from_cache("openai/whisper-small.en", "config.json"), str)
+
+
+needs_whisper = pytest.mark.skipif(
+    not _whisper_cached(),
+    reason=(
+        "torch, transformers, or the cached model openai/whisper-small.en is missing (run: "
+        "python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml)"
+    ),
+)

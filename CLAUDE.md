@@ -51,7 +51,10 @@ cargo run -p sw-schema -- check data/experiments/m1_smoke.yaml   # load and reso
 python -m semantic_world.taxonomy data/taxonomy/default.yaml [--seed N] [--out DIR]   # run the taxonomy generator
 pytest tests/taxonomy                                            # the taxonomy generator's tests alone
 python -m semantic_world.wordforms forms data/wordforms/default.yaml [--seed N] [--out DIR]   # generate word forms
+python -m semantic_world.wordforms synth data/wordforms/tiny.yaml [--seed N] [--out DIR]      # word forms and their audio
 python -m semantic_world.wordforms check-ipa                      # compare the IPA table with espeak-ng
+python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml   # transcribe real words synthesized from phonemes
+python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/wordforms/voices   # fetch the Piper voice once
 pytest tests/wordforms                                           # the word-form pipeline's tests alone
 ```
 

@@ -101,10 +101,13 @@ class PiperConfig:
     noise_scale: float
     length_scale: float
     noise_w: float
+    voice_dir: str
+    """The folder that holds the voice's ``.onnx`` and ``.onnx.json`` files."""
 
     def resolved(self) -> dict[str, Any]:
         return {
             "voice": self.voice,
+            "voice_dir": self.voice_dir,
             "speakers": self.speakers,
             "noise_scale": self.noise_scale,
             "length_scale": self.length_scale,
@@ -153,11 +156,11 @@ class SynthesisConfig:
         return tuple(e for e in ENGINES if getattr(self, e) is not None)
 
     def resolved(self) -> dict[str, Any]:
-        engines: dict[str, Any] = {}
-        if self.piper is not None:
-            engines["piper"] = self.piper.resolved()
-        if self.espeak is not None:
-            engines["espeak"] = self.espeak.resolved()
+        # an engine that is off is written as null, so that the resolved file reloads equal
+        engines: dict[str, Any] = {
+            "piper": None if self.piper is None else self.piper.resolved(),
+            "espeak": None if self.espeak is None else self.espeak.resolved(),
+        }
         return {
             "cache_dir": self.cache_dir,
             "sample_rate": self.sample_rate,
@@ -532,6 +535,7 @@ def _read_piper(node: _Node) -> PiperConfig:
         noise_scale=node.number("noise_scale", 0.667, min=0),
         length_scale=node.number("length_scale", 1.0, min=0, exclusive_min=True),
         noise_w=node.number("noise_w", 0.8, min=0),
+        voice_dir=node.string("voice_dir", "runs/wordforms/voices"),
     )
     node.finish()
     return config

@@ -39,6 +39,14 @@ class Streams:
             raise ValueError(f"unknown stream {name!r}; the streams are {', '.join(STREAM_NAMES)}")
         return stream_seed(self.master_seed, STREAM_PREFIX + name)
 
+    def substream(self, name: str, key: str) -> np.random.Generator:
+        """A fresh generator for one part of a stream, named ``wordforms:<name>:<key>``. Parts
+        are independent of each other, so drawing for one engine, or for one token, never changes
+        the draws for another."""
+        if name not in STREAM_NAMES:
+            raise ValueError(f"unknown stream {name!r}; the streams are {', '.join(STREAM_NAMES)}")
+        return np.random.default_rng(stream_seed(self.master_seed, f"{STREAM_PREFIX}{name}:{key}"))
+
     def seeds(self) -> dict[str, int]:
         """Every stream's full name and seed, in stream order."""
         return {STREAM_PREFIX + name: self.seed(name) for name in STREAM_NAMES}

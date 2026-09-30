@@ -59,6 +59,17 @@ def test_resolved_config_round_trips(default_config, tmp_path):
     assert again.resolved() == default_config.resolved()
 
 
+def test_an_engine_that_is_off_stays_off_when_the_resolved_config_reloads():
+    config = parse_config({"synthesis": {"engines": {"piper": None, "espeak": {}}}}, "x")
+    assert config.synthesis.engines == ("espeak",)
+    assert config.resolved()["synthesis"]["engines"]["piper"] is None
+    again = parse_config(config.resolved(), "x")
+    assert again.synthesis.piper is None and again.resolved() == config.resolved()
+    assert again.synthesis.espeak.speakers == 5
+    piper = parse_config({}, "x").synthesis.piper
+    assert piper.voice_dir == "runs/wordforms/voices"
+
+
 def test_seed_override():
     config = load_config(DATA / "default.yaml", seed=7)
     assert config.seed == 7

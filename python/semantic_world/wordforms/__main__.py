@@ -1,8 +1,10 @@
 """The command line: ``python -m semantic_world.wordforms <subcommand> ...``.
 
-Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms, ``all`` runs every
-built layer (in stage 1, the same as ``forms``), and ``check-ipa [--sample N] [--seed N]`` reports
-the agreement between the IPA table and espeak-ng.
+Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms; ``synth`` also
+synthesizes them; ``all`` runs every built layer (in stage 2, the same as ``synth``);
+``check-ipa [--sample N] [--seed N]`` reports the agreement between the IPA table and espeak-ng;
+and ``check-whisper CONFIG`` reports how well a Whisper model recognizes real words synthesized
+from their phonemes.
 """
 
 from __future__ import annotations
@@ -10,10 +12,11 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 import yaml
 
-from semantic_world.wordforms import load_config, run_forms
+from semantic_world.wordforms import load_config, run_forms, run_synthesis
 from semantic_world.wordforms.config import ConfigError
 from semantic_world.wordforms.generate import GenerationError
 from semantic_world.wordforms.phonemes import IPA_TABLE, PhonemeTable, espeak_path, ipa_agreement
@@ -27,6 +30,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     for name, help_text in (
         ("forms", "generate the word forms"),
+        ("synth", "generate the word forms and synthesize them"),
         ("all", "run every layer that is built"),
     ):
         sub = subparsers.add_parser(name, help=help_text)
@@ -41,6 +45,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     check.add_argument("--sample", type=int, default=500, help="the number of words to compare")
     check.add_argument("--seed", type=int, default=0, help="the seed of the sample")
     check.add_argument("--voice", default="en-us", help="the espeak-ng voice")
+    whisper = subparsers.add_parser(
+        "check-whisper", help="transcribe real words synthesized from their phonemes"
+    )
+    whisper.add_argument("config", help="the YAML configuration file")
+    whisper.add_argument("--seed", type=int, default=None, help="override the master seed")
+    whisper.add_argument("--words", type=int, default=200, help="the number of real words")
+    whisper.add_argument("--speakers", type=int, default=3, help="speakers per engine")
+    whisper.add_argument("--model", default="openai/whisper-small.en", help="the Whisper model")
+    whisper.add_argument("--out", default=None, help="write the report to this YAML file")
     args = parser.parse_args(argv)
 
     if args.command == "check-ipa":
@@ -53,11 +66,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(yaml.safe_dump(report, sort_keys=False, allow_unicode=True), end="")
         return 0
 
+    if args.command == "check-whisper":
+        from semantic_world.wordforms.transcribe import whisper_check
+
+        try:
+            config = load_config(args.config, seed=args.seed)
+            report = whisper_check(
+                config, words=args.words, speakers=args.speakers, model=args.model
+            )
+        except (ConfigError, GenerationError, RuntimeError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        text = yaml.safe_dump(report, sort_keys=False, allow_unicode=True)
+        if args.out:
+            Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            Path(args.out).write_text(text, encoding="utf-8")
+        print(text, end="")
+        return 0
+
     try:
         config = load_config(args.config, seed=args.seed)
         run = run_forms(config)
+        if args.command in ("synth", "all"):
+            run_synthesis(run, progress=_progress)
         folder = run.write(args.out)
-    except (ConfigError, GenerationError) as error:
+    except (ConfigError, GenerationError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     summary = run.summary()
@@ -66,7 +99,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{summary['minimal_pairs']} minimal pairs, "
         f"{summary['rejections']['total']} candidates rejected"
     )
+    if "synthesis" in summary:
+        synthesis = summary["synthesis"]
+        print(
+            f"synthesis: {synthesis['tokens']} tokens from {synthesis['speakers']} speakers, "
+            f"{synthesis['synthesized']} synthesized, {synthesis['read_from_cache']} read from "
+            f"the cache"
+        )
     return 0
+
+
+def _progress(done: int, total: int) -> None:
+    if done % 1000 == 0 or done == total:
+        print(f"  {done} of {total} tokens", file=sys.stderr)
 
 
 if __name__ == "__main__":
