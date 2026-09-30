@@ -386,6 +386,32 @@ def test_neighbor_auc():
     assert np.isnan(result[0]) and result[1] == 0
 
 
+def test_harder_neighbor_auc_compares_distance_1_with_distance_2():
+    # words 0 and 1 are neighbors at distance 1; word 2 is at distance 2 from both, word 3 at 4
+    phonemes = np.array(
+        [[0, 1, 2, 4], [1, 0, 2, 4], [2, 2, 0, 4], [4, 4, 4, 0]],
+        dtype=float,
+    )
+    # the distance-2 word lies between the two neighbors, and the distance-4 word is far away
+    angles = np.radians([0, 30, 10, 90])
+    layout = np.stack([np.cos(angles), np.sin(angles)], axis=1)
+    assert neighbor_auc(layout, phonemes) == (1.0, 2)  # against distance 3 or more: perfect
+    assert neighbor_auc(layout, phonemes, 2, True) == (0.0, 2)  # against distance 2: all wrong
+    # with the neighbors closer to each other than to the distance-2 word, both are 1
+    angles = np.radians([0, 10, 30, 90])
+    layout = np.stack([np.cos(angles), np.sin(angles)], axis=1)
+    assert neighbor_auc(layout, phonemes) == (1.0, 2)
+    assert neighbor_auc(layout, phonemes, 2, True) == (1.0, 2)
+    # only words with neighbors at both distances count: word 1 loses its distance-2 neighbor
+    fewer = phonemes.copy()
+    fewer[1, 2] = fewer[2, 1] = 3
+    assert neighbor_auc(layout, fewer, 2, True) == (1.0, 1)
+    assert neighbor_auc(layout, fewer)[1] == 2
+    # distance 2 exactly: without any word at distance 2 the measure is undefined
+    result = neighbor_auc(layout, np.where(phonemes == 2, 3.0, phonemes), 2, True)
+    assert np.isnan(result[0]) and result[1] == 0
+
+
 def test_sample_word_means():
     tokens = np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 5.0], [0.0, 9.0]])
     words = np.array([0, 0, 1, 2])
@@ -483,6 +509,13 @@ def test_neighbor_auc_in_the_table(tmp_path):
     assert table["auc_words"].to_list() == [with_neighbor, with_neighbor]
     for name, value in zip(table["embedding"], table["fidelity_auc"], strict=True):
         expected, _ = neighbor_auc(run.embeddings[name].types, matrix)
+        assert 0 <= value <= 1 and value == pytest.approx(expected)
+    # the harder measure: distance 1 against distance 2, over the words with both
+    with_both = int(((matrix == 1).any(axis=1) & (matrix == 2).any(axis=1)).sum())
+    assert 0 < with_both <= with_neighbor
+    assert table["auc_1v2_words"].to_list() == [with_both, with_both]
+    for name, value in zip(table["embedding"], table["fidelity_auc_1v2"], strict=True):
+        expected, _ = neighbor_auc(run.embeddings[name].types, matrix, 2, True)
         assert 0 <= value <= 1 and value == pytest.approx(expected)
 
 

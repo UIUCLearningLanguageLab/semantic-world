@@ -4,11 +4,13 @@
   and compute the average precision for detecting pairs of the same word. It is reported for
   three sets of pairs: within a speaker, across two training speakers, and across two speakers
   of whom at least one is held out. Chance is the proportion of same-word pairs in the set.
-- **Phonological fidelity**, two measures on the word embeddings. The first is the correlation,
+- **Phonological fidelity**, on the word embeddings. The first measure is the correlation,
   across pairs of words, between cosine distance and phoneme edit distance. The second is the
   neighbor AUC: for a word, the probability that a word at edit distance 1 is closer in embedding
   space than a word at edit distance 3 or more, averaged over the words that have a neighbor at
-  distance 1.
+  distance 1. That measure is near its ceiling for every embedding, so a harder version stands
+  beside it: distance 1 against distance 2 exactly, averaged over the words that have neighbors
+  at both distances.
 - **Layer sweep.** For a pretrained model, every layer is evaluated, so that the default layer
   can be chosen from evidence.
 
@@ -45,6 +47,8 @@ MAX_TOKENS = 5000
 NEAR_DISTANCE = 1
 FAR_DISTANCE = 3
 """The neighbor AUC compares words at edit distance 1 with words at distance 3 or more."""
+HARD_FAR_DISTANCE = 2
+"""The harder neighbor AUC compares words at edit distance 1 with words at distance 2."""
 CONDITIONS = ("within_speaker", "across_train", "held_out")
 WORD_SETS = ("all", "without_long_synthesis")
 EVAL_COLUMNS = (
@@ -66,6 +70,8 @@ EVAL_COLUMNS = (
     "fidelity_spearman",
     "fidelity_auc",
     "auc_words",
+    "fidelity_auc_1v2",
+    "auc_1v2_words",
     "tokens_evaluated",
     "words_evaluated",
 )
@@ -145,23 +151,27 @@ def phonological_fidelity(types: np.ndarray, phonemes: np.ndarray) -> tuple[floa
     return pearson, spearman
 
 
-def neighbor_auc(types: np.ndarray, phonemes: np.ndarray) -> tuple[float, int]:
+def neighbor_auc(
+    types: np.ndarray, phonemes: np.ndarray, far: int = FAR_DISTANCE, far_exact: bool = False
+) -> tuple[float, int]:
     """The neighbor AUC, and the number of words it is averaged over.
 
     For one word, the AUC is the probability that a word at phoneme edit distance 1 is closer in
-    embedding space (cosine distance) than a word at edit distance 3 or more; a tie counts as
-    one half. The result is the mean over the words that have at least one word at distance 1
-    and at least one at distance 3 or more. NaN when there is no such word. 0.5 is chance.
+    embedding space (cosine distance) than a far word; a tie counts as one half. A far word is
+    at edit distance ``far`` or more, or at exactly ``far`` with ``far_exact``. The result is the
+    mean over the words that have at least one word at distance 1 and at least one far word. NaN
+    when there is no such word. 0.5 is chance.
     """
     embedding = cosine_distances(types)
     values = []
     for i in range(len(types)):
         near = embedding[i, phonemes[i] == NEAR_DISTANCE]
-        far = embedding[i, phonemes[i] >= FAR_DISTANCE]
-        if near.size == 0 or far.size == 0:
+        distant = phonemes[i] == far if far_exact else phonemes[i] >= far
+        others = embedding[i, distant]
+        if near.size == 0 or others.size == 0:
             continue
-        closer = (near[:, None] < far[None, :]).mean()
-        tied = (near[:, None] == far[None, :]).mean()
+        closer = (near[:, None] < others[None, :]).mean()
+        tied = (near[:, None] == others[None, :]).mean()
         values.append(closer + 0.5 * tied)
     if not values:
         return float("nan"), 0
@@ -257,6 +267,7 @@ def evaluate_embeddings(
             distances = phonemes[np.ix_(chosen, chosen)]
             pearson, spearman = phonological_fidelity(types[chosen], distances)
             auc, auc_words = neighbor_auc(types[chosen], distances)
+            hard, hard_words = neighbor_auc(types[chosen], distances, HARD_FAR_DISTANCE, True)
             rows.append(
                 {
                     "embedding": store.name,
@@ -272,6 +283,8 @@ def evaluate_embeddings(
                     "fidelity_spearman": spearman,
                     "fidelity_auc": auc,
                     "auc_words": auc_words,
+                    "fidelity_auc_1v2": hard,
+                    "auc_1v2_words": hard_words,
                     "tokens_evaluated": int(in_sample[name].sum()),
                     "words_evaluated": int(chosen.sum()),
                 }
@@ -310,6 +323,7 @@ def evaluate_embeddings(
             "word_set": pl.String,
             "dims": pl.Int64,
             "auc_words": pl.Int64,
+            "auc_1v2_words": pl.Int64,
             "tokens_evaluated": pl.Int64,
             "words_evaluated": pl.Int64,
         }

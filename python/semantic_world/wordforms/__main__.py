@@ -162,7 +162,7 @@ def _evaluation_text(table) -> str:
     all words, and again without the long_synthesis words when there are any."""
     lines = [
         f"  {'embedding':26s} {'words':>22s} {'dims':>5s}  {'within':>7s} {'across':>7s} "
-        f"{'held-out':>8s}  {'spearman':>8s} {'auc':>6s}"
+        f"{'held-out':>8s}  {'spearman':>8s} {'auc':>6s} {'1v2':>6s}"
     ]
 
     def shown(value, width: int) -> str:
@@ -174,7 +174,7 @@ def _evaluation_text(table) -> str:
             f"  {name:26s} {row['word_set']:>22s} {row['dims']:5d}  "
             f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
             f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
-            f"{shown(row['fidelity_auc'], 6)}"
+            f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)}"
         )
     sweep = table.filter((table["basis"] == "sweep") & (table["word_set"] == "all"))
     for name in sweep["embedding"].unique(maintain_order=True):
@@ -185,7 +185,7 @@ def _evaluation_text(table) -> str:
                 f"   {mark}layer {row['layer']:2d} {'':38s}"
                 f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
                 f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
-                f"{shown(row['fidelity_auc'], 6)}"
+                f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)}"
             )
     return "\n".join(lines)
 
