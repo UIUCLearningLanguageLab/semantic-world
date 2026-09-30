@@ -1,0 +1,12 @@
+# Warmth and a better place to sleep. A brown box, 3 m × 2.5 m × 3 m, open on the side the
+# entity faces. Only its walls block movement, 0.2 m thick. An agent is inside when its center
+# is within the footprint.
+type: shelter
+version: 1
+body:
+  plan: structure
+  radius: {default: 1.5, range: [1, 5], units: m}
+  solid: true
+  collision: {shape: walls, thickness: {default: 0.2, range: [0.05, 1.0], units: m}}
+  tags: [shelter]
+  placeholder: {shape: shelter, size: [3.0, 2.5, 3.0], color: "#7b5636"}

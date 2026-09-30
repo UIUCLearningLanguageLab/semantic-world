@@ -1,0 +1,52 @@
+# The agent. Placeholder: a tan capsule, 1.7 m tall and 0.5 m wide. Blocking radius 0.25 m.
+# Needs and their rates follow docs/specs/MILESTONE_1.md, "The tiny survival world".
+type: human
+version: 1
+body:
+  plan: biped
+  mass: {default: 70, range: [40, 110], units: kg, variation: {normal: {sd: 10}}, visible: true}
+  height: {default: 1.7, range: [1.4, 2.0], units: m, variation: {normal: {sd: 0.08}}, visible: true}
+  insulation: {default: 0.2, range: [0, 1]}
+  radius: {default: 0.25, range: [0.1, 0.5], units: m}
+  solid: true
+  placeholder: {shape: capsule, size: [0.5, 1.7, 0.5], color: "#d2b48c"}
+  needs:
+    hunger:
+      initial: 0.0
+      rise_per_day: {default: 0.5, range: [0, 5], units: per_day}
+      rise_when: always
+      at_max: {health_drain_per_hour: {default: 0.5, range: [0, 5], units: per_hour}}
+    thirst:
+      initial: 0.0
+      rise_per_day: {default: 1.0, range: [0, 5], units: per_day}
+      rise_when: always
+      at_max: {health_drain_per_hour: {default: 1.0, range: [0, 5], units: per_hour}}
+    fatigue:
+      initial: 0.0
+      rise_per_day: {default: 1.0, range: [0, 5], units: per_day}
+      rise_when: awake                     # rises while awake; see docs/proposals/2026-09-29-rise-when-awake.md
+      rise_multipliers: {running: {default: 2.0, range: [1, 5]}}
+      fall_per_day: {default: 4.0, range: [0, 20], units: per_day}   # while asleep
+      fall_multipliers: {in_shelter: {default: 2.0, range: [1, 5]}}
+      at_max: {collapse: {duration_hours: {default: 2.0, range: [0.5, 12], units: hours}}}
+    cold:
+      initial: 0.0
+      rise_per_day: {default: 4.0, range: [0, 20], units: per_day}
+      rise_when: night_outside_shelter
+      insulation_reduces_rise: true
+      fall_per_day: {default: 4.0, range: [0, 20], units: per_day}   # in daylight or inside a shelter
+      at_max: {health_drain_per_hour: {default: 1.0, range: [0, 5], units: per_hour}}
+  health:
+    initial: 1.0
+    recover_per_hour: {default: 0.05, range: [0, 1], units: per_hour}
+sensors:
+  eyes: {resolution: [64, 64], fov_deg: {default: 90, range: [30, 170], units: deg}, range_m: {default: 50, range: [5, 200], units: m}, color: true, height_m: {default: 1.6, range: [0.5, 2.0], units: m}}
+  interoception: {needs: [hunger, thirst, fatigue, cold], health: true, noise_sd: {default: 0.0, range: [0, 0.5]}}
+  touch: {detail: whole_body}
+  proprioception: {}
+  propositional: {range_m: {default: 20, range: [1, 100], units: m}}   # active only when views.propositional_sensor is on
+actuators:
+  legs: {}
+  arms_and_hands: {}
+  mouth: {}
+nervous_system: {module: random}

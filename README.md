@@ -2,7 +2,7 @@
 
 An artificial world for comparing cognitive models.
 
-**Status:** early design. The design documents are in `docs/`. No simulation code yet.
+**Status:** early build. The design documents are in `docs/`, and the code is being built in stages against `docs/specs/MILESTONE_1.md`. The git log names the stages done so far.
 
 ## Purpose
 
@@ -52,6 +52,9 @@ The reasoning behind these choices is in `docs/ENVIRONMENT_SURVEY.md`.
 
 ## Documents
 
+- `docs/specs/MILESTONE_1.md` — the build specification for the first working version: scope, world content, and build stages.
+- `docs/CONTRACTS.md` — the contracts between the engine, the world, the agents, and the viewer: interfaces and file formats.
+- `CONTRIBUTING.md` — how to set up and make a change. `CLAUDE.md` holds the same rules for Claude Code sessions.
 - `docs/ENVIRONMENT_SURVEY.md` — a survey of existing environments, engines, and benchmarks, with a browsable version in `docs/environment_survey.html`.
 - `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and nervous systems are defined.
 - `docs/specs/` — draft specifications for later work: developing organisms for the generative world, and a full wave simulation of sound.

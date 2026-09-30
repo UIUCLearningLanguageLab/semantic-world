@@ -1,0 +1,37 @@
+[package]
+name = "sw-py"
+description = "Semantic World: PyO3 bindings, compiled as the Python module semantic_world._core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "_core"
+crate-type = ["cdylib"]
+# The bindings are tested from Python (tests/), not with `cargo test`: a Rust test binary for this
+# crate would have to link and locate libpython, which differs by machine. Engine logic and its
+# Rust tests live in the engine crates, which this crate only wraps.
+test = false
+doctest = false
+
+[dependencies]
+pyo3.workspace = true
+numpy.workspace = true
+sw-schema.workspace = true
+sw-core.workspace = true
+sw-rules.workspace = true
+sw-sense.workspace = true
+sw-render.workspace = true
+sw-log.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+thiserror.workspace = true
+
+# `pyo3/extension-module` is turned on by maturin (see pyproject.toml), not here, so that
+# `cargo test --workspace --all-features` can still link this crate against libpython.
+
+[lints]
+workspace = true

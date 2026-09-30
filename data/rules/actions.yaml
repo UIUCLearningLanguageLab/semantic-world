@@ -1,0 +1,64 @@
+# Actions of the survival world (docs/specs/MILESTONE_1.md, "Actions"; contract 2; additions
+# A3 and A4). The order here is the action-manifest order. Preconditions call registered
+# predicates; effects call registered effects; actions whose effect cannot be written as data
+# name a registered rule module and pass it parameters. Every energy cost is 0 in milestone 1:
+# fatigue carries the cost of activity instead.
+actions:
+  noop:
+    energy_cost: 0
+  move:
+    actuator: legs
+    args:
+      direction: {range: [-3.141592653589793, 3.141592653589793], units: rad}   # relative to facing
+      speed: {range: [0, 1]}
+    pre: [awake(self)]
+    module: kinematic_move
+    params:
+      walk_speed_mps: {default: 1.4, range: [0.1, 5], units: m/s}   # at speed 0.6; scaled linearly below
+      walk_speed_max: {default: 0.6, range: [0.1, 1]}                # speed above this is running
+      run_speed_mps: {default: 3.5, range: [0.1, 10], units: m/s}
+    energy_cost: 0
+  turn:
+    actuator: legs
+    args:
+      angle: {range: [-0.7853981633974483, 0.7853981633974483], units: rad}
+    pre: [awake(self)]
+    module: turn
+    energy_cost: 0
+  eat:
+    actuator: mouth
+    args:
+      target: {has: edible, optional: true}
+    pre:
+      - awake(self)
+      - within(self, target, 1.0)
+      - facing(self, target, 45)
+      - has_tag(target, edible)
+      - stock_at_least(target, berries, 1)
+    duration: {default: 2.0, range: [0.5, 10], units: s}
+    effects:                                          # applied at the end; interrupted eating has no effect
+      - take_stock: {entity: target, name: berries, amount: 1}
+      - change_need: {entity: self, need: hunger, by: target.provides.hunger}
+    energy_cost: 0
+  drink:
+    actuator: mouth
+    args:
+      target: {has: drinkable, optional: true}
+    pre:
+      - awake(self)
+      - within(self, target, 1.0)
+      - facing(self, target, 45)
+      - has_tag(target, drinkable)
+    duration: {default: 10.0, range: [1, 60], units: s}
+    effects:
+      - change_need_rate: {entity: self, need: thirst, per_second: -0.1}
+    energy_cost: 0
+  sleep:
+    pre: [awake(self)]
+    on_start:
+      - set_state: {entity: self, state: asleep, value: true}
+    until:                                            # block style: a flow list would split the call on its commas
+      - need_at_most(self, fatigue, 0.0)
+    on_end:
+      - set_state: {entity: self, state: asleep, value: false}
+    energy_cost: 0
