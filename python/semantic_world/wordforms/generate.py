@@ -61,6 +61,19 @@ class WordForm:
     long_synthesis: bool | None = None
     """Whether the word's Piper tokens are unusually long for its syllable count. None until the
     word has been synthesized by Piper."""
+    kind: str = "content"
+    """``content``, ``function``, or ``inflected``."""
+    gloss: str | None = None
+    """The gloss of a function word."""
+    stem: str | None = None
+    """The label of an inflected form's stem."""
+    affix: str | None = None
+    """The label of an inflected form's affix."""
+    join: str | None = None
+    """How an inflected form's stem and affix were joined: ``none``, ``schwa``, or ``glide``."""
+    weak_forms: tuple[str, ...] = ()
+    """The other dictionary pronunciations of an English function word (ARPAbet), for connected
+    speech later."""
 
     @property
     def phones(self) -> tuple[str, ...]:
@@ -98,6 +111,12 @@ class WordForm:
             "lexicon_neighbors": self.lexicon_neighbors,
             "real_word": self.real_word,
             "long_synthesis": self.long_synthesis,
+            "kind": self.kind,
+            "gloss": self.gloss,
+            "stem": self.stem,
+            "affix": self.affix,
+            "join": self.join,
+            "weak_forms": "; ".join(self.weak_forms) if self.weak_forms else None,
         }
 
 
@@ -128,21 +147,36 @@ class Lexicon:
     """The generated word forms with the summary of their generation."""
 
     words: list[WordForm]
+    """Every form of the run: the content words, then the function words, then the inflected
+    forms."""
     rejections: Rejections
     english_summary: dict[str, Any] = field(default_factory=dict)
+    affixes: list[Any] = field(default_factory=list)
+    """The affixes (``closed_class.Affix``). An affix is a bound form, and not a word."""
+    closed_class: dict[str, Any] | None = None
+    """The summary of the closed-class forms, when the run has them."""
+
+    @property
+    def content(self) -> list[WordForm]:
+        """The content words."""
+        return [w for w in self.words if w.kind == "content"]
 
     def summary(self) -> dict[str, Any]:
+        content = self.content
         counts: dict[int, int] = {}
-        for w in self.words:
+        for w in content:
             counts[w.syllable_count] = counts.get(w.syllable_count, 0) + 1
-        return {
-            "words": len(self.words),
-            "real_words": sum(w.real_word for w in self.words),
+        summary = {
+            "words": len(content),
+            "real_words": sum(w.real_word for w in content),
             "syllable_counts": {k: counts[k] for k in sorted(counts)},
-            "minimal_pairs": sum(w.lexicon_neighbors for w in self.words) // 2,
+            "minimal_pairs": sum(w.lexicon_neighbors for w in content) // 2,
             "rejections": self.rejections.as_dict(),
             "english": self.english_summary,
         }
+        if self.closed_class is not None:
+            summary["closed_class"] = self.closed_class
+        return summary
 
 
 class _Sampler:
@@ -236,7 +270,7 @@ def generate_lexicon(
     """Generate the word table of a configuration from the ``wordforms:generate`` stream.
     ``english`` defaults to the dictionary with the configuration's ``english_min_zipf``."""
     settings = config.wordforms
-    english = english or load_english(settings.english_min_zipf)
+    english = english or load_english(settings.english_min_zipf, settings.exclude_inflections)
     sampler = _Sampler(english)
     ipa_table, espeak_table = load_tables()
     speller = Speller.load()
@@ -349,7 +383,9 @@ def _add_statistics(
         )
 
 
-def word_form_from_arpabet(label: str, arpabet: str, english_min_zipf: float | None) -> WordForm:
+def word_form_from_arpabet(
+    label: str, arpabet: str, english_min_zipf: float | None, exclude_inflections: bool = True
+) -> WordForm:
     """A word form from an ARPAbet string with stress digits on its vowels, such as
     ``K AE1 T``: syllabified, with its IPA and espeak-ng strings and its spelling."""
     from semantic_world.wordforms.english import PHONEMES, base, is_vowel, syllabify
@@ -361,7 +397,7 @@ def word_form_from_arpabet(label: str, arpabet: str, english_min_zipf: float | N
     unstressed = [p for p in phones if is_vowel(p) and not p[-1].isdigit()]
     if unstressed:
         raise ValueError(f"vowels need a stress digit (0, 1, or 2): {' '.join(unstressed)}")
-    english = load_english(english_min_zipf)
+    english = load_english(english_min_zipf, exclude_inflections)
     ipa_table, espeak_table = load_tables()
     syllables = syllabify(phones, english.onsets)
     form = WordForm(label, syllables, real_word=english.is_pronunciation(phones))

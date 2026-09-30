@@ -369,10 +369,10 @@ def test_frontends_command_on_the_tiny_configuration(tmp_path, capsys):
         assert store.frames.shape == (sum(expected), channels)
         assert np.isfinite(store.frames).all()
     summary = yaml.safe_load((out / "summary.yaml").read_text())
-    assert summary["frontends"]["logmel"]["tokens"] == 120
+    assert summary["frontends"]["logmel"]["tokens"] == tokens.height
     assert summary["frontends"]["cochleagram"]["reused"] is False
     # a second run reads the audio cache and finds the front ends already stored
     assert main(["all", str(path), "--out", str(out)]) == 0
     text = capsys.readouterr().out
-    assert "0 synthesized, 120 read from the cache" in text
+    assert f"0 synthesized, {summary['synthesis']['synthesized']} read from the cache" in text
     assert text.count("already stored") == 2

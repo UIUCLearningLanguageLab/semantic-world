@@ -25,6 +25,17 @@ over the sample's training-speaker tokens.
 
 When some words are flagged ``long_synthesis``, every row is given twice: for all words
 (``word_set`` is ``all``) and without the flagged words (``without_long_synthesis``).
+
+A run with closed-class forms reports every measure for each kind of form separately (``kind``
+is ``content``, ``function``, or ``inflected``) and for all forms together (``all``). Each kind
+has its own sample of tokens, and so do all forms together. The sample of the content words is
+drawn first, so it is the sample of the same run without closed-class forms. A run with content
+words only has the ``content`` rows alone.
+
+- **Stem AUC**, for inflected forms, on the word embeddings: the probability that an inflected
+  form is closer to its own stem than to another stem, averaged over the inflected forms. The
+  other stems are the stems of the other inflected forms. 0.5 is chance. The measure is given in
+  the ``inflected`` rows and in the ``all`` rows.
 """
 
 from __future__ import annotations
@@ -51,6 +62,8 @@ HARD_FAR_DISTANCE = 2
 """The harder neighbor AUC compares words at edit distance 1 with words at distance 2."""
 CONDITIONS = ("within_speaker", "across_train", "held_out")
 WORD_SETS = ("all", "without_long_synthesis")
+KINDS = ("content", "function", "inflected")
+ALL_KINDS = "all"
 EVAL_COLUMNS = (
     "embedding",
     "encoder",
@@ -59,6 +72,7 @@ EVAL_COLUMNS = (
     "configured",
     "basis",
     "word_set",
+    "kind",
     "dims",
     "ap_within_speaker",
     "chance_within_speaker",
@@ -72,6 +86,8 @@ EVAL_COLUMNS = (
     "auc_words",
     "fidelity_auc_1v2",
     "auc_1v2_words",
+    "stem_auc",
+    "stem_auc_forms",
     "tokens_evaluated",
     "words_evaluated",
 )
@@ -178,6 +194,27 @@ def neighbor_auc(
     return float(np.mean(values)), len(values)
 
 
+def stem_auc(forms: np.ndarray, stems: np.ndarray, own: np.ndarray) -> tuple[float, int]:
+    """The stem AUC, and the number of inflected forms it is averaged over.
+
+    ``forms`` holds the embeddings of inflected forms, ``stems`` the embeddings of the distinct
+    stems, and ``own[i]`` the row of form ``i``'s stem. For one form, the AUC is the probability
+    that the form is closer (cosine distance) to its own stem than to another stem; a tie counts
+    as one half. NaN when there are no forms or only one stem. 0.5 is chance.
+    """
+    if len(forms) == 0 or len(stems) < 2:
+        return float("nan"), 0
+    count = len(forms)
+    distances = cosine_distances(np.concatenate([forms, stems]))[:count, count:]
+    rows = np.arange(count)
+    mine = distances[rows, own][:, None]
+    other = np.ones_like(distances, dtype=bool)
+    other[rows, own] = False
+    closer = ((mine < distances) & other).sum(axis=1)
+    tied = ((mine == distances) & other).sum(axis=1)
+    return float(((closer + 0.5 * tied) / (len(stems) - 1)).mean()), count
+
+
 def evaluation_sample(count: int, rng: np.random.Generator, limit: int = MAX_TOKENS) -> np.ndarray:
     """The tokens that the evaluation uses: all of them, or a seeded sample of ``limit``."""
     if count <= limit:
@@ -245,29 +282,63 @@ def evaluate_embeddings(
     """The evaluation table. ``config`` is needed for the layer sweep of a pretrained model that
     did not store its layers; ``sweep=False`` leaves the sweep out."""
     token_words, token_speakers, train = token_layout(words, synthesis)
-    sample = evaluation_sample(len(token_words), rng, max_tokens)
+    word_kinds = np.array([word.kind for word in words])
+    # The groups of words that get rows: each kind, and all forms together when the run has
+    # closed-class forms. Each group has its own sample of tokens, the content words' first.
+    groups = {kind: word_kinds == kind for kind in KINDS if (word_kinds == kind).any()}
+    if set(groups) != {"content"}:
+        groups[ALL_KINDS] = np.ones(len(words), dtype=bool)
+    samples: dict[str, np.ndarray] = {}
+    for group, members in groups.items():
+        own = np.flatnonzero(members[token_words])
+        samples[group] = own[evaluation_sample(len(own), rng, max_tokens)]
     phonemes = edit_distance_matrix(words)
     flagged = np.array([bool(word.long_synthesis) for word in words])
-    word_sets = {"all": np.ones(len(words), dtype=bool)}
-    if flagged.any():
-        word_sets["without_long_synthesis"] = ~flagged
-    in_sample = {name: keep[token_words[sample]] for name, keep in word_sets.items()}
-    pairs = {
-        name: PairSets(token_words[sample][mask], token_speakers[sample][mask], train[sample][mask])
-        for name, mask in in_sample.items()
-    }
+    index = {word.label: i for i, word in enumerate(words)}
+    stem_of = np.array([index.get(word.stem, -1) if word.stem else -1 for word in words])
+    word_sets: dict[str, dict[str, np.ndarray]] = {}
+    in_sample: dict[str, dict[str, np.ndarray]] = {}
+    pairs: dict[str, dict[str, PairSets]] = {}
+    for group, members in groups.items():
+        sample = samples[group]
+        word_sets[group] = {"all": members}
+        if (flagged & members).any():
+            word_sets[group]["without_long_synthesis"] = members & ~flagged
+        in_sample[group] = {
+            name: keep[token_words[sample]] for name, keep in word_sets[group].items()
+        }
+        pairs[group] = {
+            name: PairSets(
+                token_words[sample][mask], token_speakers[sample][mask], train[sample][mask]
+            )
+            for name, mask in in_sample[group].items()
+        }
     rows: list[dict[str, Any]] = []
 
-    def add_rows(store, sampled, types, present, layer, configured, basis) -> None:
-        """One row for each word set. ``sampled`` holds the sample's token embeddings, and
-        ``present`` marks the words that have a word embedding."""
+    def stem_measure(group, name, keep, types, present, stem_types, stem_present):
+        """The stem AUC of a group's inflected forms. A form counts when the form and its stem
+        both have a word embedding, and neither is left out of the word set."""
+        if group not in ("inflected", ALL_KINDS):
+            return float("nan"), 0
+        stem_kept = stem_present & ~flagged if name == "without_long_synthesis" else stem_present
+        forms = np.flatnonzero((word_kinds == "inflected") & keep & present & (stem_of >= 0))
+        forms = forms[stem_kept[stem_of[forms]]]
+        stems, own = np.unique(stem_of[forms], return_inverse=True)
+        return stem_auc(types[forms], stem_types[stems], own)
+
+    def add_rows(store, group, sampled, types, present, stems, layer, configured, basis) -> None:
+        """One row for each word set of a group. ``sampled`` holds the token embeddings of the
+        group's sample, ``present`` marks the words that have a word embedding in ``types``, and
+        ``stems`` gives the word embeddings of the stems with their own ``present``."""
         meta = store.meta
-        for name, keep in word_sets.items():
+        for name, keep in word_sets[group].items():
             chosen = keep & present
             distances = phonemes[np.ix_(chosen, chosen)]
             pearson, spearman = phonological_fidelity(types[chosen], distances)
             auc, auc_words = neighbor_auc(types[chosen], distances)
             hard, hard_words = neighbor_auc(types[chosen], distances, HARD_FAR_DISTANCE, True)
+            stem, stem_forms = stem_measure(group, name, keep, types, present, *stems)
+            inflected = group in ("inflected", ALL_KINDS)
             rows.append(
                 {
                     "embedding": store.name,
@@ -277,15 +348,18 @@ def evaluate_embeddings(
                     "configured": configured,
                     "basis": basis,
                     "word_set": name,
+                    "kind": group,
                     "dims": int(sampled.shape[1]),
-                    **pairs[name].evaluate(sampled[in_sample[name]]),
+                    **pairs[group][name].evaluate(sampled[in_sample[group][name]]),
                     "fidelity_pearson": pearson,
                     "fidelity_spearman": spearman,
                     "fidelity_auc": auc,
                     "auc_words": auc_words,
                     "fidelity_auc_1v2": hard,
                     "auc_1v2_words": hard_words,
-                    "tokens_evaluated": int(in_sample[name].sum()),
+                    "stem_auc": stem,
+                    "stem_auc_forms": stem_forms if inflected else None,
+                    "tokens_evaluated": int(in_sample[group][name].sum()),
                     "words_evaluated": int(chosen.sum()),
                 }
             )
@@ -294,7 +368,21 @@ def evaluate_embeddings(
     for store in stores.values():
         pretrained = bool(store.meta["pretrained"])
         layer = store.meta["layer"] if pretrained else None
-        add_rows(store, store.tokens[sample], store.types, everything, layer, True, "stored")
+        tokens, types = store.tokens, store.types
+        for group in groups:
+            stored = (types, everything)
+            add_rows(
+                store,
+                group,
+                tokens[samples[group]],
+                types,
+                everything,
+                stored,
+                layer,
+                True,
+                "stored",
+            )
+    union = np.unique(np.concatenate(list(samples.values())))
     for store in stores.values():
         if not (sweep and store.meta["pretrained"]):
             continue
@@ -302,13 +390,22 @@ def evaluate_embeddings(
             raise ValueError("the layer sweep needs the run's configuration to run the model")
         name = store.name
         report = None if progress is None else (lambda i, n, name=name: progress(name, i, n))
-        layers = sweep_layers(store, config, synthesis, sample, local_only, report)
+        # the model runs once on every sampled token, whichever samples the token is in
+        layers = sweep_layers(store, config, synthesis, union, local_only, report)
         for layer in range(layers.shape[1]):
-            sampled = layers[:, layer]
-            types, present = sample_word_means(
-                sampled, token_words[sample], train[sample], len(words)
-            )
-            add_rows(store, sampled, types, present, layer, layer == store.meta["layer"], "sweep")
+            means = {}
+            for group, sample in samples.items():
+                sampled = layers[np.searchsorted(union, sample), layer]
+                means[group] = (
+                    sampled,
+                    *sample_word_means(sampled, token_words[sample], train[sample], len(words)),
+                )
+            for group in groups:
+                sampled, types, present = means[group]
+                # an inflected form's stem is a content word, from the content words' sample
+                stems = means["content"][1:] if group == "inflected" else (types, present)
+                configured = layer == store.meta["layer"]
+                add_rows(store, group, sampled, types, present, stems, layer, configured, "sweep")
 
     floats = ("ap_", "chance_", "fidelity_")
     schema: dict[str, Any] = {name: pl.Float64 for name in EVAL_COLUMNS if name.startswith(floats)}
@@ -321,9 +418,12 @@ def evaluate_embeddings(
             "configured": pl.Boolean,
             "basis": pl.String,
             "word_set": pl.String,
+            "kind": pl.String,
             "dims": pl.Int64,
             "auc_words": pl.Int64,
             "auc_1v2_words": pl.Int64,
+            "stem_auc": pl.Float64,
+            "stem_auc_forms": pl.Int64,
             "tokens_evaluated": pl.Int64,
             "words_evaluated": pl.Int64,
         }

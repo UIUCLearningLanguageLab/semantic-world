@@ -12,6 +12,8 @@ from semantic_world.wordforms.english import (
     PHONEMES,
     POSITIONS,
     edit_distance,
+    inflection_bases,
+    inflection_of,
     position_of,
     rime_position_of,
     syllabify,
@@ -99,16 +101,21 @@ def test_dictionary_filtering(english):
     )
     summary = english.summary()
     assert summary["english_min_zipf"] is None
-    assert summary["pattern_words"] == summary["words"] == len(english.words)
-    # with the whole dictionary, a legal onset begins at least 20 words
-    assert -(-len(english.words) // ONSET_WORD_RATIO) == 20
+    assert summary["common_words"] == summary["words"] == len(english.words)
+    # the pattern words are the dictionary without its regular inflections
+    assert summary["exclude_inflections"] is True
+    assert summary["pattern_words"] == summary["words"] - summary["inflections_dropped"]
+    assert 20_000 < summary["inflections_dropped"] < 40_000
+    # with the whole dictionary, a legal onset begins at least 16 words
+    assert -(-len(english.pattern_words) // ONSET_WORD_RATIO) == 16
 
 
 def test_counts_by_position_and_stress(english):
-    # every pronunciation contributed one onset and one rime per syllable
+    # every pattern pronunciation contributed one onset and one rime per syllable
     onsets = sum(sum(c.values()) for c in english.onset_counts.values())
     rimes = sum(sum(c.values()) for c in english.rime_counts.values())
-    syllables = sum(len(s) for s in english.syllables.values())
+    pattern = {p for w in english.pattern_words for p in english.words[w]}
+    syllables = sum(len(english.syllables[p]) for p in pattern)
     assert onsets == rimes == syllables
     # monosyllables count as initial onsets and final rimes, so no medial or final onset comes
     # from them and every rime starts with a vowel
@@ -122,15 +129,18 @@ def test_counts_by_position_and_stress(english):
 
 
 def test_trigram_model(english):
-    assert english.phonotactic(english.words["strengths"][0])
+    assert english.phonotactic(english.words["strength"][0])
+    # "strengths" is the plural of "strength": its final trigram comes from no pattern word
+    assert not english.phonotactic(english.words["strengths"][0])
     assert not english.phonotactic(("NG", "K", "AE1", "T"))  # no English word begins with NG
     assert english.log_probability(("NG", "K", "AE1", "T")) == -math.inf
     lp = english.log_probability(english.words["cat"][0])
     assert math.isfinite(lp) and lp < 0
     # a real word is at least as probable as an odd but legal sequence of the same length
     assert lp > english.log_probability(("ZH", "AE1", "TH"))
-    # every dictionary pronunciation passes the phonotactic check
-    assert all(english.phonotactic(p) for p in list(english.syllables)[:5000])
+    # every pattern pronunciation passes the phonotactic check
+    pattern = [p for w in sorted(english.pattern_words)[:5000] for p in english.words[w]]
+    assert all(english.phonotactic(p) for p in pattern)
 
 
 def test_edit_distance():
@@ -195,7 +205,9 @@ def test_pattern_words_are_the_common_words(common_english, english):
 
     summary = common_english.summary()
     assert summary["english_min_zipf"] == 3.0
-    assert 20_000 < summary["pattern_words"] < 40_000
+    assert 20_000 < summary["common_words"] < 40_000
+    assert 5_000 < summary["inflections_dropped"] < 15_000
+    assert summary["pattern_words"] == summary["common_words"] - summary["inflections_dropped"]
     assert summary["words"] == len(english.words)  # the whole dictionary is still loaded
     assert {"cat", "hello", "pizza"} <= common_english.pattern_words
     assert not {"svelte", "tlingit", "kasprzyk"} & common_english.pattern_words
@@ -245,7 +257,7 @@ def test_statistics_come_from_pattern_words_only(common_english):
     # a rare name's trigrams are not legal, though the name is in the dictionary
     assert "tlingit" in common_english.words
     assert not common_english.phonotactic(common_english.words["tlingit"][0])
-    assert common_english.phonotactic(common_english.words["strengths"][0])
+    assert common_english.phonotactic(common_english.words["strength"][0])
 
 
 @needs_wordfreq
@@ -268,7 +280,70 @@ def test_real_word_source_is_the_plain_pattern_words(common_english, english):
     assert len(common_english.by_syllable_count[2]) < len(english.by_syllable_count[2])
     total = sum(len(v) for v in common_english.by_syllable_count.values())
     assert total == sum(w.isalpha() for w in common_english.pattern_words)
-    # with the whole dictionary, every plain word is available
+    # with the whole dictionary, every plain uninflected word is available
     assert sum(len(v) for v in english.by_syllable_count.values()) == sum(
-        w.isalpha() for w in english.words
+        w.isalpha() for w in english.pattern_words
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# Regular inflections
+# ---------------------------------------------------------------------------------------------
+
+
+def test_inflection_bases():
+    assert ("walk", "ed") in inflection_bases("walked")
+    assert ("like", "ed") in inflection_bases("liked")
+    assert ("stop", "ed") in inflection_bases("stopped")
+    assert ("try", "ed") in inflection_bases("tried")
+    assert ("make", "ing") in inflection_bases("making")
+    assert ("run", "ing") in inflection_bases("running")
+    assert ("box", "s") in inflection_bases("boxes") and ("boxe", "s") in inflection_bases("boxes")
+    assert ("family", "s") in inflection_bases("families")
+    assert ("happy", "er") in inflection_bases("happier")
+    assert ("late", "est") in inflection_bases("latest")
+    assert ("happy", "ly") in inflection_bases("happily")
+    assert ("true", "ly") in inflection_bases("truly")
+    assert inflection_bases("cat") == []
+    assert inflection_bases("s") == [] and inflection_bases("es") == []
+
+
+def test_inflection_of_needs_the_spelling_and_the_sounds(english):
+    words = english.words
+    assert inflection_of("walked", words) == ("walk", "ed")
+    assert inflection_of("stopped", words) == ("stop", "ed")
+    assert inflection_of("tried", words) in (("try", "ed"), ("tri", "ed"))  # "tri" is a word
+    assert inflection_of("making", words) == ("make", "ing")
+    assert inflection_of("boxes", words) == ("box", "s")
+    assert inflection_of("families", words) == ("family", "s")
+    assert inflection_of("happier", words) == ("happy", "er")
+    assert inflection_of("latest", words) == ("late", "est")
+    assert inflection_of("quickly", words) == ("quick", "ly")
+    assert inflection_of("truly", words) == ("true", "ly")
+    # spelled like an inflection but not pronounced like one
+    for word in ("is", "has", "only", "early", "number", "bed", "this", "less", "does"):
+        assert inflection_of(word, words) is None, word
+    assert inflection_of("cat", words) is None
+    assert english.inflections["walked"] == ("walk", "ed")
+    assert "walk" not in english.inflections and "walk" in english.pattern_words
+    assert "walked" not in english.pattern_words
+
+
+@needs_wordfreq
+def test_exclude_inflections_can_be_turned_off(common_english):
+    from semantic_world.wordforms.english import load_english
+
+    with_inflections = load_english(3.0, exclude_inflections=False)
+    assert with_inflections.common_words == common_english.common_words
+    assert with_inflections.pattern_words == common_english.common_words
+    assert with_inflections.inflections == {}
+    assert with_inflections.summary()["inflections_dropped"] == 0
+    assert "walked" in with_inflections.pattern_words
+    # the endings that the inflections carry are rarer in the patterns without them
+    ing = ("IH", "NG")
+    assert common_english.rime_counts["final", False][ing] < (
+        with_inflections.rime_counts["final", False][ing] / 3
+    )
+    assert common_english.is_common_pronunciation(common_english.words["walked"][0])
+    assert not common_english.is_common_pronunciation(common_english.words["svelte"][0])
+    assert "cat" in common_english.common_words_with_pronunciation(("K", "AE1", "T"))

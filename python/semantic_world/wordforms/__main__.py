@@ -1,6 +1,7 @@
 """The command line: ``python -m semantic_world.wordforms <subcommand> ...``.
 
-Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms; ``synth`` also
+Subcommands: ``forms CONFIG [--seed N] [--out DIR]`` generates the word forms, with the
+closed-class forms when the configuration has them; ``synth`` also
 synthesizes them; ``frontends`` also computes the auditory front ends; ``embed`` also computes
 the sound embeddings; ``eval`` also evaluates them; ``assign`` generates the word forms and
 assigns them to meanings; ``all`` runs every layer;
@@ -122,6 +123,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{summary['minimal_pairs']} minimal pairs, "
         f"{summary['rejections']['total']} candidates rejected"
     )
+    if "closed_class" in summary:
+        closed = summary["closed_class"]
+        inflected = closed["inflected"]
+        print(
+            f"closed-class forms: {closed['function_words']['count']} function words, "
+            f"{closed['affixes']['count']} affixes, {inflected['made']} inflected forms "
+            f"({inflected['joins']['schwa']} with a schwa, {inflected['joins']['glide']} with a "
+            f"glide, {len(inflected['skipped'])} pairs skipped)"
+        )
     if "synthesis" in summary:
         synthesis = summary["synthesis"]
         print(
@@ -159,34 +169,38 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _evaluation_text(table) -> str:
     """The stored embeddings' rows of the evaluation table, as aligned text: every embedding for
-    all words, and again without the long_synthesis words when there are any."""
+    each kind of form, for all words, and again without the long_synthesis words when there are
+    any. The layer sweep is shown for the content words."""
     lines = [
-        f"  {'embedding':26s} {'words':>22s} {'dims':>5s}  {'within':>7s} {'across':>7s} "
-        f"{'held-out':>8s}  {'spearman':>8s} {'auc':>6s} {'1v2':>6s}"
+        f"  {'embedding':26s} {'kind':>9s} {'words':>22s} {'dims':>5s}  {'within':>7s} "
+        f"{'across':>7s} {'held-out':>8s}  {'spearman':>8s} {'auc':>6s} {'1v2':>6s} {'stem':>6s}"
     ]
 
     def shown(value, width: int) -> str:
         return f"{'n/a':>{width}s}" if value is None else f"{value:{width}.3f}"
 
+    def measures(row) -> str:
+        return (
+            f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
+            f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
+            f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)} "
+            f"{shown(row['stem_auc'], 6)}"
+        )
+
     for row in table.filter(table["basis"] == "stored").iter_rows(named=True):
         name = row["embedding"] + ("" if row["layer"] is None else f" (layer {row['layer']})")
         lines.append(
-            f"  {name:26s} {row['word_set']:>22s} {row['dims']:5d}  "
-            f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
-            f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
-            f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)}"
+            f"  {name:26s} {row['kind']:>9s} {row['word_set']:>22s} {row['dims']:5d}  "
+            f"{measures(row)}"
         )
-    sweep = table.filter((table["basis"] == "sweep") & (table["word_set"] == "all"))
+    sweep = table.filter(
+        (table["basis"] == "sweep") & (table["word_set"] == "all") & (table["kind"] == "content")
+    )
     for name in sweep["embedding"].unique(maintain_order=True):
-        lines.append(f"  layer sweep of {name} (on the evaluation sample):")
+        lines.append(f"  layer sweep of {name} (content words, on the evaluation sample):")
         for row in sweep.filter(sweep["embedding"] == name).iter_rows(named=True):
             mark = "*" if row["configured"] else " "
-            lines.append(
-                f"   {mark}layer {row['layer']:2d} {'':38s}"
-                f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
-                f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
-                f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)}"
-            )
+            lines.append(f"   {mark}layer {row['layer']:2d} {'':48s}{measures(row)}")
     return "\n".join(lines)
 
 

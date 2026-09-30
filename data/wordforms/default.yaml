@@ -12,6 +12,7 @@ wordforms:
   min_english_distance: 1
   min_lexicon_distance: 1
   english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
+  exclude_inflections: true      # leave regular inflections (-s, -ed, -ing, -er, -est, -ly) out of the patterns
 
 synthesis:
   cache_dir: runs/wordforms/cache
@@ -36,6 +37,22 @@ embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
+
+closed_class:                    # null: content words only
+  request: null                  # a request file, in place of glosses, items, and inflect
+  function_words:
+    glosses: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
+    source: pseudo               # english: each gloss's English pronunciation
+    shapes: {CV: 0.3, CVC: 0.4, VC: 0.3}
+    min_distance: 2
+  affixes:
+    items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
+    source: pseudo               # english: the English suffixes -s, -ed, -ing
+    shapes: {C: 0.5, VC: 0.5, V: 0}   # a bare vowel suffix is available by setting, never drawn by default
+    epenthesis: true
+    glide: Y                     # the glide between two vowels at a join when neither vowel decides
+    max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
+  inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}

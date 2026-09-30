@@ -234,8 +234,9 @@ def flag_long_synthesis(config: Config, words: list[WordForm], result: Synthesis
     """Set each word's ``long_synthesis`` flag: whether the median duration of the word's Piper
     tokens is more than ``synthesis.long_synthesis_ratio`` times the median for words with the
     same number of syllables. Piper stretches some words for most speakers, and the flag lets
-    later analyses leave those words out. Without Piper tokens, or with a null ratio, the flags
-    stay unset."""
+    later analyses leave those words out. The median for a number of syllables is taken over the
+    content words, and a closed-class form is compared with it. Without Piper tokens, or with a
+    null ratio, the flags stay unset."""
     ratio = config.synthesis.long_synthesis_ratio
     durations: dict[str, list[float]] = {}
     for token in result.tokens:
@@ -244,14 +245,15 @@ def flag_long_synthesis(config: Config, words: list[WordForm], result: Synthesis
     if ratio is None or not durations:
         return
     medians = {word: float(np.median(values)) for word, values in durations.items()}
+    # The reference is the content words, so that closed-class forms never change their flags.
     by_syllables: dict[int, list[float]] = {}
     for word in words:
-        if word.label in medians:
+        if word.label in medians and word.kind == "content":
             by_syllables.setdefault(word.syllable_count, []).append(medians[word.label])
     reference = {count: float(np.median(values)) for count, values in by_syllables.items()}
     flagged = {}
     for word in words:
-        if word.label not in medians:
+        if word.label not in medians or word.syllable_count not in reference:
             continue
         relative = medians[word.label] / reference[word.syllable_count]
         word.long_synthesis = bool(relative > ratio)
@@ -352,7 +354,8 @@ def synthesize_lexicon(
     check: bool = True,
     progress: Callable[[int, int], None] | None = None,
 ) -> Synthesis:
-    """Synthesize every word by every speaker, reading clips from the cache when they exist."""
+    """Synthesize every word by every speaker, reading clips from the cache when they exist.
+    The tokens come in the order of ``words``, which holds the content words first."""
     settings = config.synthesis
     cache_dir = Path(settings.cache_dir)
     engines = engines if engines is not None else make_engines(config, streams)
@@ -405,30 +408,39 @@ def synthesize_lexicon(
             rms_db=round(audio_tools.rms_db(clip), 4),
         )
 
-    # First, one try at every token.
-    total = len(words) * len(speakers) * settings.tokens_per_speaker
-    plan = [
-        (word, speaker, k)
-        for word in words
-        for speaker in speakers
-        for k in range(1, settings.tokens_per_speaker + 1)
+    # The content words come first, through their duration check, and the closed-class forms
+    # after them. An engine whose audio depends on what it synthesized before (Piper) therefore
+    # gives the content words the same audio with and without closed-class forms.
+    groups = [
+        [word for word in words if word.kind == "content"],
+        [word for word in words if word.kind != "content"],
     ]
-    for done, (word, speaker, k) in enumerate(plan, start=1):
-        result.tokens.append(clip_for(word, speaker, k, 1))
-        if progress is not None:
-            progress(done, total)
-
-    # Then the duration check: a clip much longer than its word's median is tried again.
+    total = len(words) * len(speakers) * settings.tokens_per_speaker
     check_settings = settings.duration_check
-    if check_settings is not None:
+    for group in groups:
+        # First, one try at every token.
+        plan = [
+            (word, speaker, k)
+            for word in group
+            for speaker in speakers
+            for k in range(1, settings.tokens_per_speaker + 1)
+        ]
+        first = len(result.tokens)
+        for word, speaker, k in plan:
+            result.tokens.append(clip_for(word, speaker, k, 1))
+            if progress is not None:
+                progress(len(result.tokens), total)
+        if check_settings is None:
+            continue
+        # Then the duration check: a clip much longer than its word's median is tried again.
         durations: dict[str, list[float]] = {}
-        for token in result.tokens:
+        for token in result.tokens[first:]:
             durations.setdefault(token.word, []).append(token.duration)
         limits = {
             word: check_settings.max_ratio * float(np.median(values))
             for word, values in durations.items()
         }
-        for i, (word, speaker, k) in enumerate(plan):
+        for i, (word, speaker, k) in enumerate(plan, start=first):
             best = result.tokens[i]
             limit = limits[word.label]
             attempt = 1
