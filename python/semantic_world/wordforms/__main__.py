@@ -109,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command in ("embed", "eval", "all"):
             run_embeddings(run, args.out, progress=_frontend_progress)
         if args.command in ("eval", "all"):
-            run_evaluation(run, args.out)
+            run_evaluation(run, args.out, progress=_sweep_progress)
         if args.command in ("assign", "all"):
             run_assignment(run)
         folder = run.write(args.out)
@@ -158,21 +158,41 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _evaluation_text(table) -> str:
-    """The configured rows of the evaluation table, as aligned text."""
+    """The stored embeddings' rows of the evaluation table, as aligned text: every embedding for
+    all words, and again without the long_synthesis words when there are any."""
     lines = [
-        f"  {'embedding':24s} {'dims':>5s}  {'within':>7s} {'across':>7s} {'held-out':>8s}  "
-        f"{'fidelity':>8s}"
+        f"  {'embedding':26s} {'words':>22s} {'dims':>5s}  {'within':>7s} {'across':>7s} "
+        f"{'held-out':>8s}  {'spearman':>8s} {'auc':>6s}"
     ]
-    for row in table.filter(table["configured"]).iter_rows(named=True):
+
+    def shown(value, width: int) -> str:
+        return f"{'n/a':>{width}s}" if value is None else f"{value:{width}.3f}"
+
+    for row in table.filter(table["basis"] == "stored").iter_rows(named=True):
         name = row["embedding"] + ("" if row["layer"] is None else f" (layer {row['layer']})")
-        values = [row["ap_within_speaker"], row["ap_across_train"], row["ap_held_out"]]
-        shown = ["   n/a " if v is None else f"{v:7.3f}" for v in values]
-        fidelity = row["fidelity_spearman"]
         lines.append(
-            f"  {name:24s} {row['dims']:5d}  {shown[0]} {shown[1]} {shown[2]:>8s}  "
-            + ("     n/a" if fidelity is None else f"{fidelity:8.3f}")
+            f"  {name:26s} {row['word_set']:>22s} {row['dims']:5d}  "
+            f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
+            f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
+            f"{shown(row['fidelity_auc'], 6)}"
         )
+    sweep = table.filter((table["basis"] == "sweep") & (table["word_set"] == "all"))
+    for name in sweep["embedding"].unique(maintain_order=True):
+        lines.append(f"  layer sweep of {name} (on the evaluation sample):")
+        for row in sweep.filter(sweep["embedding"] == name).iter_rows(named=True):
+            mark = "*" if row["configured"] else " "
+            lines.append(
+                f"   {mark}layer {row['layer']:2d} {'':38s}"
+                f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
+                f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
+                f"{shown(row['fidelity_auc'], 6)}"
+            )
     return "\n".join(lines)
+
+
+def _sweep_progress(name: str, done: int, total: int) -> None:
+    if done % 1000 == 0 or done == total:
+        print(f"  layer sweep of {name}: {done} of {total} tokens", file=sys.stderr)
 
 
 def _frontend_progress(name: str, done: int, total: int) -> None:

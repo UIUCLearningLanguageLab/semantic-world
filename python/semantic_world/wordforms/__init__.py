@@ -146,7 +146,9 @@ def run_embeddings(
     return run
 
 
-def run_evaluation(run: Run, out: str | Path | None = None) -> Run:
+def run_evaluation(
+    run: Run, out: str | Path | None = None, progress=None, local_only: bool = False
+) -> Run:
     """Evaluate every embedding of the run: same-different average precision, phonological
     fidelity, and the layer sweep of pretrained models."""
     from semantic_world.wordforms.evaluate import evaluate_embeddings
@@ -154,7 +156,13 @@ def run_evaluation(run: Run, out: str | Path | None = None) -> Run:
     if run.embeddings is None:
         run_embeddings(run, out)
     run.evaluation = evaluate_embeddings(
-        run.embeddings, run.lexicon.words, run.synthesis, run.streams.eval
+        run.embeddings,
+        run.lexicon.words,
+        run.synthesis,
+        run.streams.eval,
+        config=run.config,
+        local_only=local_only,
+        progress=progress,
     )
     return run
 

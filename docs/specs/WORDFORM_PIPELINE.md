@@ -141,6 +141,10 @@ Each embedding configuration names an encoder, and the encoder's output is one v
 
 - **Fixed.** A front end's frames are averaged within a configured number of equal time bins, and the bins are concatenated. An optional principal component projection, fitted on training-speaker tokens, reduces the dimension. No learning is involved beyond the projection.
 - **Pretrained.** A pretrained speech model from Hugging Face `transformers`: HuBERT (`facebook/hubert-base-ls960`), wav2vec 2.0, WavLM, or the Whisper encoder. The configuration names the model and the layer. The layer's frame outputs are mean-pooled over the clip. Pretrained models were trained on human speech, so pretrained embeddings stand for an adult English listener. Every output labels them as pretrained.
+
+  The default layer of HuBERT base is layer 8. In the stage 4 layer sweep (default configuration, 500 words, 45 speakers), layer 8 has the highest same-different average precision across training speakers (0.57) and with held-out speakers (0.57), against 0.39 and 0.32 for layer 6. Layer 3 is the choice when graded phonological similarity matters: layer 3 has the highest Spearman correlation between embedding distance and phoneme edit distance in the sweep (0.25, against 0.13 for layer 8). The second fidelity measure does not agree: the neighbor AUC is 0.945 for layer 3 and 0.990 for layer 8. So layer 3 orders word pairs by their edit distance best over the whole lexicon, while layer 8 separates minimal pairs from distant words best.
+
+  A run stores the configured layer only. With `store_layers: true`, the run also stores the pooled output of every layer (`layers.npy`), which is large (1.8 GB for the default configuration).
 - **Learned on the world's audio** (stage 6). Two kinds:
   - a contrastive acoustic word encoder, trained so that tokens of the same word from different speakers lie close together (in the manner of Kamper et al., 2016). The contrastive encoder uses word identity as supervision;
   - a self-supervised encoder trained by prediction alone, in the manner of contrastive predictive coding (van den Oord et al., 2018), with no word labels. Its frame outputs are mean-pooled like a pretrained model's.
@@ -156,8 +160,12 @@ A word's embedding is the mean of its tokens' embeddings over training speakers.
 Every embedding configuration is evaluated in the same way:
 
 - **Same-different average precision.** Over pairs of tokens, rank pairs by embedding distance, and compute the average precision for detecting pairs of the same word. Reported for pairs within a speaker, across training speakers, and involving held-out speakers. This is the standard evaluation for acoustic word embeddings.
-- **Phonological fidelity.** The correlation between embedding distance and phoneme edit distance across word pairs.
-- **Layer sweep.** For pretrained models, the evaluation runs over every layer, so the default layer can be chosen from evidence.
+- **Phonological fidelity.** Two measures on the word embeddings. The first is the correlation (Pearson and Spearman) between embedding distance and phoneme edit distance across word pairs. The second is the neighbor AUC: for a word, the probability that a word at phoneme edit distance 1 is closer in embedding space than a word at distance 3 or more, averaged over the words that have a neighbor at distance 1. The correlation measures graded similarity over the whole lexicon. The neighbor AUC measures whether minimal pairs sound alike.
+- **Layer sweep.** For pretrained models, the evaluation runs over every layer, so the default layer can be chosen from evidence. The sweep runs the model on the evaluation sample, so a run does not have to store every layer. In a sweep row, a word's embedding is the mean over the word's training-speaker tokens in the sample.
+
+Embedding distance is cosine distance. A run with many tokens has too many pairs, so the evaluation uses a seeded sample of 5,000 tokens, drawn from the `wordforms:eval` stream. Every embedding is evaluated on the same sample. Chance for the average precision is the proportion of same-word pairs.
+
+When some words are flagged `long_synthesis`, every row of the evaluation is given twice: for all words, and without the flagged words.
 
 ### Novel words
 
@@ -170,7 +178,8 @@ The Python interface is a `SoundEmbeddings` object with:
 - `types`: an array of word embeddings, one row per word;
 - `tokens`: an array of token embeddings, with arrays giving each token's word and speaker;
 - `words`: the word table;
-- `embed(...)`: embeddings for new forms;
+- `embed(forms, speakers)`: token embeddings for new forms, one for each form and speaker;
+- `embed_types(forms)`: word embeddings for new forms, the mean over every token of every training speaker, as for the words of the lexicon;
 - `to_torch()`: the arrays as PyTorch tensors.
 
 Two example scripts go in `examples/`, as plumbing demonstrations rather than experiments:
@@ -243,7 +252,7 @@ frontends:
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
-  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 6, pooling: mean}
+  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
 
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}
@@ -254,7 +263,7 @@ Also add `data/wordforms/tiny.yaml` (20 words, 3 speakers per engine, 1 token pe
 
 ## Determinism
 
-Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:pca`, `wordforms:train`, and `wordforms:assign`. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
+Use the stream-seed function in `semantic_world.taxonomy.streams` (SHA-256 of the master seed and the stream name). The streams are `wordforms:generate`, `wordforms:speakers`, `wordforms:synthesis`, `wordforms:augment`, `wordforms:train`, `wordforms:assign`, and `wordforms:eval`. The principal component projection of the fixed encoder is exact and needs no stream. The `wordforms:eval` stream draws the evaluation's sample of tokens. Changing the speakers never changes the word forms, and changing the embeddings never changes the audio. Pretrained encoders run in evaluation mode. On the CPU, embeddings must be identical across runs. On a GPU, embeddings must match within a tolerance.
 
 ## Outputs
 
@@ -267,8 +276,8 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
-| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. |
-| `eval/embeddings.csv` | Evaluation results for every embedding, and every layer for pretrained models. |
+| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. |
+| `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`). |
 | `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. |
 
 ## Python package
@@ -323,7 +332,7 @@ These choices were made while writing this specification. Each one is the workin
 1. CMUdict is the English source, and the generator samples onsets and rimes by syllable position and stress. The sound patterns are learned from common words only (decided September 30, 2026).
 2. Piper's multi-speaker LibriTTS-R voice is the main voice set, and espeak-ng is the second engine.
 3. GPL tools are optional extras, imported only where used, and never vendored.
-4. HuBERT base, layer 6, is the default pretrained embedding until the stage 4 layer sweep picks a layer.
+4. HuBERT base, layer 8, is the default pretrained embedding. Jon chose layer 8 from the stage 4 layer sweep on September 30, 2026. Layer 3 is the choice when graded phonological similarity matters.
 5. A word's embedding is the mean over its training-speaker tokens.
 6. Until stage 8, exact acoustic control comes from Praat manipulation of synthesized audio.
 7. Real English words are available as a source, for comparison with language-model embeddings.

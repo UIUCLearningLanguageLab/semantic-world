@@ -25,6 +25,9 @@ FRONTENDS = ("waveform", "logmel", "cochleagram")
 ENCODERS = ("fixed", "pretrained")
 POOLINGS = ("mean",)
 ASSIGNMENT_MODES = ("arbitrary",)
+DEFAULT_PRETRAINED_LAYER = 8
+"""The default layer of a pretrained model: the best HuBERT base layer for telling words apart
+across speakers in the stage 4 layer sweep."""
 DEVICES = ("auto", "cpu", "cuda", "mps")
 
 LATER_STAGES = {
@@ -284,6 +287,9 @@ class PretrainedEmbeddingConfig:
     model: str
     layer: int
     pooling: str
+    store_layers: bool = False
+    """Whether the run also stores the pooled output of every layer (``layers.npy``). The
+    evaluation's layer sweep does not need the stored layers."""
 
     encoder = "pretrained"
 
@@ -294,6 +300,7 @@ class PretrainedEmbeddingConfig:
             "model": self.model,
             "layer": self.layer,
             "pooling": self.pooling,
+            "store_layers": self.store_layers,
         }
 
 
@@ -729,8 +736,9 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
                 PretrainedEmbeddingConfig(
                     name=name,
                     model=node.string("model", _MISSING),
-                    layer=node.int("layer", 6, min=0),
+                    layer=node.int("layer", DEFAULT_PRETRAINED_LAYER, min=0),
                     pooling=node.choice("pooling", "mean", POOLINGS),
+                    store_layers=node.bool("store_layers", False),
                 )
             )
         node.finish()

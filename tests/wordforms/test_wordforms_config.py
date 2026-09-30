@@ -34,7 +34,9 @@ def test_default_config_matches_the_spec_example(default_config):
     assert c.frontends.cochleagram.channels == 64
     assert [e.name for e in c.embeddings] == ["cochleagram_fixed", "logmel_fixed", "hubert_base"]
     assert isinstance(c.embeddings[0], FixedEmbeddingConfig) and c.embeddings[0].pca_dims == 256
-    assert isinstance(c.embeddings[2], PretrainedEmbeddingConfig) and c.embeddings[2].layer == 6
+    # HuBERT base layer 8 is the default, and only the configured layer is stored
+    assert isinstance(c.embeddings[2], PretrainedEmbeddingConfig) and c.embeddings[2].layer == 8
+    assert c.embeddings[2].store_layers is False
     assert c.augmentation is None
     assert c.assignment.mode == "arbitrary" and c.assignment.meanings is None
     assert c.device == "auto"
@@ -123,6 +125,19 @@ def test_frontend_settings_are_checked_against_the_sample_rate():
     with pytest.raises(ConfigError) as info:
         parse_config({"synthesis": {"sample_rate": 8000}}, "x")
     assert info.value.field == "frontends.cochleagram.high_hz"
+
+
+def test_pretrained_embedding_settings():
+    base = {"name": "h", "encoder": "pretrained", "model": "facebook/hubert-base-ls960"}
+    config = parse_config({"embeddings": [base]}, "x")
+    assert config.embeddings[0].layer == 8 and config.embeddings[0].store_layers is False
+    kept = parse_config({"embeddings": [{**base, "layer": 3, "store_layers": True}]}, "x")
+    assert kept.embeddings[0].layer == 3 and kept.embeddings[0].store_layers is True
+    assert kept.resolved()["embeddings"][0]["store_layers"] is True
+    assert parse_config(kept.resolved(), "x").resolved() == kept.resolved()
+    with pytest.raises(ConfigError) as info:
+        parse_config({"embeddings": [{**base, "store_layers": "yes"}]}, "x")
+    assert info.value.field == "embeddings[0].store_layers"
 
 
 def test_seed_override():

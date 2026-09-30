@@ -7,8 +7,9 @@ should face.
 
 A run stores each embedding under ``embeddings/<name>/``: ``tokens.npy`` (tokens by dimensions),
 ``types.npy`` (words by dimensions), and ``meta.yaml``. A fixed encoder with a projection also
-stores ``projection.npz``. A pretrained encoder also stores ``layers.npy`` (tokens by layers by
-dimensions), the pooled output of every layer, for the layer sweep of the evaluation.
+stores ``projection.npz``. A pretrained encoder stores its configured layer only; with
+``store_layers: true`` it also stores ``layers.npy`` (tokens by layers by dimensions), the
+pooled output of every layer. The evaluation's layer sweep does not need that file.
 
 :class:`SoundEmbeddings` is the interface for other models: the arrays, the word table, and
 ``embed`` for new word forms.
@@ -69,7 +70,7 @@ class EmbeddingStore:
     @property
     def layers(self) -> np.ndarray | None:
         """A pretrained encoder's pooled output for every layer, memory-mapped: tokens by layers
-        by dimensions. None for other encoders."""
+        by dimensions. None unless the embedding was stored with ``store_layers``."""
         path = self.folder / "layers.npy"
         return np.load(path, mmap_mode="r") if path.exists() else None
 
@@ -133,7 +134,8 @@ def compute_embedding(
     else:
         source = {"sample_rate": config.synthesis.sample_rate}
     mark = fingerprint(embedding, synthesis, source)
-    files = ["tokens.npy", "types.npy", "meta.yaml"] + ([] if fixed else ["layers.npy"])
+    keep_layers = not fixed and embedding.store_layers
+    files = ["tokens.npy", "types.npy", "meta.yaml"] + (["layers.npy"] if keep_layers else [])
     if all((folder / name).exists() for name in files):
         store = EmbeddingStore.load(folder)
         if store.meta.get("fingerprint") == mark:
@@ -190,22 +192,31 @@ def compute_embedding(
             config.synthesis.sample_rate,
             local_only,
         )
-        layers = np.lib.format.open_memmap(
-            folder / "layers.npy",
-            mode="w+",
-            dtype=np.float32,
-            shape=(count, encoder.layers, encoder.dims),
-        )
+        # The file of every layer's output belongs to an earlier computation of this embedding.
+        (folder / "layers.npy").unlink(missing_ok=True)
+        layers = None
+        if keep_layers:
+            layers = np.lib.format.open_memmap(
+                folder / "layers.npy",
+                mode="w+",
+                dtype=np.float32,
+                shape=(count, encoder.layers, encoder.dims),
+            )
+        tokens = np.zeros((count, encoder.dims), dtype=np.float32)
         for i, token in enumerate(synthesis.tokens):
-            layers[i] = encoder.all_layers(synthesis.audio(token))
+            pooled = encoder.all_layers(synthesis.audio(token))
+            tokens[i] = pooled[embedding.layer]
+            if layers is not None:
+                layers[i] = pooled
             if progress is not None:
                 progress(i + 1, count)
-        layers.flush()
-        tokens = np.array(layers[:, embedding.layer])
-        del layers
+        if layers is not None:
+            layers.flush()
+            del layers
         meta.update(encoder.provenance())
         meta["layers"] = encoder.layers
         meta["layer"] = embedding.layer
+        meta["layers_stored"] = keep_layers
         meta["device"] = encoder.device
     tokens = np.ascontiguousarray(tokens, dtype=np.float32)
     np.save(folder / "tokens.npy", tokens)

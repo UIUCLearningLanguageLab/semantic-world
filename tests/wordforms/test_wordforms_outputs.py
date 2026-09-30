@@ -29,7 +29,7 @@ def test_forms_writes_the_run_folder(tmp_path):
     assert config["synthesis"]["engines"]["piper"]["speakers"] == 3
     assert list(config["provenance"]["stream_seeds"]) == [
         f"wordforms:{n}"
-        for n in ("generate", "speakers", "synthesis", "augment", "pca", "train", "assign", "eval")
+        for n in ("generate", "speakers", "synthesis", "augment", "train", "assign", "eval")
     ]
     assert "cmudict" in config["provenance"]["packages"]
     assert "wordfreq" in config["provenance"]["packages"]

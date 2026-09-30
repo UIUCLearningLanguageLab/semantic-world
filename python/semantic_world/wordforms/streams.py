@@ -13,7 +13,7 @@ from semantic_world.taxonomy.streams import stream_seed
 
 STREAM_PREFIX = "wordforms:"
 
-STREAM_NAMES = ("generate", "speakers", "synthesis", "augment", "pca", "train", "assign", "eval")
+STREAM_NAMES = ("generate", "speakers", "synthesis", "augment", "train", "assign", "eval")
 """The short names of the pipeline's streams. The full name is ``wordforms:<short name>``."""
 
 
@@ -24,7 +24,6 @@ class Streams:
     speakers: np.random.Generator
     synthesis: np.random.Generator
     augment: np.random.Generator
-    pca: np.random.Generator
     train: np.random.Generator
     assign: np.random.Generator
     eval: np.random.Generator

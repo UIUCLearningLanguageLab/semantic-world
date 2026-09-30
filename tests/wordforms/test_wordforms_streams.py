@@ -15,7 +15,6 @@ def test_stream_names_match_the_spec():
         "speakers",
         "synthesis",
         "augment",
-        "pca",
         "train",
         "assign",
         "eval",
@@ -26,7 +25,8 @@ def test_stream_names_match_the_spec():
 def test_seeds_use_the_taxonomy_stream_seed_function():
     streams = Streams(42)
     assert streams.seed("generate") == stream_seed(42, "wordforms:generate")
-    assert streams.seeds()["wordforms:pca"] == stream_seed(42, "wordforms:pca")
+    assert streams.seeds()["wordforms:eval"] == stream_seed(42, "wordforms:eval")
+    assert "wordforms:pca" not in streams.seeds()  # the projection is exact and needs no stream
 
 
 def test_streams_are_independent_and_reproducible():

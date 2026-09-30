@@ -35,7 +35,7 @@ frontends:
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
-  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 6, pooling: mean}
+  - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
 
 augmentation: null
 assignment: {mode: arbitrary, meanings: null}

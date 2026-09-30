@@ -51,10 +51,12 @@ from semantic_world.wordforms.evaluate import (
     PairSets,
     average_precision,
     cosine_distances,
-    edit_distances,
+    edit_distance_matrix,
     evaluate_embeddings,
     evaluation_sample,
+    neighbor_auc,
     phonological_fidelity,
+    sample_word_means,
 )
 from semantic_world.wordforms.frontends import compute_frontends, make_frontends
 from semantic_world.wordforms.synth import synthesize_lexicon
@@ -338,20 +340,59 @@ def test_pair_sets_split_the_pairs_into_three_conditions():
 
 def test_phonological_fidelity_and_edit_distances(tmp_path):
     words = run_forms(espeak_only(tmp_path, count=12)).lexicon.words
-    distances = edit_distances(words)
-    assert distances.shape == (66,) and distances.min() >= 1
+    matrix = edit_distance_matrix(words)
+    assert matrix.shape == (12, 12) and np.array_equal(matrix, matrix.T)
+    assert (np.diag(matrix) == 0).all() and matrix[np.triu_indices(12, 1)].min() >= 1
     # embeddings built from the distances themselves have a high fidelity
-    matrix = np.zeros((12, 12))
-    matrix[np.triu_indices(12, 1)] = distances
-    matrix += matrix.T
     centered = matrix**2 - (matrix**2).mean(axis=0) - (matrix**2).mean(axis=1)[:, None]
     values, vectors = np.linalg.eigh(-0.5 * (centered + (matrix**2).mean()))
     layout = vectors[:, -6:] * np.sqrt(np.maximum(values[-6:], 0))
-    pearson, spearman = phonological_fidelity(layout + 5.0, distances)
+    pearson, spearman = phonological_fidelity(layout + 5.0, matrix)
     assert pearson > 0.3 and spearman > 0.3
     random = np.random.default_rng(0).normal(size=(12, 6))
-    assert abs(phonological_fidelity(random, distances)[0]) < 0.4
-    assert np.isnan(phonological_fidelity(np.ones((12, 3)), distances)[0])
+    assert abs(phonological_fidelity(random, matrix)[0]) < 0.4
+    assert np.isnan(phonological_fidelity(np.ones((12, 3)), matrix)[0])
+
+
+def test_neighbor_auc():
+    # five words on a line: word 0 has a neighbor at distance 1 (word 1) and far words (3, 4)
+    phonemes = np.array(
+        [
+            [0, 1, 2, 3, 4],
+            [1, 0, 2, 3, 4],
+            [2, 2, 0, 2, 2],
+            [3, 3, 2, 0, 2],
+            [4, 4, 2, 2, 0],
+        ],
+        dtype=float,
+    )
+    angles = np.radians([0, 10, 45, 80, 90])
+    ordered = np.stack([np.cos(angles), np.sin(angles)], axis=1)
+    auc, words = neighbor_auc(ordered, phonemes)
+    assert auc == 1.0 and words == 2  # only words 0 and 1 have a neighbor at distance 1
+    # the neighbor is the farthest word: the opposite of what the phonemes say
+    reversed_angles = np.radians([0, 90, 45, 10, 20])
+    reversed_layout = np.stack([np.cos(reversed_angles), np.sin(reversed_angles)], axis=1)
+    assert neighbor_auc(reversed_layout, phonemes)[0] == 0.0
+    # ties count one half, and random embeddings are near one half
+    assert neighbor_auc(np.ones((5, 2)), phonemes) == (0.5, 2)
+    rng = np.random.default_rng(0)
+    big = np.abs(np.subtract.outer(rng.integers(0, 6, 60), rng.integers(0, 6, 60))).astype(float)
+    big = np.minimum(np.triu(big, 1) + np.triu(big, 1).T, 5)
+    assert abs(neighbor_auc(rng.normal(size=(60, 8)), big)[0] - 0.5) < 0.1
+    # no word has a neighbor at distance 1: undefined
+    far = np.full((4, 4), 3.0) - 3.0 * np.eye(4)
+    result = neighbor_auc(rng.normal(size=(4, 3)), far)
+    assert np.isnan(result[0]) and result[1] == 0
+
+
+def test_sample_word_means():
+    tokens = np.array([[1.0, 0.0], [3.0, 0.0], [0.0, 5.0], [0.0, 9.0]])
+    words = np.array([0, 0, 1, 2])
+    train = np.array([True, True, True, False])
+    means, present = sample_word_means(tokens, words, train, 4)
+    assert present.tolist() == [True, True, False, False]
+    assert np.allclose(means[0], [2, 0]) and np.allclose(means[1], [0, 5])
 
 
 def test_evaluation_sample():
@@ -369,14 +410,16 @@ def test_evaluation_table_is_above_chance(tmp_path):
     assert table["encoder"].to_list() == ["fixed", "fixed"]
     assert table["source"].to_list() == ["cochleagram", "logmel"]
     assert table["layer"].null_count() == 2 and table["configured"].all()
+    assert set(table["basis"]) == {"stored"} and set(table["word_set"]) == {"all"}
     assert table["tokens_evaluated"].to_list() == [60, 60]
+    assert table["words_evaluated"].to_list() == [10, 10]
     for row in table.iter_rows(named=True):
         for condition in ("within_speaker", "across_train", "held_out"):
             assert row[f"ap_{condition}"] > 2 * row[f"chance_{condition}"], (row, condition)
         assert -1 <= row["fidelity_pearson"] <= 1 and -1 <= row["fidelity_spearman"] <= 1
     # two tokens per speaker: one same-word pair for each word and speaker
     assert table["chance_within_speaker"][0] == pytest.approx(10 / (3 * 20 * 19 / 2) * 3, rel=1e-6)
-    # the same seed gives the same table, and a sample of tokens still evaluates
+    # a sample of tokens still evaluates
     again = evaluate_embeddings(
         run.embeddings, run.lexicon.words, run.synthesis, np.random.default_rng(1), max_tokens=40
     )
@@ -389,6 +432,58 @@ def test_evaluation_table_is_above_chance(tmp_path):
     assert written["ap_held_out"].to_list() == pytest.approx(
         table["ap_held_out"].to_list(), abs=1e-6
     )
+
+
+def test_evaluation_with_and_without_the_long_synthesis_words(tmp_path):
+    run, _ = embed_run(tmp_path, count=10)
+    words = run.lexicon.words
+    plain = evaluate_embeddings(run.embeddings, words, run.synthesis, np.random.default_rng(0))
+    assert set(plain["word_set"]) == {"all"}  # no word is flagged: one set of rows
+    for word in words:
+        word.long_synthesis = word.label in ("W.2", "W.7")
+    table = evaluate_embeddings(run.embeddings, words, run.synthesis, np.random.default_rng(0))
+    assert table.height == 4
+    assert table["word_set"].to_list() == ["all", "without_long_synthesis"] * 2
+    everything = table.filter(pl.col("word_set") == "all")
+    without = table.filter(pl.col("word_set") == "without_long_synthesis")
+    assert everything["words_evaluated"].to_list() == [10, 10]
+    assert without["words_evaluated"].to_list() == [8, 8]
+    assert everything["tokens_evaluated"].to_list() == [60, 60]
+    assert without["tokens_evaluated"].to_list() == [48, 48]
+    # the rows for all words are what they were without the flags
+    assert everything["ap_across_train"].to_list() == plain["ap_across_train"].to_list()
+    assert everything["fidelity_spearman"].to_list() == plain["fidelity_spearman"].to_list()
+    # the rows without the flagged words equal an evaluation of the other words alone
+    kept = [w for w in words if not w.long_synthesis]
+    _, _, train = token_layout(words, run.synthesis)
+    store = run.embeddings["logmel_fixed"]
+    keep_rows = np.array([t.word not in ("W.2", "W.7") for t in run.synthesis.tokens])
+    token_words, token_speakers, _ = token_layout(words, run.synthesis)
+    expected = PairSets(
+        token_words[keep_rows], token_speakers[keep_rows], train[keep_rows]
+    ).evaluate(store.tokens[keep_rows])
+    row = without.filter(pl.col("embedding") == "logmel_fixed").row(0, named=True)
+    assert row["ap_across_train"] == pytest.approx(expected["ap_across_train"])
+    assert row["chance_held_out"] == pytest.approx(expected["chance_held_out"])
+    keep_words = np.array([not w.long_synthesis for w in words])
+    pearson, spearman = phonological_fidelity(store.types[keep_words], edit_distance_matrix(kept))
+    assert row["fidelity_pearson"] == pytest.approx(pearson)
+    assert row["fidelity_spearman"] == pytest.approx(spearman)
+
+
+def test_neighbor_auc_in_the_table(tmp_path):
+    # one-syllable words with minimal pairs, so that some words have a neighbor at distance 1
+    run, _ = embed_run(tmp_path, count=40, syllables={1: 1})
+    matrix = edit_distance_matrix(run.lexicon.words)
+    with_neighbor = int(((matrix == 1).any(axis=1) & (matrix >= 3).any(axis=1)).sum())
+    assert with_neighbor > 0
+    table = evaluate_embeddings(
+        run.embeddings, run.lexicon.words, run.synthesis, np.random.default_rng(0)
+    )
+    assert table["auc_words"].to_list() == [with_neighbor, with_neighbor]
+    for name, value in zip(table["embedding"], table["fidelity_auc"], strict=True):
+        expected, _ = neighbor_auc(run.embeddings[name].types, matrix)
+        assert 0 <= value <= 1 and value == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -495,38 +590,45 @@ def test_embed_errors(tmp_path):
 # Pretrained encoders
 # ---------------------------------------------------------------------------------------------
 
-HUBERT = [
-    {"name": "hubert", "encoder": "pretrained", "model": "facebook/hubert-base-ls960", "layer": 6}
-]
+HUBERT = {"name": "hubert", "encoder": "pretrained", "model": "facebook/hubert-base-ls960"}
 
 
-@needs_hubert
-def test_pretrained_embedding_with_the_layer_sweep(tmp_path):
-    run, engine = stand_in_run(tmp_path, embeddings=HUBERT, count=4)
+def hubert_run(tmp_path, **settings):
+    run, engine = stand_in_run(tmp_path, embeddings=[{**HUBERT, **settings}], count=4)
     data = run.config.resolved()
     data["device"] = "cpu"
     run.config = parse_config(data, "stand_in")
-    folder = tmp_path / "run"
     run.embeddings = compute_embeddings(
-        run.config, run.lexicon.words, run.synthesis, run.frontends, folder, local_only=True
+        run.config,
+        run.lexicon.words,
+        run.synthesis,
+        run.frontends,
+        tmp_path / "run",
+        local_only=True,
     )
+    return run, engine
+
+
+@needs_hubert
+def test_pretrained_embedding_stores_the_configured_layer(tmp_path):
+    run, engine = hubert_run(tmp_path)
+    folder = tmp_path / "run"
     store = run.embeddings["hubert"]
+    # only the configured layer is stored: layer 8 by default
     assert sorted(p.name for p in store.folder.iterdir()) == [
-        "layers.npy",
         "meta.yaml",
         "tokens.npy",
         "types.npy",
     ]
-    layers = store.layers
-    assert layers.shape == (24, 13, 768) and layers.dtype == np.float32
-    assert np.isfinite(layers).all()
-    assert np.array_equal(store.tokens, layers[:, 6]) and store.types.shape == (4, 768)
+    assert store.layers is None
+    assert store.tokens.shape == (24, 768) and store.types.shape == (4, 768)
+    assert np.isfinite(store.tokens).all()
     # every output labels the embedding as pretrained
     meta = store.meta
     assert meta["pretrained"] is True and meta["encoder"] == "pretrained"
     assert meta["model"] == "facebook/hubert-base-ls960" and meta["revision"]
-    assert meta["layers"] == 13 and meta["layer"] == 6 and meta["device"] == "cpu"
-    assert store.summary()["pretrained"] is True
+    assert meta["layers"] == 13 and meta["layer"] == 8 and meta["layers_stored"] is False
+    assert meta["device"] == "cpu" and store.summary()["pretrained"] is True
     run.write(folder)
     written = yaml.safe_load((folder / "config.yaml").read_text())
     assert written["provenance"]["models"]["embedding:hubert"] == {
@@ -534,18 +636,14 @@ def test_pretrained_embedding_with_the_layer_sweep(tmp_path):
         "revision": meta["revision"],
         "pretrained": True,
     }
+    assert (
+        written["embeddings"][0]["layer"] == 8 and written["embeddings"][0]["store_layers"] is False
+    )
     # on the CPU, a second computation is identical
     other = compute_embeddings(
         run.config, run.lexicon.words, run.synthesis, None, tmp_path / "again", local_only=True
     )["hubert"]
-    assert np.array_equal(other.layers, layers)
-    # the evaluation sweeps every layer, and marks the configured one
-    table = evaluate_embeddings(run.embeddings, run.lexicon.words, run.synthesis, run.streams.eval)
-    assert table.height == 13 and table["layer"].to_list() == list(range(13))
-    assert table["configured"].to_list() == [layer == 6 for layer in range(13)]
-    assert set(table["encoder"]) == {"pretrained"}
-    assert set(table["source"]) == {"facebook/hubert-base-ls960"}
-    assert (table["ap_across_train"] > table["chance_across_train"]).all()
+    assert np.array_equal(other.tokens, store.tokens)
     # embed reproduces the stored embeddings, and handles a novel word
     sounds = SoundEmbeddings.load(folder, "hubert", local_only=True, engines={"espeak": engine})
     assert sounds.pretrained and sounds.dims == 768
@@ -555,6 +653,69 @@ def test_pretrained_embedding_with_the_layer_sweep(tmp_path):
             row = sounds._stored[(f"W.{w + 1}", f"S.{s + 1}", 1)]
             assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-5)
     assert sounds.embed(["Z AE1 M P IH0 K"], ["S.1"]).shape == (1, 1, 768)
+
+
+@needs_hubert
+def test_layer_sweep_runs_on_the_sample_without_stored_layers(tmp_path):
+    run, _ = hubert_run(tmp_path / "plain")
+    arguments = (run.embeddings, run.lexicon.words, run.synthesis)
+    table = evaluate_embeddings(
+        *arguments, np.random.default_rng(0), config=run.config, local_only=True
+    )
+    # one row for the stored embedding, and one sweep row for each of the 13 layers
+    assert table.height == 14 and table["basis"].to_list() == ["stored"] + ["sweep"] * 13
+    assert table["layer"].to_list() == [8, *range(13)]
+    assert table["configured"].to_list() == [True] + [layer == 8 for layer in range(13)]
+    assert set(table["encoder"]) == {"pretrained"}
+    assert set(table["source"]) == {"facebook/hubert-base-ls960"}
+    assert (table["ap_across_train"] > table["chance_across_train"]).all()
+    stored = table.row(0, named=True)
+    swept = table.filter((pl.col("basis") == "sweep") & pl.col("configured")).row(0, named=True)
+    # the sample is every token here, so the sweep's row for layer 8 matches the stored row
+    for column in ("ap_within_speaker", "ap_across_train", "ap_held_out", "fidelity_spearman"):
+        assert swept[column] == pytest.approx(stored[column], abs=1e-4)
+    # the sweep needs the configuration to run the model, and can be left out
+    with pytest.raises(ValueError, match="needs the run's configuration"):
+        evaluate_embeddings(*arguments, np.random.default_rng(0))
+    assert evaluate_embeddings(*arguments, np.random.default_rng(0), sweep=False).height == 1
+    # a sample of the tokens: the model runs on the sample only
+    seen = []
+    small = evaluate_embeddings(
+        *arguments,
+        np.random.default_rng(0),
+        config=run.config,
+        max_tokens=10,
+        local_only=True,
+        progress=lambda name, done, total: seen.append((name, done, total)),
+    )
+    assert seen[-1] == ("hubert", 10, 10) and len(seen) == 10
+    assert set(small["tokens_evaluated"]) == {10}
+    # with store_layers, every layer is stored, and the sweep reads the stored layers
+    kept, _ = hubert_run(tmp_path / "kept", store_layers=True, layer=3)
+    store = kept.embeddings["hubert"]
+    assert (store.folder / "layers.npy").exists() and store.meta["layers_stored"] is True
+    assert store.layers.shape == (24, 13, 768) and store.meta["layer"] == 3
+    assert np.array_equal(store.tokens, store.layers[:, 3])
+    from_stored = evaluate_embeddings(
+        kept.embeddings, kept.lexicon.words, kept.synthesis, np.random.default_rng(0)
+    )
+    assert from_stored.height == 14 and from_stored["layer"][0] == 3
+    both = ["ap_across_train", "ap_held_out", "fidelity_pearson"]
+    ours = table.filter(pl.col("basis") == "sweep").select(both).to_numpy()
+    theirs = from_stored.filter(pl.col("basis") == "sweep").select(both).to_numpy()
+    assert np.allclose(ours, theirs, atol=1e-4)
+    # computing the embedding again without store_layers removes the stored layers
+    data = kept.config.resolved()
+    data["embeddings"][0]["store_layers"] = False
+    again = compute_embeddings(
+        parse_config(data, "x"),
+        kept.lexicon.words,
+        kept.synthesis,
+        None,
+        tmp_path / "kept" / "run",
+        local_only=True,
+    )
+    assert not again["hubert"].reused and not (store.folder / "layers.npy").exists()
 
 
 @needs_hubert

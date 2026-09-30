@@ -4,37 +4,57 @@
   and compute the average precision for detecting pairs of the same word. It is reported for
   three sets of pairs: within a speaker, across two training speakers, and across two speakers
   of whom at least one is held out. Chance is the proportion of same-word pairs in the set.
-- **Phonological fidelity.** The correlation, across pairs of words, between the cosine distance
-  of the word embeddings and the phoneme edit distance.
+- **Phonological fidelity**, two measures on the word embeddings. The first is the correlation,
+  across pairs of words, between cosine distance and phoneme edit distance. The second is the
+  neighbor AUC: for a word, the probability that a word at edit distance 1 is closer in embedding
+  space than a word at edit distance 3 or more, averaged over the words that have a neighbor at
+  distance 1.
 - **Layer sweep.** For a pretrained model, every layer is evaluated, so that the default layer
   can be chosen from evidence.
 
 A run with many tokens has too many pairs, so the evaluation uses a seeded sample of tokens
-(from the ``wordforms:eval`` stream), the same sample for every embedding.
+(5,000, from the ``wordforms:eval`` stream), the same sample for every embedding.
+
+The table has a row for each stored embedding (``basis`` is ``stored``): the token measures use
+the sample, and the word measures use the stored word embeddings. The layer sweep adds a row for
+each layer of each pretrained model (``basis`` is ``sweep``). The sweep runs the model on the
+sample only, so no run has to store every layer; a sweep row's word embeddings are the means
+over the sample's training-speaker tokens.
+
+When some words are flagged ``long_synthesis``, every row is given twice: for all words
+(``word_set`` is ``all``) and without the flagged words (``without_long_synthesis``).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import polars as pl
 
-from semantic_world.wordforms.embeddings import EmbeddingStore, token_layout, word_means
+from semantic_world.wordforms.config import Config
+from semantic_world.wordforms.embeddings import EmbeddingStore, token_layout
 from semantic_world.wordforms.english import edit_distance
 from semantic_world.wordforms.generate import WordForm
 from semantic_world.wordforms.synth import Synthesis
 
 MAX_TOKENS = 5000
 """The evaluation samples this many tokens when a run has more."""
+NEAR_DISTANCE = 1
+FAR_DISTANCE = 3
+"""The neighbor AUC compares words at edit distance 1 with words at distance 3 or more."""
 CONDITIONS = ("within_speaker", "across_train", "held_out")
+WORD_SETS = ("all", "without_long_synthesis")
 EVAL_COLUMNS = (
     "embedding",
     "encoder",
     "source",
     "layer",
     "configured",
+    "basis",
+    "word_set",
     "dims",
     "ap_within_speaker",
     "chance_within_speaker",
@@ -44,7 +64,10 @@ EVAL_COLUMNS = (
     "chance_held_out",
     "fidelity_pearson",
     "fidelity_spearman",
+    "fidelity_auc",
+    "auc_words",
     "tokens_evaluated",
+    "words_evaluated",
 )
 
 
@@ -79,6 +102,7 @@ class PairSets:
         both_train = train[:, None] & train[None, :]
         self.same_word = (words[:, None] == words[None, :])[upper]
         self.upper = upper
+        self.count = count
         self.masks = {
             "within_speaker": same_speaker[upper],
             "across_train": (~same_speaker & both_train)[upper],
@@ -90,35 +114,58 @@ class PairSets:
         result: dict[str, float] = {}
         for name, mask in self.masks.items():
             same = self.same_word[mask]
+            defined = same.size > 0 and same.any()
             result[f"ap_{name}"] = average_precision(distances[mask], same)
-            result[f"chance_{name}"] = (
-                float(same.mean()) if same.size and same.any() else float("nan")
-            )
+            result[f"chance_{name}"] = float(same.mean()) if defined else float("nan")
         return result
 
 
-def edit_distances(words: list[WordForm]) -> np.ndarray:
-    """The phoneme edit distance of every pair of words, in the order of ``np.triu_indices``."""
+def edit_distance_matrix(words: list[WordForm]) -> np.ndarray:
+    """The phoneme edit distance between every two words, as a square matrix."""
     stripped = [word.stripped for word in words]
-    rows, columns = np.triu_indices(len(words), 1)
-    return np.array(
-        [edit_distance(stripped[i], stripped[j]) for i, j in zip(rows, columns, strict=True)],
-        dtype=np.float64,
-    )
+    matrix = np.zeros((len(words), len(words)), dtype=np.float64)
+    for i in range(len(words)):
+        for j in range(i + 1, len(words)):
+            matrix[i, j] = matrix[j, i] = edit_distance(stripped[i], stripped[j])
+    return matrix
 
 
-def phonological_fidelity(types: np.ndarray, distances: np.ndarray) -> tuple[float, float]:
+def phonological_fidelity(types: np.ndarray, phonemes: np.ndarray) -> tuple[float, float]:
     """The Pearson and Spearman correlations between the cosine distance of word embeddings and
-    the phoneme edit distance, across pairs of words."""
+    the phoneme edit distance (a square matrix), across pairs of words."""
     from scipy.stats import rankdata
 
     rows, columns = np.triu_indices(len(types), 1)
     embedding = cosine_distances(types)[rows, columns]
+    distances = phonemes[rows, columns]
     if len(embedding) < 3 or embedding.std() == 0 or distances.std() == 0:
         return float("nan"), float("nan")
     pearson = float(np.corrcoef(embedding, distances)[0, 1])
     spearman = float(np.corrcoef(rankdata(embedding), rankdata(distances))[0, 1])
     return pearson, spearman
+
+
+def neighbor_auc(types: np.ndarray, phonemes: np.ndarray) -> tuple[float, int]:
+    """The neighbor AUC, and the number of words it is averaged over.
+
+    For one word, the AUC is the probability that a word at phoneme edit distance 1 is closer in
+    embedding space (cosine distance) than a word at edit distance 3 or more; a tie counts as
+    one half. The result is the mean over the words that have at least one word at distance 1
+    and at least one at distance 3 or more. NaN when there is no such word. 0.5 is chance.
+    """
+    embedding = cosine_distances(types)
+    values = []
+    for i in range(len(types)):
+        near = embedding[i, phonemes[i] == NEAR_DISTANCE]
+        far = embedding[i, phonemes[i] >= FAR_DISTANCE]
+        if near.size == 0 or far.size == 0:
+            continue
+        closer = (near[:, None] < far[None, :]).mean()
+        tied = (near[:, None] == far[None, :]).mean()
+        values.append(closer + 0.5 * tied)
+    if not values:
+        return float("nan"), 0
+    return float(np.mean(values)), len(values)
 
 
 def evaluation_sample(count: int, rng: np.random.Generator, limit: int = MAX_TOKENS) -> np.ndarray:
@@ -128,49 +175,130 @@ def evaluation_sample(count: int, rng: np.random.Generator, limit: int = MAX_TOK
     return np.sort(rng.choice(count, size=limit, replace=False))
 
 
+def sample_word_means(tokens: np.ndarray, words: np.ndarray, train: np.ndarray, count: int):
+    """Word embeddings from a sample of tokens: the mean of each word's training-speaker tokens
+    in the sample, and which words have such a token."""
+    sums = np.zeros((count, tokens.shape[1]), dtype=np.float64)
+    totals = np.zeros(count, dtype=np.int64)
+    np.add.at(sums, words[train], np.asarray(tokens, dtype=np.float64)[train])
+    np.add.at(totals, words[train], 1)
+    present = totals > 0
+    sums[present] /= totals[present][:, None]
+    return sums, present
+
+
+def sweep_layers(
+    store: EmbeddingStore,
+    config: Config,
+    synthesis: Synthesis,
+    sample: np.ndarray,
+    local_only: bool = False,
+    progress: Callable[[int, int], None] | None = None,
+) -> np.ndarray:
+    """The pooled output of every layer of a pretrained model for the sampled tokens: sample by
+    layers by dimensions. It comes from the stored layers when the run kept them, and otherwise
+    from running the model on the sample."""
+    stored = store.layers
+    if stored is not None:
+        return np.asarray(stored[sample])
+    from semantic_world.wordforms.encoders.pretrained import PretrainedEncoder
+
+    settings = store.meta["settings"]
+    encoder = PretrainedEncoder(
+        settings["model"],
+        settings["layer"],
+        settings["pooling"],
+        config.device,
+        config.synthesis.sample_rate,
+        local_only,
+    )
+    layers = np.zeros((len(sample), encoder.layers, encoder.dims), dtype=np.float32)
+    for k, index in enumerate(sample):
+        layers[k] = encoder.all_layers(synthesis.audio(synthesis.tokens[int(index)]))
+        if progress is not None:
+            progress(k + 1, len(sample))
+    return layers
+
+
 def evaluate_embeddings(
     stores: dict[str, EmbeddingStore],
     words: list[WordForm],
     synthesis: Synthesis,
     rng: np.random.Generator,
+    *,
+    config: Config | None = None,
     max_tokens: int = MAX_TOKENS,
+    sweep: bool = True,
+    local_only: bool = False,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> pl.DataFrame:
-    """The evaluation table: one row per embedding, and one row per layer of each pretrained
-    model. ``configured`` marks the layer that the embedding stores."""
+    """The evaluation table. ``config`` is needed for the layer sweep of a pretrained model that
+    did not store its layers; ``sweep=False`` leaves the sweep out."""
     token_words, token_speakers, train = token_layout(words, synthesis)
     sample = evaluation_sample(len(token_words), rng, max_tokens)
-    pairs = PairSets(token_words[sample], token_speakers[sample], train[sample])
-    phonemes = edit_distances(words)
+    phonemes = edit_distance_matrix(words)
+    flagged = np.array([bool(word.long_synthesis) for word in words])
+    word_sets = {"all": np.ones(len(words), dtype=bool)}
+    if flagged.any():
+        word_sets["without_long_synthesis"] = ~flagged
+    in_sample = {name: keep[token_words[sample]] for name, keep in word_sets.items()}
+    pairs = {
+        name: PairSets(token_words[sample][mask], token_speakers[sample][mask], train[sample][mask])
+        for name, mask in in_sample.items()
+    }
     rows: list[dict[str, Any]] = []
 
-    def row(store: EmbeddingStore, tokens, types, layer, configured) -> dict[str, Any]:
+    def add_rows(store, sampled, types, present, layer, configured, basis) -> None:
+        """One row for each word set. ``sampled`` holds the sample's token embeddings, and
+        ``present`` marks the words that have a word embedding."""
         meta = store.meta
-        pearson, spearman = phonological_fidelity(types, phonemes)
-        return {
-            "embedding": store.name,
-            "encoder": meta["encoder"],
-            "source": meta.get("model") or meta.get("frontend"),
-            "layer": layer,
-            "configured": configured,
-            "dims": int(tokens.shape[1]),
-            **pairs.evaluate(tokens[sample]),
-            "fidelity_pearson": pearson,
-            "fidelity_spearman": spearman,
-            "tokens_evaluated": len(sample),
-        }
+        for name, keep in word_sets.items():
+            chosen = keep & present
+            distances = phonemes[np.ix_(chosen, chosen)]
+            pearson, spearman = phonological_fidelity(types[chosen], distances)
+            auc, auc_words = neighbor_auc(types[chosen], distances)
+            rows.append(
+                {
+                    "embedding": store.name,
+                    "encoder": meta["encoder"],
+                    "source": meta.get("model") or meta.get("frontend"),
+                    "layer": layer,
+                    "configured": configured,
+                    "basis": basis,
+                    "word_set": name,
+                    "dims": int(sampled.shape[1]),
+                    **pairs[name].evaluate(sampled[in_sample[name]]),
+                    "fidelity_pearson": pearson,
+                    "fidelity_spearman": spearman,
+                    "fidelity_auc": auc,
+                    "auc_words": auc_words,
+                    "tokens_evaluated": int(in_sample[name].sum()),
+                    "words_evaluated": int(chosen.sum()),
+                }
+            )
 
+    everything = np.ones(len(words), dtype=bool)
     for store in stores.values():
-        layers = store.layers
-        if layers is None:
-            rows.append(row(store, store.tokens, store.types, None, True))
+        pretrained = bool(store.meta["pretrained"])
+        layer = store.meta["layer"] if pretrained else None
+        add_rows(store, store.tokens[sample], store.types, everything, layer, True, "stored")
+    for store in stores.values():
+        if not (sweep and store.meta["pretrained"]):
             continue
+        if store.layers is None and config is None:
+            raise ValueError("the layer sweep needs the run's configuration to run the model")
+        name = store.name
+        report = None if progress is None else (lambda i, n, name=name: progress(name, i, n))
+        layers = sweep_layers(store, config, synthesis, sample, local_only, report)
         for layer in range(layers.shape[1]):
-            tokens = np.asarray(layers[:, layer])
-            types = word_means(tokens, token_words, train, len(words))
-            rows.append(row(store, tokens, types, layer, layer == store.meta["layer"]))
-    schema = {
-        name: pl.Float64 for name in EVAL_COLUMNS if name.startswith(("ap_", "chance_", "fid"))
-    }
+            sampled = layers[:, layer]
+            types, present = sample_word_means(
+                sampled, token_words[sample], train[sample], len(words)
+            )
+            add_rows(store, sampled, types, present, layer, layer == store.meta["layer"], "sweep")
+
+    floats = ("ap_", "chance_", "fidelity_")
+    schema: dict[str, Any] = {name: pl.Float64 for name in EVAL_COLUMNS if name.startswith(floats)}
     schema.update(
         {
             "embedding": pl.String,
@@ -178,8 +306,12 @@ def evaluate_embeddings(
             "source": pl.String,
             "layer": pl.Int64,
             "configured": pl.Boolean,
+            "basis": pl.String,
+            "word_set": pl.String,
             "dims": pl.Int64,
+            "auc_words": pl.Int64,
             "tokens_evaluated": pl.Int64,
+            "words_evaluated": pl.Int64,
         }
     )
     frame = pl.DataFrame(rows, schema={name: schema[name] for name in EVAL_COLUMNS})

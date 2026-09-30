@@ -6,7 +6,7 @@ frame that straddles two bins counts in each by its share, so clips with fewer f
 work too. No learning is involved beyond the projection.
 
 The projection is an exact principal component analysis of the training-speaker tokens. It needs
-no random numbers, so the ``wordforms:pca`` stream is not drawn from. Each component's sign is
+no random numbers, so the pipeline has no stream for it. Each component's sign is
 fixed (its largest entry is positive), so the projection is the same on every machine.
 """
 

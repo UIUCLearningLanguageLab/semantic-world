@@ -20,7 +20,6 @@ import numpy as np
 import polars as pl
 import yaml
 
-from semantic_world.wordforms.english import edit_distance
 from semantic_world.wordforms.generate import WordForm
 
 NULL_SAMPLES = 1000
@@ -53,16 +52,6 @@ def hamming_distances(features: np.ndarray) -> np.ndarray:
     order)."""
     rows, columns = np.triu_indices(len(features), 1)
     return (features[rows] != features[columns]).mean(axis=1)
-
-
-def word_distance_matrix(words: list[WordForm]) -> np.ndarray:
-    """The phoneme edit distance between every two words, as a square matrix."""
-    stripped = [word.stripped for word in words]
-    matrix = np.zeros((len(words), len(words)), dtype=np.float64)
-    for i in range(len(words)):
-        for j in range(i + 1, len(words)):
-            matrix[i, j] = matrix[j, i] = edit_distance(stripped[i], stripped[j])
-    return matrix
 
 
 def correlation(a: np.ndarray, b: np.ndarray) -> float:
@@ -116,7 +105,9 @@ def assign_arbitrary(
         )
     chosen = rng.permutation(len(words))[: len(meanings)]
     assigned = [words[int(i)] for i in chosen]
-    sound = word_distance_matrix(assigned)
+    from semantic_world.wordforms.evaluate import edit_distance_matrix
+
+    sound = edit_distance_matrix(assigned)
     rows, columns = np.triu_indices(len(meanings), 1)
     meaning = hamming_distances(features)
     observed = correlation(sound[rows, columns], meaning)
