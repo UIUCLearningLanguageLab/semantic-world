@@ -209,7 +209,7 @@ The default distance of 2 keeps function words from being minimal pairs of each 
 
 With `function_words.source: english`, each gloss takes its English word instead: the CMUdict citation pronunciation (the first pronunciation with primary stress), with the dictionary's other pronunciations recorded in `words.csv` as `weak_forms`, for connected speech later. A gloss that is not in the dictionary is an error that names it.
 
-Function words are synthesized and embedded like content words, by every speaker. Synthesis gives the citation form, spoken alone. The reduced forms of running speech ("the" as "thuh") are out of scope until sentences are synthesized as wholes.
+Function words are synthesized and embedded like content words, by every speaker. Synthesis gives the citation form, spoken alone. The reduced forms of running speech ("the" as "thuh") are out of scope until sentences are synthesized as wholes. `docs/specs/CONNECTED_SPEECH.md` plans that layer, including weak forms of function words, alignment, and contextual embeddings.
 
 ### Affixes
 

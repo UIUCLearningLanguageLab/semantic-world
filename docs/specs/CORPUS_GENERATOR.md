@@ -22,7 +22,8 @@ Out of scope for now:
 - event schemas with changing states (see "Future additions" in `TAXONOMY_RELATIONS.md`);
 - dialogue, questions, and commands;
 - sentence coordination and subordinate clauses other than relative clauses;
-- delivering language to agents in the running world.
+- delivering language to agents in the running world;
+- spoken sentences, which are planned in `docs/specs/CONNECTED_SPEECH.md`.
 
 ## Inputs
 
@@ -76,7 +77,7 @@ The lexicon records which concept or concepts each lexeme and word form expresse
 
 ### Word forms
 
-When a word-form lexicon is given, every lexeme gets a word form. Function words get the shortest forms: one syllable, drawn from the most frequent syllable shapes. Affixes (see "Morphology") need bound forms of one or two phonemes. The word-form pipeline does not yet produce function words, affixes, or inflected forms. "Changes to the word-form pipeline" lists what it needs.
+When a word-form lexicon is given, every lexeme gets a word form. Function words get the shortest forms: one syllable, drawn from the most frequent syllable shapes. Affixes (see "Morphology") need bound forms of one or two phonemes. The word-form pipeline makes function words, affixes, and inflected forms from a request the corpus generator writes (see "Word forms for closed-class items").
 
 ## Layer 2: propositions
 
@@ -301,15 +302,17 @@ A logical form, for example:
 
 **Co-occurrence check.** `stats.yaml` reports, over pairs of leaves, the correlation of within-document co-occurrence with thematic relatedness and with taxonomic similarity, separately for each document type. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness, and encyclopedic documents more with taxonomic similarity.
 
-## Changes to the word-form pipeline
+## Word forms for closed-class items
 
-The corpus needs three things from `WORDFORM_PIPELINE.md` that its current stages do not provide:
+The word-form pipeline provides what the corpus needs for its closed class, as stage 4a of `WORDFORM_PIPELINE.md` (see its "Closed-class forms" section):
 
-1. **Function words:** word forms of one syllable, drawn from the most frequent syllable shapes, requested by part of speech.
-2. **Affixes:** bound forms of one or two phonemes, joined to stems by the phonotactic rules at the join.
-3. **Inflected forms:** synthesis and embedding of stem-plus-affix forms, cached like any other word form.
+1. **Function words:** one syllable each, with the most frequent function words given the shortest shapes; or, as an option, the real English function words (a Jabberwocky condition).
+2. **Affixes:** bound forms joined to stems, with a schwa or a glide inserted where the plain join would be illegal; or, as an option, the English suffixes with English allomorphy.
+3. **Inflected forms:** stem-plus-affix forms, synthesized and embedded like any word form.
 
-The corpus generator exports a lexicon request (lexemes with part of speech and length constraints). The word-form pipeline answers the request. These additions will be written into `WORDFORM_PIPELINE.md` as a new stage when the corpus work reaches morphology. Until then, the corpus works with inflection realized as separate words, or in the formal rendering.
+The corpus generator writes a closed-class request file: its function-word glosses in order of frequency, its affixes, and which words to inflect. The word-form pipeline reads the request and makes the forms.
+
+Spoken sentences, with coarticulation across word boundaries and reduced function words, are planned in `docs/specs/CONNECTED_SPEECH.md`. Stage 5 of that specification synthesizes the corpus's documents.
 
 ## Configuration
 
@@ -420,7 +423,7 @@ These choices were made while writing this specification. Each one is the workin
 4. Events never change state, and event-level propositions are never negated.
 5. Distinguishing modifiers follow the incremental algorithm, with one preference order per language.
 6. A pronoun is used only when its referent was the only referent, or the subject, of the previous sentence.
-7. Function words, affixes, and inflected forms need a new stage in the word-form pipeline, written when the corpus work reaches morphology.
+7. Function words, affixes, and inflected forms come from stage 4a of the word-form pipeline, through a closed-class request file.
 8. Sibling contrasts are two adjacent sentences, not a contrastive construction.
 
 ## References
