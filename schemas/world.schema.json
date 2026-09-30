@@ -1,0 +1,277 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "world": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "regime": {
+      "$ref": "#/$defs/Regime",
+      "default": "scripted"
+    },
+    "types": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Directory holding the entity type files `<name>.yaml`, relative to this file."
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Rules files, relative to this file. Their sections are merged."
+    },
+    "map": {
+      "$ref": "#/$defs/MapSpec"
+    },
+    "calendar": {
+      "$ref": "#/$defs/CalendarSpec",
+      "default": {}
+    },
+    "light": {
+      "$ref": "#/$defs/LightSpec",
+      "default": {}
+    },
+    "schedule": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": true,
+      "description": "Scheduled world changes. Parsed for the contract's format; not in milestone 1."
+    }
+  },
+  "required": [
+    "map"
+  ],
+  "description": "A world settings file, or the inline `world` section of an experiment configuration.",
+  "title": "WorldSpec",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Regime": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "scripted"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "generative",
+          "description": "Physics-driven. Not in milestone 1."
+        }
+      ]
+    },
+    "MapSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "generator": {
+          "type": "string"
+        },
+        "size_m": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Extent in meters along x and z. The map is centered on the origin."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "generator",
+        "size_m"
+      ],
+      "description": "The map generator, a registered module, and its parameters."
+    },
+    "CalendarSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minutes_per_day": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Simulated minutes per calendar day."
+        },
+        "daylight_fraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fraction of the day, from dawn, that is daylight."
+        }
+      },
+      "description": "The calendar (contract 6): how simulated seconds map to days.\n\nFields are optional so that a partial inline calendar parses; a run needs all of them,\nwhich [`WorldSpec::validate`] checks."
+    },
+    "Trait_for_double": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/TraitFull"
+        }
+      ]
+    },
+    "TraitFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "double"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Variation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "normal": {
+              "type": "object",
+              "properties": {
+                "sd": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "sd"
+              ]
+            }
+          },
+          "required": [
+            "normal"
+          ],
+          "additionalProperties": false,
+          "description": "Normal distribution centered on the default, with standard deviation `sd`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "properties": {
+                "half_width": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "half_width"
+              ]
+            }
+          },
+          "required": [
+            "uniform"
+          ],
+          "additionalProperties": false,
+          "description": "Uniform distribution centered on the default, from `default - half_width` to\n`default + half_width`."
+        }
+      ],
+      "description": "How individuals vary when sampled. Sampled values are clipped to the trait's range."
+    },
+    "LightSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "twilight_hours": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Length of the linear rise at dawn and fall at dusk, in calendar hours, centered on\nthe day–night boundary."
+        },
+        "night_below": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Trait_for_double"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "It is night when the light level is below this value."
+        }
+      },
+      "description": "Light: the dawn and dusk transitions and the night threshold."
+    }
+  }
+}

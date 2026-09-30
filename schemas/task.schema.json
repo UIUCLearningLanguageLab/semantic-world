@@ -1,0 +1,202 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "subskills": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Subskill"
+      }
+    },
+    "task": {
+      "$ref": "#/$defs/Task"
+    }
+  },
+  "required": [
+    "task"
+  ],
+  "title": "TaskFile",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Subskill": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "goal": {
+          "type": "string",
+          "description": "The goal condition, as PDDL propositions."
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "goal"
+      ]
+    },
+    "Task": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "goal": {
+          "type": "string",
+          "description": "The subskill whose goal is the task's goal."
+        },
+        "delays": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Trait_for_double"
+          },
+          "description": "Delays between a step that pays off and the payoff, keyed `from->to`, in seconds."
+        },
+        "success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Success"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "goal"
+      ]
+    },
+    "Trait_for_double": {
+      "description": "A trait: either a bare value, or a mapping with `default` and optional `range`, `units`, `variation`, `heritable`, `mutable`, and `visible`. Without `range`, the range is the default alone.",
+      "anyOf": [
+        {
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "$ref": "#/$defs/TraitFull"
+        }
+      ]
+    },
+    "TraitFull": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number",
+          "format": "double"
+        },
+        "range": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Variation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "heritable": {
+          "type": "boolean"
+        },
+        "mutable": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "default"
+      ],
+      "description": "The full, written-out form of a trait. `range` may be left out, in which case the range is\nthe default value alone, as in the bare-value shorthand."
+    },
+    "Variation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "normal": {
+              "type": "object",
+              "properties": {
+                "sd": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "sd"
+              ]
+            }
+          },
+          "required": [
+            "normal"
+          ],
+          "additionalProperties": false,
+          "description": "Normal distribution centered on the default, with standard deviation `sd`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "uniform": {
+              "type": "object",
+              "properties": {
+                "half_width": {
+                  "type": "number",
+                  "format": "double"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "half_width"
+              ]
+            }
+          },
+          "required": [
+            "uniform"
+          ],
+          "additionalProperties": false,
+          "description": "Uniform distribution centered on the default, from `default - half_width` to\n`default + half_width`."
+        }
+      ],
+      "description": "How individuals vary when sampled. Sampled values are clipped to the trait's range."
+    },
+    "Success": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "within": {
+          "$ref": "#/$defs/Trait_for_double",
+          "description": "Time allowed, in seconds."
+        }
+      },
+      "required": [
+        "within"
+      ]
+    }
+  }
+}

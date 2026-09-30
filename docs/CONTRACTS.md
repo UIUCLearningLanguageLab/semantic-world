@@ -1,6 +1,6 @@
 # Contracts
 
-Draft, September 27, 2026. Nothing in this document is decided until Jon approves it. Proposed choices are marked **Proposed**. Choices already made elsewhere are marked **Decided**, with the source.
+Draft, September 27, 2026. Proposed choices are marked **Proposed**. Items marked **Proposed** are the working design for milestone 1 (decided 2026-09-27). A **Proposed** item that turns out wrong during the build goes back to Jon as a question. Choices already made elsewhere are marked **Decided**, with the source.
 
 ## Why contracts
 
@@ -66,9 +66,9 @@ body:
   height: {default: 1.7, range: [1.4, 2.0], units: m, variation: {normal: {sd: 0.08}}, visible: true}
   insulation: {default: 0.2, range: [0, 1]}
   needs:
-    hunger: {rate: {default: 0.01, range: [0, 0.1], units: per_minute}, lethal_at: 1.0}
-    thirst: {rate: {default: 0.02, range: [0, 0.1], units: per_minute}, lethal_at: 1.0}
-    fatigue: {rate: {default: 0.005, range: [0, 0.05], units: per_minute}, collapse_at: 1.0}
+    hunger: {rise_per_day: {default: 0.5, range: [0, 5]}, at_max: {health_drain_per_hour: 0.5}}
+    thirst: {rise_per_day: {default: 1.0, range: [0, 5]}, at_max: {health_drain_per_hour: 1.0}}
+    fatigue: {rise_per_day: {default: 1.0, range: [0, 5]}, at_max: {collapse: {duration_hours: 2}}}   # full need format: addition A1
 sensors:
   eyes: {resolution: [64, 64], fov_deg: 90, range_m: 50, color: true}
   interoception: {needs: [hunger, thirst, fatigue], noise_sd: 0.0}
@@ -207,7 +207,7 @@ Targets need care. Naming a target by its entity ID (`eat(bush_3)`) gives the ag
 
 ### Timing
 
-Agents act at decision points, not necessarily every tick (contract 6). `world.agents_awaiting_action` lists which agents must act before the next step. An agent in the middle of a durative action (for example, eating for two seconds) is not asked to act until the action ends or is interrupted.
+Agents act at decision points, not necessarily every tick (contract 6). `world.agents_awaiting_action` lists which agents must act before the next step. An agent in the middle of a voluntary durative action (for example, eating for two seconds) is still asked to act at every decision point: `noop` continues the action, and any other action interrupts the action (addition A4). A collapsed agent is not asked to act until the collapse ends.
 
 ## 4. Internal state and reward
 
@@ -359,6 +359,76 @@ seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 ```
 
 A batch runner expands `conditions` × `seeds` into runs, and every run writes its fully resolved configuration to `run.yaml`.
+
+## Additions (decided 2026-09-27)
+
+These additions fill gaps that the first build specification (`docs/specs/MILESTONE_1.md`) needed filled. The additions were found by a review of that specification and approved on 2026-09-27. Where an addition changes an earlier part of this document, the earlier part has been updated to match.
+
+### A1. Needs (extends contract 1)
+
+A body declares its needs as a mapping. Each need is a generic mechanism with these fields, all of them traits:
+
+```yaml
+needs:
+  hunger:
+    initial: 0.0
+    rise_per_day: 0.5                      # rise rate in normal conditions
+    rise_when: always                      # always | night_outside_shelter
+    rise_multipliers: {running: 1.0}       # multiply the rise rate while a state holds
+    fall_per_day: 0.0                      # passive fall rate, when the rise condition does not hold
+    fall_multipliers: {}                   # multiply the fall rate while a state holds
+    insulation_reduces_rise: false         # if true, rise rate × (1 − body.insulation)
+    at_max: {health_drain_per_hour: 0.5}   # what happens at 1.0: health drain, or collapse
+```
+
+`at_max` holds either `health_drain_per_hour` or `collapse: {duration_hours}`. The states usable in multipliers are `running`, `asleep`, and `in_shelter`. Need values are clamped to the range 0 to 1. "At max" means a value of 1.0 after clamping. The `lethal_at` and `collapse_at` fields in the contract 1 example are replaced by `at_max`.
+
+The body also declares `health: {initial: 1.0, recover_per_hour: 0.05}`. Health drains from all needs at max add together. Health recovers only while no need is at max. Health is clamped to the range 0 to 1. The agent dies when health reaches 0.
+
+### A2. Tags, stocks, and placeholders (extends contract 1)
+
+```yaml
+body:
+  tags: [edible, regrows]                  # free-form labels that rules select on
+  stock: {berries: {initial: 3, max: 3}}   # countable amounts held by the entity
+  provides: {hunger: -0.25}                # need changes per unit consumed
+  placeholder: {shape: sphere, size: [1.2, 1.2, 1.2], color: "#2e7d32"}
+  solid: true                              # whether the entity blocks movement
+```
+
+In milestone 1, `placeholder` replaces `model`. The `model` field is optional and is not validated against an asset manifest. Placeholder shapes are `capsule`, `sphere`, `cylinder`, `cone`, `box`, `disc`, and `shelter` (a box with one open side). A shape may be a list of parts with offsets, so a tree is a cylinder plus a cone. `size` is the full extent in meters along x, y, and z.
+
+### A3. Rule expressions (extends contract 2)
+
+Preconditions are a list of calls to registered predicates, all of which must hold:
+
+| Predicate | Meaning |
+|---|---|
+| `within(a, b, d)` | The gap between the surfaces of `a` and `b` (distance between centers minus both radii on the ground plane) is at most `d` meters. |
+| `facing(a, b, deg)` | The direction from `a` to `b` is within `deg` degrees of `a`'s facing. |
+| `has_tag(x, tag)` | `x` carries the tag. |
+| `stock_at_least(x, name, n)` | `x` holds at least `n` of the stock. |
+| `awake(a)`, `asleep(a)`, `collapsed(a)` | The agent's sleep state. |
+
+Effects are a list, each with one of these forms:
+
+| Effect | Meaning |
+|---|---|
+| `change_need: {entity, need, by}` | Add `by` to a need, once. |
+| `change_need_rate: {entity, need, per_second}` | Add `per_second` × elapsed time to a need, every tick while the action lasts. |
+| `take_stock: {entity, name, amount}` | Remove stock. |
+| `add_stock: {entity, name, amount, up_to}` | Add stock, up to a limit. |
+| `set_state: {entity, state, value}` | Set a state such as `asleep`. |
+
+Arguments may be literals or references: `self`, `target`, `this`, and a field path on one of those (`target.provides.hunger`, `this.stock.berries.max`). There is no arithmetic beyond an optional leading minus sign. New predicates and effects are added as registered modules, never as special cases in the engine.
+
+### A4. Durative actions (clarifies contracts 3 and 6)
+
+An agent in a voluntary durative action (`eat`, `drink`, `sleep`) stays in `agents_awaiting_action` at every decision point. Choosing `noop` continues the current action. Choosing any other action interrupts the current action and starts the new one. A collapsed agent is not asked to act until the collapse ends. Contract 3's sentence "an agent in the middle of a durative action is not asked to act until the action ends or is interrupted" is replaced by this rule.
+
+### A5. Conditions in experiment configurations (clarifies contract 10)
+
+Each key under `conditions` is a dotted path into the configuration, and each value is the list of settings to cross. For example, `population.0.nervous_system.module: [random, scripted_optimal]` and `options.impossible_actions: [masked, attempt_and_fail]`. The batch runner crosses all conditions with all seeds. Nervous-system module names resolve through a registry in `semantic_world.agents`.
 
 ## Paper tests
 

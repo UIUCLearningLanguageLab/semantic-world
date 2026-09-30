@@ -1,0 +1,25 @@
+# The tiny survival world: a flat, square meadow with walls at the edges. Placement uses the
+# `map` random stream. Every object's center is at least `min_object_gap_m` from every other
+# object's center and at least `edge_margin_m` from the edge; agents start at least
+# `agent_clearance_m` from any object. Times: one calendar day is 24 simulated minutes
+# (1,440 s). Daylight holds for the first 60% of the day; light rises and falls linearly over
+# 1 calendar hour at dawn and at dusk; it is night when the light level is below 0.5.
+world: meadow
+version: 1
+regime: scripted
+types: ../types
+rules: [../rules/actions.yaml, ../rules/processes.yaml, ../rules/predicates.yaml]
+map:
+  generator: meadow
+  size_m: [100, 100]
+  params:
+    objects: {berry_bush: 20, pond: 3, shelter: 2, tree: 30}
+    min_object_gap_m: {default: 4.0, range: [0, 20], units: m}
+    edge_margin_m: {default: 3.0, range: [0, 20], units: m}
+    agent_clearance_m: {default: 5.0, range: [0, 20], units: m}
+calendar:
+  minutes_per_day: {default: 24, range: [1, 1440], units: min}
+  daylight_fraction: {default: 0.6, range: [0, 1]}
+light:
+  twilight_hours: {default: 1.0, range: [0, 6], units: hours}
+  night_below: {default: 0.5, range: [0, 1]}

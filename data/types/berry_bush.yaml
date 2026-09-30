@@ -1,0 +1,18 @@
+# Food. A green sphere, 1.2 m across, red while berries remain. Holds 3 berries; each berry
+# lowers hunger by 0.25. Regrowth is a process in data/rules/processes.yaml.
+type: berry_bush
+version: 1
+body:
+  plan: plant
+  radius: {default: 0.6, range: [0.3, 1.0], units: m}
+  solid: true
+  tags: [edible, regrows]
+  stock:
+    berries: {initial: {default: 3, range: [0, 10]}, max: {default: 3, range: [1, 10]}}
+  provides:
+    hunger: {default: -0.25, range: [-1, 0]}
+  placeholder:
+    shape: sphere
+    size: [1.2, 1.2, 1.2]
+    color: "#2e7d32"
+    color_when_stocked: {stock: berries, color: "#c62828"}

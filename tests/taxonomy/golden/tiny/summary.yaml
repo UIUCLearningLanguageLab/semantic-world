@@ -1,0 +1,10 @@
+categories: 6
+leaves: 4
+instances: 12
+mean_true_features_per_instance: {is: 3.6666666666666665, has: 3.25, can: 2.75}
+constant_features: 0
+duplicate_leaves: 0
+duplicate_instances: 1
+superordinates: {similarity_min: -1.2412670766236365e-17, similarity_max: -1.2412670766236365e-17,
+  tries: 2}
+warnings: []
