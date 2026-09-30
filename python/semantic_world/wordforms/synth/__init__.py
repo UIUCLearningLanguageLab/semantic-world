@@ -108,6 +108,8 @@ class Synthesis:
     engines: dict[str, dict[str, Any]] = field(default_factory=dict)
     over_limit: int = 0
     """Tokens whose kept clip is still longer than the duration limit."""
+    long_synthesis: dict[str, Any] = field(default_factory=dict)
+    """The long-word rule and the words that it flags, when Piper is an engine."""
 
     def audio(self, token: Token) -> np.ndarray:
         """The token's clip: mono, float32, at ``sample_rate``."""
@@ -143,6 +145,7 @@ class Synthesis:
                     for k in sorted({t.tries for t in self.tokens})
                 },
             },
+            "long_synthesis": self.long_synthesis,
             "levels": {
                 name: _level_summary([t for t in self.tokens if t.engine == name])
                 for name in by_engine
@@ -225,6 +228,43 @@ def finish_clip(config: Config, raw: np.ndarray, native_rate: int, pitch: float)
     clip = audio_tools.resample(raw, native_rate * factor, config.synthesis.sample_rate)
     clip = audio_tools.trim(clip, config.synthesis.sample_rate, trim.threshold_db, trim.margin_ms)
     return audio_tools.set_level(clip, level.rms_db, level.max_peak)
+
+
+def flag_long_synthesis(config: Config, words: list[WordForm], result: Synthesis) -> None:
+    """Set each word's ``long_synthesis`` flag: whether the median duration of the word's Piper
+    tokens is more than ``synthesis.long_synthesis_ratio`` times the median for words with the
+    same number of syllables. Piper stretches some words for most speakers, and the flag lets
+    later analyses leave those words out. Without Piper tokens, or with a null ratio, the flags
+    stay unset."""
+    ratio = config.synthesis.long_synthesis_ratio
+    durations: dict[str, list[float]] = {}
+    for token in result.tokens:
+        if token.engine == "piper":
+            durations.setdefault(token.word, []).append(token.duration)
+    if ratio is None or not durations:
+        return
+    medians = {word: float(np.median(values)) for word, values in durations.items()}
+    by_syllables: dict[int, list[float]] = {}
+    for word in words:
+        if word.label in medians:
+            by_syllables.setdefault(word.syllable_count, []).append(medians[word.label])
+    reference = {count: float(np.median(values)) for count, values in by_syllables.items()}
+    flagged = {}
+    for word in words:
+        if word.label not in medians:
+            continue
+        relative = medians[word.label] / reference[word.syllable_count]
+        word.long_synthesis = bool(relative > ratio)
+        if word.long_synthesis:
+            flagged[word.label] = {
+                "median_seconds": round(medians[word.label], 3),
+                "ratio": round(relative, 3),
+            }
+    result.long_synthesis = {
+        "ratio": ratio,
+        "median_seconds_by_syllables": {k: round(reference[k], 3) for k in sorted(reference)},
+        "flagged": flagged,
+    }
 
 
 def make_engines(config: Config, streams: Streams) -> dict[str, Engine]:
@@ -401,4 +441,5 @@ def synthesize_lexicon(
             kept = latest if latest.duration <= limit else best
             result.tokens[i] = dataclasses.replace(kept, tries=attempt)
             result.over_limit += int(kept.duration > limit)
+    flag_long_synthesis(config, words, result)
     return result

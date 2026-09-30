@@ -22,6 +22,7 @@ def test_forms_writes_the_run_folder(tmp_path):
     assert words["label"].to_list() == [f"W.{i}" for i in range(1, 21)]
     assert words["real_word"].dtype == pl.Boolean and not words["real_word"].any()
     assert words["log_probability"].dtype == pl.Float64
+    assert words["long_synthesis"].null_count() == 20  # unknown until Piper has synthesized
     config = yaml.safe_load((out / "config.yaml").read_text())
     assert config["name"] == "tiny" and config["seed"] == 1
     assert config["wordforms"]["count"] == 20

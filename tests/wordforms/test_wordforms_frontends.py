@@ -11,10 +11,10 @@ import yaml
 from test_wordforms_synth import ToneEngine, espeak_only
 from wordforms_support import (
     DATA,
+    FIXTURES,
     VOICE_DIR,
     needs_audio,
     needs_cmudict,
-    needs_cochleagram,
     needs_espeak,
     needs_piper,
     needs_wordfreq,
@@ -113,7 +113,6 @@ def test_logmel_frames_are_centered_in_their_hop():
 # ---------------------------------------------------------------------------------------------
 
 
-@needs_cochleagram
 def test_cochleagram_shape_and_frame_rate_match_the_settings():
     cochleagram = frontends_for()["cochleagram"]
     assert (cochleagram.channels, cochleagram.frame_rate) == (64, 100.0)
@@ -138,7 +137,6 @@ def test_cochleagram_shape_and_frame_rate_match_the_settings():
     assert other.compute(tone(440, 1.0)).shape == (50, 32)
 
 
-@needs_cochleagram
 def test_a_1_khz_tone_peaks_in_the_channel_nearest_1_khz():
     cochleagram = frontends_for()["cochleagram"]
     frames = cochleagram.compute(tone(1000))
@@ -150,7 +148,40 @@ def test_a_1_khz_tone_peaks_in_the_channel_nearest_1_khz():
         assert int(frames[5:-5].mean(axis=0).argmax()) == nearest(cochleagram.centers, frequency)
 
 
-@needs_cochleagram
+def test_cochleagram_matches_the_chcochleagram_reference():
+    """The NumPy cochleagram against saved outputs of the McDermott lab's chcochleagram package
+    on tones, noise, a click, silence, and two synthesized words."""
+    import json
+
+    reference = np.load(FIXTURES / "cochleagram_reference.npz")
+    cases = json.loads(str(reference["index"]))
+    assert len(cases) == 9
+    assert {c["name"] for c in cases} >= {"tone_1000hz", "white_noise", "word_1", "word_2"}
+    worst = 0.0
+    for case in cases:
+        name = case["name"]
+        cochleagram = frontends_for(cochleagram=case["settings"])["cochleagram"]
+        expected = reference[f"{name}_output"]
+        frames = cochleagram.compute(reference[f"{name}_input"])
+        assert frames.shape == expected.shape and frames.dtype == expected.dtype == np.float32
+        worst = max(worst, float(np.abs(frames - expected).max()))
+        assert np.allclose(frames, expected, atol=2e-4, rtol=0), name
+        assert np.allclose(cochleagram.centers, reference[f"{name}_centers"], atol=1e-3)
+    # the largest difference measured when the reference was made was 4.5e-5
+    assert worst < 1e-4
+
+
+def test_erb_filterbank_squared_responses_add_to_one():
+    from semantic_world.wordforms.frontends import erb_filterbank
+
+    for size in (8000, 8001, 16000):
+        filters, centers = erb_filterbank(size, RATE, 64, 50.0, 8000.0)
+        assert filters.shape == (64, size // 2 + 1) and len(centers) == 64
+        assert (filters >= 0).all()
+        assert np.allclose((filters**2).sum(axis=0), 1.0)
+        assert centers[0] == pytest.approx(50.0) and centers[-1] == pytest.approx(8000.0)
+
+
 def test_cochleagram_compression_and_timing():
     cochleagram = frontends_for()["cochleagram"]
     channel = nearest(cochleagram.centers, 1000)
@@ -172,7 +203,6 @@ def test_cochleagram_compression_and_timing():
     assert silence.max() < 0.01 and silence.max() < 0.05 * loud
 
 
-@needs_cochleagram
 def test_front_ends_are_deterministic_and_depend_only_on_the_clip():
     clip = np.random.default_rng(0).normal(0, 0.05, 9000).astype(np.float32)
     for name in ("logmel", "cochleagram"):
@@ -204,7 +234,6 @@ def synthesis(tmp_path):
     return config, result
 
 
-@needs_cochleagram
 def test_the_index_recovers_every_token_exactly(synthesis, tmp_path):
     config, result = synthesis
     stores = compute_frontends(config, result, tmp_path / "run")
@@ -319,7 +348,6 @@ def test_progress_is_reported(synthesis, tmp_path):
 @needs_audio
 @needs_espeak
 @needs_piper
-@needs_cochleagram
 def test_frontends_command_on_the_tiny_configuration(tmp_path, capsys):
     data = yaml.safe_load((DATA / "tiny.yaml").read_text())
     data["synthesis"]["engines"]["piper"]["voice_dir"] = str(VOICE_DIR)

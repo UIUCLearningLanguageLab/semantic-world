@@ -165,6 +165,9 @@ class SynthesisConfig:
     trim: TrimConfig
     level: LevelConfig
     duration_check: DurationCheckConfig | None
+    long_synthesis_ratio: float | None
+    """A word is flagged ``long_synthesis`` when the median duration of its Piper tokens is more
+    than this many times the median for words with the same number of syllables. None: no flag."""
     tokens_per_speaker: int
     held_out_speaker_proportion: float
     piper: PiperConfig | None
@@ -192,6 +195,7 @@ class SynthesisConfig:
                 "max_ratio": self.duration_check.max_ratio,
                 "max_tries": self.duration_check.max_tries,
             },
+            "long_synthesis_ratio": self.long_synthesis_ratio,
             "tokens_per_speaker": self.tokens_per_speaker,
             "held_out_speaker_proportion": self.held_out_speaker_proportion,
             "engines": engines,
@@ -605,6 +609,11 @@ def _read_synthesis(node: _Node) -> SynthesisConfig:
             max_tries=duration_node.int("max_tries", 5, min=1),
         )
         duration_node.finish()
+    long_ratio = node.get("long_synthesis_ratio", 1.6, nullable=True)
+    if long_ratio is not None:
+        long_ratio = float(
+            node.check_number("long_synthesis_ratio", long_ratio, min=1, exclusive_min=True)
+        )
     engines_value = node.get("engines", {"piper": {}, "espeak": {}})
     engines = _Node(node.source, node.field("engines"), engines_value)
     piper_node = engines.mapping("piper", nullable=True)
@@ -626,6 +635,7 @@ def _read_synthesis(node: _Node) -> SynthesisConfig:
         trim=trim_config,
         level=level_config,
         duration_check=duration_check,
+        long_synthesis_ratio=long_ratio,
         tokens_per_speaker=node.int("tokens_per_speaker", 2, min=1),
         held_out_speaker_proportion=node.probability("held_out_speaker_proportion", 0.2),
         piper=piper,

@@ -58,6 +58,9 @@ class WordForm:
     english_neighbors: int = 0
     nearest_english: str = ""
     lexicon_neighbors: int = 0
+    long_synthesis: bool | None = None
+    """Whether the word's Piper tokens are unusually long for its syllable count. None until the
+    word has been synthesized by Piper."""
 
     @property
     def phones(self) -> tuple[str, ...]:
@@ -94,6 +97,7 @@ class WordForm:
             "nearest_english": self.nearest_english,
             "lexicon_neighbors": self.lexicon_neighbors,
             "real_word": self.real_word,
+            "long_synthesis": self.long_synthesis,
         }
 
 

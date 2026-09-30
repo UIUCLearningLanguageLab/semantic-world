@@ -2,15 +2,19 @@
 
 - ``waveform``: the trimmed audio itself, one channel, for encoders that take waveforms.
 - ``logmel``: a log-mel spectrogram, the standard input of speech recognition models.
-- ``cochleagram``: a model of the cochlea from the McDermott lab's ``chcochleagram`` package
-  (MIT license): half-cosine filters spaced on the ERB scale, Hilbert envelopes, downsampling,
-  and power-law compression. The lowest and highest channels are the low-pass and high-pass
-  filters that complete the filter bank, so the center frequencies run from ``low_hz`` to
-  ``high_hz``.
+- ``cochleagram``: a model of the cochlea: half-cosine filters spaced on the ERB scale, Hilbert
+  envelopes, downsampling, and power-law compression. The lowest and highest channels are the
+  low-pass and high-pass filters that complete the filter bank, so the center frequencies run
+  from ``low_hz`` to ``high_hz``.
+
+The cochleagram is a NumPy implementation of the filter bank of the McDermott lab's
+``pycochleagram`` and ``chcochleagram`` packages (Feather et al.), written here so that the
+pipeline needs neither package. A test compares it with saved outputs of ``chcochleagram``
+(``tests/wordforms/fixtures/cochleagram_reference.npz``).
 
 A front end's output depends only on the clip and the settings, never on the other clips of a
-run, so a novel word gets the same frames as a stored word. Front ends run on the CPU, where the
-results are identical across runs.
+run, so a novel word gets the same frames as a stored word. Front ends run in NumPy on the CPU,
+where the results are identical across runs.
 
 Output is stored as one float32 array per front end (``frames.npy``), with all clips joined along
 the frame axis, plus an index of each token's first frame and number of frames (``index.csv``)
@@ -37,6 +41,8 @@ from semantic_world.wordforms.synth import Synthesis
 LOG_FLOOR = 1e-10
 MEL_LOW_HZ = 20.0
 DOWNSAMPLING_WINDOW = 1001
+ENVELOPE_FLOOR = 1e-16
+"""The smallest squared envelope, as in chcochleagram."""
 
 
 class Frontend:
@@ -153,10 +159,63 @@ class LogMel(Frontend):
         }
 
 
+def hz_to_erb(hz):
+    """Hz to the ERB-rate scale of Glasberg and Moore."""
+    return 9.265 * np.log(1.0 + np.asarray(hz, dtype=np.float64) / (24.7 * 9.265))
+
+
+def erb_to_hz(erb):
+    return 24.7 * 9.265 * (np.exp(np.asarray(erb, dtype=np.float64) / 9.265) - 1.0)
+
+
+def erb_filterbank(size: int, sample_rate: int, channels: int, low_hz: float, high_hz: float):
+    """Half-cosine filters for the real FFT of a signal of ``size`` samples: an array of
+    channels by FFT bins, and the center frequency of each channel.
+
+    ``channels - 2`` band-pass filters have their centers equally spaced on the ERB scale between
+    ``low_hz`` and ``high_hz``, each reaching to its neighbors' centers. A low-pass filter below
+    the first center and a high-pass filter above the last one complete the bank, so that the
+    squared responses add to one.
+    """
+    bandpass = channels - 2
+    if size % 2 == 0:
+        bins, top = size // 2, sample_rate / 2.0
+    else:
+        bins, top = (size - 1) // 2, sample_rate * (size - 1) / 2.0 / size
+    hz = np.linspace(0.0, top, bins + 1)
+    erb = hz_to_erb(hz)
+    cutoffs, spacing = np.linspace(
+        hz_to_erb(low_hz), hz_to_erb(high_hz), bandpass + 2, retstep=True
+    )
+    centers = cutoffs[1:-1]
+    filters = np.zeros((channels, bins + 1), dtype=np.float64)
+    for i, center in enumerate(centers):
+        inside = (erb > center - spacing) & (erb < center + spacing)
+        filters[i + 1, inside] = np.cos((erb[inside] - center) / (2.0 * spacing) * np.pi)
+    below = int(np.max(np.flatnonzero(hz < erb_to_hz(centers[0]))))
+    filters[0, : below + 1] = np.sqrt(1.0 - filters[1, : below + 1] ** 2)
+    above = int(np.min(np.flatnonzero(hz > erb_to_hz(centers[-1]))))
+    filters[-1, above:] = np.sqrt(1.0 - filters[-2, above:] ** 2)
+    center_erb = np.concatenate([[centers[0] - spacing], centers, [centers[-1] + spacing]])
+    return filters, erb_to_hz(center_erb)
+
+
+def downsampling_filter(step: int, window: int = DOWNSAMPLING_WINDOW) -> np.ndarray:
+    """A sinc low-pass filter under a Kaiser window, for downsampling by ``step``."""
+    times = np.arange(-window / 2.0, int(window / 2))
+    return np.kaiser(window, 5.0) * np.sinc(times / step) / step
+
+
 class Cochleagram(Frontend):
-    """A cochleagram from ``chcochleagram``. The package builds its filters for one signal
-    length, so a clip is padded with zeros to the next half second, and the frames beyond the
-    clip are dropped. A clip of ``n`` samples has ``ceil(n * frame_rate / sample_rate)`` frames."""
+    """A cochleagram: ERB half-cosine filters applied to the clip's spectrum, the Hilbert
+    envelope of each channel, downsampling to the frame rate, and power-law compression.
+
+    The filters are built for one signal length, so a clip is padded with zeros to the next half
+    second, and the frames beyond the clip are dropped. A clip of ``n`` samples has
+    ``ceil(n * frame_rate / sample_rate)`` frames, and frame ``t`` is centered on sample
+    ``(t + 1/2) * step``. The envelope is that of the one-sided spectrum, which is half the
+    amplitude of a tone, as in ``chcochleagram``.
+    """
 
     name = "cochleagram"
 
@@ -179,80 +238,55 @@ class Cochleagram(Frontend):
         self.frame_rate = float(settings.frame_rate)
         self.step = sample_rate // settings.frame_rate
         self.bucket = max(self.step, (sample_rate // 2) // self.step * self.step)
-        self._modules: dict[int, Any] = {}
-        self._centers: list[float] | None = None
+        self.lowpass = downsampling_filter(self.step)
+        self._filters: dict[int, np.ndarray] = {}
+        self.centers = [
+            round(float(c), 3)
+            for c in erb_filterbank(
+                self.bucket, sample_rate, self.channels, settings.low_hz, settings.high_hz
+            )[1]
+        ]
+        """The center frequency of each channel, in Hz."""
 
     def frame_count(self, samples: int) -> int:
         return math.ceil(samples / self.step)
 
-    def _module(self, size: int):
-        """The cochleagram model for signals of ``size`` samples, built once for each size."""
-        module = self._modules.get(size)
-        if module is None:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", SyntaxWarning)
-                from chcochleagram import cochleagram, cochlear_filters, downsampling
-                from chcochleagram import envelope_extraction as envelopes
-
-            filters = cochlear_filters.ERBCosFilters(
-                size,
-                self.sample_rate,
-                use_rfft=True,
-                pad_factor=None,
-                filter_kwargs={
-                    "n": self.channels - 2,
-                    "low_lim": self.config.low_hz,
-                    "high_lim": self.config.high_hz,
-                    "sample_factor": 1,
-                    "full_filter": False,
-                },
+    def filters(self, size: int) -> np.ndarray:
+        """The filter bank for signals of ``size`` samples, built once for each size."""
+        bank = self._filters.get(size)
+        if bank is None:
+            bank, _ = erb_filterbank(
+                size, self.sample_rate, self.channels, self.config.low_hz, self.config.high_hz
             )
-            module = cochleagram.Cochleagram(
-                filters,
-                envelopes.HilbertEnvelopeExtraction(
-                    size, self.sample_rate, use_rfft=True, pad_factor=None
-                ),
-                downsampling.SincWithKaiserWindow(
-                    self.sample_rate,
-                    self.config.frame_rate,
-                    window_size=DOWNSAMPLING_WINDOW,
-                    # zeros on both sides, so that frame t is centered on sample (t + 1/2) * step
-                    padding=downsampling.calculate_same_padding(
-                        size, DOWNSAMPLING_WINDOW, stride=self.step
-                    ),
-                ),
-                compression=None,
-            )
-            module.eval()
-            self._modules[size] = module
-            if self._centers is None:
-                self._centers = [round(float(c), 3) for c in filters.filter_extras["cf"]]
-        return module
-
-    @property
-    def centers(self) -> list[float]:
-        """The center frequency of each channel, in Hz."""
-        if self._centers is None:
-            self._module(self.bucket)
-        return list(self._centers)
+            self._filters[size] = bank
+        return bank
 
     def compute(self, clip: np.ndarray) -> np.ndarray:
-        import torch
-
+        count = self.frame_count(len(clip))
         size = max(1, math.ceil(len(clip) / self.bucket)) * self.bucket
-        padded = np.zeros(size, dtype=np.float32)
+        padded = np.zeros(size, dtype=np.float64)
         padded[: len(clip)] = clip
-        with torch.no_grad():
-            envelopes = self._module(size)(torch.from_numpy(padded)[None, None, :])
-            compressed = torch.clamp(envelopes, min=0.0) ** self.config.compression
-        frames = compressed[0, 0].T.contiguous().numpy()
-        return np.ascontiguousarray(frames[: self.frame_count(len(clip))], dtype=np.float32)
+        # Filter in the frequency domain, and keep only the positive frequencies: the inverse
+        # transform is then the analytic signal, whose magnitude is the envelope.
+        subbands = np.fft.rfft(padded)[None, :] * self.filters(size)
+        spectrum = np.zeros((self.channels, size), dtype=np.complex128)
+        spectrum[:, : subbands.shape[1]] = subbands
+        analytic = np.fft.ifft(spectrum, axis=1)
+        envelopes = np.sqrt(np.maximum(analytic.real**2 + analytic.imag**2, ENVELOPE_FLOOR))
+        # Downsample: a low-pass filter centered on each frame.
+        window = len(self.lowpass)
+        total = (math.ceil(size / self.step) - 1) * self.step + window - size
+        envelopes = np.pad(envelopes, ((0, 0), (total // 2, total - total // 2)))
+        windows = np.lib.stride_tricks.sliding_window_view(envelopes, window, axis=1)
+        windows = np.ascontiguousarray(windows[:, :: self.step][:, :count])
+        frames = (windows.reshape(-1, window) @ self.lowpass).reshape(self.channels, count)
+        compressed = np.maximum(frames, 0.0) ** self.config.compression
+        return np.ascontiguousarray(compressed.T, dtype=np.float32)
 
     def settings(self) -> dict[str, Any]:
         return {
             **self.config.resolved(),
+            "implementation": "numpy",
             "filters": "half-cosine, ERB scale, with low-pass and high-pass end filters",
             "envelope": "Hilbert",
             "downsampling": f"sinc with a Kaiser window, {DOWNSAMPLING_WINDOW} samples",

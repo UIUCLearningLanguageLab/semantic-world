@@ -45,10 +45,7 @@ needs_piper = pytest.mark.skipif(
 )
 
 
-needs_cochleagram = pytest.mark.skipif(
-    importlib.util.find_spec("chcochleagram") is None or importlib.util.find_spec("torch") is None,
-    reason="the chcochleagram or torch package is not installed (the 'speech' extra)",
-)
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def _whisper_cached() -> bool:

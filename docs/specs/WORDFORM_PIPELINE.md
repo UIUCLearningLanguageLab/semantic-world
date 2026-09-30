@@ -108,6 +108,7 @@ A third engine, a parametric formant synthesizer, comes in stage 8. Until then, 
 - A configured number of speakers is drawn for each engine. A configured proportion of speakers is held out: held-out speakers never train a learned encoder, and never contribute to word embeddings. Held-out speakers test generalization to new voices.
 - Every word is synthesized by every speaker, with a configured number of tokens per speaker. Tokens differ through the engine's own variability and through small seeded perturbations of rate and pitch.
 - A neural engine now and then stretches a word far beyond its usual length. After synthesis, the pipeline compares each clip's duration with the median duration of the same word across all tokens. A clip longer than `duration_check.max_ratio` times its word's median (1.8 by default) is synthesized again with a new perturbation seed, up to `duration_check.max_tries` tries in all (5 by default). When no try passes, the shortest try is kept. `tokens.csv` records the number of tries, and the run's summary records how many clips were tried again and how many still exceed the limit.
+- Piper also stretches a few words for most speakers, and the retry rule does not catch those words. `words.csv` marks them with the flag `long_synthesis`. A word is flagged when the median duration of its Piper tokens is more than `long_synthesis_ratio` times (1.6 by default) the median for words with the same number of syllables. The flag does not change the audio. Later analyses can leave the flagged words out.
 
 ### Audio
 
@@ -128,7 +129,7 @@ Each front end turns a clip into a matrix of frames by channels. The front ends 
 | `cochleagram` | A model of the cochlea: a bank of filters spaced on the ERB scale, envelope extraction, power-law compression, and downsampling. | 64 channels, 50 Hz to 8 kHz, compression exponent 0.3, 100 frames per second |
 | `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales. | rates 2–32 Hz, scales 0.25–8 cycles per octave |
 
-For the cochleagram, the pipeline uses `pycochleagram` (NumPy) or `chcochleagram` (PyTorch), both from the McDermott lab. The choice is an engineering decision, after checking licenses.
+The cochleagram is a NumPy implementation, inside the package, of the filter bank of `pycochleagram` and `chcochleagram`, both from the McDermott lab. Neither package is on PyPI, so the pipeline does not depend on them. A test compares the implementation with saved outputs of `chcochleagram` (`tests/wordforms/fixtures/cochleagram_reference.npz`). The 64 channels are 62 band-pass filters plus the low-pass and high-pass filters that complete the bank.
 
 Front-end output is stored as one float32 array per front end, with all clips concatenated along the frame axis, plus an index of each token's first frame and number of frames. That layout loads with memory mapping and needs no extra dependency.
 
@@ -226,6 +227,7 @@ synthesis:
   trim: {threshold_db: -40, margin_ms: 20}
   level: {rms_db: -24, max_peak: 0.9}
   duration_check: {max_ratio: 1.8, max_tries: 5}   # null turns the check off
+  long_synthesis_ratio: 1.6                        # null turns the flag off
   tokens_per_speaker: 2
   held_out_speaker_proportion: 0.2
   engines:
@@ -234,6 +236,7 @@ synthesis:
   token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
 
 frontends:
+  waveform: {store: false}       # true also stores the waveforms, which repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
 
@@ -260,7 +263,7 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word. |
+| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
@@ -292,7 +295,7 @@ data/wordforms/      # default.yaml, tiny.yaml, arpabet_ipa.yaml, arpabet_espeak
 examples/            # wordforms_lm_inputs.py, wordforms_contrastive.py
 ```
 
-Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `cmudict`, `wordfreq`, a cochleagram package, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
+Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `scipy`, `cmudict`, `wordfreq`, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
 
 ### Licenses
 

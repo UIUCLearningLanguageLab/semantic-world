@@ -36,6 +36,7 @@ WORD_COLUMNS = (
     "nearest_english",
     "lexicon_neighbors",
     "real_word",
+    "long_synthesis",
 )
 SPEAKER_COLUMNS = ("label", "engine", "voice", "speaker_id", "variant", "pitch", "rate", "split")
 TOKEN_COLUMNS = (
@@ -66,7 +67,6 @@ PACKAGES = (
     "piper-tts",
     "onnxruntime",
     "torch",
-    "chcochleagram",
 )
 
 
@@ -131,7 +131,9 @@ def write_config(
 
 def words_frame(lexicon: Lexicon) -> pl.DataFrame:
     records = [w.record() for w in lexicon.words]
-    frame = pl.DataFrame(records, schema_overrides={"log_probability": pl.Float64})
+    frame = pl.DataFrame(
+        records, schema_overrides={"log_probability": pl.Float64, "long_synthesis": pl.Boolean}
+    )
     return frame.select(WORD_COLUMNS)
 
 

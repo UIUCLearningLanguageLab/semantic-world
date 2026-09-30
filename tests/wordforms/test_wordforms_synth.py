@@ -523,6 +523,56 @@ def test_duration_check_settings(tmp_path):
 
 @needs_cmudict
 @needs_wordfreq
+def test_long_synthesis_flags_words_that_piper_stretches(tmp_path):
+    from pathlib import Path
+
+    from semantic_world.wordforms.synth import Token, flag_long_synthesis
+
+    config = espeak_only(tmp_path, count=12, syllables={2: 1})
+    words = run_forms(config).lexicon.words
+    assert all(w.long_synthesis is None for w in words)
+
+    def tokens(engine, long_word):
+        result = []
+        for i, word in enumerate(words):
+            for k, speaker in enumerate(("S.1", "S.2", "S.3")):
+                duration = 0.5 + 0.01 * i + 0.02 * k
+                if word.label == long_word:
+                    duration *= 2 if speaker != "S.3" else 1  # long for most speakers
+                result.append(
+                    Token(f"{word.label}.{speaker}.1", word.label, speaker, engine, "", {}, 1.0,
+                          0.0, duration, "", "")
+                )  # fmt: skip
+        return result
+
+    synthesis = Synthesis(Path("."), RATE, [], tokens("piper", "W.4"))
+    flag_long_synthesis(config, words, synthesis)
+    assert [w.label for w in words if w.long_synthesis] == ["W.4"]
+    assert all(w.long_synthesis is False for w in words if w.label != "W.4")
+    record = synthesis.long_synthesis
+    assert record["ratio"] == 1.6 and list(record["flagged"]) == ["W.4"]
+    assert record["flagged"]["W.4"]["ratio"] > 1.6
+    assert list(record["median_seconds_by_syllables"]) == [2]
+    assert synthesis.summary()["long_synthesis"] == record
+    # a looser rule flags nothing
+    data = config.resolved()
+    data["synthesis"]["long_synthesis_ratio"] = 2.5
+    for word in words:
+        word.long_synthesis = None
+    flag_long_synthesis(parse_config(data, "x"), words, synthesis)
+    assert not any(w.long_synthesis for w in words) and synthesis.long_synthesis["flagged"] == {}
+    # without Piper tokens, or without a ratio, the flag stays unset
+    for word in words:
+        word.long_synthesis = None
+    flag_long_synthesis(config, words, Synthesis(Path("."), RATE, [], tokens("espeak", "W.4")))
+    assert all(w.long_synthesis is None for w in words)
+    data["synthesis"]["long_synthesis_ratio"] = None
+    flag_long_synthesis(parse_config(data, "x"), words, synthesis)
+    assert all(w.long_synthesis is None for w in words)
+
+
+@needs_cmudict
+@needs_wordfreq
 @needs_audio
 def test_a_silent_clip_is_an_error_that_names_the_token(tmp_path):
     class SilentEngine(ToneEngine):
@@ -558,6 +608,8 @@ def test_run_folder_with_synthesis(tmp_path):
     assert speakers.columns == list(SPEAKER_COLUMNS) and speakers.height == 3
     assert speakers["split"].to_list().count("held_out") == 1
     assert speakers["speaker_id"].null_count() == 3  # espeak-ng speakers have no speaker ID
+    # no Piper tokens: the long_synthesis flag is empty
+    assert pl.read_csv(folder / "words.csv")["long_synthesis"].null_count() == 6
     tokens = pl.read_csv(folder / "tokens.csv")
     assert tokens.columns == list(TOKEN_COLUMNS) and tokens.height == 36
     assert tokens["label"][0] == "W.1.S.1.1"
@@ -704,6 +756,8 @@ def test_synth_command_on_the_tiny_configuration(tmp_path, capsys):
     out = tmp_path / "run"
     assert main(["synth", str(path), "--out", str(out)]) == 0
     assert "120 synthesized, 0 read from the cache" in capsys.readouterr().out
+    words = pl.read_csv(out / "words.csv")
+    assert words["long_synthesis"].dtype == pl.Boolean and words["long_synthesis"].null_count() == 0
     speakers = pl.read_csv(out / "speakers.csv")
     assert speakers["engine"].to_list() == ["piper"] * 3 + ["espeak"] * 3
     assert speakers["split"].to_list().count("held_out") == 2

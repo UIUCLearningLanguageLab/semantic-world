@@ -78,6 +78,13 @@ def test_level_and_duration_check_settings(default_config):
     assert off.synthesis.duration_check is None
     assert off.resolved()["synthesis"]["duration_check"] is None
     assert parse_config(off.resolved(), "x").synthesis.duration_check is None
+    assert synthesis.long_synthesis_ratio == 1.6
+    no_flag = parse_config({"synthesis": {"long_synthesis_ratio": None}}, "x")
+    assert no_flag.synthesis.long_synthesis_ratio is None
+    assert parse_config(no_flag.resolved(), "x").synthesis.long_synthesis_ratio is None
+    with pytest.raises(ConfigError) as info:
+        parse_config({"synthesis": {"long_synthesis_ratio": 1}}, "x")
+    assert info.value.field == "synthesis.long_synthesis_ratio"
     changed = parse_config(
         {"synthesis": {"level": {"rms_db": -20}, "duration_check": {"max_tries": 3}}}, "x"
     )

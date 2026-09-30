@@ -19,6 +19,7 @@ synthesis:
   trim: {threshold_db: -40, margin_ms: 20}
   level: {rms_db: -24, max_peak: 0.9}            # every clip's RMS level, with a peak limit
   duration_check: {max_ratio: 1.8, max_tries: 5} # retry clips far longer than their word's median
+  long_synthesis_ratio: 1.6                      # flag words whose Piper tokens are long for their syllable count
   tokens_per_speaker: 2
   held_out_speaker_proportion: 0.2
   engines:
@@ -27,6 +28,7 @@ synthesis:
   token_perturbation: {rate: 0.05, pitch_semitones: 0.5}
 
 frontends:
+  waveform: {store: false}                       # stored waveforms would repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
 
