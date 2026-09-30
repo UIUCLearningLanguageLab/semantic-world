@@ -1,9 +1,10 @@
-"""The phoneme mapping tables: ARPAbet to IPA, to espeak-ng mnemonics, and to a readable spelling.
+"""The phoneme mapping tables: ARPAbet to IPA and to espeak-ng mnemonics.
 
 The tables live in ``data/wordforms/``, not in code. Each table maps every one of the 39 ARPAbet
 phonemes, and may add stress-specific entries (``AH0``) that override the plain entry for a vowel
-carrying that stress. The two phonetic tables also give the primary and secondary stress marks,
-which the pipeline writes before the stressed vowel, as espeak-ng does.
+carrying that stress. The tables also give the primary and secondary stress marks, which the
+pipeline writes before the stressed vowel, as espeak-ng does. The readable spellings are in
+``semantic_world.wordforms.spelling``.
 
 The IPA sanity check compares the table's IPA for a sample of dictionary words with the IPA that
 espeak-ng produces from the spelled words.
@@ -25,7 +26,6 @@ from semantic_world.wordforms.english import PHONEMES, English, Syllable, base, 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "wordforms"
 IPA_TABLE = DATA_DIR / "arpabet_ipa.yaml"
 ESPEAK_TABLE = DATA_DIR / "arpabet_espeak.yaml"
-SPELLING_TABLE = DATA_DIR / "spelling.yaml"
 IPA_STRESS_MARKS = "ˈˌ"
 
 
@@ -81,18 +81,10 @@ class PhonemeTable:
             parts.extend(self.phone(p) for p in syllable.rime)
         return "".join(parts)
 
-    def spell(self, phones: tuple[str, ...]) -> str:
-        """The string for a phoneme sequence, without stress marks."""
-        return "".join(self.phone(p) for p in phones)
 
-
-def load_tables() -> tuple[PhonemeTable, PhonemeTable, PhonemeTable]:
-    """The IPA, espeak-ng, and spelling tables from ``data/wordforms/``."""
-    return (
-        PhonemeTable.load(IPA_TABLE),
-        PhonemeTable.load(ESPEAK_TABLE),
-        PhonemeTable.load(SPELLING_TABLE),
-    )
+def load_tables() -> tuple[PhonemeTable, PhonemeTable]:
+    """The IPA and espeak-ng tables from ``data/wordforms/``."""
+    return PhonemeTable.load(IPA_TABLE), PhonemeTable.load(ESPEAK_TABLE)
 
 
 # ---------------------------------------------------------------------------------------------

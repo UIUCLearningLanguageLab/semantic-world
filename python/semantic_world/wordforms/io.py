@@ -35,7 +35,7 @@ WORD_COLUMNS = (
     "lexicon_neighbors",
     "real_word",
 )
-PACKAGES = ("numpy", "polars", "pyyaml", "cmudict")
+PACKAGES = ("numpy", "polars", "pyyaml", "cmudict", "wordfreq")
 
 
 def default_output_dir(config: Config, base: str | Path = "runs/wordforms") -> Path:

@@ -38,7 +38,8 @@ dev = [
 # The word-form pipeline (docs/specs/WORDFORM_PIPELINE.md). The taxonomy generator does not need
 # this extra. espeak-ng is a system program: brew install espeak-ng.
 speech = [
-    "cmudict>=1.1,<2",
+    "cmudict>=1.1,<1.2",
+    "wordfreq>=3.1,<3.2",
 ]
 
 [project.urls]

@@ -1,15 +1,22 @@
 """The English source: the CMU Pronouncing Dictionary, syllabified and counted.
 
-The dictionary comes from the ``cmudict`` package (in the ``speech`` extra). Every pronunciation
-is syllabified by maximal onset: consonants between two vowels go to the following syllable as
-far as the result is a legal onset, where a legal onset is a consonant sequence that begins at
-least :data:`MIN_ONSET_WORDS` dictionary words. The word count keeps the onsets of proper names
-and loanwords (``tl``, ``dm``, ``mn``) from splitting words like *atlas* and *admit* wrongly.
+The dictionary comes from the ``cmudict`` package (in the ``speech`` extra). The sound patterns
+of English are learned from the *pattern words*: the dictionary words whose Zipf frequency in the
+``wordfreq`` package is at least ``wordforms.english_min_zipf`` (3.0 by default), or the whole
+dictionary when that setting is null. Restricting the patterns to common words keeps the proper
+names and loanwords of the dictionary (``tl``, ``dm``, ``sr``) out of the word forms
+(``docs/proposals/2026-09-30-wordforms-common-words-and-spelling.md``).
 
-From the syllabified dictionary this module counts, by type frequency, onsets and rimes by
-syllable position and stress, and phoneme trigrams with word boundaries. It also answers the
-generator's questions: is a sequence a dictionary pronunciation, and which dictionary words are
-its nearest neighbors by phoneme edit distance.
+Every pronunciation is syllabified by maximal onset: consonants between two vowels go to the
+following syllable as far as the result is a legal onset. A legal onset is a consonant sequence
+that begins at least 1 in every :data:`ONSET_WORD_RATIO` pattern words (20 words of the full
+dictionary, 5 of the default common words). The floor keeps the onsets of the few remaining
+names from splitting words like *atlas* and *pizza* wrongly.
+
+From the syllabified pattern words this module counts, by type frequency, onsets and rimes by
+syllable position and stress, and phoneme trigrams with word boundaries. The whole dictionary
+still answers the generator's other questions: is a sequence a dictionary pronunciation, and
+which dictionary words are its nearest neighbors by phoneme edit distance.
 
 Stress is read from the vowel's digit: 1 and 2 count as stressed, 0 as unstressed. Edit distances
 and trigrams ignore stress. A monosyllable's onset is counted as word-initial and its rime as
@@ -40,8 +47,9 @@ PHONEMES = tuple(sorted(VOWELS | CONSONANTS))
 """The 39 ARPAbet phonemes, sorted."""
 BOUNDARY = "#"
 POSITIONS = ("initial", "medial", "final")
-MIN_ONSET_WORDS = 20
-"""A consonant sequence is a legal medial onset when it begins at least this many words."""
+ONSET_WORD_RATIO = 6300
+"""A consonant sequence is a legal medial onset when it begins at least 1 in this many of the
+pattern words."""
 
 WORD_PATTERN = re.compile(r"[a-z][a-z'\-]*")
 PLAIN_WORD_PATTERN = re.compile(r"[a-z]+")
@@ -168,10 +176,27 @@ class Neighbors:
     """The number of dictionary words at edit distance exactly 1."""
 
 
-class English:
-    """The syllabified, counted CMU Pronouncing Dictionary. Build it with :func:`load_english`."""
+def zipf_frequencies(words) -> dict[str, float]:
+    """The Zipf frequency of each word in ``wordfreq``'s large English list."""
+    try:
+        from wordfreq import zipf_frequency
+    except ImportError as error:  # pragma: no cover - depends on the environment
+        raise ImportError(
+            "wordforms.english_min_zipf needs the wordfreq package; install the 'speech' extra, "
+            "or set english_min_zipf to null to use the whole dictionary"
+        ) from error
+    return {word: zipf_frequency(word, "en", wordlist="large") for word in words}
 
-    def __init__(self, entries: dict[str, list[list[str]]]) -> None:
+
+class English:
+    """The syllabified, counted CMU Pronouncing Dictionary. Build it with :func:`load_english`.
+
+    ``min_zipf`` selects the pattern words, from which the legal onsets, the onset and rime
+    counts, and the trigram model are learned. ``None`` uses every word.
+    """
+
+    def __init__(self, entries: dict[str, list[list[str]]], min_zipf: float | None = None) -> None:
+        self.min_zipf = min_zipf
         self.words: dict[str, tuple[tuple[str, ...], ...]] = {}
         for word in sorted(entries):
             if WORD_PATTERN.fullmatch(word) is None:
@@ -179,6 +204,12 @@ class English:
             prons = tuple(tuple(p) for p in entries[word] if any(is_vowel(x) for x in p))
             if prons:
                 self.words[word] = prons
+        if min_zipf is None:
+            self.pattern_words: frozenset[str] = frozenset(self.words)
+        else:
+            zipf = zipf_frequencies(self.words)
+            self.pattern_words = frozenset(w for w in self.words if zipf[w] >= min_zipf)
+        """The words the sound patterns are learned from."""
         self.pronunciations: dict[tuple[str, ...], tuple[str, ...]] = {}
         """Stress-stripped pronunciation to the sorted words that have it."""
         by_pron: dict[tuple[str, ...], set[str]] = {}
@@ -186,13 +217,14 @@ class English:
         for word, prons in self.words.items():
             for pron in prons:
                 by_pron.setdefault(strip_stress(pron), set()).add(word)
-                first_vowel = next(i for i, p in enumerate(pron) if is_vowel(p))
-                initial[pron[:first_vowel]] += 1
+                if word in self.pattern_words:
+                    first_vowel = next(i for i, p in enumerate(pron) if is_vowel(p))
+                    initial[pron[:first_vowel]] += 1
         self.pronunciations = {k: tuple(sorted(v)) for k, v in by_pron.items()}
         self.onsets: frozenset[tuple[str, ...]] = frozenset(
-            o for o, n in initial.items() if n >= MIN_ONSET_WORDS
+            o for o, n in initial.items() if n * ONSET_WORD_RATIO >= len(self.pattern_words)
         )
-        """The legal onsets: consonant sequences that begin at least MIN_ONSET_WORDS words."""
+        """The legal onsets: consonant sequences that begin enough pattern words."""
         self.syllables: dict[tuple[str, ...], tuple[Syllable, ...]] = {}
         """Every pronunciation (with stress), syllabified."""
         self.onset_counts: dict[tuple[str, bool], Counter[tuple[str, ...]]] = {}
@@ -205,13 +237,19 @@ class English:
         self.contexts: Counter[tuple[str, str]] = Counter()
         self.by_syllable_count: dict[int, list[tuple[str, tuple[str, ...]]]] = {}
         """Plain alphabetic words with their first pronunciation, by syllable count."""
+        counted: set[tuple[str, ...]] = set()
         for word, prons in self.words.items():
             for k, pron in enumerate(prons):
-                if pron in self.syllables:
-                    continue
-                syllables = syllabify(pron, self.onsets)
-                self.syllables[pron] = syllables
+                syllables = self.syllables.get(pron)
+                if syllables is None:
+                    syllables = syllabify(pron, self.onsets)
+                    self.syllables[pron] = syllables
                 n = len(syllables)
+                if k == 0 and PLAIN_WORD_PATTERN.fullmatch(word):
+                    self.by_syllable_count.setdefault(n, []).append((word, pron))
+                if word not in self.pattern_words or pron in counted:
+                    continue
+                counted.add(pron)
                 for i, s in enumerate(syllables):
                     self.onset_counts[position_of(i, n), s.stressed][s.onset] += 1
                     self.rime_counts[rime_position_of(i, n), s.stressed][strip_stress(s.rime)] += 1
@@ -219,8 +257,7 @@ class English:
                 for i in range(2, len(padded)):
                     self.trigrams[padded[i - 2], padded[i - 1], padded[i]] += 1
                     self.contexts[padded[i - 2], padded[i - 1]] += 1
-                if k == 0 and PLAIN_WORD_PATTERN.fullmatch(word):
-                    self.by_syllable_count.setdefault(n, []).append((word, pron))
+        self.pattern_pronunciations = len(counted)
         self._index = _DistanceIndex(self.pronunciations)
 
     # Membership and phonotactics -------------------------------------------------------------
@@ -234,7 +271,7 @@ class English:
 
     def phonotactic(self, phones: tuple[str, ...]) -> bool:
         """Whether every phoneme trigram of the sequence, with word boundaries, occurs in the
-        dictionary."""
+        pattern words."""
         padded = (BOUNDARY, BOUNDARY, *strip_stress(phones), BOUNDARY)
         return all(padded[i - 2 : i + 1] in self.trigrams for i in range(2, len(padded)))
 
@@ -285,9 +322,11 @@ class English:
         return {
             "words": len(self.words),
             "pronunciations": len(self.pronunciations),
+            "english_min_zipf": self.min_zipf,
+            "pattern_words": len(self.pattern_words),
+            "pattern_pronunciations": self.pattern_pronunciations,
             "legal_onsets": len(self.onsets),
             "trigrams": len(self.trigrams),
-            "min_onset_words": MIN_ONSET_WORDS,
         }
 
 
@@ -367,13 +406,14 @@ def _levenshtein_rows(query: np.ndarray, rows: np.ndarray) -> np.ndarray:
     return previous[:, n]
 
 
-@lru_cache(maxsize=1)
-def load_english() -> English:
-    """Load and syllabify the CMU Pronouncing Dictionary once per process."""
+@lru_cache(maxsize=4)
+def load_english(min_zipf: float | None = None) -> English:
+    """Load and syllabify the CMU Pronouncing Dictionary, once per process for each ``min_zipf``
+    (the smallest Zipf frequency of the pattern words; ``None`` uses the whole dictionary)."""
     try:
         import cmudict
     except ImportError as error:  # pragma: no cover - depends on the environment
         raise ImportError(
             "the word-form pipeline needs the cmudict package; install the 'speech' extra"
         ) from error
-    return English(cmudict.dict())
+    return English(cmudict.dict(), min_zipf)

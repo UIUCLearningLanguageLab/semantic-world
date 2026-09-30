@@ -5,10 +5,10 @@ from __future__ import annotations
 import math
 
 import pytest
-from wordforms_support import needs_cmudict
+from wordforms_support import needs_cmudict, needs_wordfreq
 
 from semantic_world.wordforms.english import (
-    MIN_ONSET_WORDS,
+    ONSET_WORD_RATIO,
     PHONEMES,
     POSITIONS,
     edit_distance,
@@ -97,7 +97,11 @@ def test_dictionary_filtering(english):
         ("R", "EH1", "K", "ER0", "D"),
         ("R", "IH0", "K", "AO1", "R", "D"),
     )
-    assert english.summary()["min_onset_words"] == MIN_ONSET_WORDS
+    summary = english.summary()
+    assert summary["english_min_zipf"] is None
+    assert summary["pattern_words"] == summary["words"] == len(english.words)
+    # with the whole dictionary, a legal onset begins at least 20 words
+    assert -(-len(english.words) // ONSET_WORD_RATIO) == 20
 
 
 def test_counts_by_position_and_stress(english):
@@ -178,3 +182,79 @@ def test_neighbors_with_max_distance(english):
     limited = english.neighbors(far, max_distance=2)
     assert limited.distance == 3 and limited.nearest == ""
     assert english.neighbors(far).distance > 2
+
+
+# ---------------------------------------------------------------------------------------------
+# Patterns from common words (english_min_zipf)
+# ---------------------------------------------------------------------------------------------
+
+
+@needs_wordfreq
+def test_pattern_words_are_the_common_words(common_english, english):
+    from wordfreq import zipf_frequency
+
+    summary = common_english.summary()
+    assert summary["english_min_zipf"] == 3.0
+    assert 20_000 < summary["pattern_words"] < 40_000
+    assert summary["words"] == len(english.words)  # the whole dictionary is still loaded
+    assert {"cat", "hello", "pizza"} <= common_english.pattern_words
+    assert not {"svelte", "tlingit", "kasprzyk"} & common_english.pattern_words
+    assert all(zipf_frequency(w, "en") >= 3.0 for w in sorted(common_english.pattern_words)[:500])
+    assert len(common_english.trigrams) < len(english.trigrams)
+    assert set(common_english.trigrams) <= set(english.trigrams)
+
+
+@needs_wordfreq
+def test_common_words_give_cleaner_onsets(common_english, english):
+    common = {" ".join(o) for o in common_english.onsets}
+    full = {" ".join(o) for o in english.onsets}
+    # onsets of names and loanwords are legal in the whole dictionary but not among common words
+    assert {"T S", "S V", "SH N", "SH M"} <= full
+    assert not {"T S", "S V", "SH N", "SH M", "T L", "S R", "V L"} & common
+    assert {"", "S T R", "S P L", "S K W", "K W", "TH R", "SH R", "B Y"} <= common
+    pizza = common_english.words["pizza"][0]
+    assert " . ".join(str(s) for s in common_english.syllables[pizza]) == "P IY1 T . S AH0"
+    assert " . ".join(str(s) for s in english.syllables[pizza]) == "P IY1 . T S AH0"
+
+
+@needs_wordfreq
+def test_hand_checked_syllabifications_with_common_words(common_english):
+    for word, expected in HAND_CHECKED.items():
+        pron = common_english.words[word][0]
+        assert " . ".join(str(s) for s in common_english.syllables[pron]) == expected, word
+
+
+@needs_wordfreq
+def test_statistics_come_from_pattern_words_only(common_english):
+    from semantic_world.wordforms.english import BOUNDARY, strip_stress
+
+    trigrams = set()
+    syllables = 0
+    seen = set()
+    for word in common_english.pattern_words:
+        for pron in common_english.words[word]:
+            padded = (BOUNDARY, BOUNDARY, *strip_stress(pron), BOUNDARY)
+            trigrams.update(padded[i - 2 : i + 1] for i in range(2, len(padded)))
+            if pron not in seen:
+                seen.add(pron)
+                syllables += len(common_english.syllables[pron])
+    assert set(common_english.trigrams) == trigrams
+    assert sum(sum(c.values()) for c in common_english.onset_counts.values()) == syllables
+    assert sum(sum(c.values()) for c in common_english.rime_counts.values()) == syllables
+    assert common_english.summary()["pattern_pronunciations"] == len(seen)
+    # a rare name's trigrams are not legal, though the name is in the dictionary
+    assert "tlingit" in common_english.words
+    assert not common_english.phonotactic(common_english.words["tlingit"][0])
+    assert common_english.phonotactic(common_english.words["strengths"][0])
+
+
+@needs_wordfreq
+def test_real_words_and_neighbors_use_the_whole_dictionary(common_english, english):
+    rare = common_english.words["svelte"][0]
+    assert common_english.is_pronunciation(rare)
+    assert common_english.neighbors(rare).distance == 0
+    assert common_english.pronunciations == english.pronunciations
+    phones = ("F", "AE", "T", "S", "K")
+    assert common_english.count_at_one(phones) == english.count_at_one(phones)
+    assert common_english.by_syllable_count.keys() == english.by_syllable_count.keys()
+    assert len(common_english.by_syllable_count[2]) == len(english.by_syllable_count[2])

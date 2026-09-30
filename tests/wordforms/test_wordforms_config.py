@@ -24,6 +24,7 @@ def test_default_config_matches_the_spec_example(default_config):
     assert c.wordforms.initial_stress_probability == 0.8
     assert c.wordforms.exclude_real_words is True
     assert c.wordforms.min_english_distance == 1 and c.wordforms.min_lexicon_distance == 1
+    assert c.wordforms.english_min_zipf == 3.0
     assert c.synthesis.sample_rate == 16000 and c.synthesis.tokens_per_speaker == 2
     assert c.synthesis.piper.speakers == 40 and c.synthesis.piper.voice == "en_US-libritts_r-medium"
     assert c.synthesis.espeak.variants == ("m1", "m3", "m7", "f2", "f4")
@@ -67,6 +68,21 @@ def test_seed_override():
 def test_syllable_weights_are_normalized():
     config = parse_config({"wordforms": {"syllables": {2: 1, 1: 3}}}, "x")
     assert config.wordforms.syllables == {1: 0.75, 2: 0.25}
+
+
+def test_english_min_zipf():
+    assert parse_config({}, "x").wordforms.english_min_zipf == 3.0
+    null = parse_config({"wordforms": {"english_min_zipf": None}}, "x")
+    assert null.wordforms.english_min_zipf is None
+    assert null.resolved()["wordforms"]["english_min_zipf"] is None
+    assert (
+        parse_config({"wordforms": {"english_min_zipf": 4}}, "x").wordforms.english_min_zipf == 4.0
+    )
+    assert parse_config(null.resolved(), "x").resolved() == null.resolved()
+    for bad in (-1, 9, "common"):
+        with pytest.raises(ConfigError) as info:
+            parse_config({"wordforms": {"english_min_zipf": bad}}, "x")
+        assert info.value.field == "wordforms.english_min_zipf"
 
 
 def test_english_count():

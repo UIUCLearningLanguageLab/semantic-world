@@ -30,6 +30,7 @@ from semantic_world.wordforms.english import (
     strip_stress,
 )
 from semantic_world.wordforms.phonemes import PhonemeTable, load_tables
+from semantic_world.wordforms.spelling import Speller
 
 MAX_REJECTIONS = 10_000
 """Consecutive rejected candidates before generation gives up."""
@@ -224,11 +225,13 @@ def lexicon_distance(stripped: tuple[str, ...], accepted: list[tuple[str, ...]],
 def generate_lexicon(
     config: Config, rng: np.random.Generator, english: English | None = None
 ) -> Lexicon:
-    """Generate the word table of a configuration from the ``wordforms:generate`` stream."""
-    english = english or load_english()
+    """Generate the word table of a configuration from the ``wordforms:generate`` stream.
+    ``english`` defaults to the dictionary with the configuration's ``english_min_zipf``."""
     settings = config.wordforms
+    english = english or load_english(settings.english_min_zipf)
     sampler = _Sampler(english)
-    ipa_table, espeak_table, spelling_table = load_tables()
+    ipa_table, espeak_table = load_tables()
+    speller = Speller.load()
 
     real_slots = _real_word_slots(rng, settings)
     words: list[WordForm] = []
@@ -284,7 +287,7 @@ def generate_lexicon(
         words.append(form)
         accepted.append(stripped)
 
-    _add_statistics(words, english, ipa_table, espeak_table, spelling_table)
+    _add_statistics(words, english, ipa_table, espeak_table, speller)
     return Lexicon(words, rejections, english.summary())
 
 
@@ -313,14 +316,14 @@ def _add_statistics(
     english: English,
     ipa_table: PhonemeTable,
     espeak_table: PhonemeTable,
-    spelling_table: PhonemeTable,
+    speller: Speller,
 ) -> None:
     spellings: dict[str, int] = {}
     stripped = [w.stripped for w in words]
     for i, word in enumerate(words):
         word.ipa = ipa_table.render(word.syllables)
         word.espeak = espeak_table.render(word.syllables)
-        spelling = word.english_word or spelling_table.spell(word.phones)
+        spelling = word.english_word or speller.spell(word.phones)
         seen = spellings.get(spelling, 0)
         spellings[spelling] = seen + 1
         word.spelling = spelling if seen == 0 else f"{spelling}{seen + 1}"

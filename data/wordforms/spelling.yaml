@@ -1,44 +1,87 @@
-# Common English spellings of each ARPAbet phoneme, for the readable spelling of a word form.
-# The spelling is for human readers only. A key with a stress digit (AH0) overrides the plain
-# key (AH) for vowels carrying that stress.
-phonemes:
-  AA: "o"
-  AE: "a"
-  AH: "u"
-  AH0: "a"
-  AO: "aw"
-  AW: "ow"
-  AY: "ie"
-  B: "b"
-  CH: "ch"
-  D: "d"
-  DH: "th"
-  EH: "e"
-  ER: "er"
-  EY: "ay"
-  F: "f"
-  G: "g"
-  HH: "h"
-  IH: "i"
-  IY: "ee"
-  JH: "j"
-  K: "k"
-  L: "l"
-  M: "m"
-  N: "n"
-  NG: "ng"
-  OW: "oe"
-  OY: "oy"
-  P: "p"
-  R: "r"
-  S: "s"
-  SH: "sh"
-  T: "t"
-  TH: "th"
-  UH: "oo"
-  UW: "oo"
-  V: "v"
-  W: "w"
-  Y: "y"
-  Z: "z"
-  ZH: "zh"
+# Readable spellings of word forms, from common English spellings chosen by position in the word.
+# The spellings are for human readers only. The contexts are defined in
+# python/semantic_world/wordforms/spelling.py, and the first context that applies is used.
+#
+# Vowel contexts, in order:
+#   final            the vowel ends the word
+#   last             one consonant follows and ends the word; a map from that consonant to the
+#                    spelling of the vowel and the consonant together
+#   magic_e          one consonant follows and ends the word: vowel letter, consonant, silent e
+#                    (time). One more consonant may follow when it is in magic_e_suffixes and
+#                    agrees in voicing with the consonant before it (times, liked)
+#   before_r_closed  R follows, and then a consonant or the end of the word
+#   before_r         R follows
+#   before_vowel     a vowel follows
+#   open             one consonant and then a vowel follow
+#   default          anywhere else
+# A key with a stress digit (AH0) overrides the plain key (AH), context by context, for vowels
+# with that stress. YUW is the vowel UW after a consonant and Y; the Y is then not written.
+#
+# Consonant contexts, in order:
+#   magic_e          the consonant of a magic-e ending, with its silent e
+#   final_short      ends the word after a stressed short vowel
+#   final_long       ends the word after a long vowel
+#   final_consonant  ends the word after a consonant
+#   final            ends the word otherwise
+#   doubled          between a stressed short vowel and a vowel
+#   before_velar     before K or G
+#   hard             K only: before a spelling that begins with a letter of hard_c_before
+#   default          anywhere else
+short_vowels: [AE, EH, IH, AA, AH]
+long_vowels: [EY, AY, OW, UW, IY, OY, AW, AO]
+hard_c_before: aoulrt
+# The plural and past endings that may follow a magic-e ending, and the voiceless consonants.
+magic_e_suffixes: {S: s, Z: s, T: d, D: d}
+voiceless: [P, T, K, F, TH, S, SH, CH, HH]
+# AH0 and L ending the word after one of these consonants are written "le" (apple, little).
+syllabic_l: {after: [B, D, G, K, P, T, F, Z], spelling: le}
+vowels:
+  AA: {default: o, final: ah, before_r: a}
+  AE: {default: a}
+  AH: {default: u, final: uh}
+  AH0: {default: a, final: a, last: {N: en, M: um, S: us, T: et, L: al, JH: age}}
+  AO: {default: au, final: aw, before_vowel: aw, before_r: o}
+  AW: {default: ou, final: ow, before_vowel: ow}
+  AY: {default: igh, final: y, magic_e: i, before_vowel: i, open: i}
+  EH: {default: e, final: eh, before_r_closed: ai}
+  ER: {default: ur, before_vowel: urr}
+  ER0: {default: er, before_vowel: er, last: {Z: ers}}
+  EY: {default: ai, final: ay, magic_e: a, before_vowel: ay}
+  IH: {default: i, final: ih, before_r_closed: ee}
+  IH0: {last: {K: ic, V: ive, JH: age}}
+  IY: {default: ee}
+  IY0: {final: y, before_vowel: i, last: {Z: ies, D: ied}}
+  OW: {default: oa, final: o, magic_e: o, before_vowel: o}
+  OY: {default: oi, final: oy, before_vowel: oy}
+  UH: {default: oo}
+  UW: {default: oo, before_vowel: u}
+  YUW: {default: eu, final: ew, magic_e: u, before_vowel: u, open: u}
+consonants:
+  B: {default: b, doubled: bb, magic_e: be}
+  CH: {default: ch, doubled: tch, final_short: tch}
+  D: {default: d, doubled: dd, magic_e: de}
+  DH: {default: th, final_long: the, magic_e: the}
+  F: {default: f, doubled: ff, final_short: ff, magic_e: fe}
+  G: {default: g, doubled: gg}
+  HH: {default: h}
+  JH: {default: j, final: ge, final_short: dge, final_long: ge, final_consonant: ge, magic_e: ge}
+  K: {default: k, hard: c, doubled: ck, final_short: ck, magic_e: ke}
+  L: {default: l, doubled: ll, final_short: ll, magic_e: le}
+  M: {default: m, doubled: mm, magic_e: me}
+  N: {default: n, doubled: nn, magic_e: ne}
+  NG: {default: ng, before_velar: n}
+  P: {default: p, doubled: pp, magic_e: pe}
+  R: {default: r, doubled: rr, magic_e: re}
+  S: {default: s, doubled: ss, final_short: ss, final_long: ce, magic_e: ce}
+  SH: {default: sh}
+  T: {default: t, doubled: tt, magic_e: te}
+  TH: {default: th}
+  V: {default: v, final_long: ve, final_consonant: ve, magic_e: ve}
+  W: {default: w}
+  Y: {default: y}
+  Z: {default: z, doubled: zz, final_short: zz, final_long: ze, final_consonant: s, magic_e: ze}
+  ZH: {default: zh}
+# Two consonants written together. K S is not written x at the start of a word.
+pairs: {K S: x, K W: qu, HH W: wh}
+# Two consonants written together when they end the word.
+final_pairs: {N S: nce, L S: lse, R S: rce, V D: ved, V Z: ves, Z D: zed, DH D: thed, JH D: ged}

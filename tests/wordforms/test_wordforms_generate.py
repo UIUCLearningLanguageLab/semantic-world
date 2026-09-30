@@ -7,7 +7,7 @@ import math
 
 import numpy as np
 import pytest
-from wordforms_support import needs_cmudict
+from wordforms_support import needs_cmudict, needs_wordfreq
 
 from semantic_world.wordforms.config import parse_config
 from semantic_world.wordforms.english import edit_distance, strip_stress
@@ -20,12 +20,14 @@ from semantic_world.wordforms.generate import (
 )
 from semantic_world.wordforms.streams import Streams
 
-pytestmark = needs_cmudict
+pytestmark = [needs_cmudict, needs_wordfreq]
 
 
-def lexicon_for(data, english, seed=1):
+def lexicon_for(data, english=None, seed=1):
+    """The lexicon of a configuration. The generator loads the dictionary with the
+    configuration's ``english_min_zipf``; ``english`` is accepted for the stage-1 call sites."""
     config = parse_config(data, "test", seed=seed)
-    return generate_lexicon(config, Streams(config.seed).generate, english)
+    return generate_lexicon(config, Streams(config.seed).generate)
 
 
 @pytest.fixture(scope="module")
@@ -191,3 +193,39 @@ def test_lexicon_distance():
     assert lexicon_distance(("B", "AE", "T"), accepted, 3) == 1
     assert lexicon_distance(("F", "IY", "SH", "M", "AH", "N"), accepted, 3) == 3
     assert strip_stress(("K", "AE1", "T")) == ("K", "AE", "T")
+
+
+# ---------------------------------------------------------------------------------------------
+# Patterns from common words (stage 1a)
+# ---------------------------------------------------------------------------------------------
+
+
+def uncommon_trigram_words(lexicon, common_english):
+    """The number of words with a phoneme trigram that occurs in no common English word."""
+    return sum(not common_english.phonotactic(w.phones) for w in lexicon.words)
+
+
+def test_default_words_use_only_trigrams_of_common_words(default_lexicon, common_english):
+    assert default_lexicon.english_summary["english_min_zipf"] == 3.0
+    assert uncommon_trigram_words(default_lexicon, common_english) == 0
+
+
+def test_whole_dictionary_patterns_give_uncommon_trigrams(common_english):
+    lexicon = lexicon_for({"wordforms": {"english_min_zipf": None}})
+    assert lexicon.english_summary["english_min_zipf"] is None
+    # Jon measured 144 of the 500 default words before the change
+    assert uncommon_trigram_words(lexicon, common_english) > 100
+
+
+def test_real_words_are_rejected_against_the_whole_dictionary(default_lexicon, english):
+    # english is the whole dictionary, rare words included
+    assert default_lexicon.rejections.english > 0
+    for w in default_lexicon.words:
+        assert not english.is_pronunciation(w.phones)
+        assert w.english_neighbors == english.count_at_one(w.stripped)
+
+
+def test_a_higher_threshold_changes_the_words():
+    a = lexicon_for({"wordforms": {"count": 50}})
+    b = lexicon_for({"wordforms": {"count": 50, "english_min_zipf": 4.5}})
+    assert [w.arpabet for w in a.words] != [w.arpabet for w in b.words]

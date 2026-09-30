@@ -11,6 +11,7 @@ wordforms:
   exclude_real_words: true
   min_english_distance: 1
   min_lexicon_distance: 1
+  english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
 
 synthesis:
   cache_dir: runs/wordforms/cache

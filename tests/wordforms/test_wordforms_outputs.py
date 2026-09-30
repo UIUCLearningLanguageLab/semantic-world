@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import polars as pl
 import yaml
-from wordforms_support import DATA, needs_cmudict
+from wordforms_support import DATA, needs_cmudict, needs_wordfreq
 
 from semantic_world.wordforms.__main__ import main
 from semantic_world.wordforms.io import WORD_COLUMNS
 
-pytestmark = needs_cmudict
+pytestmark = [needs_cmudict, needs_wordfreq]
 
 
 def test_forms_writes_the_run_folder(tmp_path):
@@ -31,9 +31,13 @@ def test_forms_writes_the_run_folder(tmp_path):
         for n in ("generate", "speakers", "synthesis", "augment", "pca", "train", "assign")
     ]
     assert "cmudict" in config["provenance"]["packages"]
+    assert "wordfreq" in config["provenance"]["packages"]
+    assert config["wordforms"]["english_min_zipf"] == 3.0
     assert "git_commit" in config["provenance"]
     summary = yaml.safe_load((out / "summary.yaml").read_text())
     assert summary["words"] == 20 and summary["rejections"]["total"] >= 0
+    assert summary["english"]["english_min_zipf"] == 3.0
+    assert summary["english"]["pattern_words"] < summary["english"]["words"]
 
 
 def test_written_config_reloads(tmp_path):

@@ -17,6 +17,11 @@ needs_cmudict = pytest.mark.skipif(
     reason="the cmudict package is not installed (the 'speech' extra)",
 )
 
+needs_wordfreq = pytest.mark.skipif(
+    importlib.util.find_spec("wordfreq") is None,
+    reason="the wordfreq package is not installed (the 'speech' extra)",
+)
+
 needs_espeak = pytest.mark.skipif(
     shutil.which("espeak-ng") is None, reason="espeak-ng is not installed (brew install espeak-ng)"
 )

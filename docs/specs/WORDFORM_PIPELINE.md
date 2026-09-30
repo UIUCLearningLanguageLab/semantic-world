@@ -39,13 +39,19 @@ Labels follow the taxonomy generator's convention: formal labels, indices starti
 
 ### English source
 
-The English source is the CMU Pronouncing Dictionary (CMUdict), in ARPAbet with stress marks. The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin some CMUdict word. From the syllabified dictionary, the pipeline counts, by type frequency:
+The English source is the CMU Pronouncing Dictionary (CMUdict), in ARPAbet with stress marks.
+
+The sound patterns of English are learned from common words only. The pattern words are the CMUdict words whose Zipf frequency in the `wordfreq` package is at least `english_min_zipf` (3.0 by default). CMUdict holds many proper names, loanwords, and rare words, and their sound sequences do not belong in English-like pseudowords. With `english_min_zipf: null`, every CMUdict word is a pattern word. See `docs/proposals/2026-09-30-wordforms-common-words-and-spelling.md`.
+
+The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing only onsets that begin at least 1 in every 6,300 pattern words (5 words with the default, and 20 words with the whole dictionary). From the syllabified pattern words, the pipeline counts, by type frequency:
 
 - onsets, by syllable position (initial, medial, final) and stress;
 - rimes (the vowel plus the coda, kept together as one unit), by syllable position and stress;
 - phoneme trigrams, with word boundaries, over whole pronunciations.
 
 Keeping the rime as a unit preserves the constraints between vowels and codas in English.
+
+Rejecting real words, and counting English neighbors, still use the whole dictionary.
 
 ### Generating pseudowords
 
@@ -57,7 +63,7 @@ A word form is built syllable by syllable:
 
 A candidate is rejected when:
 
-- it contains a phoneme trigram that never occurs in CMUdict (the phonotactic check);
+- it contains a phoneme trigram that occurs in no pattern word (the phonotactic check);
 - it is the pronunciation of a CMUdict word, or lies closer to one than `min_english_distance` (phoneme edit distance), when real words are excluded;
 - it lies closer than `min_lexicon_distance` to a word form already accepted.
 
@@ -76,7 +82,7 @@ Every word form records:
 - English neighbors: the number of CMUdict words at phoneme edit distance 1, and the nearest CMUdict word;
 - lexicon neighbors: the number of other word forms at edit distance 1.
 
-The readable spelling comes from a fixed table of common English spellings for each phoneme. The spelling is for human readers only. When two words would get the same spelling, the later word's spelling gets a numeric suffix.
+The readable spelling comes from a table of common English spellings for each phoneme, chosen by position in the word. For example, the vowel of "my" is written "y" at the end of a word, and "i" with a silent "e" before a final consonant. A consonant is doubled after a stressed short vowel. The table is a data file, and the contexts that the table refers to are defined in code. The spelling is for human readers only. A real English word keeps its dictionary spelling. When two words would get the same spelling, the later word's spelling gets a numeric suffix.
 
 ### Phoneme mappings
 
@@ -209,6 +215,7 @@ wordforms:
   exclude_real_words: true
   min_english_distance: 1
   min_lexicon_distance: 1
+  english_min_zipf: 3.0          # learn sound patterns from common words; null uses all of CMUdict
 
 synthesis:
   cache_dir: runs/wordforms/cache
@@ -266,7 +273,8 @@ python/semantic_world/wordforms/
   __main__.py        # command line with subcommands: forms, synth, frontends, embed, eval, assign, all
   config.py
   english.py         # CMUdict, syllabification, counts, trigram model
-  generate.py        # pseudowords, filters, statistics, spelling
+  generate.py        # pseudowords, filters, statistics
+  spelling.py        # readable spellings by position in the word
   phonemes.py        # loading the mapping tables
   synth/             # piper.py, espeak.py, cache.py, and later formant.py
   augment.py         # noise, reverberation, perturbation, Praat manipulation
@@ -279,7 +287,7 @@ data/wordforms/      # default.yaml, tiny.yaml, arpabet_ipa.yaml, arpabet_espeak
 examples/            # wordforms_lm_inputs.py, wordforms_contrastive.py
 ```
 
-Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `cmudict`, a cochleagram package, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
+Module names are recommendations. Speech dependencies go in an optional extra, `speech`, so the rest of the package installs without them: `torch`, `transformers`, `soundfile`, `cmudict`, `wordfreq`, a cochleagram package, `piper-tts`, and later `pyroomacoustics` and `praat-parselmouth`. Pin versions to the minor version, as the rest of `pyproject.toml` does. espeak-ng is a system program (`brew install espeak-ng`). Tests that need a missing tool are skipped with a message naming the tool, and the stage report lists every skip.
 
 ### Licenses
 
@@ -304,7 +312,7 @@ Stages 1–4 are the fast path to usable embeddings.
 
 These choices were made while writing this specification. Each one is the working design unless Jon changes it.
 
-1. CMUdict is the English source, and the generator samples onsets and rimes by syllable position and stress.
+1. CMUdict is the English source, and the generator samples onsets and rimes by syllable position and stress. The sound patterns are learned from common words only (decided September 30, 2026).
 2. Piper's multi-speaker LibriTTS-R voice is the main voice set, and espeak-ng is the second engine.
 3. GPL tools are optional extras, imported only where used, and never vendored.
 4. HuBERT base, layer 6, is the default pretrained embedding until the stage 4 layer sweep picks a layer.

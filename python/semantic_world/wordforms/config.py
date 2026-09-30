@@ -61,6 +61,9 @@ class WordformsConfig:
     exclude_real_words: bool
     min_english_distance: int
     min_lexicon_distance: int
+    english_min_zipf: float | None
+    """The smallest Zipf frequency of the words that the sound patterns are learned from; None
+    uses the whole dictionary."""
 
     @property
     def english_count(self) -> int:
@@ -81,6 +84,7 @@ class WordformsConfig:
             "exclude_real_words": self.exclude_real_words,
             "min_english_distance": self.min_english_distance,
             "min_lexicon_distance": self.min_lexicon_distance,
+            "english_min_zipf": self.english_min_zipf,
         }
 
 
@@ -487,6 +491,9 @@ def _read_wordforms(node: _Node) -> WordformsConfig:
     proportion = node.probability("mixed_proportion_english", 0.5)
     count = node.int("count", 500, min=1)
     syllables = _read_syllables(node)
+    min_zipf = node.get("english_min_zipf", 3.0, nullable=True)
+    if min_zipf is not None:
+        min_zipf = float(node.check_number("english_min_zipf", min_zipf, min=0, max=8))
     config = WordformsConfig(
         source=source,
         mixed_proportion_english=proportion,
@@ -496,6 +503,7 @@ def _read_wordforms(node: _Node) -> WordformsConfig:
         exclude_real_words=node.bool("exclude_real_words", True),
         min_english_distance=node.int("min_english_distance", 1, min=1),
         min_lexicon_distance=node.int("min_lexicon_distance", 1, min=1),
+        english_min_zipf=min_zipf,
     )
     node.finish()
     return config
