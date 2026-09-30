@@ -69,7 +69,11 @@ def set_level(audio: np.ndarray, target_rms_db: float, max_peak: float) -> np.nd
 
 def silence_margins(audio: np.ndarray, threshold_db: float) -> tuple[int, int]:
     """The number of samples before the first sound and after the last sound, with sound defined
-    as in :func:`trim`."""
+    as in :func:`trim`.
+
+    A clip is trimmed before it is stored as 16-bit audio. Rounding can move a sample that sat
+    at the threshold just below it, so a stored clip should be measured with a threshold a
+    little lower than the one it was trimmed with (0.1 dB is enough in practice)."""
     peak = float(np.max(np.abs(audio)))
     loud = np.flatnonzero(np.abs(audio) > peak * 10.0 ** (threshold_db / 20.0))
     return int(loud[0]), int(len(audio) - 1 - loud[-1])

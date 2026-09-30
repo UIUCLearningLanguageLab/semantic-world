@@ -33,6 +33,8 @@ from semantic_world.wordforms.synth import audio as audio_tools
 from semantic_world.wordforms.synth.speakers import Speaker, draw_speakers, held_out_count
 
 RATE = 16000
+ROUNDING_DB = 0.5
+"""The allowance for 16-bit rounding when the trimming of a stored clip is checked."""
 
 
 class ToneEngine:
@@ -112,7 +114,10 @@ def check_clips(synthesis: Synthesis, config) -> None:
         assert token.peak == pytest.approx(peak, abs=1e-5)
         assert token.rms_db == pytest.approx(rms, abs=1e-3)
         assert 1 <= token.tries <= 5
-        before, after = audio_tools.silence_margins(clip, trim.threshold_db)
+        # The clip is trimmed before it is stored as 16-bit audio. Rounding can move a sample
+        # that sat at the threshold just below it, so the stored clip is measured with a
+        # threshold half a decibel lower.
+        before, after = audio_tools.silence_margins(clip, trim.threshold_db - ROUNDING_DB)
         assert before <= margin + 1 and after <= margin + 1
         assert token.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -165,6 +170,26 @@ def test_trim_removes_silence_and_keeps_the_margin():
     assert len(audio_tools.trim(quiet, RATE, -70, 0)) > 5000
     with pytest.raises(audio_tools.AudioError, match="silent"):
         audio_tools.trim(silence, RATE, -40, 20)
+
+
+@needs_audio
+def test_rounding_to_16_bits_can_move_the_measured_margin(tmp_path):
+    # a clip whose last sound before a quiet tail sits just above the trimming threshold
+    clip = np.zeros(4000, dtype=np.float32)
+    clip[:2000] = tone(440, 2000 / RATE, RATE, amplitude=0.37)
+    peak = float(np.abs(clip).max())
+    clip[2000:2400] = 0.5 * peak * 10 ** (-40 / 20)  # a tail below the threshold
+    clip[2400] = peak * 10 ** (-40 / 20) * 1.0005  # one sample just above the threshold
+    trimmed = audio_tools.trim(clip, RATE, -40, 20)
+    assert len(trimmed) == 2401 + 320  # the trim keeps the margin after that sample
+    assert audio_tools.silence_margins(trimmed, -40)[1] == 320
+    path = tmp_path / "clip.flac"
+    audio_tools.write_flac(path, trimmed, RATE)
+    stored, _ = audio_tools.read_flac(path)
+    # after rounding, the sample may be at or below the threshold, and the margin looks longer
+    assert audio_tools.silence_margins(stored, -40)[1] >= 320
+    # measured half a decibel lower, the stored clip's margin is the configured margin
+    assert audio_tools.silence_margins(stored, -40 - ROUNDING_DB)[1] <= 321
 
 
 def test_set_level_reaches_the_target_rms():
