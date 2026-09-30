@@ -196,8 +196,9 @@ class _TreeBuilder:
             tuple(self.warnings),
         )
 
-    def _compute(self, free_values: np.ndarray) -> np.ndarray:
-        return self.rules.compute(free_values[None, :])[0]
+    def _compute(self, free_values: np.ndarray, scalars: np.ndarray | None = None) -> np.ndarray:
+        scalar_rows = None if scalars is None or self.n_scalars == 0 else scalars[None, :]
+        return self.rules.compute(free_values[None, :], scalar_rows)[0]
 
     # Superordinates ------------------------------------------------------------------------------
 
@@ -208,16 +209,19 @@ class _TreeBuilder:
         accepted_scope: list[np.ndarray] = []
         for index in range(1, self.config.taxonomy.superordinates + 1):
             label = f"C{index}"
+            scalars = self._superordinate_scalars()
             if bound is None:
                 free_values = (rng.random(self.n_free) < self.base_rates).astype(np.uint8)
-                values = self._compute(free_values)
+                values = self._compute(free_values, scalars)
                 self.tries += 1
             else:
-                free_values, values = self._bounded_superordinate(label, bound, accepted_scope, rng)
+                free_values, values = self._bounded_superordinate(
+                    label, bound, accepted_scope, rng, scalars
+                )
                 accepted_scope.append(values[self.scope_columns])
-            category = Category(label, (index,), 1, None, free_values, values)
-            category.scalars = self._superordinate_scalars()
-            accepted.append(category)
+            accepted.append(
+                Category(label, (index,), 1, None, free_values, values, scalars=scalars)
+            )
         if bound is not None and len(accepted_scope) >= 2:
             sims = cross_similarity(
                 np.stack(accepted_scope), np.stack(accepted_scope), bound.metric
@@ -250,6 +254,7 @@ class _TreeBuilder:
         bound: SimilarityBound,
         accepted_scope: list[np.ndarray],
         rng: np.random.Generator,
+        scalars: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         assert self.scope_columns is not None
         closest: tuple[float, float] = (float("inf"), float("nan"))
@@ -257,7 +262,7 @@ class _TreeBuilder:
         for _ in range(bound.max_tries):
             self.tries += 1
             free_values = (rng.random(self.n_free) < self.base_rates).astype(np.uint8)
-            values = self._compute(free_values)
+            values = self._compute(free_values, scalars)
             violation, similarity = self._violation(
                 values[self.scope_columns], accepted_scope, bound
             )
@@ -268,7 +273,7 @@ class _TreeBuilder:
                 best_candidate = free_values
         if bound.local_search and best_candidate is not None:
             free_values, values, closest = self._local_search(
-                best_candidate, closest, accepted_scope, bound
+                best_candidate, closest, accepted_scope, bound, scalars
             )
             if closest[0] == 0.0:
                 return free_values, values
@@ -287,12 +292,13 @@ class _TreeBuilder:
         closest: tuple[float, float],
         accepted_scope: list[np.ndarray],
         bound: SimilarityBound,
+        scalars: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
         """Flip one free feature at a time, always the flip that most reduces the largest
         violation, until the bound holds or no flip helps."""
         assert self.scope_columns is not None
         current = start.copy()
-        current_values = self._compute(current)
+        current_values = self._compute(current, scalars)
         current_violation = closest
         for _ in range(10 * max(self.n_free, 1)):
             if current_violation[0] == 0.0:
@@ -303,7 +309,7 @@ class _TreeBuilder:
             for i in range(self.n_free):
                 candidate = current.copy()
                 candidate[i] ^= 1
-                values = self._compute(candidate)
+                values = self._compute(candidate, scalars)
                 violation = self._violation(values[self.scope_columns], accepted_scope, bound)
                 if best is None or violation[0] < best[0]:
                     best, best_index, best_values = violation, i, values
@@ -331,15 +337,16 @@ class _TreeBuilder:
         children = []
         for j in range(1, count + 1):
             free_values = self._child_free_values(category, copy_probability, rng)
+            scalars = self._child_scalars(category)
             child = Category(
                 f"{category.label}.{j}",
                 category.indices + (j,),
                 level + 1,
                 category,
                 free_values,
-                self._compute(free_values),
+                self._compute(free_values, scalars),
+                scalars=scalars,
             )
-            child.scalars = self._child_scalars(category)
             children.append(child)
         category.children = children
         for child in children:
@@ -406,7 +413,7 @@ class _TreeBuilder:
                 break
             copy_probability = inheritance.characteristic_probability[parent.level - 1]
             leaf.free_values = self._child_free_values(parent, copy_probability, rng)
-            leaf.values = self._compute(leaf.free_values)
+            leaf.values = self._compute(leaf.free_values, leaf.scalars)
         other = self.leaf_vectors[leaf.values.tobytes()]
         raise GenerationError(
             f"leaf {leaf.label} duplicates leaf {other} on its IS, HAS, and CAN features after "

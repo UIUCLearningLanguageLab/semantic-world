@@ -1,10 +1,11 @@
 """Expressions: the printed and parsed form of rules, and random read-once formulas.
 
-Literals are feature labels. The operators are ``NOT``, ``AND``, ``OR``, and ``XOR``, with
-parentheses. Precedence, from tightest to loosest, is ``NOT``, ``AND``, ``XOR``, ``OR``.
-Printed expressions put parentheses around every nested operator, so no reader has to rely on
-precedence. The constants ``TRUE`` and ``FALSE`` are accepted so that a constant function has a
-printable minimal DNF.
+Literals are feature labels, or threshold literals on scalar dimensions such as
+``SC.2 > 0.4127`` (whose negation prints as ``SC.2 <= 0.4127``). The operators are ``NOT``,
+``AND``, ``OR``, and ``XOR``, with parentheses. Precedence, from tightest to loosest, is ``NOT``,
+``AND``, ``XOR``, ``OR``. Printed expressions put parentheses around every nested operator, so no
+reader has to rely on precedence. The constants ``TRUE`` and ``FALSE`` are accepted so that a
+constant function has a printable minimal DNF.
 """
 
 from __future__ import annotations
@@ -31,21 +32,29 @@ class ExpressionError(ValueError):
 
 
 class Expr:
-    """A Boolean expression. Subclasses are :class:`Var`, :class:`Const`, :class:`Not`, and
-    :class:`Op`."""
+    """A Boolean expression. Subclasses are :class:`Var`, :class:`Gt`, :class:`Const`,
+    :class:`Not`, and :class:`Op`."""
 
     def variables(self) -> tuple[str, ...]:
-        """The distinct variables, in order of first appearance."""
+        """The distinct variables, in order of first appearance. A threshold literal counts as
+        the variable named by its :attr:`Gt.key`, such as ``SC.2>0.4127``."""
         seen: dict[str, None] = {}
-        for name in self._variable_occurrences():
-            seen.setdefault(name, None)
+        for atom in self._atom_occurrences():
+            seen.setdefault(atom_key(atom), None)
         return tuple(seen)
+
+    def atoms(self) -> tuple[Var | Gt, ...]:
+        """The distinct variables and threshold literals, in order of first appearance."""
+        seen: dict[str, Var | Gt] = {}
+        for atom in self._atom_occurrences():
+            seen.setdefault(atom_key(atom), atom)
+        return tuple(seen.values())
 
     def literal_count(self) -> int:
         """The number of variable occurrences."""
-        return len(self._variable_occurrences())
+        return len(self._atom_occurrences())
 
-    def _variable_occurrences(self) -> list[str]:
+    def _atom_occurrences(self) -> list[Var | Gt]:
         raise NotImplementedError
 
     def depth(self) -> int:
@@ -77,8 +86,8 @@ class Expr:
 class Var(Expr):
     name: str
 
-    def _variable_occurrences(self) -> list[str]:
-        return [self.name]
+    def _atom_occurrences(self) -> list[Var | Gt]:
+        return [self]
 
     def depth(self) -> int:
         return 0
@@ -91,10 +100,55 @@ class Var(Expr):
 
 
 @dataclass(frozen=True)
+class Gt(Expr):
+    """A threshold literal on a scalar dimension: ``SC.2 > 0.4127``. Inside a rule it acts
+    like a binary input. Its negation prints as ``SC.2 <= 0.4127``. Thresholds are rounded to
+    4 decimal places, so printed expressions parse back exactly."""
+
+    scalar: str
+    threshold: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "threshold", round(float(self.threshold), 4))
+
+    @property
+    def key(self) -> str:
+        """The literal as a variable name, ``SC.2>0.4127``."""
+        return f"{self.scalar}>{self.threshold:.4f}"
+
+    def _atom_occurrences(self) -> list[Var | Gt]:
+        return [self]
+
+    def depth(self) -> int:
+        return 0
+
+    def evaluate(self, env: Mapping[str, np.ndarray]) -> np.ndarray:
+        try:
+            return np.asarray(env[self.key], dtype=bool)
+        except KeyError:
+            raise ExpressionError(f"no value for {self.key}") from None
+
+
+def atom_key(atom: str | Expr) -> str:
+    """The variable name of an atom: a label, a :class:`Var` name, or a :class:`Gt` key."""
+    if isinstance(atom, str):
+        return atom
+    if isinstance(atom, Var):
+        return atom.name
+    if isinstance(atom, Gt):
+        return atom.key
+    raise TypeError(f"not an atom: {atom!r}")
+
+
+def as_atom(atom: str | Expr) -> Expr:
+    return Var(atom) if isinstance(atom, str) else atom
+
+
+@dataclass(frozen=True)
 class Const(Expr):
     value: bool
 
-    def _variable_occurrences(self) -> list[str]:
+    def _atom_occurrences(self) -> list[Var | Gt]:
         return []
 
     def depth(self) -> int:
@@ -108,8 +162,8 @@ class Const(Expr):
 class Not(Expr):
     operand: Expr
 
-    def _variable_occurrences(self) -> list[str]:
-        return self.operand._variable_occurrences()
+    def _atom_occurrences(self) -> list[Var | Gt]:
+        return self.operand._atom_occurrences()
 
     def depth(self) -> int:
         return self.operand.depth()
@@ -134,8 +188,8 @@ class Op(Expr):
         if len(self.operands) < 2:
             raise ExpressionError(f"{self.operator} needs at least two operands")
 
-    def _variable_occurrences(self) -> list[str]:
-        return [name for operand in self.operands for name in operand._variable_occurrences()]
+    def _atom_occurrences(self) -> list[Var | Gt]:
+        return [atom for operand in self.operands for atom in operand._atom_occurrences()]
 
     def depth(self) -> int:
         return 1 + max(operand.depth() for operand in self.operands)
@@ -154,9 +208,13 @@ def format_expression(expr: Expr, nested: bool = False) -> str:
     """Print an expression. Every nested operator is parenthesized; the top level is not."""
     if isinstance(expr, Var):
         return expr.name
+    if isinstance(expr, Gt):
+        return f"{expr.scalar} > {expr.threshold:.4f}"
     if isinstance(expr, Const):
         return "TRUE" if expr.value else "FALSE"
     if isinstance(expr, Not):
+        if isinstance(expr.operand, Gt):
+            return f"{expr.operand.scalar} <= {expr.operand.threshold:.4f}"
         if isinstance(expr.operand, Op):
             return f"NOT ({format_expression(expr.operand)})"
         return f"NOT {format_expression(expr.operand)}"
@@ -171,13 +229,15 @@ def format_expression(expr: Expr, nested: bool = False) -> str:
 # ---------------------------------------------------------------------------------------------
 
 _TOKEN = re.compile(
-    r"\s*(?:(?P<lparen>\()|(?P<rparen>\))|(?P<word>[A-Za-z_][A-Za-z0-9_.]*)|(?P<bad>\S))"
+    r"\s*(?:(?P<lparen>\()|(?P<rparen>\))|(?P<word>[A-Za-z_][A-Za-z0-9_.]*)"
+    r"|(?P<op><=|>=|<|>)|(?P<number>-?\d+(?:\.\d+)?)|(?P<bad>\S))"
 )
+COMPARISONS = (">", "<=")
 
 
 @dataclass(frozen=True)
 class _Token:
-    kind: str  # "(", ")", "keyword", "name", or "end"
+    kind: str  # "(", ")", "keyword", "name", "op", "number", or "end"
     text: str
     position: int
 
@@ -198,6 +258,10 @@ def _tokenize(text: str) -> list[_Token]:
             word = match.group("word")
             kind = "keyword" if word in KEYWORDS else "name"
             tokens.append(_Token(kind, word, start))
+        elif match.group("op"):
+            tokens.append(_Token("op", match.group("op"), start))
+        elif match.group("number"):
+            tokens.append(_Token("number", match.group("number"), start))
         else:
             raise ExpressionError(
                 f"unexpected character {match.group('bad')!r} at position {start} in {text!r}"
@@ -263,6 +327,8 @@ class _Parser:
         token = self.current
         if token.kind == "name":
             self.advance()
+            if self.current.kind == "op":
+                return self.parse_threshold(token.text)
             return Var(token.text)
         if token.kind == "keyword" and token.text in ("TRUE", "FALSE"):
             self.advance()
@@ -275,6 +341,18 @@ class _Parser:
             self.advance()
             return expr
         raise self.error("expected a feature label, a constant, NOT, or an opening parenthesis")
+
+    def parse_threshold(self, scalar: str) -> Expr:
+        """``SC.n > x`` is a threshold literal; ``SC.n <= x`` is its negation."""
+        operator = self.advance()
+        if operator.text not in COMPARISONS:
+            self.index -= 1
+            raise self.error("a threshold literal uses > or <= (its negation)")
+        if self.current.kind != "number":
+            raise self.error("expected a threshold number")
+        number = self.advance()
+        literal_node = Gt(scalar, float(number.text))
+        return literal_node if operator.text == ">" else Not(literal_node)
 
 
 def parse_expression(text: str) -> Expr:
@@ -289,12 +367,15 @@ def parse_expression(text: str) -> Expr:
 # ---------------------------------------------------------------------------------------------
 
 
-def literal(name: str, negated: bool) -> Expr:
-    return Not(Var(name)) if negated else Var(name)
+def literal(atom: str | Expr, negated: bool) -> Expr:
+    """An atom (a label, a :class:`Var`, or a :class:`Gt`), negated or not."""
+    node = as_atom(atom)
+    return Not(node) if negated else node
 
 
-def from_dnf(terms: Iterable[Implicant], inputs: Sequence[str]) -> Expr:
-    """The expression of a disjunctive normal form over the given input labels.
+def from_dnf(terms: Iterable[Implicant], inputs: Sequence[str | Expr]) -> Expr:
+    """The expression of a disjunctive normal form over the given input atoms (labels or
+    threshold literals).
 
     Terms are printed in the order given, and the literals of a term in input order. No terms
     is ``FALSE``, and a single empty term is ``TRUE``.
@@ -320,7 +401,7 @@ def from_dnf(terms: Iterable[Implicant], inputs: Sequence[str]) -> Expr:
 
 
 def random_read_once(
-    inputs: Sequence[str],
+    inputs: Sequence[str | Expr],
     max_depth: int,
     operator_weights: Mapping[str, float],
     negation_probability: float,
@@ -338,8 +419,9 @@ def random_read_once(
     names = list(inputs)
     if not names:
         raise ValueError("a read-once formula needs at least one input")
-    if len(set(names)) != len(names):
-        raise ValueError(f"the inputs {names} contain a duplicate")
+    keys = [atom_key(a) for a in names]
+    if len(set(keys)) != len(keys):
+        raise ValueError(f"the inputs {keys} contain a duplicate")
     if max_depth < 1:
         raise ValueError(f"the nesting depth must be at least 1, got {max_depth}")
     operators = [op for op in OPERATORS if operator_weights.get(op, 0) > 0]
@@ -348,10 +430,10 @@ def random_read_once(
     weights = np.array([operator_weights[op] for op in operators], dtype=float)
     probabilities = weights / weights.sum()
 
-    def leaf(name: str) -> Expr:
+    def leaf(name: str | Expr) -> Expr:
         return literal(name, bool(rng.random() < negation_probability))
 
-    def build(group: list[str], budget: int) -> Expr:
+    def build(group: list, budget: int) -> Expr:
         if len(group) == 1:
             return leaf(group[0])
         operator = operators[int(rng.choice(len(operators), p=probabilities))]

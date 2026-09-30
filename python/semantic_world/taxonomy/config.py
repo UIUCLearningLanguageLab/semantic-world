@@ -244,6 +244,12 @@ class ScalarsConfig:
         below that level, including the instance drift, is 0."""
         return all(d == 0 for d in self.drift[level - 1 :]) and self.instance_drift == 0
 
+    @property
+    def model_std(self) -> float:
+        """The standard deviation of the model distribution of an instance's scalar value: a
+        standard normal at the superordinate plus every drift down to the instances."""
+        return math.sqrt(1.0 + sum(d * d for d in self.drift) + self.instance_drift**2)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -750,14 +756,16 @@ def _read_sampling(node: _Node, base: RuleSampling) -> RuleSampling:
 def _read_input_type_weights(node: _Node, base: RuleSampling) -> dict[str, float]:
     """``is`` and ``has`` weights, plus a ``scalar`` weight that defaults to 1 when absent."""
     weights = node.weights("input_type_weights", base.input_type_weights, allowed=INPUT_TYPES)
-    if all(weights.get(t, 0) == 0 for t in FREE_FEATURE_TYPES):
-        raise node.error("input_type_weights", "at least one of is and has must be positive")
     weights.setdefault("scalar", 1.0)
     return {t: weights[t] for t in INPUT_TYPES}
 
 
 def _check_arity_pool(
-    node: _Node, output_type: str, sampling: RuleSampling, features: FeaturesConfig
+    node: _Node,
+    output_type: str,
+    sampling: RuleSampling,
+    features: FeaturesConfig,
+    scalars: ScalarsConfig,
 ) -> None:
     """The largest arity with nonzero weight must fit the smallest eligible input pool."""
     types = sampling.input_types
@@ -769,6 +777,9 @@ def _check_arity_pool(
         what = "free IS or HAS features (layer 0)"
     if len(types) == 1:
         what = what.replace("IS or HAS", types[0].upper())
+    if scalars.count and sampling.scalar_weight > 0:
+        pool += scalars.count
+        what += f" plus {scalars.count} scalar threshold literals"
     if sampling.max_arity > pool:
         raise node.error(
             "arity",
@@ -777,7 +788,7 @@ def _check_arity_pool(
         )
 
 
-def _read_rules(node: _Node, features: FeaturesConfig) -> RulesConfig:
+def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -> RulesConfig:
     source = node.choice("source", "automatic", RULE_SOURCES)
     file = node.string("file", None, nullable=True)
     if source == "file" and file is None:
@@ -802,6 +813,18 @@ def _read_rules(node: _Node, features: FeaturesConfig) -> RulesConfig:
             "max_chain_depth",
             f"must be at least 1 when any IS or HAS feature is determined ({determined} are)",
         )
+    binary_inputs_possible = scalars.count > 0
+    for owner, effective in [(node, sampling)] + [
+        (overrides_node.mapping(t), s) for t, s in overrides.items()
+    ]:
+        if not effective.input_types and not (
+            binary_inputs_possible and effective.scalar_weight > 0
+        ):
+            raise owner.error(
+                "input_type_weights",
+                "at least one of is and has must be positive (or scalars must be on with a "
+                "positive scalar weight)",
+            )
     for feature_type in FEATURE_TYPES:
         if features.determined_count(feature_type) == 0:
             continue
@@ -811,9 +834,10 @@ def _read_rules(node: _Node, features: FeaturesConfig) -> RulesConfig:
                 feature_type,
                 overrides[feature_type],
                 features,
+                scalars,
             )
         else:
-            _check_arity_pool(node, feature_type, sampling, features)
+            _check_arity_pool(node, feature_type, sampling, features, scalars)
     return RulesConfig(
         source, file, max_chain_depth, sampling, overrides, allow_duplicates, variance_bound
     )
@@ -942,13 +966,13 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     if seed is not None:
         master_seed = root.check_int("seed", seed, min=0, max=SEED_MAX)
     features = _read_features(root.mapping("features"))
-    rules = _read_rules(root.mapping("rules"), features)
     taxonomy = _read_taxonomy(root.mapping("taxonomy"))
+    scalars = _read_scalars(root.mapping("scalars"), taxonomy.depth)
+    rules = _read_rules(root.mapping("rules"), features, scalars)
     similarity_bound = _read_similarity_bound(root.mapping("superordinates"))
     inheritance = _read_inheritance(root.mapping("inheritance"), taxonomy.depth)
     instances = _read_instances(root.mapping("instances"))
     analysis = _read_analysis(root.mapping("analysis"))
-    scalars = _read_scalars(root.mapping("scalars"), taxonomy.depth)
     root.finish()
     return Config(
         name=name,

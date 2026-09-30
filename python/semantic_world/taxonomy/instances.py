@@ -93,7 +93,7 @@ def generate_instances(config: Config, rules: RuleSet, tree: Tree, streams: Stre
         tuple(labels),
         tuple(leaf_labels),
         np.array(leaf_index, dtype=np.intp),
-        rules.compute(free_matrix),
+        rules.compute(free_matrix, scalar_matrix if n_scalars else None),
         scalar_matrix,
     )
 

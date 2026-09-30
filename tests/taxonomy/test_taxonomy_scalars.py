@@ -210,18 +210,32 @@ def test_scalar_means_match_the_instances() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def _binary_snapshot(result) -> tuple:
+def _free_snapshot(result) -> tuple:
+    """The parts of a run that scalars never touch: the tree, the roles, and the free binary
+    features. Determined features may read threshold literals, so they can change (stage 8)."""
+    features = result.rules.features
     return (
-        result.rules.records(),
         [c.label for c in result.tree.categories],
-        result.tree.generative_matrix().tobytes(),
+        result.tree.free_matrix().tobytes(),
         np.stack([c.roles for c in result.tree.categories]).tobytes(),
         result.instances.labels,
-        result.instances.values.tobytes(),
+        result.instances.free_values(features).tobytes(),
     )
 
 
-def test_binary_features_are_unchanged_when_only_scalar_settings_change() -> None:
+def _full_snapshot(result) -> tuple:
+    return (
+        [{k: v for k, v in r.items() if k != "thresholds"} for r in result.rules.records()],
+        result.tree.generative_matrix().tobytes(),
+        result.instances.values.tobytes(),
+        *_free_snapshot(result),
+    )
+
+
+NO_THRESHOLDS = {"input_type_weights": {"is": 1, "has": 1, "scalar": 0}}
+
+
+def test_free_binary_features_are_unchanged_when_only_scalar_settings_change() -> None:
     off = generate(config_from_mapping({}))
     variants = [
         {"scalars": {"count": 3}},
@@ -229,7 +243,19 @@ def test_binary_features_are_unchanged_when_only_scalar_settings_change() -> Non
         {"scalars": {"count": 5, "thermometer_bins": 4}},
     ]
     for overrides in variants:
-        assert _binary_snapshot(generate(config_from_mapping(overrides))) == _binary_snapshot(off)
+        assert _free_snapshot(generate(config_from_mapping(overrides))) == _free_snapshot(off)
+
+
+def test_every_binary_feature_is_unchanged_when_rules_read_no_thresholds() -> None:
+    off = generate(config_from_mapping({"rules": NO_THRESHOLDS}))
+    for overrides in ({"scalars": {"count": 3}}, {"scalars": {"count": 2, "drift": 1.5}}):
+        on = generate(config_from_mapping({**overrides, "rules": NO_THRESHOLDS}))
+        assert _full_snapshot(on) == _full_snapshot(off)
+    # The rules records without the thresholds key equal the scalars-off records.
+    plain = generate(config_from_mapping({}))
+    assert [
+        {k: v for k, v in r.items() if k != "thresholds"} for r in off.rules.records()
+    ] == plain.rules.records()
 
 
 def test_scalars_use_only_the_scalar_streams() -> None:
@@ -241,9 +267,9 @@ def test_scalars_use_only_the_scalar_streams() -> None:
         generate_instances(config, rules, tree, streams)
 
     on = Streams(1)
-    run(config_from_mapping({"scalars": {"count": 2}}), on)
+    run(config_from_mapping({"scalars": {"count": 2}, "rules": NO_THRESHOLDS}), on)
     off = Streams(1)
-    run(config_from_mapping({}), off)
+    run(config_from_mapping({"rules": NO_THRESHOLDS}), off)
     fresh = Streams(1)
     # With scalars on, both scalar streams advance; with scalars off, neither does.
     assert on.scalars.random() != Streams(1).scalars.random()
@@ -253,6 +279,14 @@ def test_scalars_use_only_the_scalar_streams() -> None:
     # The other streams are in the same state whether scalars are on or off.
     for name in ("base_rates", "rules", "superordinates", "tree", "instances", "analysis"):
         assert getattr(on, name).random() == getattr(off, name).random(), name
+    # With threshold literals allowed, only the rules stream draws more (the thresholds).
+    thresholds = Streams(1)
+    run(config_from_mapping({"scalars": {"count": 2}}), thresholds)
+    baseline = Streams(1)
+    run(config_from_mapping({"rules": NO_THRESHOLDS}), baseline)
+    for name in ("base_rates", "superordinates", "tree", "instances", "analysis"):
+        assert getattr(thresholds, name).random() == getattr(baseline, name).random(), name
+    assert thresholds.rules.random() != baseline.rules.random()
 
 
 def test_changing_the_instance_count_leaves_category_scalars_unchanged() -> None:
@@ -362,10 +396,14 @@ def test_thermometer_codes(scalar_folder) -> None:
 
 
 def test_similarity_statistics_ignore_scalars() -> None:
-    off = generate(config_from_mapping({}))
-    on = generate(config_from_mapping({"scalars": {"count": 3}}))
+    off = generate(config_from_mapping({"rules": NO_THRESHOLDS}))
+    on = generate(config_from_mapping({"scalars": {"count": 3}, "rules": NO_THRESHOLDS}))
     assert on.similarity.equals(off.similarity)
     assert on.summary["superordinates"] == off.summary["superordinates"]
+    everything = generate(
+        config_from_mapping({"scalars": {"count": 3}, "analysis": {"similarity_features": "all"}})
+    )
+    assert everything.similarity.columns == ["label", "within", "between", "instances"]
 
 
 def test_config_yaml_with_scalars_reloads(scalar_folder) -> None:
