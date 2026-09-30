@@ -11,7 +11,10 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 1. `docs/specs/MILESTONE_1.md` — the current build specification: scope, world content, build stages, and acceptance tests. Start here.
 2. `docs/CONTRACTS.md` — the ten contracts between the engine, the world, the agents, and the viewer. The contracts are the source of truth for every interface and file format.
 3. `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and nervous systems are defined.
-4. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
+4. `docs/specs/TAXONOMY_GENERATOR.md` — the taxonomy feature generator: a standalone Python program in `python/semantic_world/taxonomy/` that builds datasets of categories, instances, and binary features with recorded rules. It does not use the Rust engine.
+5. `docs/specs/TAXONOMY_RELATIONS.md` — the extension of the generator with scalar dimensions, transitive verbs, and a verb taxonomy. The decided proposals in `docs/proposals/` are part of both taxonomy specifications.
+6. `docs/guides/` — user guides, starting with `docs/guides/TAXONOMY.md`, for running the taxonomy generator and reading its outputs.
+7. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
 
 The project's planning documents (decisions, to-do lists, research goals, and the first study) live in a private folder that is not available in this repository. Everything needed to build is in `docs/`. If something seems missing, ask rather than guess.
 
@@ -45,7 +48,11 @@ Other commands:
 ```
 cargo run -p sw-schema -- schemas                                # regenerate schemas/*.json after changing the data-file types
 cargo run -p sw-schema -- check data/experiments/m1_smoke.yaml   # load and resolve an experiment
+python -m semantic_world.taxonomy data/taxonomy/default.yaml [--seed N] [--out DIR]   # run the taxonomy generator
+pytest tests/taxonomy                                            # the taxonomy generator's tests alone
 ```
+
+The taxonomy generator needs only NumPy, polars, and PyYAML: `PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/tiny.yaml` runs without the Rust core built.
 
 This is the full check list. A stage is done when the full check list passes locally.
 
