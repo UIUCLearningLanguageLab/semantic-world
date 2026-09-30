@@ -6,7 +6,8 @@ the dictionary counts for that syllable's position and stress. Candidates are re
 phonotactic trigram check, by closeness to real words, and by closeness to accepted forms.
 
 Real words (``source: english`` or ``mixed``) are drawn uniformly, by syllable count, from the
-plain alphabetic dictionary words, using each word's first pronunciation.
+plain alphabetic pattern words (the common words, by default), using each word's first
+pronunciation.
 
 All draws come from the ``wordforms:generate`` stream, in a fixed order, so the same seed gives
 the same word table.
@@ -199,10 +200,13 @@ def draw_pseudoword(
 def draw_english_word(
     rng: np.random.Generator, english: English, count: int
 ) -> tuple[str, tuple[Syllable, ...]]:
-    """One real word, drawn uniformly among the plain words with ``count`` syllables."""
+    """One real word, drawn uniformly among the plain pattern words with ``count`` syllables."""
     candidates = english.by_syllable_count.get(count)
     if not candidates:
-        raise GenerationError(f"the dictionary has no plain words with {count} syllables")
+        raise GenerationError(
+            f"no common English word has {count} syllables; lower english_min_zipf or change "
+            f"syllables"
+        )
     word, pron = candidates[int(rng.integers(len(candidates)))]
     return word, english.syllables[pron]
 
@@ -323,7 +327,8 @@ def _add_statistics(
     for i, word in enumerate(words):
         word.ipa = ipa_table.render(word.syllables)
         word.espeak = espeak_table.render(word.syllables)
-        spelling = word.english_word or speller.spell(word.phones)
+        # a pseudoword never takes the spelling of a word the patterns were learned from
+        spelling = word.english_word or speller.spell_avoiding(word.phones, english.pattern_words)
         seen = spellings.get(spelling, 0)
         spellings[spelling] = seen + 1
         word.spelling = spelling if seen == 0 else f"{spelling}{seen + 1}"

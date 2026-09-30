@@ -14,7 +14,8 @@ dictionary, 5 of the default common words). The floor keeps the onsets of the fe
 names from splitting words like *atlas* and *pizza* wrongly.
 
 From the syllabified pattern words this module counts, by type frequency, onsets and rimes by
-syllable position and stress, and phoneme trigrams with word boundaries. The whole dictionary
+syllable position and stress, and phoneme trigrams with word boundaries. The real words of the
+``english`` and ``mixed`` sources are drawn from the pattern words too. The whole dictionary
 still answers the generator's other questions: is a sequence a dictionary pronunciation, and
 which dictionary words are its nearest neighbors by phoneme edit distance.
 
@@ -236,7 +237,8 @@ class English:
         self.trigrams: Counter[tuple[str, str, str]] = Counter()
         self.contexts: Counter[tuple[str, str]] = Counter()
         self.by_syllable_count: dict[int, list[tuple[str, tuple[str, ...]]]] = {}
-        """Plain alphabetic words with their first pronunciation, by syllable count."""
+        """Plain alphabetic pattern words with their first pronunciation, by syllable count: the
+        real words of the ``english`` and ``mixed`` sources."""
         counted: set[tuple[str, ...]] = set()
         for word, prons in self.words.items():
             for k, pron in enumerate(prons):
@@ -245,9 +247,11 @@ class English:
                     syllables = syllabify(pron, self.onsets)
                     self.syllables[pron] = syllables
                 n = len(syllables)
+                if word not in self.pattern_words:
+                    continue
                 if k == 0 and PLAIN_WORD_PATTERN.fullmatch(word):
                     self.by_syllable_count.setdefault(n, []).append((word, pron))
-                if word not in self.pattern_words or pron in counted:
+                if pron in counted:
                     continue
                 counted.add(pron)
                 for i, s in enumerate(syllables):

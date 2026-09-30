@@ -170,6 +170,39 @@ def test_generated_spellings_are_unique():
     assert all(s.rstrip("0123456789").isalpha() for s in spellings)
 
 
+def test_candidates_run_from_best_to_next_best(speller):
+    room = tuple("R UH1 M".split())
+    candidates = list(speller.candidates(room))
+    assert candidates[0] == "room" == speller.spell(room)
+    assert candidates[1:3] == ["rum", "roum"]
+    assert len(set(candidates)) == len(candidates)
+    # the default spelling of one phoneme comes before the listed alternatives
+    assert list(speller.candidates(tuple("F AE1 L".split())))[:3] == ["fall", "fal", "faell"]
+    assert list(speller.candidates(tuple("IH1 D Z".split())))[:2] == ["ids", "idz"]
+    assert list(speller.candidates(tuple("HH EY1 V".split())))[:2] == ["have", "haive"]
+    assert list(speller.candidates(tuple("K AA1 G".split())))[:2] == ["cog", "kog"]
+
+
+def test_spell_avoiding_common_words(speller):
+    room = tuple("R UH1 M".split())
+    assert speller.spell_avoiding(room, set()) == "room"
+    assert speller.spell_avoiding(room, {"room"}) == "rum"
+    assert speller.spell_avoiding(room, {"room", "rum"}) == "roum"
+    # when every candidate is taken, the best spelling stays
+    assert speller.spell_avoiding(room, set(speller.candidates(room))) == "room"
+
+
+def test_forced_spellings(speller):
+    have = tuple("HH EY1 V".split())
+    assert speller.spell(have) == "have"
+    assert speller.spell(have, {1: None}) == "haive"  # the vowel in its default spelling
+    assert speller.spell(have, {2: None}) == "haiv"  # no magic e around a forced consonant
+    assert speller.spell(have, {1: "ey"}) == "heyve"
+    quick = tuple("K W IH1 K".split())
+    assert speller.spell(quick) == "quick"
+    assert speller.spell(quick, {0: None}) == "kwick"  # a forced consonant joins no pair
+
+
 def test_table_validation(tmp_path):
     good = yaml.safe_load(SPELLING_TABLE.read_text())
     bad = tmp_path / "bad.yaml"
@@ -193,4 +226,6 @@ def test_table_validation(tmp_path):
         load_with(lambda d: d.update({"extra": 1}))
     with pytest.raises(ValueError, match="expected two consonants"):
         load_with(lambda d: d["pairs"].update({"K": "c"}))
+    with pytest.raises(ValueError, match="expected a list of strings"):
+        load_with(lambda d: d["alternatives"].update({"K": "c"}))
     assert set(good) >= {"vowels", "consonants", "pairs", "final_pairs"}

@@ -256,5 +256,19 @@ def test_real_words_and_neighbors_use_the_whole_dictionary(common_english, engli
     assert common_english.pronunciations == english.pronunciations
     phones = ("F", "AE", "T", "S", "K")
     assert common_english.count_at_one(phones) == english.count_at_one(phones)
-    assert common_english.by_syllable_count.keys() == english.by_syllable_count.keys()
-    assert len(common_english.by_syllable_count[2]) == len(english.by_syllable_count[2])
+
+
+@needs_wordfreq
+def test_real_word_source_is_the_plain_pattern_words(common_english, english):
+    for count, entries in common_english.by_syllable_count.items():
+        for word, pron in entries[:200]:
+            assert word in common_english.pattern_words and word.isalpha()
+            assert pron == common_english.words[word][0]
+            assert len(common_english.syllables[pron]) == count
+    assert len(common_english.by_syllable_count[2]) < len(english.by_syllable_count[2])
+    total = sum(len(v) for v in common_english.by_syllable_count.values())
+    assert total == sum(w.isalpha() for w in common_english.pattern_words)
+    # with the whole dictionary, every plain word is available
+    assert sum(len(v) for v in english.by_syllable_count.values()) == sum(
+        w.isalpha() for w in english.words
+    )

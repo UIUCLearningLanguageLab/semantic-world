@@ -51,7 +51,7 @@ The pipeline syllabifies every CMUdict pronunciation by maximal onset, allowing 
 
 Keeping the rime as a unit preserves the constraints between vowels and codas in English.
 
-Rejecting real words, and counting English neighbors, still use the whole dictionary.
+Rejecting real words, and counting English neighbors, still use the whole dictionary. Real words for the `english` and `mixed` sources come from the pattern words.
 
 ### Generating pseudowords
 
@@ -69,7 +69,7 @@ A candidate is rejected when:
 
 With `min_lexicon_distance: 1`, minimal pairs are allowed. With 2, no two words differ by only one phoneme.
 
-The source can also be `english` (real CMUdict words, drawn by syllable count) or `mixed` (a configured proportion of each). Real words let us compare the sound embeddings of real words with language-model embeddings of the same words.
+The source can also be `english` (real words, drawn by syllable count from the pattern words) or `mixed` (a configured proportion of each). Real words let us compare the sound embeddings of real words with language-model embeddings of the same words.
 
 ### Word-form statistics
 
@@ -82,7 +82,7 @@ Every word form records:
 - English neighbors: the number of CMUdict words at phoneme edit distance 1, and the nearest CMUdict word;
 - lexicon neighbors: the number of other word forms at edit distance 1.
 
-The readable spelling comes from a table of common English spellings for each phoneme, chosen by position in the word. For example, the vowel of "my" is written "y" at the end of a word, and "i" with a silent "e" before a final consonant. A consonant is doubled after a stressed short vowel. The table is a data file, and the contexts that the table refers to are defined in code. The spelling is for human readers only. A real English word keeps its dictionary spelling. When two words would get the same spelling, the later word's spelling gets a numeric suffix.
+The readable spelling comes from a table of common English spellings for each phoneme, chosen by position in the word. For example, the vowel of "my" is written "y" at the end of a word, and "i" with a silent "e" before a final consonant. A consonant is doubled after a stressed short vowel. The table is a data file, and the contexts that the table refers to are defined in code. The spelling is for human readers only. A real English word keeps its dictionary spelling. When a pseudoword's spelling equals the spelling of a pattern word, the pseudoword gets its next-best spelling instead (for example, "roum" and not "room" for `R UH1 M`). When two words would get the same spelling, the later word's spelling gets a numeric suffix.
 
 ### Phoneme mappings
 

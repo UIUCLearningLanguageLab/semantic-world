@@ -5,6 +5,10 @@ word: the vowel of *my* is written ``y`` at the end of a word and ``i`` with a s
 a final consonant, a consonant is doubled after a stressed short vowel, and so on. The spellings
 live in ``data/wordforms/spelling.yaml``. This module defines the contexts that the table's
 entries refer to. The spellings are for human readers only; no model is given them.
+
+When a pseudoword's spelling equals the spelling of a common English word, the speller moves to
+the next-best spelling (:meth:`Speller.candidates`), so that a reader does not take the
+pseudoword for the real word.
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ TOP_LEVEL_KEYS = (
     "consonants",
     "pairs",
     "final_pairs",
+    "alternatives",
 )
 
 
@@ -71,6 +76,8 @@ class Speller:
     final_pairs: dict[tuple[str, str], str]
     magic_e_suffixes: dict[str, str]
     voiceless: frozenset[str]
+    alternatives: dict[str, tuple[str, ...]]
+    """Phoneme (with or without a stress digit) to its next-best spellings, in order."""
 
     @classmethod
     def load(cls, path: str | Path = SPELLING_TABLE) -> Speller:
@@ -105,6 +112,7 @@ class Speller:
                 str(k): str(v) for k, v in (data.get("magic_e_suffixes") or {}).items()
             },
             voiceless=frozenset(data.get("voiceless") or ()),
+            alternatives=_alternatives(path, data),
         )
 
     # Lookups ---------------------------------------------------------------------------------
@@ -134,8 +142,53 @@ class Speller:
 
     # Spelling --------------------------------------------------------------------------------
 
-    def spell(self, phones: tuple[str, ...]) -> str:
-        """The spelling of a phoneme sequence (ARPAbet, with or without stress digits)."""
+    def candidates(self, phones: tuple[str, ...]):
+        """The spellings of a phoneme sequence from best to worst, without repeats: the spelling
+        by position, then that spelling with one phoneme in its default spelling (from left to
+        right), then with one phoneme in one of its ``alternatives`` (vowels before consonants)."""
+        seen: set[str] = set()
+
+        def fresh(spelling: str) -> bool:
+            if spelling in seen:
+                return False
+            seen.add(spelling)
+            return True
+
+        best = self.spell(phones)
+        seen.add(best)
+        yield best
+        for i in range(len(phones)):
+            plain = self.spell(phones, {i: None})
+            if fresh(plain):
+                yield plain
+        order = [i for i, p in enumerate(phones) if base(p) in VOWELS]
+        order += [i for i, p in enumerate(phones) if base(p) not in VOWELS]
+        for i in order:
+            key = base(phones[i])
+            stressed_key = f"{key}{stress_of(phones[i])}"
+            for alternative in self.alternatives.get(stressed_key, self.alternatives.get(key, ())):
+                spelling = self.spell(phones, {i: alternative})
+                if fresh(spelling):
+                    yield spelling
+
+    def spell_avoiding(self, phones: tuple[str, ...], avoid) -> str:
+        """The best spelling that is not in ``avoid`` (the spellings of common English words),
+        or the best spelling when every candidate is in ``avoid``."""
+        best = None
+        for spelling in self.candidates(phones):
+            if best is None:
+                best = spelling
+            if spelling not in avoid:
+                return spelling
+        return best or ""
+
+    def spell(self, phones: tuple[str, ...], forced: dict[int, str | None] | None = None) -> str:
+        """The spelling of a phoneme sequence (ARPAbet, with or without stress digits).
+
+        ``forced`` maps a position to a spelling that replaces the choice by position; ``None``
+        stands for the phoneme's default spelling. A forced phoneme takes no part in the rules
+        that write two phonemes together."""
+        forced = forced or {}
         bases = [base(p) for p in phones]
         stresses = [stress_of(p) for p in phones]
         n = len(bases)
@@ -147,17 +200,34 @@ class Speller:
         def consonant_at(i: int) -> bool:
             return 0 <= i < n and not vowel[i]
 
+        def free(i: int) -> bool:
+            return i not in forced
+
+        for i, spelling in forced.items():
+            if spelling is not None:
+                chunks[i] = spelling
+            elif vowel[i]:
+                chunks[i] = self.vowel_entry(bases[i], stresses[i])["default"]
+            else:
+                chunks[i] = self.consonants[bases[i]]["default"]
+
         # Vowels first: their spellings depend only on the phonemes around them.
         for i in range(n):
-            if not vowel[i]:
+            if not vowel[i] or not free(i):
                 continue
             key = bases[i]
-            if key == "UW" and i >= 2 and bases[i - 1] == "Y" and consonant_at(i - 2):
+            if (
+                key == "UW"
+                and i >= 2
+                and bases[i - 1] == "Y"
+                and consonant_at(i - 2)
+                and free(i - 1)
+            ):
                 key = Y_UW
                 chunks[i - 1] = ""  # the Y is not written: cute, music
             entry = self.vowel_entry(key, stresses[i])
             last = i == n - 1
-            one_final_consonant = i == n - 2 and consonant_at(i + 1)
+            one_final_consonant = i == n - 2 and consonant_at(i + 1) and free(i + 1)
             if last and "final" in entry:
                 chunks[i] = entry["final"]
             elif (
@@ -182,6 +252,8 @@ class Speller:
                 i == n - 3
                 and consonant_at(i + 1)
                 and consonant_at(i + 2)
+                and free(i + 1)
+                and free(i + 2)
                 and "magic_e" in entry
                 and self.magic_suffix(bases[i + 1], bases[i + 2])
             ):
@@ -290,4 +362,15 @@ def _pairs(path: Path, data: dict, name: str) -> dict[tuple[str, str], str]:
         if len(parts) != 2 or not all(p in CONSONANTS for p in parts):
             raise ValueError(f"{path}: {name}.{key}: expected two consonants")
         result[parts[0], parts[1]] = str(spelling)
+    return result
+
+
+def _alternatives(path: Path, data: dict) -> dict[str, tuple[str, ...]]:
+    result: dict[str, tuple[str, ...]] = {}
+    for key, spellings in (data.get("alternatives") or {}).items():
+        if base(str(key)) not in VOWELS | CONSONANTS:
+            raise ValueError(f"{path}: alternatives.{key}: not an ARPAbet phoneme")
+        if not isinstance(spellings, list) or not all(isinstance(x, str) for x in spellings):
+            raise ValueError(f"{path}: alternatives.{key}: expected a list of strings")
+        result[str(key)] = tuple(spellings)
     return result

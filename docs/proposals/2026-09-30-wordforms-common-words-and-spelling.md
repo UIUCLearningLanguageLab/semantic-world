@@ -1,6 +1,6 @@
 # Proposal: common-word sound patterns and natural spellings for word forms
 
-September 30, 2026. Raised by Jon while reviewing stage 1 of `docs/specs/WORDFORM_PIPELINE.md`. Status: decided. Jon chose both changes on September 30, 2026. Built as stage 1a, on the branch `wordforms-stage-1a`.
+September 30, 2026. Raised by Jon while reviewing stage 1 of `docs/specs/WORDFORM_PIPELINE.md`. Status: decided. Jon chose both changes on September 30, 2026, and added two more decisions after reviewing the result: real words are drawn from the common words, and a pseudoword is never spelled like a common word. Built as stage 1a, on the branch `wordforms-stage-1a`.
 
 ## Question 1: which words teach the generator English sound patterns?
 
@@ -33,7 +33,8 @@ The pattern words alone give:
 
 - the onset counts and the rime counts, by syllable position and stress;
 - the phoneme trigrams, for the phonotactic check and the phonotactic log probability;
-- the legal onsets of the syllabifier.
+- the legal onsets of the syllabifier;
+- the real words of the sources `english` and `mixed`, which are drawn uniformly, by syllable count, from the plain alphabetic pattern words. Stage 1 drew real words from the whole dictionary, so most of the real words drawn were rare names.
 
 The whole dictionary still gives:
 
@@ -55,7 +56,7 @@ So a pseudoword is never the pronunciation of any dictionary word, rare or commo
 | Legal onsets | 71 | 66 |
 | Candidates rejected by the phonotactic check | 110 | 339 |
 
-The count is exactly 0, not only near 0, because the phonotactic check now uses the same trigrams as the measure.
+The measure asked for in the acceptance check is 0 of 500. The count is exactly 0, not only near 0, because the phonotactic check now uses the same trigrams as the measure.
 
 ## Question 2: how should the readable spellings be built?
 
@@ -81,6 +82,14 @@ A stress-specific entry (`AH0`) overrides the plain entry (`AH`) context by cont
 
 Real English words (the sources `english` and `mixed`) keep their dictionary spellings.
 
+**Next-best spellings.** A pseudoword is never the pronunciation of a real word, but the pseudoword's spelling can still equal the spelling of a real word. `R UH1 M` is spelled "room", and the real word "room" is `R UW1 M`. A reader would take the pseudoword for the real word. So when a pseudoword's spelling equals the spelling of a pattern word, the speller moves to the next-best spelling that is not a pattern word. The candidates come in this order:
+
+1. the spelling by position;
+2. the same spelling with one phoneme in its default spelling, trying each phoneme from left to right (`F AE1 L`: "fall", then "fal"; `IH1 D Z`: "ids", then "idz"; `HH EY1 V`: "have", then "haive");
+3. the same spelling with one phoneme in one of the alternatives listed in the table, vowels before consonants (`R UH1 M`: "room", then "rum", which is also a word, then "roum").
+
+About 1% of pseudowords need a next-best spelling: 5 of the 500 default words ("idz", "aebd", "haive", "roum", "fighrd"), and 31 of 4,000 words in a larger run.
+
 ### Result
 
 Stage 1 spellings and stage 1a spellings of the same forms:
@@ -97,7 +106,3 @@ Stage 1 spellings and stage 1a spellings of the same forms:
 As a check of the table as a whole, we spelled the first pronunciation of every common English word (26,920 plain words with a Zipf frequency of 3.0 or above). The speller gives the dictionary spelling for 24% of them. English spelling is too irregular for a high figure, but the figure shows that the rules follow common patterns.
 
 Known weak spots: "igh" before some consonant clusters (`P AY1 N T` gives "pighnt"), the long "o" before `S T` (`K L OW1 S T` gives "cloced"), and an unstressed first syllable before a single consonant (`HH AH0 L OW1` gives "halo").
-
-## An open point
-
-The sources `english` and `mixed` still draw real words uniformly from the whole dictionary, so most of the real words drawn are rare names. Drawing real words from the pattern words would give common words. The change is not part of this proposal, because Jon's decision covers the sound patterns only.

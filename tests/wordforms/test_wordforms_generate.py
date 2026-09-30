@@ -229,3 +229,34 @@ def test_a_higher_threshold_changes_the_words():
     a = lexicon_for({"wordforms": {"count": 50}})
     b = lexicon_for({"wordforms": {"count": 50, "english_min_zipf": 4.5}})
     assert [w.arpabet for w in a.words] != [w.arpabet for w in b.words]
+
+
+def test_real_words_are_drawn_from_the_common_words(common_english):
+    lexicon = lexicon_for({"wordforms": {"source": "english", "count": 200}})
+    assert all(
+        w.real_word and w.english_word in common_english.pattern_words for w in lexicon.words
+    )
+    mixed = lexicon_for({"wordforms": {"source": "mixed", "count": 60}})
+    real = [w for w in mixed.words if w.real_word]
+    assert len(real) == 30
+    assert all(w.english_word in common_english.pattern_words for w in real)
+
+
+def test_real_words_come_from_the_whole_dictionary_without_a_threshold(common_english):
+    lexicon = lexicon_for(
+        {"wordforms": {"source": "english", "count": 200, "english_min_zipf": None}}
+    )
+    assert any(w.english_word not in common_english.pattern_words for w in lexicon.words)
+
+
+def test_no_pseudoword_is_spelled_like_a_common_word(common_english):
+    from semantic_world.wordforms.spelling import Speller
+
+    speller = Speller.load()
+    lexicon = lexicon_for({"wordforms": {"count": 1500}}, seed=2)
+    assert not any(w.spelling in common_english.pattern_words for w in lexicon.words)
+    # some words needed the next-best spelling, and most did not
+    moved = [w for w in lexicon.words if speller.spell(w.phones) in common_english.pattern_words]
+    assert 0 < len(moved) < 75
+    for w in moved:
+        assert w.spelling.rstrip("0123456789") in list(speller.candidates(w.phones))[1:]
