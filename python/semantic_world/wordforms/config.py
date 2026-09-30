@@ -37,7 +37,8 @@ DEFAULT_FUNCTION_WORDS = (
 )  # fmt: skip
 """The default function-word glosses, in order of English frequency (wordfreq, large list)."""
 DEFAULT_FUNCTION_SHAPES = {"CV": 0.3, "CVC": 0.4, "VC": 0.3}
-DEFAULT_AFFIX_SHAPES = {"C": 0.4, "VC": 0.4, "V": 0.2}
+DEFAULT_AFFIX_SHAPES = {"C": 0.5, "VC": 0.5, "V": 0.0}
+"""A bare vowel suffix is available by setting, but never drawn by default."""
 DEFAULT_AFFIXES = (("PLURAL", "suffix"), ("PAST", "suffix"), ("PROGRESSIVE", "suffix"))
 DEFAULT_PRETRAINED_LAYER = 8
 """The default layer of a pretrained model: the best HuBERT base layer for telling words apart

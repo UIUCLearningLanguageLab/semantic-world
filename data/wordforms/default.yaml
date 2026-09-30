@@ -48,7 +48,7 @@ closed_class:                    # null: content words only
   affixes:
     items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
     source: pseudo               # english: the English suffixes -s, -ed, -ing
-    shapes: {C: 0.4, VC: 0.4, V: 0.2}
+    shapes: {C: 0.5, VC: 0.5, V: 0}   # a bare vowel suffix is available by setting, never drawn by default
     epenthesis: true
     glide: Y                     # the glide between two vowels at a join when neither vowel decides
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take

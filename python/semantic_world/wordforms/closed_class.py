@@ -434,6 +434,12 @@ def skipped_share(
     return failing / len(content)
 
 
+def same_after_schwa(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
+    """Whether one affix is the other with the joining schwa, so that a stem plus one, repaired
+    with the schwa, would sound like the stem plus the other (``L`` and ``AH0 L``)."""
+    return a == (SCHWA,) + b or b == (SCHWA,) + a or a == b + (SCHWA,) or b == a + (SCHWA,)
+
+
 def generate_affixes(
     settings: ClosedClassConfig,
     rng: np.random.Generator,
@@ -441,8 +447,9 @@ def generate_affixes(
     ipa: PhonemeTable,
     content: list[WordForm] | None = None,
 ) -> tuple[list[Affix], dict[str, Any]]:
-    """One affix for each item. Two affixes never have the same phonemes, and an affix that more
-    than ``max_skipped`` of the content words cannot take is rejected."""
+    """One affix for each item. Two affixes never have the same phonemes, nor the same phonemes
+    once the joining schwa is added to one of them, and an affix that more than ``max_skipped``
+    of the content words cannot take is rejected."""
     content = content or []
     affixes: list[Affix] = []
     used: set[tuple[str, ...]] = set()
@@ -463,7 +470,7 @@ def generate_affixes(
             fresh = [
                 (phones, w)
                 for phones, w in affix_candidates(english, shape, item.position)
-                if phones not in used
+                if phones not in used and not any(same_after_schwa(phones, u) for u in used)
             ]
             shares = {
                 phones: skipped_share(

@@ -213,7 +213,7 @@ Function words are synthesized and embedded like content words, by every speaker
 
 ### Affixes
 
-An affix is a bound form: it never occurs alone, and it is never synthesized alone. Its shape is drawn from configured weights over C (one consonant, like English -s), VC (like -ing), and V (like -y). Suffixes are the default, and `position: prefix` makes a prefix. Two affixes must differ in at least one phoneme. An affix's vowel is unstressed. An affix that more than `affixes.max_skipped` (default 0.1) of the content words cannot take, even with the schwa below, is rejected and drawn again, so that no affix leaves large gaps in the paradigm.
+An affix is a bound form: it never occurs alone, and it is never synthesized alone. Its shape is drawn from configured weights over C (one consonant, like English -s), VC (like -ing), and V (like -y); the default weights are C 0.5 and VC 0.5, so a bare vowel is available by setting but never drawn by default. Suffixes are the default, and `position: prefix` makes a prefix. Two affixes must differ in at least one phoneme, and one must not be the other with the joining schwa added (`L` and `AH0 L`), or a stem plus one, repaired with the schwa, would sound like the stem plus the other. An affix's vowel is unstressed. An affix that more than `affixes.max_skipped` (default 0.1) of the content words cannot take, even with the schwa below, is rejected and drawn again, so that no affix leaves large gaps in the paradigm.
 
 With `affixes.source: english`, the glosses PLURAL, PAST, and PROGRESSIVE become the English suffixes with English allomorphy: -s is `IH0 Z` after a sibilant, `S` after another voiceless consonant, and `Z` otherwise; -ed is `IH0 D` after `T` or `D`, `T` after another voiceless consonant, and `D` otherwise; -ing is `IH0 NG`. `affixes.csv` lists the allomorphs. Any other gloss, or a prefix, is an error that names it.
 
@@ -325,7 +325,7 @@ closed_class:                    # null: content words only
   affixes:
     items: [{gloss: PLURAL, position: suffix}, {gloss: PAST, position: suffix}, {gloss: PROGRESSIVE, position: suffix}]
     source: pseudo               # english: the English suffixes with their allomorphs
-    shapes: {C: 0.4, VC: 0.4, V: 0.2}
+    shapes: {C: 0.5, VC: 0.5, V: 0}   # a bare vowel suffix is available by setting, never drawn by default
     epenthesis: true
     glide: Y                     # the glide between two vowels at a join when neither vowel decides
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take

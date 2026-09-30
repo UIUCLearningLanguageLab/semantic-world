@@ -75,7 +75,7 @@ def test_default_closed_class_has_function_words_and_affixes_and_inflects_nothin
         ("PAST", "suffix"),
         ("PROGRESSIVE", "suffix"),
     ]
-    assert closed.affix_shapes == {"C": 0.4, "VC": 0.4, "V": 0.2}
+    assert closed.affix_shapes == {"C": 0.5, "VC": 0.5, "V": 0.0}
     assert closed.epenthesis is True and closed.glide == "Y" and closed.inflect == ()
     assert load_config(DATA / "default.yaml").closed_class == closed
     assert parse_config({"closed_class": None}, "x").closed_class is None
@@ -912,3 +912,23 @@ def test_the_glide_repair_in_a_run(common_english):
     with pytest.raises(ConfigError) as info:
         config_with({"affixes": {"glide": "L"}})
     assert info.value.field == "closed_class.affixes.glide"
+
+
+def test_an_affix_is_never_another_affix_with_the_schwa():
+    from semantic_world.wordforms.closed_class import same_after_schwa
+
+    assert same_after_schwa(("L",), ("AH0", "L")) and same_after_schwa(("AH0", "L"), ("L",))
+    assert not same_after_schwa(("L",), ("AH0", "N")) and not same_after_schwa(("L",), ("L",))
+    for seed in range(1, 9):
+        run = run_forms(config_with({"inflect": INFLECT_ALL}, count=40, seed=seed))
+        affixes = run.lexicon.affixes
+        for a in affixes:
+            for b in affixes:
+                assert a is b or not same_after_schwa(a.phones, b.phones), (seed, a, b)
+        # so no stem has the same form for two affixes
+        assert not any(
+            len({s for s in group if ".AF." in s}) > 1
+            and len(set(group)) > 1
+            and all(s.split(".AF.")[0] == group[0].split(".AF.")[0] for s in group)
+            for group in run.lexicon.closed_class["identical_forms"]
+        )
