@@ -156,6 +156,8 @@ Each embedding configuration names an encoder, and the encoder's output is one v
 
   Learned encoders train on training speakers only, and are frozen afterwards.
 
+  Both encoders read a front end's frames (`frontend`, log-mel by default), standardized by channel with statistics from the training tokens, through a stack of one-dimensional convolutions (`layers`, `hidden`, `kernel`). The contrastive encoder pools the convolutions over time (mean and maximum) and projects to `dims`; its loss is a supervised contrastive loss with a `temperature`, over batches of `batch_size` tokens drawn as pairs of tokens of the same word (from different speakers when the word has them). The CPC encoder projects the convolutions to latent frames of `dims`, summarizes them with a GRU of `hidden` units, and predicts the latents 1 to `steps_ahead` frames ahead against `negatives` frames drawn from the batch; its embedding is the mean of the context frames, of `hidden` numbers. `train_on` chooses the training tokens: the clean tokens of training speakers (`clean`, the default) or all of them (`all`). Training runs for `epochs` epochs with AdamW at `learning_rate`, seeded from the `wordforms:train` stream by the embedding's name, with PyTorch's deterministic algorithms, on the configured device; on the CPU, the same seed gives the same weights and embeddings. The stored embedding holds the frozen model (`model.pt`), the frame statistics, and a training report (epochs, steps, seconds, device, the loss of each epoch). The default configuration trains one of each on the log-mel front end (decided September 30, 2026).
+
 ### Word embeddings
 
 A word's embedding is the mean of its tokens' embeddings over training speakers, without augmented tokens; `word_embeddings.tokens: all` includes the augmented tokens of training speakers (decided September 30, 2026). Token embeddings are kept too, augmented ones included, because token variability is part of what models should face.
@@ -323,6 +325,8 @@ embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
+  - {name: contrastive_logmel, encoder: learned, kind: contrastive, frontend: logmel, dims: 128, hidden: 128, layers: 3, kernel: 5, epochs: 20, batch_size: 64, learning_rate: 0.001, temperature: 0.1, train_on: clean}
+  - {name: cpc_logmel, encoder: learned, kind: cpc, frontend: logmel, dims: 64, hidden: 128, layers: 3, kernel: 5, epochs: 10, batch_size: 32, learning_rate: 0.001, steps_ahead: 8, negatives: 32, train_on: clean}
 
 closed_class:                    # null: content words only
   request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
@@ -371,7 +375,7 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation (the recipe and drawn values of an augmented token), achieved (each transformation's target and measured value), duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
-| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. |
+| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. A learned encoder writes its frozen model, `model.pt`, and its training report in `meta.yaml`. |
 | `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`), by kind of form (`kind`) and, with augmentation, by set of tokens (`tokens`). |
 | `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. |
 

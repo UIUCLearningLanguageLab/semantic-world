@@ -167,6 +167,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         state = "already stored" if embedding["reused"] else "computed"
         kind = "pretrained" if embedding["pretrained"] else embedding["encoder"]
         print(f"embedding {name} ({kind}): {embedding['dims']} dimensions, {state}")
+        if embedding.get("training"):
+            training = embedding["training"]
+            print(
+                f"  trained {training['kind']} on {training['tokens']} tokens for "
+                f"{training['epochs']} epochs ({training['steps']} steps) in "
+                f"{training['seconds']:.0f} s on {training['device']}; loss "
+                f"{training['losses'][0]:.3f} -> {training['losses'][-1]:.3f}"
+            )
     if run.evaluation is not None:
         print(f"evaluation: {folder / 'eval' / 'embeddings.csv'}")
         print(_evaluation_text(run.evaluation))
@@ -227,7 +235,9 @@ def _sweep_progress(name: str, done: int, total: int) -> None:
 
 
 def _frontend_progress(name: str, done: int, total: int) -> None:
-    if done % 5000 == 0 or done == total:
+    if total <= 100:  # a learned encoder reports its epochs
+        print(f"  {name}: epoch {done} of {total}", file=sys.stderr)
+    elif done % 5000 == 0 or done == total:
         print(f"  {name}: {done} of {total} tokens", file=sys.stderr)
 
 

@@ -32,6 +32,7 @@ from semantic_world.wordforms.config import (
     Config,
     EmbeddingConfig,
     FixedEmbeddingConfig,
+    LearnedEmbeddingConfig,
     load_config,
 )
 from semantic_world.wordforms.encoders.fixed import FixedEncoder, Projection, fit_pca
@@ -76,7 +77,10 @@ class EmbeddingStore:
 
     def summary(self) -> dict[str, Any]:
         keys = ("encoder", "pretrained", "dims", "tokens", "words")
-        return {**{k: self.meta[k] for k in keys}, "reused": self.reused}
+        summary = {**{k: self.meta[k] for k in keys}, "reused": self.reused}
+        if "training" in self.meta:
+            summary["training"] = self.meta["training"]
+        return summary
 
 
 def token_layout(words: list[WordForm], synthesis: Synthesis):
@@ -110,6 +114,13 @@ def word_means(tokens: np.ndarray, token_words: np.ndarray, chosen: np.ndarray, 
     return (types / totals[:, None]).astype(np.float32)
 
 
+def training_seed(config: Config, embedding: LearnedEmbeddingConfig) -> int:
+    """The seed of a learned encoder's training: the ``wordforms:train`` stream, by name."""
+    from semantic_world.wordforms.streams import Streams
+
+    return int(Streams(config.seed).substream("train", embedding.name).integers(2**31 - 1))
+
+
 def fingerprint(embedding: EmbeddingConfig, synthesis: Synthesis, extra: dict[str, Any]) -> str:
     """A hash of the embedding's settings, of what the embedding is computed from, and of every
     token's label, speaker split, and audio."""
@@ -136,16 +147,22 @@ def compute_embedding(
     folder already holds the same embedding for the same audio, nothing is computed."""
     folder = Path(folder)
     fixed = isinstance(embedding, FixedEmbeddingConfig)
+    learned = isinstance(embedding, LearnedEmbeddingConfig)
     source: dict[str, Any]
-    if fixed:
+    if fixed or learned:
         frontend = make_frontends(config)[embedding.frontend]
         source = frontend.meta()
     else:
         source = {"sample_rate": config.synthesis.sample_rate}
     source["word_embedding_tokens"] = config.word_embeddings.tokens
+    if learned:
+        source["train_seed"] = training_seed(config, embedding)
+        source["device"] = "cpu" if config.device == "cpu" else "accelerator"
     mark = fingerprint(embedding, synthesis, source)
-    keep_layers = not fixed and embedding.store_layers
+    keep_layers = not fixed and not learned and embedding.store_layers
     files = ["tokens.npy", "types.npy", "meta.yaml"] + (["layers.npy"] if keep_layers else [])
+    if learned:
+        files.append("model.pt")
     if all((folder / name).exists() for name in files):
         store = EmbeddingStore.load(folder)
         if store.meta.get("fingerprint") == mark:
@@ -159,10 +176,48 @@ def compute_embedding(
     meta: dict[str, Any] = {
         "name": embedding.name,
         "encoder": embedding.encoder,
-        "pretrained": not fixed,
+        "pretrained": not fixed and not learned,
         "settings": embedding.resolved(),
     }
-    if fixed:
+    if learned:
+        from semantic_world.wordforms.device import resolve_device
+        from semantic_world.wordforms.encoders import learned as learned_encoders
+
+        stored = (frontends or {}).get(embedding.frontend)
+        cache: dict[int, np.ndarray] = {}
+
+        def frames_of(index: int) -> np.ndarray:
+            if stored is not None:
+                return stored.token_frames(synthesis.tokens[index].label)
+            if index not in cache:
+                cache[index] = frontend.compute(synthesis.audio(synthesis.tokens[index]))
+            return cache[index]
+
+        clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+        trainable = train if embedding.train_on == "all" else train & clean
+        train_indices = np.flatnonzero(trainable)
+        mean, std = learned_encoders.frame_statistics(frames_of, train_indices)
+        frame_source = learned_encoders.FrameSource(frames_of, mean, std)
+        device = resolve_device(config.device)
+        model, report = learned_encoders.train_encoder(
+            embedding.kind,
+            embedding.settings(),
+            frame_source,
+            token_words,
+            train_indices,
+            training_seed(config, embedding),
+            device,
+            None if progress is None else (lambda e, n, loss: progress(e, n)),
+        )
+        learned_encoders.save_model(
+            folder / "model.pt", model, embedding.kind, embedding.settings(), mean, std
+        )
+        tokens = learned_encoders.encode_tokens(model, frame_source, count, device)
+        meta["frontend"] = embedding.frontend
+        meta["learned"] = True
+        meta["training"] = report.as_dict()
+        meta["device"] = device
+    elif fixed:
         encoder = FixedEncoder(frontend, embedding.time_bins)
         stored = (frontends or {}).get(embedding.frontend)
         features = np.zeros((count, encoder.feature_dims), dtype=np.float32)
@@ -453,7 +508,15 @@ class SoundEmbeddings:
         """The frozen encoder of this embedding."""
         if self._encoder is None:
             settings = self.meta["settings"]
-            if self.meta["encoder"] == "fixed":
+            if self.meta["encoder"] == "learned":
+                from semantic_world.wordforms.device import resolve_device
+                from semantic_world.wordforms.encoders.learned import LearnedEncoder
+
+                frontend = make_frontends(self.config)[settings["frontend"]]
+                self._encoder = LearnedEncoder(
+                    frontend, self.store.folder / "model.pt", resolve_device(self.config.device)
+                )
+            elif self.meta["encoder"] == "fixed":
                 frontend = make_frontends(self.config)[settings["frontend"]]
                 path = self.store.folder / "projection.npz"
                 projection = Projection.load(path) if path.exists() else None

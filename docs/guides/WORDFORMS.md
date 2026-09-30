@@ -4,7 +4,7 @@ The word-form pipeline makes the spoken words of Semantic World's language. It g
 
 This guide covers setup, running the pipeline, the ideas behind each layer, the output files, the evaluation table, and the Python interface. The design is specified in `docs/specs/WORDFORM_PIPELINE.md`.
 
-**Status.** Stages 1 to 5 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), and augmentation with Praat manipulation and the modulation front end. Encoders trained on the world's own audio and systematic sound–meaning assignment (stages 6 and 7) are not built yet.
+**Status.** Stages 1 to 6 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, and encoders trained on the world's own audio. Systematic sound–meaning assignment (stage 7) is not built yet.
 
 ## Setup
 
@@ -128,8 +128,10 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 | `cochleagram_fixed` | the cochleagram averaged in 10 time bins, reduced by principal components | 256 |
 | `logmel_fixed` | the same, from the log-mel spectrogram | 256 |
 | `hubert_base` | layer 8 of the pretrained HuBERT speech model, averaged over time | 768 |
+| `contrastive_logmel` | a small convolutional encoder trained on the run's own clips so that tokens of the same word lie together (supervised by word identity) | 128 |
+| `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels | 128 |
 
-The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained.
+The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (37,080 training tokens) the contrastive encoder trains in about 1.5 minutes and the CPC encoder in about 16 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
 
 ## Closed-class forms
 

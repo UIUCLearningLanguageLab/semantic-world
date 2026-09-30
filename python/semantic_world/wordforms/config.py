@@ -21,7 +21,7 @@ SEED_MAX = 2**64 - 1
 
 SOURCES = ("pseudowords", "english", "mixed")
 ENGINES = ("piper", "espeak")
-ENCODERS = ("fixed", "pretrained")
+ENCODERS = ("fixed", "pretrained", "learned")
 POOLINGS = ("mean",)
 ASSIGNMENT_MODES = ("arbitrary",)
 FUNCTION_SHAPES = ("CV", "CVC", "VC", "V")
@@ -45,9 +45,10 @@ across speakers in the stage 4 layer sweep."""
 DEVICES = ("auto", "cpu", "cuda", "mps")
 
 LATER_STAGES = {
-    "encoders.learned": "stage 6",
     "assignment.modes": "stage 7",
 }
+LEARNED_KINDS = ("contrastive", "cpc")
+TRAINING_TOKENS = ("clean", "all")
 FRONTENDS = ("waveform", "logmel", "cochleagram", "modulation")
 NOISE_KINDS = ("white", "pink", "speech", "babble")
 AUGMENTED_SPEAKERS = ("all", "train", "held_out")
@@ -342,7 +343,62 @@ class PretrainedEmbeddingConfig:
         }
 
 
-EmbeddingConfig = FixedEmbeddingConfig | PretrainedEmbeddingConfig
+@dataclass(frozen=True)
+class LearnedEmbeddingConfig:
+    """An encoder trained on the run's own audio: ``contrastive`` (an acoustic word encoder
+    supervised by word identity) or ``cpc`` (self-supervised, by prediction alone)."""
+
+    name: str
+    kind: str
+    frontend: str
+    dims: int
+    """The embedding size of the contrastive encoder, and the latent size of the CPC encoder,
+    whose embedding is its context of ``hidden`` numbers."""
+    hidden: int
+    layers: int
+    kernel: int
+    epochs: int
+    batch_size: int
+    learning_rate: float
+    temperature: float
+    """The contrastive loss's temperature."""
+    steps_ahead: int
+    """How many frames ahead the CPC encoder predicts."""
+    negatives: int
+    """How many negative frames each CPC prediction is scored against."""
+    train_on: str
+    """Which training-speaker tokens the encoder trains on: ``clean``, or ``all`` with the
+    augmented ones."""
+
+    encoder = "learned"
+
+    def settings(self) -> dict[str, Any]:
+        """The training settings, as the trainer takes them."""
+        return {
+            "dims": self.dims,
+            "hidden": self.hidden,
+            "layers": self.layers,
+            "kernel": self.kernel,
+            "epochs": self.epochs,
+            "batch_size": self.batch_size,
+            "learning_rate": self.learning_rate,
+            "temperature": self.temperature,
+            "steps_ahead": self.steps_ahead,
+            "negatives": self.negatives,
+        }
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "encoder": self.encoder,
+            "kind": self.kind,
+            "frontend": self.frontend,
+            **self.settings(),
+            "train_on": self.train_on,
+        }
+
+
+EmbeddingConfig = FixedEmbeddingConfig | PretrainedEmbeddingConfig | LearnedEmbeddingConfig
 
 
 @dataclass(frozen=True)
@@ -1009,6 +1065,8 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
         {"name": "cochleagram_fixed", "encoder": "fixed", "frontend": "cochleagram"},
         {"name": "logmel_fixed", "encoder": "fixed", "frontend": "logmel"},
         {"name": "hubert_base", "encoder": "pretrained", "model": "facebook/hubert-base-ls960"},
+        {"name": "contrastive_logmel", "encoder": "learned", "kind": "contrastive"},
+        {"name": "cpc_logmel", "encoder": "learned", "kind": "cpc"},
     ]
     value = root.get("embeddings", default)
     if not isinstance(value, list):
@@ -1021,11 +1079,6 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
         if name in names:
             raise node.error("name", f"the name {name!r} is used twice")
         names.add(name)
-        encoder = node.get("encoder", _MISSING)
-        if encoder == "learned":
-            raise node.error(
-                "encoder", f"is not available until {LATER_STAGES['encoders.learned']}"
-            )
         encoder = node.choice("encoder", _MISSING, ENCODERS)
         if encoder == "fixed":
             frontend = node.choice("frontend", _MISSING, FRONTENDS)
@@ -1038,6 +1091,29 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
                     frontend=frontend,
                     time_bins=node.int("time_bins", 10, min=1),
                     pca_dims=None if pca is None else node.check_int("pca_dims", pca, min=1),
+                )
+            )
+        elif encoder == "learned":
+            frontend = node.choice("frontend", "logmel", FRONTENDS)
+            if frontend not in frontends.names:
+                raise node.error("frontend", f"the front end {frontend!r} is not configured")
+            kind = node.choice("kind", _MISSING, LEARNED_KINDS)
+            result.append(
+                LearnedEmbeddingConfig(
+                    name=name,
+                    kind=kind,
+                    frontend=frontend,
+                    dims=node.int("dims", 128 if kind == "contrastive" else 64, min=1),
+                    hidden=node.int("hidden", 128, min=1),
+                    layers=node.int("layers", 3, min=1),
+                    kernel=node.int("kernel", 5, min=1),
+                    epochs=node.int("epochs", 20 if kind == "contrastive" else 10, min=1),
+                    batch_size=node.int("batch_size", 64 if kind == "contrastive" else 32, min=2),
+                    learning_rate=node.number("learning_rate", 0.001, min=0, exclusive_min=True),
+                    temperature=node.number("temperature", 0.1, min=0, exclusive_min=True),
+                    steps_ahead=node.int("steps_ahead", 8, min=1),
+                    negatives=node.int("negatives", 32, min=1),
+                    train_on=node.choice("train_on", "clean", TRAINING_TOKENS),
                 )
             )
         else:
