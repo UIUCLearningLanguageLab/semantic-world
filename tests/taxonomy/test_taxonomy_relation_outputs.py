@@ -47,6 +47,8 @@ EXPECTED_COLUMNS = {
         "symmetric_proportion",
         "within_leaf_proportion",
         "estimated",
+        "leaf_pair_density",
+        "tries",
     ],
     "thematic.csv": ["leaf_a", "leaf_b", "thematic", "similarity"],
 }
@@ -420,12 +422,15 @@ def test_verb_settings_never_change_noun_outputs(tmp_path: Path) -> None:
         if name in ("config.yaml", "instances.csv", "summary.yaml"):
             continue
         assert (a / name).read_bytes() == (b / name).read_bytes(), name
-    # The summary differs only in its verb block.
+    # The summary differs only in its verb block and in verb density warnings.
     summary_a = yaml.safe_load((a / "summary.yaml").read_text())
     summary_b = yaml.safe_load((b / "summary.yaml").read_text())
     assert summary_a["verbs"] != summary_b["verbs"]
-    summary_a.pop("verbs")
-    summary_b.pop("verbs")
+    for summary in (summary_a, summary_b):
+        summary.pop("verbs")
+        summary["warnings"] = [
+            w for w in summary["warnings"] if not w.startswith(("verb ", "constraint "))
+        ]
     assert summary_a == summary_b
     noun_columns = [
         c for c in pl.read_csv(a / "instances.csv").columns if not c.startswith(("CAN.V", "CANBE."))

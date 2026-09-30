@@ -14,6 +14,7 @@ from semantic_world.taxonomy.constraints import (
     Relation,
     Relations,
     generate_constraints,
+    generate_relations,
 )
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import Expr, ExpressionError, parse_expression
@@ -60,6 +61,7 @@ __all__ = [
     "config_from_mapping",
     "generate",
     "generate_constraints",
+    "generate_relations",
     "generate_instances",
     "generate_rules",
     "generate_tree",

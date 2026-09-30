@@ -34,14 +34,15 @@ from semantic_world.taxonomy.features import Feature, FeatureSet
 from semantic_world.taxonomy.instances import Instances
 from semantic_world.taxonomy.rules import (
     MAX_TRIES,
+    RuleSet,
     Threshold,
     _draw,
     build_function,
     model_quantile_threshold,
 )
 from semantic_world.taxonomy.streams import Streams
-from semantic_world.taxonomy.tree import Category
-from semantic_world.taxonomy.verbs import VerbTaxonomy
+from semantic_world.taxonomy.tree import Category, Tree
+from semantic_world.taxonomy.verbs import VerbTaxonomy, generate_verb_tree, redraw_verb_features
 
 ROLES = ("a", "p")
 FAMILIES = ("agent", "patient", "cross", "key_lock", "comparison")
@@ -287,6 +288,29 @@ class Relation:
         }
 
 
+def relation_pair_matrix(
+    constraints: Sequence[Constraint], values: np.ndarray, scalars: np.ndarray
+) -> np.ndarray:
+    """A conjunction of constraints over every ordered pair of rows, including a row paired with
+    itself: shape ``(rows, rows)``."""
+    n = values.shape[0]
+    out = np.ones((n, n), dtype=bool)
+    agents = np.arange(n)
+    for constraint in constraints:
+        out &= constraint.matrix(values, scalars, agents)
+    return out
+
+
+def leaf_pair_density(
+    constraints: Sequence[Constraint], leaf_values: np.ndarray, leaf_scalars: np.ndarray
+) -> float:
+    """The proportion of ordered leaf pairs (a leaf paired with itself included) for which the
+    conjunction holds between the leaves' generative vectors, with their own scalars."""
+    if leaf_values.shape[0] == 0:
+        return math.nan
+    return float(relation_pair_matrix(constraints, leaf_values, leaf_scalars).mean())
+
+
 class Relations:
     """Every constraint and every relation of a run, with evaluation over the run's instances."""
 
@@ -296,11 +320,24 @@ class Relations:
         feature_constraints: Sequence[Constraint],
         own_constraints: dict[str, Constraint],
         instances: Instances,
+        constraint_density: dict[str, float] | None = None,
+        verb_density: dict[str, float] | None = None,
+        verb_tries: dict[str, int] | None = None,
+        outside_range: tuple[str, ...] = (),
+        warnings: tuple[str, ...] = (),
     ) -> None:
         self.verbs = verbs
         self.feature_constraints = tuple(feature_constraints)
         self.own_constraints = dict(own_constraints)
         self.instances = instances
+        self.constraint_density = constraint_density
+        """Leaf-pair density of every constraint alone, when a density check is on."""
+        self.verb_density = verb_density
+        """Leaf-pair density of every verb's relation, when the verb density check is on."""
+        self.verb_tries = verb_tries
+        self.outside_range = outside_range
+        """The verbs the generator could not bring inside the density range."""
+        self.warnings = warnings
         self.constraints: tuple[Constraint, ...] = self.feature_constraints + tuple(
             self.own_constraints[v.label] for v in verbs.verbs if v.label in self.own_constraints
         )
@@ -361,7 +398,15 @@ class Relations:
         return out
 
     def records(self) -> list[dict[str, Any]]:
-        return [c.record() for c in self.constraints]
+        """The ``constraints.yaml`` entries, with each constraint's leaf-pair density when a
+        density check is on."""
+        entries = []
+        for c in self.constraints:
+            entry = c.record()
+            if self.constraint_density is not None:
+                entry["leaf_pair_density"] = self.constraint_density[c.label]
+            entries.append(entry)
+        return entries
 
     def relation_records(self) -> list[dict[str, Any]]:
         return [r.record() for r in self.relations()]
@@ -380,7 +425,8 @@ def generate_constraints(
     streams: Streams,
 ) -> Relations | None:
     """Sample one constraint per verb feature and, when on, one per verb, from the
-    ``constraints`` stream, and assemble the relations."""
+    ``constraints`` stream, and assemble the relations. This is the build without the density
+    checks; :func:`generate_relations` is the full build."""
     if verbs is None or config.verbs is None:
         return None
     sampler = _ConstraintSampler(config.verbs, config.scalars, features, streams.constraints)
@@ -390,6 +436,199 @@ def generate_constraints(
         for verb in verbs.verbs:
             own[verb.label] = sampler.sample(f"K.{verb.label}")
     return Relations(verbs, feature_constraints, own, instances)
+
+
+def generate_relations(
+    config: Config, rules: RuleSet, tree: Tree, instances: Instances, streams: Streams
+) -> tuple[VerbTaxonomy | None, Relations | None]:
+    """The full verb build: verb-feature constraints (with the constraint density floor), the
+    verb tree, and each verb's own constraint with the verb density range
+    (``docs/proposals/2026-09-29-taxonomy-verb-density.md``).
+
+    Densities are measured over the leaves of the noun tree, never the instances. Constraints
+    draw from the ``constraints`` stream and verb features from the ``verb_tree`` stream, so with
+    both checks off the build equals the one without them.
+    """
+    if config.verbs is None:
+        return None, None
+    settings = config.verbs
+    leaf_values = np.stack([leaf.values for leaf in tree.leaves])
+    leaf_scalars = np.stack([leaf.scalars for leaf in tree.leaves])
+    checks_on = settings.density is not None or settings.constraint_min_density is not None
+    sampler = _ConstraintSampler(settings, config.scalars, rules.features, streams.constraints)
+    warnings: list[str] = []
+    constraint_density: dict[str, float] = {}
+
+    def density(constraints: Sequence[Constraint]) -> float:
+        return leaf_pair_density(constraints, leaf_values, leaf_scalars)
+
+    feature_constraints: list[Constraint] = []
+    for label in settings.feature_labels:
+        name = f"K.{label}"
+        if settings.constraint_min_density is None:
+            constraint = sampler.sample(name)
+        else:
+            constraint, warning = _sample_dense_constraint(
+                sampler, name, density, settings.constraint_min_density, settings.density_tries
+            )
+            if warning:
+                warnings.append(warning)
+        feature_constraints.append(constraint)
+        if checks_on:
+            constraint_density[name] = density([constraint])
+
+    verbs = generate_verb_tree(config, streams)
+    assert verbs is not None
+    own: dict[str, Constraint] = {}
+    verb_density: dict[str, float] = {}
+    verb_tries: dict[str, int] = {}
+    outside: list[str] = []
+    if settings.density is None:
+        for verb in verbs.verbs:
+            if settings.own_constraint:
+                own[verb.label] = sampler.sample(f"K.{verb.label}")
+    else:
+        tuner = _DensityTuner(settings, verbs, feature_constraints, sampler, density, streams)
+        for verb in verbs.verbs:
+            result = tuner.tune(verb)
+            if result.own is not None:
+                own[verb.label] = result.own
+            verb_density[verb.label] = result.density
+            verb_tries[verb.label] = result.tries
+            if not result.in_range:
+                outside.append(verb.label)
+                warnings.append(
+                    f"verb {verb.label} has leaf-pair density {result.density:.4f}, outside "
+                    f"[{settings.density.min}, {settings.density.max}] after {result.tries} tries"
+                )
+    if checks_on:
+        for constraint in own.values():
+            constraint_density[constraint.label] = density([constraint])
+    relations = Relations(
+        verbs,
+        feature_constraints,
+        own,
+        instances,
+        constraint_density=constraint_density if checks_on else None,
+        verb_density=verb_density if settings.density is not None else None,
+        verb_tries=verb_tries if settings.density is not None else None,
+        outside_range=tuple(outside),
+        warnings=tuple(warnings),
+    )
+    return verbs, relations
+
+
+def _sample_dense_constraint(
+    sampler: _ConstraintSampler, label: str, density, minimum: float, max_tries: int
+) -> tuple[Constraint, str | None]:
+    """Resample a constraint until its leaf-pair density reaches ``minimum``; otherwise keep the
+    densest candidate and return a warning."""
+    best: tuple[float, Constraint] | None = None
+    for _ in range(max_tries):
+        constraint = sampler.sample(label)
+        value = density([constraint])
+        if value >= minimum:
+            return constraint, None
+        if best is None or value > best[0]:
+            best = (value, constraint)
+    assert best is not None
+    return best[1], (
+        f"constraint {label} has leaf-pair density {best[0]:.4f}, below "
+        f"verbs.constraint_min_density {minimum} after {max_tries} tries"
+    )
+
+
+@dataclass(frozen=True)
+class _TuneResult:
+    own: Constraint | None
+    density: float
+    tries: int
+    in_range: bool
+
+
+class _DensityTuner:
+    """Brings each verb's leaf-pair density into the configured range, in category order."""
+
+    def __init__(
+        self,
+        settings: VerbsConfig,
+        verbs: VerbTaxonomy,
+        feature_constraints: Sequence[Constraint],
+        sampler: _ConstraintSampler,
+        density,
+        streams: Streams,
+    ) -> None:
+        assert settings.density is not None
+        self.settings = settings
+        self.range = settings.density
+        self.verbs = verbs
+        self.feature_constraints = tuple(feature_constraints)
+        self.sampler = sampler
+        self.density = density
+        self.rng = streams.verb_tree
+        self.base_rates = verbs.features.base_rates
+        self.vectors: dict[str, bytes] = {v.label: v.values.tobytes() for v in verbs.verbs}
+
+    def distance(self, value: float) -> float:
+        if self.range.min <= value <= self.range.max:
+            return 0.0
+        return self.range.min - value if value < self.range.min else value - self.range.max
+
+    def base_constraints(self, verb: Category) -> list[Constraint]:
+        return [self.feature_constraints[i] for i in np.flatnonzero(verb.values == 1)]
+
+    def redraw(self, verb: Category) -> bool:
+        """Redraw the verb's non-defining features; False when the draw duplicates another verb
+        and distinct leaves are required, or when nothing can change."""
+        if verb.parent is not None and verb.parent.defining_mask().all():
+            return False
+        values = redraw_verb_features(verb, self.settings, self.base_rates, self.rng)
+        key = values.tobytes()
+        if self.settings.inheritance.require_distinct_leaves and any(
+            other == key for label, other in self.vectors.items() if label != verb.label
+        ):
+            return False
+        verb.free_values = values
+        verb.values = values.copy()
+        self.vectors[verb.label] = key
+        return True
+
+    def tune(self, verb: Category) -> _TuneResult:
+        label = f"K.{verb.label}"
+        best: tuple[float, np.ndarray, Constraint | None, float] | None = None
+        tries = 0
+        stuck = False
+        while tries < self.range.max_tries and not stuck:
+            tries += 1
+            base_density = self.density(self.base_constraints(verb))
+            too_sparse = base_density < self.range.min
+            too_dense_without_own = (
+                not self.settings.own_constraint and base_density > self.range.max
+            )
+            if too_sparse or too_dense_without_own:
+                candidate = (self.distance(base_density), verb.values.copy(), None, base_density)
+                if best is None or candidate[0] < best[0]:
+                    best = candidate
+                if not self.redraw(verb):
+                    stuck = True
+                continue
+            own = self.sampler.sample(label) if self.settings.own_constraint else None
+            value = self.density(self.base_constraints(verb) + ([own] if own else []))
+            candidate = (self.distance(value), verb.values.copy(), own, value)
+            if best is None or candidate[0] < best[0]:
+                best = candidate
+            if candidate[0] == 0.0:
+                break
+        assert best is not None
+        _, values, own, value = best
+        verb.free_values = values.copy()
+        verb.values = values.copy()
+        self.vectors[verb.label] = values.tobytes()
+        if own is None and self.settings.own_constraint:
+            # Every candidate was too sparse before its own constraint; the verb still gets one.
+            own = self.sampler.sample(label)
+            value = self.density(self.base_constraints(verb) + [own])
+        return _TuneResult(own, value, tries, self.distance(value) == 0.0)
 
 
 class _ConstraintSampler:

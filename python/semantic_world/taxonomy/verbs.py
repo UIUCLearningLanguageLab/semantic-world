@@ -18,7 +18,7 @@ from semantic_world.taxonomy.config import Config, VerbsConfig
 from semantic_world.taxonomy.features import Feature, FeatureSet
 from semantic_world.taxonomy.rules import RuleSet
 from semantic_world.taxonomy.streams import Streams
-from semantic_world.taxonomy.tree import Category, Tree, build_tree
+from semantic_world.taxonomy.tree import Category, Role, Tree, build_tree
 
 VERB_FEATURE_TYPE = "vf"
 
@@ -48,6 +48,26 @@ class VerbTaxonomy:
             mask = category.defining_mask()
             rows[i, mask] = category.free_values[mask]
         return rows
+
+
+def redraw_verb_features(
+    verb: Category, verbs: VerbsConfig, base_rates: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
+    """A fresh draw of a verb's non-defining verb features from its parent, as the
+    distinct-leaves check does: defining features copy the parent, characteristic ones copy with
+    the parent level's characteristic probability, undiagnostic ones come from the base rate. A
+    verb without a parent draws every feature from the base rates."""
+    parent = verb.parent
+    if parent is None:
+        return (rng.random(len(base_rates)) < base_rates).astype(np.uint8)
+    copy_probability = verbs.inheritance.characteristic_probability[parent.level - 1]
+    u = rng.random(len(base_rates))
+    values = parent.free_values.copy()
+    characteristic = parent.roles == Role.CHARACTERISTIC
+    values[characteristic] ^= (u[characteristic] >= copy_probability).astype(np.uint8)
+    undiagnostic = parent.roles == Role.UNDIAGNOSTIC
+    values[undiagnostic] = (u[undiagnostic] < base_rates[undiagnostic]).astype(np.uint8)
+    return values
 
 
 def verb_feature_set(verbs: VerbsConfig) -> FeatureSet:

@@ -159,11 +159,13 @@ def compute_relation_stats(
             )
 
         # Verb statistics.
-        stat_rows.append(
-            _verb_statistics(
-                verb.label, relation, matrix, sample, relations, verb, leaf_assignment, n, estimated
-            )
+        row = _verb_statistics(
+            verb.label, relation, matrix, sample, relations, verb, leaf_assignment, n, estimated
         )
+        if relations.verb_density is not None:
+            row["leaf_pair_density"] = relations.verb_density[verb.label]
+            row["tries"] = (relations.verb_tries or {}).get(verb.label, 0)
+        stat_rows.append(row)
 
     # Thematic relatedness with the taxonomic similarity of the two leaves.
     leaf_rows = np.array([tree.categories.index(leaf) for leaf in tree.leaves], dtype=np.intp)
@@ -192,7 +194,9 @@ def compute_relation_stats(
             pair_rows,
             schema={"verb": pl.Utf8, "agent": pl.Utf8, "patient": pl.Utf8, "holds": pl.Int64},
         ),
-        verb_stats=pl.DataFrame(stat_rows, schema=_verb_stat_schema()),
+        verb_stats=pl.DataFrame(
+            stat_rows, schema=_verb_stat_schema(relations.verb_density is not None)
+        ),
         thematic=pl.DataFrame(
             thematic_rows,
             schema={
@@ -220,7 +224,15 @@ def _proportion_schema() -> dict[str, Any]:
     }
 
 
-def _verb_stat_schema() -> dict[str, Any]:
+def _verb_stat_schema(with_density: bool = False) -> dict[str, Any]:
+    schema = _base_verb_stat_schema()
+    if with_density:
+        schema["leaf_pair_density"] = pl.Float64
+        schema["tries"] = pl.Int64
+    return schema
+
+
+def _base_verb_stat_schema() -> dict[str, Any]:
     return {
         "verb": pl.Utf8,
         "proportion_true": pl.Float64,

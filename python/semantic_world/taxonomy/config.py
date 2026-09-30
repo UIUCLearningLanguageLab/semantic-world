@@ -272,6 +272,16 @@ class ComparisonConfig:
 
 
 @dataclass(frozen=True)
+class DensityConfig:
+    """The allowed range of leaf-pair density for every verb, and how many tries the generator
+    spends bringing a verb or a constraint into range."""
+
+    min: float
+    max: float
+    max_tries: int
+
+
+@dataclass(frozen=True)
 class VerbsConfig:
     """Transitive verbs and the verb taxonomy (``docs/specs/TAXONOMY_RELATIONS.md``, Part B)."""
 
@@ -292,6 +302,15 @@ class VerbsConfig:
     sampled_true: int
     sampled_false: int
     max_exact_pairs: int
+    density: DensityConfig | None = None
+    """The verb density range (``docs/proposals/2026-09-29-taxonomy-verb-density.md``); None
+    turns the check off."""
+    constraint_min_density: float | None = None
+    """The smallest leaf-pair density allowed for any single constraint; None turns it off."""
+
+    @property
+    def density_tries(self) -> int:
+        return self.density.max_tries if self.density is not None else 200
 
     @property
     def base_rate(self) -> float | None:
@@ -333,6 +352,16 @@ class VerbsConfig:
                 "sampled_false": self.sampled_false,
                 "max_exact_pairs": self.max_exact_pairs,
             },
+            "density": (
+                None
+                if self.density is None
+                else {
+                    "min": self.density.min,
+                    "max": self.density.max,
+                    "max_tries": self.density.max_tries,
+                }
+            ),
+            "constraint_min_density": self.constraint_min_density,
         }
 
 
@@ -1100,6 +1129,17 @@ def _read_verbs(root: _Node, rules: RulesConfig, scalars: ScalarsConfig) -> Verb
     sampled_false = pairs.int("sampled_false", 1000, min=0)
     max_exact_pairs = pairs.int("max_exact_pairs", 50_000_000, min=1)
     pairs.finish()
+    density_node = node.mapping("density", nullable=True)
+    density = None
+    if density_node is not None:
+        low = density_node.probability("min", 0.01)
+        high = density_node.probability("max", 0.3)
+        tries = density_node.int("max_tries", 200, min=1)
+        density_node.finish()
+        if low > high:
+            raise density_node.error("min", f"min {low} exceeds max {high}")
+        density = DensityConfig(low, high, tries)
+    constraint_min_density = node.probability("constraint_min_density", 0.1, nullable=True)
     node.finish()
     return VerbsConfig(
         feature_count=count,
@@ -1117,6 +1157,8 @@ def _read_verbs(root: _Node, rules: RulesConfig, scalars: ScalarsConfig) -> Verb
         sampled_true=sampled_true,
         sampled_false=sampled_false,
         max_exact_pairs=max_exact_pairs,
+        density=density,
+        constraint_min_density=constraint_min_density,
     )
 
 

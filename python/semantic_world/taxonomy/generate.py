@@ -10,7 +10,7 @@ import polars as pl
 
 from semantic_world.taxonomy.analysis import feature_stats_table, similarity_table, summary_stats
 from semantic_world.taxonomy.config import Config
-from semantic_world.taxonomy.constraints import Relations, generate_constraints
+from semantic_world.taxonomy.constraints import Relations, generate_relations
 from semantic_world.taxonomy.features import FeatureSet
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.instances import Instances, generate_instances
@@ -19,7 +19,7 @@ from semantic_world.taxonomy.relation_stats import RelationStats, compute_relati
 from semantic_world.taxonomy.rules import RuleSet, generate_rules
 from semantic_world.taxonomy.streams import Streams
 from semantic_world.taxonomy.tree import Tree, generate_tree
-from semantic_world.taxonomy.verbs import VerbTaxonomy, generate_verb_tree
+from semantic_world.taxonomy.verbs import VerbTaxonomy
 
 
 @dataclass(frozen=True)
@@ -72,16 +72,15 @@ def generate(config: Config) -> TaxonomyResult:
     vectors = compute_node_vectors(rules, tree, instances, config.scalars)
     similarity = similarity_table(config, tree, instances, vectors, streams.analysis)
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
-    verbs = generate_verb_tree(config, streams)
-    relations = generate_constraints(config, rules.features, verbs, instances, streams)
+    verbs, relations = generate_relations(config, rules, tree, instances, streams)
     projections = (
         None
         if relations is None
         else compute_projections(config, rules, relations, instances, streams.constraints)
     )
     warnings = tuple(rules.warnings) + tuple(tree.warnings)
-    if verbs is not None:
-        warnings += tuple(verbs.tree.warnings)
+    if verbs is not None and relations is not None:
+        warnings += tuple(verbs.tree.warnings) + tuple(relations.warnings)
     relation_stats = (
         None
         if relations is None
@@ -118,7 +117,7 @@ def verb_summary(
         families[constraint.family] = families.get(constraint.family, 0) + 1
     approximate = int(projections.agent_approximate.sum() + projections.patient_approximate.sum())
     total = 2 * len(projections.verb_labels)
-    return {
+    block: dict[str, Any] = {
         "verb_features": len(verbs.features),
         "verb_categories": len(verbs.categories),
         "verbs": len(verbs.verbs),
@@ -128,3 +127,7 @@ def verb_summary(
         "proportions_estimated": stats.estimated,
         "pairs_short": stats.pairs_short,
     }
+    if relations.verb_density is not None:
+        block["verbs_outside_density"] = len(relations.outside_range)
+        block["verbs_outside_density_labels"] = list(relations.outside_range)
+    return block

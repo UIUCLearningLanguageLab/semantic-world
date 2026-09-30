@@ -93,6 +93,8 @@ def test_verb_defaults_match_the_specification() -> None:
         "rules",
         "projections",
         "pairs",
+        "density",
+        "constraint_min_density",
     ]
     assert config_from_mapping(resolved).resolved() == resolved
 
@@ -417,6 +419,9 @@ def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Pat
 
             with_verbs = yaml.safe_load((folder_on / file.name).read_text())
             assert with_verbs.pop("verbs")
+            with_verbs["warnings"] = [
+                w for w in with_verbs["warnings"] if not w.startswith(("verb ", "constraint "))
+            ]
             assert with_verbs == yaml.safe_load(file.read_text())
             continue
         if file.name == "instances.csv":
@@ -436,5 +441,9 @@ def test_verb_settings_do_not_change_the_noun_streams() -> None:
     on = generate(config_on)
     assert off.rules.records() == on.rules.records()
     assert off.instances.labels == on.instances.labels
-    assert {k: v for k, v in on.summary.items() if k != "verbs"} == off.summary
+    noun_summary = {k: v for k, v in on.summary.items() if k != "verbs"}
+    noun_summary["warnings"] = [
+        w for w in noun_summary["warnings"] if not w.startswith(("verb ", "constraint "))
+    ]
+    assert noun_summary == off.summary
     assert "verbs" in on.summary and "verbs" not in off.summary
