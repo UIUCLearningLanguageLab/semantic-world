@@ -411,6 +411,14 @@ def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Pat
     for file in folder_off.iterdir():
         if file.name == "config.yaml":
             continue
+        if file.name == "summary.yaml":
+            # With verbs on, the summary gains a verb block (stage 12) and nothing else.
+            import yaml
+
+            with_verbs = yaml.safe_load((folder_on / file.name).read_text())
+            assert with_verbs.pop("verbs")
+            assert with_verbs == yaml.safe_load(file.read_text())
+            continue
         if file.name == "instances.csv":
             # With verbs on, instances.csv also carries the exposed projections (stage 11).
             on = pl.read_csv(folder_on / file.name)
@@ -428,4 +436,5 @@ def test_verb_settings_do_not_change_the_noun_streams() -> None:
     on = generate(config_on)
     assert off.rules.records() == on.rules.records()
     assert off.instances.labels == on.instances.labels
-    assert on.summary == off.summary
+    assert {k: v for k, v in on.summary.items() if k != "verbs"} == off.summary
+    assert "verbs" in on.summary and "verbs" not in off.summary

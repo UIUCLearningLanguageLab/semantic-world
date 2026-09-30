@@ -22,6 +22,7 @@ from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.generate import TaxonomyResult, generate
 from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.projections import Projections, compute_projections
+from semantic_world.taxonomy.relation_stats import RelationStats, compute_relation_stats
 from semantic_world.taxonomy.rules import Rule, RuleSet, generate_rules
 from semantic_world.taxonomy.streams import STREAM_NAMES, Streams, stream_seed
 from semantic_world.taxonomy.tree import Category, Role, Tree, generate_tree
@@ -42,6 +43,7 @@ __all__ = [
     "NodeVectors",
     "Projections",
     "Relation",
+    "RelationStats",
     "Relations",
     "Role",
     "Rule",
@@ -54,6 +56,7 @@ __all__ = [
     "build_features",
     "compute_node_vectors",
     "compute_projections",
+    "compute_relation_stats",
     "config_from_mapping",
     "generate",
     "generate_constraints",

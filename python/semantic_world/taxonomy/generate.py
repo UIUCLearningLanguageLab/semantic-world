@@ -15,6 +15,7 @@ from semantic_world.taxonomy.features import FeatureSet
 from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.projections import Projections, compute_projections
+from semantic_world.taxonomy.relation_stats import RelationStats, compute_relation_stats
 from semantic_world.taxonomy.rules import RuleSet, generate_rules
 from semantic_world.taxonomy.streams import Streams
 from semantic_world.taxonomy.tree import Tree, generate_tree
@@ -41,6 +42,8 @@ class TaxonomyResult:
     """The constraints and relations, or None without verbs."""
     projections: Projections | None = None
     """The agent and patient projections, or None without verbs."""
+    relation_stats: RelationStats | None = None
+    """Category proportions, sampled pairs, verb statistics, and thematic relatedness."""
 
     @property
     def features(self) -> FeatureSet:
@@ -79,7 +82,15 @@ def generate(config: Config) -> TaxonomyResult:
     warnings = tuple(rules.warnings) + tuple(tree.warnings)
     if verbs is not None:
         warnings += tuple(verbs.tree.warnings)
+    relation_stats = (
+        None
+        if relations is None
+        else compute_relation_stats(config, tree, instances, relations, vectors, streams.pairs)
+    )
     summary = summary_stats(rules, tree, instances, warnings)
+    if verbs is not None and relations is not None and projections is not None:
+        assert relation_stats is not None
+        summary["verbs"] = verb_summary(verbs, relations, projections, relation_stats)
     return TaxonomyResult(
         config=config,
         stream_seeds=streams.seeds(),
@@ -94,4 +105,26 @@ def generate(config: Config) -> TaxonomyResult:
         verbs=verbs,
         relations=relations,
         projections=projections,
+        relation_stats=relation_stats,
     )
+
+
+def verb_summary(
+    verbs: VerbTaxonomy, relations: Relations, projections: Projections, stats: RelationStats
+) -> dict[str, Any]:
+    """The verb block of ``summary.yaml``."""
+    families: dict[str, int] = {}
+    for constraint in relations.constraints:
+        families[constraint.family] = families.get(constraint.family, 0) + 1
+    approximate = int(projections.agent_approximate.sum() + projections.patient_approximate.sum())
+    total = 2 * len(projections.verb_labels)
+    return {
+        "verb_features": len(verbs.features),
+        "verb_categories": len(verbs.categories),
+        "verbs": len(verbs.verbs),
+        "constraints": len(relations.constraints),
+        "constraint_families": families,
+        "approximate_projections": approximate / total if total else 0.0,
+        "proportions_estimated": stats.estimated,
+        "pairs_short": stats.pairs_short,
+    }

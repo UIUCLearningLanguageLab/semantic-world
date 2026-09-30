@@ -230,6 +230,12 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
     extra: dict[str, pl.DataFrame] = {}
     if result.projections is not None:
         extra["projections.csv"] = projections_frame(list(instances.labels), result.projections)
+    if (
+        result.verbs is not None
+        and result.relations is not None
+        and result.relation_stats is not None
+    ):
+        extra.update(verb_frames(result))
     bins = result.config.scalars.thermometer_bins
     if k and bins:
         extra["instances_scalar_codes.csv"] = thermometer_frame(
@@ -247,6 +253,84 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         "similarity.csv": result.similarity,
         "feature_stats.csv": result.feature_stats,
         **extra,
+    }
+
+
+RELATION_FILES = (
+    "verb_features.csv",
+    "verb_tree.csv",
+    "verb_roles.csv",
+    "verbs_generative.csv",
+    "verbs_defining.csv",
+    "constraints.yaml",
+    "relations.yaml",
+    "projections.csv",
+    "relation_proportions.csv",
+    "relation_pairs.csv",
+    "verb_stats.csv",
+    "thematic.csv",
+)
+"""The files written only when verbs are on."""
+
+
+def verb_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
+    """The verb and relation CSV tables."""
+    verbs = result.verbs
+    relations = result.relations
+    stats = result.relation_stats
+    assert verbs is not None and relations is not None and stats is not None
+    features = verbs.features
+    labels = list(features.labels)
+    category_labels = [c.label for c in verbs.categories]
+    constraint_of = {c.label[2:]: c.label for c in relations.feature_constraints}
+    verb_features = pl.DataFrame(
+        {
+            "label": labels,
+            "base_rate": pl.Series(
+                [float("nan") if f.base_rate is None else f.base_rate for f in features.features],
+                dtype=pl.Float64,
+            ),
+            "constraint": [constraint_of[label] for label in labels],
+        }
+    )
+    verb_tree = pl.DataFrame(
+        {
+            "label": category_labels,
+            "parent": [None if c.parent is None else c.parent.label for c in verbs.categories],
+            "level": [c.level for c in verbs.categories],
+            "children": [len(c.children) for c in verbs.categories],
+        },
+        schema={"label": pl.Utf8, "parent": pl.Utf8, "level": pl.Int64, "children": pl.Int64},
+    )
+    role_names = {int(r): r.csv_name for r in Role}
+    role_rows: dict[str, list] = {"category": [], "feature": [], "role": []}
+    for category in verbs.categories:
+        for k, label in enumerate(labels):
+            role_rows["category"].append(category.label)
+            role_rows["feature"].append(label)
+            role_rows["role"].append(role_names[int(category.roles[k])])
+    generative = _matrix_frame(
+        "label",
+        category_labels,
+        tuple(labels),
+        [
+            verbs.tree.generative_matrix()[:, j].astype(np.int64).tolist()
+            for j in range(len(labels))
+        ],
+    )
+    defining = _matrix_frame(
+        "label", category_labels, tuple(labels), _binary_or_nan(verbs.defining_matrix())
+    )
+    return {
+        "verb_features.csv": verb_features,
+        "verb_tree.csv": verb_tree,
+        "verb_roles.csv": pl.DataFrame(role_rows),
+        "verbs_generative.csv": generative,
+        "verbs_defining.csv": defining,
+        "relation_proportions.csv": stats.proportions,
+        "relation_pairs.csv": stats.pairs,
+        "verb_stats.csv": stats.verb_stats,
+        "thematic.csv": stats.thematic,
     }
 
 
@@ -294,6 +378,13 @@ def write_result(result: TaxonomyResult, path: str | Path | None = None) -> Path
     (folder / "config.yaml").write_text(_yaml(config_data), encoding="utf-8")
     (folder / "rules.yaml").write_text(_yaml(result.rules.records()), encoding="utf-8")
     (folder / "summary.yaml").write_text(_yaml(result.summary), encoding="utf-8")
+    if result.relations is not None:
+        (folder / "constraints.yaml").write_text(
+            _yaml(result.relations.records()), encoding="utf-8"
+        )
+        (folder / "relations.yaml").write_text(
+            _yaml(result.relations.relation_records()), encoding="utf-8"
+        )
     for name, frame in result_frames(result).items():
         frame.write_csv(folder / name, float_precision=6, null_value="")
     return folder

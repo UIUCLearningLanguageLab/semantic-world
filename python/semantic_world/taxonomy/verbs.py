@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from semantic_world.taxonomy.config import Config, VerbsConfig
 from semantic_world.taxonomy.features import Feature, FeatureSet
 from semantic_world.taxonomy.rules import RuleSet
@@ -37,6 +39,15 @@ class VerbTaxonomy:
     @property
     def categories(self) -> tuple[Category, ...]:
         return self.tree.categories
+
+    def defining_matrix(self) -> np.ndarray:
+        """One row per verb category: the value of every verb feature that is defining at the
+        category (inherited or new), NaN elsewhere."""
+        rows = np.full((len(self.categories), len(self.features)), np.nan)
+        for i, category in enumerate(self.categories):
+            mask = category.defining_mask()
+            rows[i, mask] = category.free_values[mask]
+        return rows
 
 
 def verb_feature_set(verbs: VerbsConfig) -> FeatureSet:

@@ -30,10 +30,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     summary = result.summary
-    print(
+    line = (
         f"wrote {folder}: {summary['categories']} categories, {summary['leaves']} leaves, "
         f"{summary['instances']} instances, {len(result.rules.rules)} rules"
     )
+    if "verbs" in summary:
+        line += (
+            f", {summary['verbs']['verbs']} verbs, {summary['verbs']['constraints']} constraints"
+        )
+    print(line)
     for warning in result.warnings:
         print(f"warning: {warning}")
     return 0
