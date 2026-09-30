@@ -151,6 +151,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"{augmentation['computed']} computed, {augmentation['read_from_cache']} read "
                 f"from the cache, {len(augmentation['skipped'])} skipped"
             )
+            for quantity, counts in augmentation["achieved"].items():
+                print(
+                    f"  {quantity}: {counts['tokens']} tokens, {counts['over_5_percent']} miss "
+                    f"the target by more than 5%, {counts['over_10_percent']} by more than 10%"
+                    + (f", {counts['unmeasured']} unmeasured" if counts["unmeasured"] else "")
+                )
     for name, frontend in summary.get("frontends", {}).items():
         state = "already stored" if frontend["reused"] else "computed"
         print(
@@ -176,11 +182,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _evaluation_text(table) -> str:
     """The stored embeddings' rows of the evaluation table, as aligned text: every embedding for
-    each kind of form, for all words, and again without the long_synthesis words when there are
-    any. The layer sweep is shown for the content words."""
+    each kind of form and set of tokens, for all words, and again without the long_synthesis
+    words when there are any. The layer sweep is shown for the clean content words."""
     lines = [
-        f"  {'embedding':26s} {'kind':>9s} {'words':>22s} {'dims':>5s}  {'within':>7s} "
-        f"{'across':>7s} {'held-out':>8s}  {'spearman':>8s} {'auc':>6s} {'1v2':>6s} {'stem':>6s}"
+        f"  {'embedding':26s} {'kind':>9s} {'tokens':>14s} {'words':>22s} {'dims':>5s}  "
+        f"{'within':>7s} {'across':>7s} {'held-out':>8s}  {'spearman':>8s} {'auc':>6s} "
+        f"{'1v2':>6s} {'stem':>6s} {'robust':>6s}"
     ]
 
     def shown(value, width: int) -> str:
@@ -191,23 +198,26 @@ def _evaluation_text(table) -> str:
             f"{shown(row['ap_within_speaker'], 7)} {shown(row['ap_across_train'], 7)} "
             f"{shown(row['ap_held_out'], 8)}  {shown(row['fidelity_spearman'], 8)} "
             f"{shown(row['fidelity_auc'], 6)} {shown(row['fidelity_auc_1v2'], 6)} "
-            f"{shown(row['stem_auc'], 6)}"
+            f"{shown(row['stem_auc'], 6)} {shown(row['robustness_ap'], 6)}"
         )
 
     for row in table.filter(table["basis"] == "stored").iter_rows(named=True):
         name = row["embedding"] + ("" if row["layer"] is None else f" (layer {row['layer']})")
         lines.append(
-            f"  {name:26s} {row['kind']:>9s} {row['word_set']:>22s} {row['dims']:5d}  "
-            f"{measures(row)}"
+            f"  {name:26s} {row['kind']:>9s} {row['tokens']:>14s} {row['word_set']:>22s} "
+            f"{row['dims']:5d}  {measures(row)}"
         )
     sweep = table.filter(
-        (table["basis"] == "sweep") & (table["word_set"] == "all") & (table["kind"] == "content")
+        (table["basis"] == "sweep")
+        & (table["word_set"] == "all")
+        & (table["kind"] == "content")
+        & (table["tokens"] == "clean")
     )
     for name in sweep["embedding"].unique(maintain_order=True):
-        lines.append(f"  layer sweep of {name} (content words, on the evaluation sample):")
+        lines.append(f"  layer sweep of {name} (clean content words, on the evaluation sample):")
         for row in sweep.filter(sweep["embedding"] == name).iter_rows(named=True):
             mark = "*" if row["configured"] else " "
-            lines.append(f"   {mark}layer {row['layer']:2d} {'':48s}{measures(row)}")
+            lines.append(f"   {mark}layer {row['layer']:2d} {'':63s}{measures(row)}")
     return "\n".join(lines)
 
 

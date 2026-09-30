@@ -76,6 +76,9 @@ class Token:
     augmentation: str = ""
     """For an augmented token, the recipe and every drawn value, as JSON, with the source
     token's label; empty for a synthesized token."""
+    achieved: str = ""
+    """For an augmented token, each transformation's target and the value measured after it,
+    as JSON; empty for a synthesized token."""
 
     def record(self) -> dict[str, Any]:
         return {
@@ -88,6 +91,7 @@ class Token:
             "rate_factor": self.rate_factor,
             "pitch_semitones": self.pitch_semitones,
             "augmentation": self.augmentation,
+            "achieved": self.achieved,
             "duration": self.duration,
             "tries": self.tries,
             "peak": self.peak,

@@ -160,7 +160,9 @@ augmentation:
   speakers: train     # all, train, or held_out
 ```
 
-Each recipe applies its transformations in the order manipulation (Praat's "Change gender": pitch median, pitch range, formant shift, duration), speed and pitch, reverberation (a simulated room), and noise (white, pink, speech-shaped, or babble from other tokens), with every value drawn from its range. An augmented token is labeled after its source (`W.12.S.3.2.A.1` is recipe 1 applied to that token), keeps the source's word and speaker, and records the recipe and the drawn values in the `augmentation` column of `tokens.csv`. Augmented clips live in the cache like any clip. They go through the front ends and embeddings like any token; `SoundEmbeddings.token_augmented` marks them.
+Each recipe applies its transformations in the order manipulation (Praat's "Change gender": pitch median, pitch range, formant shift, duration), speed and pitch, reverberation (a simulated room), and noise (white, pink, speech-shaped, or babble from other tokens), with every value drawn from its range. An augmented token is labeled after its source (`W.12.S.3.2.A.1` is recipe 1 applied to that token), keeps the source's word and speaker, and records the recipe and the drawn values in the `augmentation` column of `tokens.csv`. The `achieved` column holds each transformation's target beside the value measured right after it (median pitch, pitch range, formant ratio, duration, reverberation time, signal-to-noise ratio), and `summary.yaml` counts the tokens that miss a target by more than 5% and 10%. Augmented clips live in the cache like any clip. They go through the front ends and embeddings like any token; `SoundEmbeddings.token_augmented` marks them. Word embeddings leave augmented tokens out unless `word_embeddings: {tokens: all}`.
+
+With augmentation on, the evaluation gives every measure for clean tokens, augmented tokens, both, and each recipe (the `tokens` column), plus a robustness measure: how well a token retrieves its own word's clean embedding (`robustness_ap`, with `robustness_top1` for the share of tokens whose nearest word is their own).
 
 The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
 
@@ -263,6 +265,7 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
 | `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
 | `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
+| `word_embeddings.tokens` | clean | Which training-speaker tokens make a word's embedding: `clean` leaves augmented tokens out, `all` includes them. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 
 To turn an engine off, set it to null, for example `espeak: null` under `synthesis.engines`. Leaving an engine out keeps it on, with its defaults.

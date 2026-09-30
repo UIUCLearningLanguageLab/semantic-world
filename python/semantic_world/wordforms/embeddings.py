@@ -90,12 +90,21 @@ def token_layout(words: list[WordForm], synthesis: Synthesis):
     return token_words, token_speakers, ~held_out[token_speakers]
 
 
-def word_means(tokens: np.ndarray, token_words: np.ndarray, train: np.ndarray, count: int):
-    """Each word's embedding: the mean of its training-speaker tokens."""
+def word_embedding_tokens(config: Config, synthesis: Synthesis, train: np.ndarray) -> np.ndarray:
+    """Which tokens make the word embeddings: the training-speaker tokens, without the augmented
+    ones unless ``word_embeddings.tokens`` is ``all``."""
+    if config.word_embeddings.tokens == "all":
+        return train
+    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    return train & clean
+
+
+def word_means(tokens: np.ndarray, token_words: np.ndarray, chosen: np.ndarray, count: int):
+    """Each word's embedding: the mean of its ``chosen`` tokens."""
     types = np.zeros((count, tokens.shape[1]), dtype=np.float64)
     totals = np.zeros(count, dtype=np.int64)
-    np.add.at(types, token_words[train], np.asarray(tokens, dtype=np.float64)[train])
-    np.add.at(totals, token_words[train], 1)
+    np.add.at(types, token_words[chosen], np.asarray(tokens, dtype=np.float64)[chosen])
+    np.add.at(totals, token_words[chosen], 1)
     if (totals == 0).any():
         raise ValueError("a word has no tokens from training speakers")
     return (types / totals[:, None]).astype(np.float32)
@@ -133,6 +142,7 @@ def compute_embedding(
         source = frontend.meta()
     else:
         source = {"sample_rate": config.synthesis.sample_rate}
+    source["word_embedding_tokens"] = config.word_embeddings.tokens
     mark = fingerprint(embedding, synthesis, source)
     keep_layers = not fixed and embedding.store_layers
     files = ["tokens.npy", "types.npy", "meta.yaml"] + (["layers.npy"] if keep_layers else [])
@@ -144,6 +154,7 @@ def compute_embedding(
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "meta.yaml").unlink(missing_ok=True)  # an unfinished write is never up to date
     token_words, _, train = token_layout(words, synthesis)
+    chosen = word_embedding_tokens(config, synthesis, train)
     count = len(synthesis.tokens)
     meta: dict[str, Any] = {
         "name": embedding.name,
@@ -168,7 +179,8 @@ def compute_embedding(
             # The projection is fitted on the content words, so that closed-class forms never
             # change a content word's embedding.
             content = np.array([word.kind == "content" for word in words], dtype=bool)
-            fitted = train & content[token_words]
+            clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+            fitted = train & content[token_words] & clean
             projection = fit_pca(features[fitted], embedding.pca_dims)
             projection.save(folder / "projection.npz")
             tokens = projection.apply(features)
@@ -177,7 +189,8 @@ def compute_embedding(
             meta["projection"] = {
                 "kind": "pca",
                 "fitted_on": "training-speaker tokens"
-                + ("" if content.all() else " of content words"),
+                + ("" if content.all() else " of content words")
+                + ("" if clean.all() else ", without augmented tokens"),
                 "fitted_tokens": int(fitted.sum()),
                 "dims": projection.dims,
                 "explained_variance": round(kept / total, 6) if total > 0 else None,
@@ -225,13 +238,15 @@ def compute_embedding(
         meta["device"] = encoder.device
     tokens = np.ascontiguousarray(tokens, dtype=np.float32)
     np.save(folder / "tokens.npy", tokens)
-    np.save(folder / "types.npy", word_means(tokens, token_words, train, len(words)))
+    np.save(folder / "types.npy", word_means(tokens, token_words, chosen, len(words)))
     meta.update(
         {
             "dims": int(tokens.shape[1]),
             "tokens": count,
             "words": len(words),
-            "word_embedding": "mean over training-speaker tokens",
+            "word_embedding": "mean over training-speaker tokens"
+            + (", without augmented tokens" if config.word_embeddings.tokens == "clean" else ""),
+            "word_embedding_tokens": config.word_embeddings.tokens,
             "fingerprint": mark,
         }
     )

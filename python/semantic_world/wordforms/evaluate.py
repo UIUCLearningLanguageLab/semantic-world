@@ -36,10 +36,23 @@ words only has the ``content`` rows alone.
   form is closer to its own stem than to another stem, averaged over the inflected forms. The
   other stems are the stems of the other inflected forms. 0.5 is chance. The measure is given in
   the ``inflected`` rows and in the ``all`` rows.
+
+A run with augmented tokens reports every measure separately for the clean (synthesized) tokens,
+the augmented tokens, and both together (``tokens``: ``clean``, ``augmented``, ``all``), each
+with its own sample, and once more for each recipe (``recipe:<name>``) on the widest kind. A run
+without augmentation has the ``clean`` rows alone.
+
+- **Robustness**: how well a token retrieves its own word's clean embedding. Pairs of a sampled
+  token and a word embedding (the mean of the word's clean training tokens) are ranked by cosine
+  distance, and the average precision for the pairs of a token with its own word is reported
+  (``robustness_ap``; chance is one over the number of words), with the share of tokens whose
+  nearest word embedding is their own (``robustness_top1``). For clean tokens the measure is a
+  baseline, since a training token is part of its own word's mean.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,7 +61,7 @@ import numpy as np
 import polars as pl
 
 from semantic_world.wordforms.config import Config
-from semantic_world.wordforms.embeddings import EmbeddingStore, token_layout
+from semantic_world.wordforms.embeddings import EmbeddingStore, token_layout, word_means
 from semantic_world.wordforms.english import edit_distance
 from semantic_world.wordforms.generate import WordForm
 from semantic_world.wordforms.synth import Synthesis
@@ -73,6 +86,7 @@ EVAL_COLUMNS = (
     "basis",
     "word_set",
     "kind",
+    "tokens",
     "dims",
     "ap_within_speaker",
     "chance_within_speaker",
@@ -88,6 +102,9 @@ EVAL_COLUMNS = (
     "auc_1v2_words",
     "stem_auc",
     "stem_auc_forms",
+    "robustness_ap",
+    "robustness_top1",
+    "robustness_chance",
     "tokens_evaluated",
     "words_evaluated",
 )
@@ -194,6 +211,26 @@ def neighbor_auc(
     return float(np.mean(values)), len(values)
 
 
+def robustness(tokens: np.ndarray, token_words: np.ndarray, types: np.ndarray, present):
+    """How well tokens retrieve their own word's embedding among the ``present`` words: the
+    average precision of the pairs of a token with its own word, over all token-word pairs
+    ranked by cosine distance; the share of tokens whose nearest word is their own; and chance
+    (one over the number of words). NaN when a token's word is absent or nothing is present."""
+    words = np.flatnonzero(present)
+    keep = present[token_words]
+    if len(words) < 2 or not keep.any():
+        return float("nan"), float("nan"), float("nan")
+    vectors = np.asarray(tokens[keep], dtype=np.float64)
+    means = np.asarray(types[words], dtype=np.float64)
+    unit_tokens = vectors / np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-12)
+    unit_types = means / np.maximum(np.linalg.norm(means, axis=1, keepdims=True), 1e-12)
+    distances = 1.0 - unit_tokens @ unit_types.T
+    same = token_words[keep][:, None] == words[None, :]
+    ap = average_precision(distances.ravel(), same.ravel())
+    top1 = float(same[np.arange(len(distances)), np.argmin(distances, axis=1)].mean())
+    return ap, top1, 1.0 / len(words)
+
+
 def stem_auc(forms: np.ndarray, stems: np.ndarray, own: np.ndarray) -> tuple[float, int]:
     """The stem AUC, and the number of inflected forms it is averaged over.
 
@@ -283,29 +320,49 @@ def evaluate_embeddings(
     did not store its layers; ``sweep=False`` leaves the sweep out."""
     token_words, token_speakers, train = token_layout(words, synthesis)
     word_kinds = np.array([word.kind for word in words])
-    # The groups of words that get rows: each kind, and all forms together when the run has
-    # closed-class forms. Each group has its own sample of tokens, the content words' first.
-    groups = {kind: word_kinds == kind for kind in KINDS if (word_kinds == kind).any()}
-    if set(groups) != {"content"}:
-        groups[ALL_KINDS] = np.ones(len(words), dtype=bool)
-    samples: dict[str, np.ndarray] = {}
-    for group, members in groups.items():
-        own = np.flatnonzero(members[token_words])
-        samples[group] = own[evaluation_sample(len(own), rng, max_tokens)]
+    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    recipe_of = np.array(
+        [json.loads(t.augmentation)["recipe"] if t.augmentation else "" for t in synthesis.tokens]
+    )
+    # The kinds of words that get rows: each kind, and all forms together when the run has
+    # closed-class forms. The token sets: the clean tokens, and with augmentation also the
+    # augmented tokens, all tokens, and each recipe's tokens (on the widest kind). Each group,
+    # a kind with a token set, has its own sample of tokens, the clean content words' first.
+    kinds = {kind: word_kinds == kind for kind in KINDS if (word_kinds == kind).any()}
+    if set(kinds) != {"content"}:
+        kinds[ALL_KINDS] = np.ones(len(words), dtype=bool)
+    widest = ALL_KINDS if ALL_KINDS in kinds else "content"
+    token_sets: dict[str, np.ndarray] = {"clean": clean}
+    if not clean.all():
+        token_sets["augmented"] = ~clean
+        token_sets["all"] = np.ones(len(clean), dtype=bool)
+        for name in dict.fromkeys(recipe_of[~clean]):
+            token_sets[f"recipe:{name}"] = recipe_of == name
+    groups: list[tuple[str, str]] = [
+        (kind, tokens)
+        for kind in kinds
+        for tokens in token_sets
+        if not tokens.startswith("recipe:") or kind == widest
+    ]
+    samples: dict[tuple[str, str], np.ndarray] = {}
+    for kind, tokens in groups:
+        own = np.flatnonzero(kinds[kind][token_words] & token_sets[tokens])
+        samples[kind, tokens] = own[evaluation_sample(len(own), rng, max_tokens)]
     phonemes = edit_distance_matrix(words)
     flagged = np.array([bool(word.long_synthesis) for word in words])
     index = {word.label: i for i, word in enumerate(words)}
     stem_of = np.array([index.get(word.stem, -1) if word.stem else -1 for word in words])
     word_sets: dict[str, dict[str, np.ndarray]] = {}
-    in_sample: dict[str, dict[str, np.ndarray]] = {}
-    pairs: dict[str, dict[str, PairSets]] = {}
-    for group, members in groups.items():
-        sample = samples[group]
-        word_sets[group] = {"all": members}
+    for kind, members in kinds.items():
+        word_sets[kind] = {"all": members}
         if (flagged & members).any():
-            word_sets[group]["without_long_synthesis"] = members & ~flagged
+            word_sets[kind]["without_long_synthesis"] = members & ~flagged
+    in_sample: dict[tuple[str, str], dict[str, np.ndarray]] = {}
+    pairs: dict[tuple[str, str], dict[str, PairSets]] = {}
+    for group in groups:
+        sample = samples[group]
         in_sample[group] = {
-            name: keep[token_words[sample]] for name, keep in word_sets[group].items()
+            name: keep[token_words[sample]] for name, keep in word_sets[group[0]].items()
         }
         pairs[group] = {
             name: PairSets(
@@ -315,10 +372,10 @@ def evaluate_embeddings(
         }
     rows: list[dict[str, Any]] = []
 
-    def stem_measure(group, name, keep, types, present, stem_types, stem_present):
-        """The stem AUC of a group's inflected forms. A form counts when the form and its stem
+    def stem_measure(kind, name, keep, types, present, stem_types, stem_present):
+        """The stem AUC of a kind's inflected forms. A form counts when the form and its stem
         both have a word embedding, and neither is left out of the word set."""
-        if group not in ("inflected", ALL_KINDS):
+        if kind not in ("inflected", ALL_KINDS):
             return float("nan"), 0
         stem_kept = stem_present & ~flagged if name == "without_long_synthesis" else stem_present
         forms = np.flatnonzero((word_kinds == "inflected") & keep & present & (stem_of >= 0))
@@ -326,19 +383,25 @@ def evaluate_embeddings(
         stems, own = np.unique(stem_of[forms], return_inverse=True)
         return stem_auc(types[forms], stem_types[stems], own)
 
-    def add_rows(store, group, sampled, types, present, stems, layer, configured, basis) -> None:
+    def add_rows(store, group, sampled, types, present, stems, reference, layer, configured, basis):
         """One row for each word set of a group. ``sampled`` holds the token embeddings of the
-        group's sample, ``present`` marks the words that have a word embedding in ``types``, and
-        ``stems`` gives the word embeddings of the stems with their own ``present``."""
+        group's sample, ``present`` marks the words that have a word embedding in ``types``,
+        ``stems`` gives the word embeddings of the stems with their own ``present``, and
+        ``reference`` the clean word embeddings that the robustness measure retrieves."""
         meta = store.meta
-        for name, keep in word_sets[group].items():
+        kind, tokens = group
+        for name, keep in word_sets[kind].items():
             chosen = keep & present
             distances = phonemes[np.ix_(chosen, chosen)]
             pearson, spearman = phonological_fidelity(types[chosen], distances)
             auc, auc_words = neighbor_auc(types[chosen], distances)
             hard, hard_words = neighbor_auc(types[chosen], distances, HARD_FAR_DISTANCE, True)
-            stem, stem_forms = stem_measure(group, name, keep, types, present, *stems)
-            inflected = group in ("inflected", ALL_KINDS)
+            stem, stem_forms = stem_measure(kind, name, keep, types, present, *stems)
+            inflected = kind in ("inflected", ALL_KINDS)
+            mask = in_sample[group][name]
+            robust_ap, robust_top1, robust_chance = robustness(
+                sampled[mask], token_words[samples[group]][mask], reference[0], keep & reference[1]
+            )
             rows.append(
                 {
                     "embedding": store.name,
@@ -348,9 +411,10 @@ def evaluate_embeddings(
                     "configured": configured,
                     "basis": basis,
                     "word_set": name,
-                    "kind": group,
+                    "kind": kind,
+                    "tokens": tokens,
                     "dims": int(sampled.shape[1]),
-                    **pairs[group][name].evaluate(sampled[in_sample[group][name]]),
+                    **pairs[group][name].evaluate(sampled[mask]),
                     "fidelity_pearson": pearson,
                     "fidelity_spearman": spearman,
                     "fidelity_auc": auc,
@@ -359,7 +423,10 @@ def evaluate_embeddings(
                     "auc_1v2_words": hard_words,
                     "stem_auc": stem,
                     "stem_auc_forms": stem_forms if inflected else None,
-                    "tokens_evaluated": int(in_sample[group][name].sum()),
+                    "robustness_ap": robust_ap,
+                    "robustness_top1": robust_top1,
+                    "robustness_chance": robust_chance,
+                    "tokens_evaluated": int(mask.sum()),
                     "words_evaluated": int(chosen.sum()),
                 }
             )
@@ -369,15 +436,18 @@ def evaluate_embeddings(
         pretrained = bool(store.meta["pretrained"])
         layer = store.meta["layer"] if pretrained else None
         tokens, types = store.tokens, store.types
+        # the robustness reference: each word's clean training tokens, whatever the run's
+        # word embeddings are made of
+        reference = (word_means(tokens, token_words, train & clean, len(words)), everything)
         for group in groups:
-            stored = (types, everything)
             add_rows(
                 store,
                 group,
                 tokens[samples[group]],
                 types,
                 everything,
-                stored,
+                (types, everything),
+                reference,
                 layer,
                 True,
                 "stored",
@@ -396,16 +466,31 @@ def evaluate_embeddings(
             means = {}
             for group, sample in samples.items():
                 sampled = layers[np.searchsorted(union, sample), layer]
+                # a sweep row's word embeddings are the means over the sample's training tokens
                 means[group] = (
                     sampled,
                     *sample_word_means(sampled, token_words[sample], train[sample], len(words)),
                 )
             for group in groups:
+                kind, tokens = group
                 sampled, types, present = means[group]
-                # an inflected form's stem is a content word, from the content words' sample
-                stems = means["content"][1:] if group == "inflected" else (types, present)
+                # an inflected form's stem is a content word, from the content words' sample;
+                # the robustness reference is the kind's clean sample
+                stems = means["content", tokens][1:] if kind == "inflected" else (types, present)
+                reference = means[kind, "clean"][1:]
                 configured = layer == store.meta["layer"]
-                add_rows(store, group, sampled, types, present, stems, layer, configured, "sweep")
+                add_rows(
+                    store,
+                    group,
+                    sampled,
+                    types,
+                    present,
+                    stems,
+                    reference,
+                    layer,
+                    configured,
+                    "sweep",
+                )
 
     floats = ("ap_", "chance_", "fidelity_")
     schema: dict[str, Any] = {name: pl.Float64 for name in EVAL_COLUMNS if name.startswith(floats)}
@@ -419,11 +504,15 @@ def evaluate_embeddings(
             "basis": pl.String,
             "word_set": pl.String,
             "kind": pl.String,
+            "tokens": pl.String,
             "dims": pl.Int64,
             "auc_words": pl.Int64,
             "auc_1v2_words": pl.Int64,
             "stem_auc": pl.Float64,
             "stem_auc_forms": pl.Int64,
+            "robustness_ap": pl.Float64,
+            "robustness_top1": pl.Float64,
+            "robustness_chance": pl.Float64,
             "tokens_evaluated": pl.Int64,
             "words_evaluated": pl.Int64,
         }

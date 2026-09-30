@@ -650,3 +650,148 @@ def test_all_stores_the_modulation_front_end_of_the_tiny_configuration(tmp_path,
     text = capsys.readouterr().out
     assert "front end modulation: " in text and "16 channels" in text
     assert "embedding modulation_fixed (fixed): 8 dimensions, computed" in text
+
+
+# ---------------------------------------------------------------------------------------------
+# Word embeddings, achieved values, and the evaluation with augmentation
+# ---------------------------------------------------------------------------------------------
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+def test_word_embeddings_leave_augmented_tokens_out_unless_asked(tmp_path):
+    from semantic_world.wordforms.embeddings import token_layout, word_embedding_tokens, word_means
+
+    config = stand_in_config(tmp_path, NOISE_AND_SPEED)
+    assert config.word_embeddings.tokens == "clean"
+    run = stand_in_run(tmp_path, config)
+    run.frontends = compute_frontends(config, run.synthesis, tmp_path / "run")
+    stores = compute_embeddings(config, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "run")  # fmt: skip
+    token_words, _, train = token_layout(run.lexicon.words, run.synthesis)
+    clean = np.array([not t.augmentation for t in run.synthesis.tokens])
+    chosen = word_embedding_tokens(config, run.synthesis, train)
+    assert np.array_equal(chosen, train & clean) and chosen.sum() == 24
+    store = stores["cochleagram_fixed"]
+    assert np.allclose(store.types, word_means(store.tokens, token_words, train & clean, 6), atol=1e-6)  # fmt: skip
+    assert store.meta["word_embedding_tokens"] == "clean"
+    assert "without augmented tokens" in store.meta["word_embedding"]
+    assert store.meta["projection"]["fitted_tokens"] == 24
+    # with every token, the means change and the fingerprint with them
+    data = yaml.safe_load(config.to_yaml())
+    data["word_embeddings"] = {"tokens": "all"}
+    every = parse_config(data, "all")
+    stores = compute_embeddings(every, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "run_all")  # fmt: skip
+    store_all = stores["cochleagram_fixed"]
+    assert np.array_equal(store_all.tokens, store.tokens)  # the projection is still fitted clean
+    assert np.allclose(store_all.types, word_means(store.tokens, token_words, train, 6), atol=1e-6)  # fmt: skip
+    assert not np.allclose(store_all.types, store.types)
+    assert store_all.meta["word_embedding_tokens"] == "all"
+    with pytest.raises(ConfigError) as info:
+        parse_config({"word_embeddings": {"tokens": "some"}}, "x")
+    assert info.value.field == "word_embeddings.tokens"
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+@needs_parselmouth
+@needs_pyroomacoustics
+def test_achieved_values_are_recorded_beside_their_targets(tmp_path):
+    recipes = [
+        {"name": "noisy", "noise": {"snr_db": [5, 15]}},
+        {"name": "room", "reverberation": {"rt60": [0.3, 0.6], "room_m": [4, 6]}},
+        {"name": "faster", "speed_pitch": {"speed": [1.1, 1.3], "pitch_semitones": [1, 3]}},
+        {"name": "longer", "manipulation": {"duration_factor": [1.2, 1.4], "pitch_range_factor": [0.5, 0.8]}},
+    ]  # fmt: skip
+    run = stand_in_run(tmp_path, stand_in_config(tmp_path, recipes, proportion=0.4))
+    synthesis = run.synthesis
+    seen = set()
+    for token in synthesis.tokens:
+        if not token.augmentation:
+            assert token.achieved == ""
+            continue
+        record = json.loads(token.augmentation)
+        achieved = json.loads(token.achieved)
+        seen.add(record["recipe"])
+        for entry in achieved.values():
+            assert set(entry) == {"target", "measured", "miss"}
+            if entry["measured"] is not None and abs(entry["target"]) > 1e-3:
+                # the values are rounded, so a small target gives a rough miss
+                assert entry["miss"] == pytest.approx(abs(entry["measured"] / entry["target"] - 1), rel=0.01, abs=1e-5)  # fmt: skip
+        if record["recipe"] == "noisy":
+            assert set(achieved) == {"snr_db"}
+            assert achieved["snr_db"]["target"] == record["noise"]["snr_db"]
+            assert achieved["snr_db"]["miss"] < 1e-6  # exact by construction
+        elif record["recipe"] == "room":
+            assert set(achieved) == {"rt60_s"}
+            assert achieved["rt60_s"]["target"] == record["reverberation"]["rt60"]
+            assert achieved["rt60_s"]["measured"] > 0.1
+        elif record["recipe"] == "faster":
+            assert set(achieved) == {"speed_duration_s", "speed_pitch_median_hz"}
+            assert achieved["speed_duration_s"]["miss"] < 0.01
+            assert achieved["speed_duration_s"]["measured"] == pytest.approx(token.duration, abs=1e-5)  # fmt: skip
+        else:
+            assert set(achieved) == {"duration_s", "pitch_range_semitones"}
+            assert achieved["duration_s"]["miss"] < 0.01
+    assert seen == {"noisy", "room", "faster", "longer"}
+    summary = synthesis.augmentation["achieved"]
+    assert set(summary) == {"snr_db", "rt60_s", "speed_duration_s", "speed_pitch_median_hz", "duration_s", "pitch_range_semitones"}  # fmt: skip
+    for counts in summary.values():
+        assert set(counts) == {"tokens", "unmeasured", "over_5_percent", "over_10_percent"}
+        assert counts["over_10_percent"] <= counts["over_5_percent"] <= counts["tokens"]
+    assert summary["snr_db"]["over_5_percent"] == 0
+    assert summary["duration_s"]["over_5_percent"] == 0
+    # the run folder has the column, and a second run reads the values from the cache
+    run.write(tmp_path / "run")
+    table = pl.read_csv(tmp_path / "run" / "tokens.csv")
+    assert "achieved" in table.columns
+    assert json.loads(table.filter(pl.col("augmentation").is_not_null())["achieved"][0])
+    again = stand_in_run(tmp_path, stand_in_config(tmp_path, recipes, proportion=0.4))
+    assert again.synthesis.augmentation["read_from_cache"] == len(
+        [t for t in synthesis.tokens if t.augmentation]
+    )
+    assert [t.achieved for t in again.synthesis.tokens] == [t.achieved for t in synthesis.tokens]
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+def test_evaluation_by_token_set_and_robustness(tmp_path):
+    from semantic_world.wordforms.evaluate import evaluate_embeddings, robustness
+
+    # the measure itself: a token nearest its own word retrieves it
+    types = np.eye(3)
+    tokens = np.array([[0.9, 0.1, 0.0], [0.0, 1.0, 0.1], [0.1, 0.0, 0.9], [0.5, 0.6, 0.0]])
+    ap, top1, chance = robustness(tokens, np.array([0, 1, 2, 0]), types, np.ones(3, dtype=bool))
+    assert top1 == 0.75 and chance == pytest.approx(1 / 3) and 0.5 < ap < 1.0
+    assert np.isnan(robustness(tokens, np.array([0, 1, 2, 0]), types, np.zeros(3, dtype=bool))[0])
+    config = stand_in_config(tmp_path, NOISE_AND_SPEED)
+    run = stand_in_run(tmp_path, config)
+    run.frontends = compute_frontends(config, run.synthesis, tmp_path / "run")
+    stores = compute_embeddings(config, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "run")  # fmt: skip
+    table = evaluate_embeddings(stores, run.lexicon.words, run.synthesis, run.streams.eval, config=config)  # fmt: skip
+    sets = ["clean", "augmented", "all", "recipe:noisy", "recipe:faster"]
+    assert table["tokens"].to_list() == sets * 2
+    assert table["kind"].to_list() == ["content"] * 10
+    by = {(r["embedding"], r["tokens"]): r for r in table.iter_rows(named=True)}
+    for name in stores:
+        assert by[name, "clean"]["tokens_evaluated"] == 36
+        assert by[name, "augmented"]["tokens_evaluated"] == 72
+        assert by[name, "all"]["tokens_evaluated"] == 108
+        assert by[name, "recipe:noisy"]["tokens_evaluated"] == 36
+        for tokens in sets:
+            row = by[name, tokens]
+            assert row["robustness_chance"] == pytest.approx(1 / 6)
+            assert 0 <= row["robustness_top1"] <= 1 and row["robustness_ap"] > row["robustness_chance"]  # fmt: skip
+        # clean tokens retrieve their own word best: they are part of its mean
+        assert by[name, "clean"]["robustness_ap"] >= by[name, "augmented"]["robustness_ap"]
+    # a run without augmentation has the clean rows only, and every column
+    plain = stand_in_config(tmp_path / "plain", NOISE_AND_SPEED)
+    plain = parse_config({**yaml.safe_load(plain.to_yaml()), "augmentation": None}, "plain")
+    run = stand_in_run(tmp_path / "plain", plain)
+    run.frontends = compute_frontends(plain, run.synthesis, tmp_path / "plain" / "run")
+    stores = compute_embeddings(plain, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "plain" / "run")  # fmt: skip
+    table = evaluate_embeddings(stores, run.lexicon.words, run.synthesis, run.streams.eval, config=plain)  # fmt: skip
+    assert table["tokens"].to_list() == ["clean", "clean"]
+    assert table["robustness_ap"].drop_nulls().len() == 2

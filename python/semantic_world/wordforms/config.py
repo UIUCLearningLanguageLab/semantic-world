@@ -51,6 +51,7 @@ LATER_STAGES = {
 FRONTENDS = ("waveform", "logmel", "cochleagram", "modulation")
 NOISE_KINDS = ("white", "pink", "speech", "babble")
 AUGMENTED_SPEAKERS = ("all", "train", "held_out")
+WORD_EMBEDDING_TOKENS = ("clean", "all")
 
 
 class ConfigError(ValueError):
@@ -345,6 +346,17 @@ EmbeddingConfig = FixedEmbeddingConfig | PretrainedEmbeddingConfig
 
 
 @dataclass(frozen=True)
+class WordEmbeddingsConfig:
+    """Which tokens make a word's embedding: the training-speaker tokens without augmentation
+    (``clean``, the default), or every training-speaker token (``all``)."""
+
+    tokens: str
+
+    def resolved(self) -> dict[str, Any]:
+        return {"tokens": self.tokens}
+
+
+@dataclass(frozen=True)
 class AssignmentConfig:
     mode: str
     meanings: str | None
@@ -543,6 +555,7 @@ class Config:
     """None: the run has content words only."""
     augmentation: AugmentationConfig | None
     """None: no augmented tokens."""
+    word_embeddings: WordEmbeddingsConfig
     assignment: AssignmentConfig
     device: str
 
@@ -557,6 +570,7 @@ class Config:
             "embeddings": [e.resolved() for e in self.embeddings],
             "closed_class": None if self.closed_class is None else self.closed_class.resolved(),
             "augmentation": None if self.augmentation is None else self.augmentation.resolved(),
+            "word_embeddings": self.word_embeddings.resolved(),
             "assignment": self.assignment.resolved(),
             "device": self.device,
         }
@@ -1349,6 +1363,11 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     embeddings = _read_embeddings(root, frontends)
     closed_class = _read_closed_class(root, wordforms.count)
     augmentation = _read_augmentation(root)
+    word_node = root.mapping("word_embeddings")
+    word_embeddings = WordEmbeddingsConfig(
+        tokens=word_node.choice("tokens", "clean", WORD_EMBEDDING_TOKENS)
+    )
+    word_node.finish()
     assignment = _read_assignment(root.mapping("assignment"))
     device = root.choice("device", "auto", DEVICES)
     root.get("provenance", None, nullable=True)  # written by a run; ignored when read back
@@ -1363,6 +1382,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         embeddings=embeddings,
         closed_class=closed_class,
         augmentation=augmentation,
+        word_embeddings=word_embeddings,
         assignment=assignment,
         device=device,
     )

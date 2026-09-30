@@ -260,6 +260,41 @@ def manipulate(
     )
 
 
+FORMANT_CEILING = 5500.0
+"""The highest formant frequency Praat looks for, in Hz."""
+
+
+def measure_formants(
+    clip: np.ndarray,
+    rate: int,
+    time_range: tuple[float, float] | None = None,
+    count: int = 3,
+    voiced_only: bool = True,
+) -> tuple[float, ...]:
+    """The mean of the first ``count`` formant frequencies (Hz) over the frames of a clip, or of
+    a span, from Praat's Burg formant analysis, by default over the voiced frames only; NaN for
+    a formant that no frame has."""
+    from parselmouth.praat import call
+
+    formant = call(sound(clip, rate), "To Formant (burg)", 0.0, 5, FORMANT_CEILING, 0.025, 50.0)
+    times = np.arange(formant.n_frames) * formant.dt + formant.t1
+    if time_range is not None:
+        times = times[(times >= time_range[0]) & (times < time_range[1])]
+    if voiced_only:
+        pitch_times, hz = pitch_track(clip, rate)
+        voiced = hz[np.clip(np.searchsorted(pitch_times, times), 0, len(hz) - 1)] > 0
+        if voiced.any():
+            times = times[voiced]
+    means = []
+    for k in range(1, count + 1):
+        values = np.array(
+            [call(formant, "Get value at time", k, t, "Hertz", "Linear") for t in times]
+        )
+        values = values[np.isfinite(values)]
+        means.append(float(values.mean()) if values.size else float("nan"))
+    return tuple(means)
+
+
 def praat_version() -> str:
     """The version of Praat inside parselmouth, for provenance."""
     parselmouth = _parselmouth()

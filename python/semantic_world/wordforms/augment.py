@@ -9,7 +9,11 @@ eligible tokens. An augmented token keeps its source's word and speaker, gets th
 source clip and the drawn values, so a second run reads it back.
 
 Every draw comes from a substream of ``wordforms:augment`` named by the source token and the
-recipe, so augmenting one token never changes another. Noise is generated from the same
+recipe, so augmenting one token never changes another. Every transformation's target is checked:
+the value it aimed at and the value measured right after it (median pitch, pitch range, formant
+ratio, duration, reverberation time, signal-to-noise ratio) go in the token's ``achieved``
+record, and the summary counts the tokens that miss a target by more than 5% and by more than
+10%. Noise is generated from the same
 substream. Reverberation uses ``pyroomacoustics`` (MIT) and manipulation uses Praat
 (:mod:`semantic_world.wordforms.praat`); both are imported only where used.
 
@@ -69,7 +73,44 @@ class Augmentation:
             "read_from_cache": self.cached,
             "by_recipe": recipes,
             "skipped": self.skipped or [],
+            "achieved": achieved_summary(self.tokens),
         }
+
+
+MISS_LEVELS = (0.05, 0.10)
+"""The relative errors that the achieved-value summary counts misses against."""
+
+
+def achieved_summary(tokens: list[Token]) -> dict[str, dict[str, int]]:
+    """For each measured quantity, over the augmented tokens: how many tokens it was measured on,
+    how many could not be measured, and how many miss their target by more than 5% and 10%."""
+    summary: dict[str, dict[str, int]] = {}
+    for token in tokens:
+        if not token.achieved:
+            continue
+        for name, entry in json.loads(token.achieved).items():
+            counts = summary.setdefault(
+                name, {"tokens": 0, "unmeasured": 0, "over_5_percent": 0, "over_10_percent": 0}
+            )
+            counts["tokens"] += 1
+            if entry["miss"] is None:
+                counts["unmeasured"] += 1
+                continue
+            if entry["miss"] > MISS_LEVELS[0]:
+                counts["over_5_percent"] += 1
+            if entry["miss"] > MISS_LEVELS[1]:
+                counts["over_10_percent"] += 1
+    return summary
+
+
+def _achieved(target: float, measured: float) -> dict[str, float | None]:
+    # a relative miss needs a target that is not (nearly) zero, such as a flat pitch range
+    ok = bool(np.isfinite(measured)) and abs(target) > 1e-6
+    return {
+        "target": round(float(target), 6),
+        "measured": round(float(measured), 6) if np.isfinite(measured) else None,
+        "miss": round(abs(float(measured) / target - 1.0), 6) if ok else None,
+    }
 
 
 # ---------------------------------------------------------------------------------------------
@@ -188,6 +229,20 @@ def room_impulse_response(
     return np.asarray(room.rir[0][0], dtype=np.float64), float(absorption)
 
 
+def reverberation_time(rir: np.ndarray, rate: int) -> float:
+    """The reverberation time of an impulse response: the time for its Schroeder decay curve to
+    fall from -5 dB to -35 dB, doubled (T30)."""
+    energy = np.cumsum(rir[::-1] ** 2)[::-1]
+    if energy[0] <= 0:
+        return float("nan")
+    decay = 10.0 * np.log10(np.maximum(energy / energy[0], 1e-30))
+    start = int(np.argmax(decay <= -5.0))
+    end = int(np.argmax(decay <= -35.0))
+    if decay[end] > -35.0 or end <= start:
+        return float("nan")
+    return 2.0 * (end - start) / rate
+
+
 def reverberate(clip: np.ndarray, rir: np.ndarray) -> np.ndarray:
     from scipy.signal import fftconvolve
 
@@ -294,14 +349,21 @@ class Augmenter:
 
     def apply(self, clip: np.ndarray, rng: np.random.Generator, settings: dict[str, Any]):
         """The augmented clip: manipulated, perturbed, reverberated, mixed with noise, trimmed,
-        and leveled. ``rng`` continues the token's substream after the draws."""
+        and leveled; and the achieved values, each measured right after its own transformation.
+        ``rng`` continues the token's substream after the draws."""
         trim = self.config.synthesis.trim
         level = self.config.synthesis.level
         out = np.asarray(clip, dtype=np.float32)
+        achieved: dict[str, Any] = {}
         if "manipulation" in settings:
             from semantic_world.wordforms import praat
 
             m = settings["manipulation"]
+            before = praat.measure_pitch(out, self.rate)
+            formants_before = (
+                praat.measure_formants(out, self.rate) if m["formant_shift_ratio"] else None
+            )
+            duration_before = len(out) / self.rate
             out = praat.manipulate(
                 out,
                 self.rate,
@@ -310,28 +372,57 @@ class Augmenter:
                 pitch_range_factor=m["pitch_range_factor"] or 1.0,
                 duration_factor=m["duration_factor"] or 1.0,
             )
+            after = praat.measure_pitch(out, self.rate)
+            if m["pitch_median_hz"]:
+                achieved["pitch_median_hz"] = _achieved(m["pitch_median_hz"], after.median_hz)
+            if m["pitch_range_factor"]:
+                achieved["pitch_range_semitones"] = _achieved(
+                    before.range_semitones * m["pitch_range_factor"], after.range_semitones
+                )
+            if m["formant_shift_ratio"]:
+                formants_after = praat.measure_formants(out, self.rate)
+                ratios = [b / a for a, b in zip(formants_before, formants_after, strict=True)]
+                achieved["formant_ratio"] = _achieved(
+                    m["formant_shift_ratio"], float(np.nanmean(ratios))
+                )
+            if m["duration_factor"]:
+                achieved["duration_s"] = _achieved(
+                    duration_before * m["duration_factor"], len(out) / self.rate
+                )
         if "speed_pitch" in settings:
             from semantic_world.wordforms import praat
 
             speed = settings["speed_pitch"]["speed"]
             semitones = settings["speed_pitch"]["pitch_semitones"]
+            before = praat.measure_pitch(out, self.rate)
+            duration_before = len(out) / self.rate
             if speed != 1.0:
                 out = audio_tools.resample(out, self.rate * speed, self.rate)
             if semitones != 0.0:
                 out = praat.change_pitch(out, self.rate, factor=2.0 ** (semitones / 12.0))
+            achieved["speed_duration_s"] = _achieved(duration_before / speed, len(out) / self.rate)
+            if speed != 1.0 or semitones != 0.0:
+                target = before.median_hz * speed * 2.0 ** (semitones / 12.0)
+                achieved["speed_pitch_median_hz"] = _achieved(
+                    target, praat.measure_pitch(out, self.rate).median_hz
+                )
         if "reverberation" in settings:
             r = settings["reverberation"]
             rir, _ = room_impulse_response(
                 self.rate, tuple(r["room_m"]), r["rt60"], r["source"], r["microphone"]
             )
+            achieved["rt60_s"] = _achieved(r["rt60"], reverberation_time(rir, self.rate))
             out = reverberate(out, rir)
             out = audio_tools.trim(out, self.rate, trim.threshold_db, trim.margin_ms)
         if "noise" in settings:
             noise = self.noise_for(rng, len(out), settings["noise"])
-            out = add_noise(out, noise, settings["noise"]["snr_db"])
-        return audio_tools.set_level(
+            mixed = add_noise(out, noise, settings["noise"]["snr_db"])
+            achieved["snr_db"] = _achieved(settings["noise"]["snr_db"], measured_snr_db(mixed, out))
+            out = mixed
+        leveled = audio_tools.set_level(
             np.asarray(out, dtype=np.float32), level.rms_db, level.max_peak
         )
+        return leveled, achieved
 
 
 def eligible_tokens(config: Config, synthesis: Synthesis) -> list[Token]:
@@ -378,17 +469,20 @@ def augment_synthesis(
         key = augmented_cache_key(config, token.sha256, drawn)
         relative = Path(f"v{CACHE_VERSION}") / "augment" / key[:2] / f"{key}.flac"
         path = cache_dir / relative
-        if path.exists():
+        sidecar = path.with_suffix(".json")  # the achieved values, beside the clip
+        if path.exists() and sidecar.exists():
             result.cached += 1
+            achieved = json.loads(sidecar.read_text(encoding="utf-8"))
         else:
             try:
-                clip = augmenter.apply(synthesis.audio(token), rng, drawn)
+                clip, achieved = augmenter.apply(synthesis.audio(token), rng, drawn)
             except (audio_tools.AudioError, RuntimeError) as error:
                 result.skipped.append(
                     {"token": token.label, "recipe": recipe.name, "reason": str(error)}
                 )
                 continue
             audio_tools.write_flac(path, clip, config.synthesis.sample_rate)
+            sidecar.write_text(json.dumps(achieved, sort_keys=True), encoding="utf-8")
             result.computed += 1
         clip, _ = audio_tools.read_flac(path)
         result.tokens.append(
@@ -402,6 +496,7 @@ def augment_synthesis(
                 peak=round(audio_tools.peak(clip), 6),
                 rms_db=round(audio_tools.rms_db(clip), 4),
                 augmentation=json.dumps(drawn, sort_keys=True),
+                achieved=json.dumps(achieved, sort_keys=True),
             )
         )
         if progress is not None:
