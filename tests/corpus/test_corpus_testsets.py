@@ -139,6 +139,17 @@ def test_changes_that_can_apply(cases) -> None:
     assert candidates(facts, instance, QUANTIFIER) == [] and candidates(facts, feature, ROLE) == []
 
 
+def test_false_events_wait_for_the_test_sets(cases) -> None:
+    # A false event is an event that did not happen in its scene: stage 6 builds those items.
+    case = cases("tiny")
+    scene = case.scenes().scene(Streams(1), 1, "I1.1.1")
+    report = scene.events[0].proposition()
+    rng = np.random.default_rng(0)
+    for change in CHANGES:
+        assert candidates(case.facts(), report, change) == []
+        assert falsify(case.facts(), report, change, rng) is None
+
+
 def test_quantifier_swaps(cases) -> None:
     case = cases("default")
     facts, truth = case.facts(), case.facts().truth

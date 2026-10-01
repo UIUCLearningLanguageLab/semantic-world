@@ -105,3 +105,9 @@ class Case:
             all_grounding=config.quantifiers.all_grounding,
             generic=config.quantifiers.generic_means,
         )
+
+    def scenes(self, **sections: Any):
+        """The scene generator of the same settings, sharing the truth tests of the facts."""
+        from semantic_world.corpus.scenes import SceneGenerator
+
+        return SceneGenerator(self.config(**sections), self.result, self.facts(**sections).truth)

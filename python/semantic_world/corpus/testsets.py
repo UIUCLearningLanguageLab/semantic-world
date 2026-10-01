@@ -24,6 +24,7 @@ from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.propositions import (
     ALL,
     CLASS,
+    EVENT,
     FEATURE_KINDS,
     GENERIC,
     MOST,
@@ -46,6 +47,12 @@ CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, ROLE)
 def candidates(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
     """Every proposition that differs from ``proposition`` by one change of the given kind,
     true or false, in a fixed order."""
+    if change not in CHANGES:
+        raise ValueError(f"unknown change {change!r}; the changes are {', '.join(CHANGES)}")
+    if proposition.level == EVENT:
+        # A false event is an event that did not happen in its scene. Stage 6 builds those
+        # items, with the test sets.
+        return []
     predicate = proposition.predicate
     subject = proposition.subject
     truth = facts.truth
@@ -95,13 +102,10 @@ def candidates(facts: Facts, proposition: Proposition, change: str) -> list[Prop
             if quantifier != proposition.quantifier
         ]
 
-    if change == ROLE:
-        if predicate.kind != VERB:
-            return []
-        swapped = dataclasses.replace(predicate, patient=subject)
-        return [dataclasses.replace(proposition, subject=predicate.patient, predicate=swapped)]
-
-    raise ValueError(f"unknown change {change!r}; the changes are {', '.join(CHANGES)}")
+    if predicate.kind != VERB:
+        return []
+    swapped = dataclasses.replace(predicate, patient=subject)
+    return [dataclasses.replace(proposition, subject=predicate.patient, predicate=swapped)]
 
 
 def falsify(

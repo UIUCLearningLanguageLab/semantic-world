@@ -10,10 +10,16 @@ before ``most`` before ``some``, and for a negative fact ``no`` before ``most ..
 
 A rule statement takes one term of the minimal DNF of a determined feature's rule: the generic
 noun as its head, the term's literals as its restriction, and the determined feature as its
-predicate ("things with wings and with feathers can fly"). A term is skipped, and counted, when
-it reads a scalar threshold, when it would need more than one relative clause (a negated IS
-literal is a relative clause), when it has more literals than ``propositions.rule_statements.
-max_literals``, when one of its concepts has no word, or when no instance satisfies it.
+predicate ("things with wings and with feathers can fly"). All of a term's negated IS literals
+go into one relative clause, joined with "and" ("things with wings that are not red and not big
+can fly"). A term is skipped, and counted, when it reads a scalar threshold, when it has more
+literals than ``propositions.rule_statements.max_literals``, when one of its concepts has no
+word, or when no instance satisfies it. A rule statement is true with ``all`` and as a bare
+generic, and its quantifier is drawn like that of any class-level proposition.
+
+An event is reported by an event-level proposition. Its verb is named at a level of the verb
+tree, as a noun names a category at a level of the noun tree: the verb itself, or a verb category
+above it ("chase" or "hunt"), drawn by ``mention.verb_level_weights``.
 """
 
 from __future__ import annotations
@@ -52,9 +58,6 @@ from semantic_world.taxonomy.rules import Threshold
 
 SKIP_THRESHOLD = "threshold"
 """The term reads a scalar threshold, which no pole adjective states."""
-SKIP_RELATIVE_CLAUSES = "relative_clauses"
-"""The term has more than one negated IS literal, so it would need more than one relative
-clause."""
 SKIP_MAX_LITERALS = "max_literals"
 SKIP_NO_WORD = "no_word"
 SKIP_NO_INSTANCE = "no_instance"
@@ -63,7 +66,6 @@ SKIP_UNCONFIRMED = "unconfirmed"
 """The cone is too large to enumerate, and the local test does not confirm the statement."""
 SKIP_REASONS = (
     SKIP_THRESHOLD,
-    SKIP_RELATIVE_CLAUSES,
     SKIP_MAX_LITERALS,
     SKIP_NO_WORD,
     SKIP_NO_INSTANCE,
@@ -273,10 +275,6 @@ class Facts:
                     skipped[SKIP_THRESHOLD] += 1
                     continue
                 literals = tuple(Literal(item.label, bool(value)) for item, value in used)
-                negated_is = sum(1 for x in literals if not x.positive and x.feature[:3] == "IS.")
-                if negated_is > 1:
-                    skipped[SKIP_RELATIVE_CLAUSES] += 1
-                    continue
                 if cap is not None and len(literals) > cap:
                     skipped[SKIP_MAX_LITERALS] += 1
                     continue
@@ -309,6 +307,39 @@ class Facts:
         }
         return tuple(statements)
 
+    # Events ----------------------------------------------------------------------------------
+
+    def event_names(self, event: Any) -> tuple[str, ...]:
+        """The labels that have a word and can name an event: its CAN feature, or its verb and
+        the verb categories above it, from the verb upward."""
+        return tuple(label for label in self.truth.verb_names(event.verb) if label in self.named)
+
+    def event_fact(self, event: Any, verb: str | None = None) -> Proposition | None:
+        """The event-level proposition that reports an event, named by its own verb or by
+        ``verb``, a verb category above it. None when the name has no word, or does not name
+        the event."""
+        candidate = event.proposition(verb)
+        if not self.expressible(candidate):
+            return None
+        return self.truth.grounded(candidate)
+
+    def draw_event(self, rng: np.random.Generator, event: Any) -> Proposition | None:
+        """The proposition that reports an event, with its verb named at a level drawn by
+        ``mention.verb_level_weights`` among the levels that have a word. A level with the
+        weight 0 is never used. None when no level can name the event."""
+        names = self.event_names(event)
+        if not event.transitive:
+            return self.event_fact(event) if names else None
+        assert self.result.verbs is not None
+        levels = self.config.mention.verb_level_weights
+        weights = np.array(
+            [levels[self.result.verbs.tree[label].level - 1] for label in names], dtype=float
+        )
+        if weights.sum() == 0:
+            return None
+        name = names[int(rng.choice(len(names), p=weights / weights.sum()))]
+        return self.event_fact(event, name)
+
     # Drawing ---------------------------------------------------------------------------------
 
     def draw_class(
@@ -330,6 +361,20 @@ class Facts:
         if rng.random() < self.config.quantifiers.generic_rate:
             fact = self.generic(fact) or fact
         return fact
+
+    def draw_rule_statement(
+        self, rng: np.random.Generator, pool: tuple[Proposition, ...] | None = None
+    ) -> Proposition | None:
+        """One rule statement, from every rule statement of the world or from ``pool``. Its
+        quantifier is drawn like that of any class-level proposition: ``all``, or the bare
+        generic at the generic rate. A rule statement is true under both."""
+        pool = self.rule_statements() if pool is None else pool
+        if not pool:
+            return None
+        statement = pool[int(rng.integers(len(pool)))]
+        if rng.random() < self.config.quantifiers.generic_rate:
+            statement = self.generic(statement) or statement
+        return statement
 
     def draw_instance(
         self, rng: np.random.Generator, instance: str, patients: tuple[str, ...] | None = None
