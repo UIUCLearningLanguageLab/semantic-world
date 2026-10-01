@@ -87,6 +87,7 @@ def test_default_values() -> None:
     assert (clauses.rate, clauses.max_depth, clauses.object_share) == (0.1, 1, 0.3)
     grammar = config.grammar
     assert grammar.adjective_order_fixed is True
+    assert grammar.class_can_rate == 0.5
     assert grammar.word_order.resolved() == {
         "clause": "SVO",
         "determiner": "before",
@@ -388,6 +389,7 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "at most 1",
     ),
     ({"grammar": {"adjective_order": {"fixed": 1}}}, "grammar.adjective_order.fixed", "true or"),
+    ({"grammar": {"class_can_rate": 1.5}}, "grammar.class_can_rate", "at most 1"),
     ({"grammar": {"word_order": {"clause": "SVV"}}}, "grammar.word_order.clause", "SVO, SOV"),
     ({"grammar": {"word_order": {"adjective": "left"}}}, "grammar.word_order.adjective", "before"),
     (

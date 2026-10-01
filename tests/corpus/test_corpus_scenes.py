@@ -267,6 +267,36 @@ def test_the_transitive_share(cases) -> None:
     assert any(scene.events for scene in make(mostly, 30))
 
 
+def test_events_are_drawn_verb_first(cases) -> None:
+    # With every instance of the tiny world in the scene, the pool is the same in every scene,
+    # and the verbs differ widely in how many pairs they hold for.
+    case = cases("tiny")
+    generator = case.scenes(**scene_settings(size=[11, 11], events_per_step=1.0, steps=[4, 4]))
+    intransitive, transitive = generator.possible_events(case.result.instances.labels)
+    pairs = Counter(verb for verb, _, _ in transitive)
+    agents = Counter(verb for verb, _, _ in intransitive)
+    assert max(pairs.values()) > 3 * min(pairs.values())
+    events = [e for s in make(generator, 1500) for e in s.events]
+    drawn = Counter(e.verb for e in events)
+    # each verb with a possible event is equally likely, however many pairs it holds for
+    for counts in (pairs, agents):
+        share = np.array([drawn[verb] for verb in counts], dtype=float)
+        share /= share.sum()
+        assert np.abs(share - 1 / len(counts)).max() < 0.03, dict(zip(counts, share, strict=True))
+    # and within a verb, each possible pair is equally likely
+    verb = max(pairs, key=pairs.get)
+    by_pair = Counter(e.key for e in events if e.verb == verb)
+    assert set(by_pair) == {key for key in transitive if key[0] == verb}
+    expected = drawn[verb] / pairs[verb]
+    assert all(abs(count - expected) < 5 * np.sqrt(expected) for count in by_pair.values())
+    # the weights are weights of verbs, not of events
+    weighted = case.scenes(
+        **scene_settings(size=[11, 11], events_per_step=1.0, verb_weights={"V1.1": 3})
+    )
+    counts = Counter(e.verb for s in make(weighted, 1500) for e in s.events if e.transitive)
+    assert abs(counts["V1.1"] / counts["V2.1"] - 3) < 0.5
+
+
 def test_verb_weights(cases) -> None:
     case = cases("tiny")
     uniform = Counter(e.verb for s in make(case.scenes(), 300) for e in s.events)

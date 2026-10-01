@@ -177,7 +177,7 @@ The weights are parameters. With verbs off, the thematic weight has no effect. T
 - an intransitive event for every participant and every CAN feature the participant has;
 - a transitive event for every ordered pair of distinct participants and every verb whose relation holds for the pair.
 
-Draws are weighted by `scene.verb_weights` (uniform by default) and by `scene.transitive_share`. An event is transitive with probability `scene.transitive_share`, when both kinds of event are possible. Within its kind, an event is drawn with a probability proportional to the weight of its CAN feature or verb. `scene.verb_weights` maps CAN features and verbs to weights, and a label that is left out has the weight 1. The same event does not occur twice at one time step, but the same event can occur again at a later step. Nothing changes state: events do not alter the participants, so the pool of possible events is the same at every step.
+Events are drawn verb first. `scene.transitive_share` decides the kind first: an event is transitive with that probability, when both kinds of event are possible. Then a CAN feature or a leaf verb is chosen among those with at least one possible event in the scene, weighted by `scene.verb_weights` (uniform by default). Then the participants are chosen uniformly among the pairs, or the agents, for which that verb's event is possible. So a verb that holds for many pairs is no more frequent than a verb that holds for few. `scene.verb_weights` maps CAN features and verbs to weights, and a label that is left out has the weight 1. The same event does not occur twice at one time step, but the same event can occur again at a later step. Nothing changes state: events do not alter the participants, so the pool of possible events is the same at every step.
 
 **Scenes and the lexicon.** Scenes are a fact about the world, not about the language. The generator uses every CAN feature and every verb (the leaves of the verb tree), with a word or without one, so the lexicon settings never change a scene. The planner leaves out an event that no word can report. Each scene draws from its own part of the `corpus:scenes` stream, named by its label, so a scene depends only on the corpus seed, its number, its seed instance, and the scene settings.
 
@@ -250,7 +250,20 @@ VP   → is a N | is not a N                 (membership)
 
 Quantifiers occupy the determiner slot: "all penguins", "no fish". The negative class-level quantifier "no" replaces sentence negation: "no fish have fur".
 
-**Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction. A subject relative can join several verb phrases with "and": "things that are not red and not big". The negated IS literals of one restriction always share one relative clause.
+**`can` and the bare verb.** An instance-level capacity always takes `can` ("the penguin can swim"), because a bare verb after an instance reports an event ("the penguin swims"). A negative capacity takes `can` too, to carry `not`. A positive class-level capacity can be said either way: "penguins can swim" or "penguins swim". Both say the same. `grammar.class_can_rate` (default 0.5) is the share of them that take `can`. **Proposed:** the setting and its default wait for Jon (`docs/proposals/2026-10-01-corpus-stage-4-decisions.md`).
+
+**The tree.** The parse tree is a nested list, and its leaves are the sentence's tokens. Its labels are `S`; `NP-SBJ` and `NP-OBJ`, the subject and the object; `VP`; `NP-PRD`, the noun of a "has" or "is a" predicate; `AP`; `PP`, a with-phrase; `RC`; and the words `N`, `V`, `A`, `Det`, `Pro`, `P`, `Conj`, `Rel`, `AUX`, and `Neg`. The subject and the object are labeled by their function, so a tree reads the same in every word order. When the verb and the object are neighbors (SVO, SOV, VOS, OVS), the object is inside the verb phrase. When the subject stands between them (VSO, OSV), the object is a daughter of `S`.
+
+**The noun phrase.** A positive IS literal and a scalar pole are adjectives. A HAS literal is a with-phrase or a without-phrase. The negated IS literals share one relative clause. The noun phrase is built outward from the noun: the adjectives, then the determiner, then the with-phrases, then the relative clause. Each one is placed before or after what is already there, by its word-order setting.
+
+**Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction. A subject relative can join several verb phrases with "and": "things that are not red and not big". The negated IS literals of one restriction always share one relative clause. A verb phrase with the same auxiliary as the one before it does not say the auxiliary again. A noun phrase has at most one relative clause. A relative clause holds CAN features, verbs, exposed patient projections, and membership, beside the negated IS literals. It never holds a positive IS literal, a scalar pole, or a HAS literal, which are adjectives and with-phrases. `that` comes first in every relative clause. An object relative is the clause's subject and its verb, in the order of `word_order.clause`.
+
+A drawn relative clause expresses one of these propositions (`mentions.py`):
+
+- in an event-level sentence, another event of the same scene that the referent takes part in: as its agent (a subject relative, "the dog that chased the cat") or as its patient (an object relative, "the cat that the dog chased");
+- in an instance-level sentence, a capacity of the referent: a CAN feature it has, or a verb's relation with another referent of the document, as agent ("the owl that can eat the mouse") or as patient ("the mouse that the owl can eat").
+
+When the drawn kind of clause has no true proposition, the other kind is used. A relative clause never repeats what its sentence already says. **Open:** class-level noun phrases take no drawn relative clause yet, because the specification does not say what "owls that eat mice are big" means for the truth of the sentence (`docs/proposals/2026-10-01-corpus-stage-4-decisions.md`).
 
 **Adjective order.** When a noun takes several adjectives, they appear in a fixed order: a random ordering of adjective concepts drawn once per language. `adjective_order.fixed: false` makes the order random for each phrase.
 
@@ -271,16 +284,18 @@ Each setting has an English default. The word-order and morphology settings neve
 | `auxiliary` | before, after the verb (applies to `can`, `is`, `has`) | before |
 | `negation` | before, after the verb or auxiliary | after the auxiliary |
 
+The auxiliary stands before or after the predicate word: the verb, the adjective, or the predicate noun ("has fins", "is a bird"). `not` stands right after or right before the auxiliary (`negation: after_auxiliary` or `before_auxiliary`). Every negated verb phrase has an auxiliary. The auxiliary, `not`, and the predicate word stay together, and the object stands before or after them by `clause`. In "has no fins", `no` is the determiner of the part noun, and follows `determiner`.
+
 ### Morphology
 
 Number, tense, and aspect are each off by default. When on, each is realized either as an affix joined to the word form (`realization: affix`, "swim-s") or as a separate function word (`realization: word`), set separately for each.
 
-- **Number:** singular and plural on nouns. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim".
-- **Agreement:** with number on, verbs agree with their subjects unless `number.agreement` is false. The verb takes the same affix or word as a plural noun. `number.verb_marks` says which verbs take it: `plural` (the default) or `singular`, as in English ("the penguin swims", "penguins swim"). The auxiliaries `is` and `has` agree by switching to the function words `are` and `have`. `can` does not agree. Agreement holds across relative clauses, so relative clauses in subject position create long-distance dependencies between subject and verb.
+- **Number:** singular and plural on nouns. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim". Every class-level noun is plural, and every instance is singular. A part noun ("with fins", "has fur") is never marked. A plural predicate noun takes no `a`: "penguins are birds".
+- **Agreement:** with number on, verbs agree with their subjects unless `number.agreement` is false. The verb takes the same affix or word as a plural noun. `number.verb_marks` says which verbs take it: `plural` (the default) or `singular`, as in English ("the penguin swims", "penguins swim"). The auxiliaries `is` and `has` agree by switching to the function words `are` and `have`. `can` does not agree, and the verb after `can` is not marked. A verb that carries a tense or aspect marker takes no agreement marker, as in English "chased". Agreement holds across relative clauses, so relative clauses in subject position create long-distance dependencies between subject and verb. In an object relative, the verb agrees with the clause's own subject.
 - **Tense:** present and past. Class-level and instance-level propositions are present. Event-level propositions take `tense.event_tense` (default past).
 - **Aspect:** simple and progressive, drawn for event-level propositions at `aspect.progressive_rate`.
 
-A morphology word stands right after the word it marks, or right before it with `position: before`. With every inflection off, the language is the one in your examples: "the penguin swim".
+A morphology word stands right after the word it marks, or right before it with `position: before`. A word takes at most one affix, because a word form has one. So tense and aspect cannot both be affixes when the event tense is the past: one of them must be a word, and the configuration is an error otherwise. With every inflection off, the language is the one in your examples: "the penguin swim".
 
 With English function words (the Jabberwocky option of the word-form pipeline), every function-word gloss must be an English word. So `realization: word` is an error with English function words, because `PLURAL` is not an English word. The English affixes are the suffixes for `PLURAL`, `PAST`, and `PROGRESSIVE` only.
 
@@ -292,7 +307,7 @@ Each scalar dimension has two adjectives, one for each pole. An instance counts 
 
 Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 
-- **Formal:** lexeme labels with glosses, for example `the/L.176 C1.3/L.5 CAN.2/L.138` for "the penguin swim". The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`), and the gloss of a function word is its English gloss (`the`).
+- **Formal:** lexeme labels with glosses, for example `the/L.176 C1.3/L.5 CAN.2/L.138` for "the penguin swim". The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`), and the gloss of a function word is its English gloss (`the`). An inflected word is followed by its affix's gloss: `C1.3/L.5-PLURAL`. Its token is `L.5-PLURAL`.
 - **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering carries different information from the formal rendering only when synonyms are on, because synonyms share a concept label. Homonyms are two lexemes, so both renderings tell a homonym's two meanings apart.
 - **Propositional:** the sentence's logical form, written out as atomic propositions joined by `AND`. Every modifier, with-phrase, relative clause, and noun becomes its own proposition, so one sentence is usually several propositions. Determiners and pronouns disappear, and referents are named by label. Its format is below.
 - **Spelled:** the word forms' readable spellings, after word forms are attached.
@@ -338,7 +353,8 @@ Each document object holds its label, type, topic, scenes, and sentences. Each s
 - `propositional`: the propositional rendering;
 - `tree`: the parse tree, as a nested list of the form `[label, child, ...]`;
 - `logical_form`: the proposition (schema below);
-- `referents`: for each noun phrase, the instance or category it refers to and the category its noun names;
+- `referents`: for each noun phrase, the instance or category it refers to and the category its noun names, in the order of the tree, a node before its children;
+- `events`: for each verb phrase, the event it reports, or null, in the same order;
 - `coreference`: the chain each referring noun phrase belongs to.
 
 A logical form, for example:
@@ -464,6 +480,7 @@ mention:
 
 grammar:
   adjective_order: {fixed: true}
+  class_can_rate: 0.5                         # share of positive class-level capacity sentences with "can" (proposed)
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
@@ -493,7 +510,7 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `mentions.py` (the sentence plan of a proposition, and relative clauses), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -561,6 +578,10 @@ Jon decided the following on October 1, 2026, before stage 3 (`docs/proposals/20
 29. A false event-level test item is an event that did not happen in the scene. Each item is marked possible or impossible, and the two kinds go into separate test sets.
 30. Every instance-level and event-level test item names a document. The item is tested as a continuation of that document, so its definite noun phrases refer to that document's referents.
 31. A rule statement's quantifier is drawn like that of any class-level proposition: `all` or the generic, at the generic rate. "All things with wings ..." is `ALL`, and the bare plural is `GEN`. A rule statement is true under both.
+
+Jon decided the following on October 1, 2026, before stage 4 (`docs/proposals/2026-10-01-corpus-stage-4-decisions.md`):
+
+32. Events are drawn verb first. `scene.transitive_share` decides the kind. Then a CAN feature or leaf verb is chosen among those with at least one possible event in the scene, weighted by `scene.verb_weights`. Then the participants are chosen uniformly among the pairs, or the agents, for which that verb's event is possible.
 
 ## Future additions
 

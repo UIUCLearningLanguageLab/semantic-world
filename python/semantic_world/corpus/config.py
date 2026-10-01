@@ -320,12 +320,16 @@ class GrammarConfig:
     """How a logical form is realized. Nothing here changes what a sentence says."""
 
     adjective_order_fixed: bool
+    class_can_rate: float
+    """The share of positive class-level capacity sentences that use ``can`` ("penguins can
+    swim") and not the bare verb ("penguins swim"). Both say the same."""
     word_order: WordOrderConfig
     morphology: MorphologyConfig
 
     def resolved(self) -> dict[str, Any]:
         return {
             "adjective_order": {"fixed": self.adjective_order_fixed},
+            "class_can_rate": self.class_can_rate,
             "word_order": self.word_order.resolved(),
             "morphology": self.morphology.resolved(),
         }
@@ -628,6 +632,17 @@ def _read_morphology(node: _Node) -> MorphologyConfig:
     )
     aspect_node.finish()
     node.finish()
+    if (
+        tense.enabled
+        and aspect.enabled
+        and tense.event_tense == "past"
+        and tense.realization == aspect.realization == "affix"
+    ):
+        raise aspect_node.error(
+            "realization",
+            "a word takes one affix, and a past progressive verb would need two: make tense or "
+            "aspect a word",
+        )
     return MorphologyConfig(number, tense, aspect)
 
 
@@ -660,7 +675,12 @@ def _read_grammar(node: _Node) -> GrammarConfig:
         negation=words.choice("negation", "after_auxiliary", NEGATION_POSITIONS),
     )
     words.finish()
-    config = GrammarConfig(fixed, word_order, _read_morphology(node.mapping("morphology")))
+    config = GrammarConfig(
+        adjective_order_fixed=fixed,
+        class_can_rate=node.probability("class_can_rate", 0.5),
+        word_order=word_order,
+        morphology=_read_morphology(node.mapping("morphology")),
+    )
     node.finish()
     return config
 

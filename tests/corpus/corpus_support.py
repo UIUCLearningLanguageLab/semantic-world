@@ -111,3 +111,17 @@ class Case:
         from semantic_world.corpus.scenes import SceneGenerator
 
         return SceneGenerator(self.config(**sections), self.result, self.facts(**sections).truth)
+
+    def lexicon(self, **sections: Any):
+        from semantic_world.corpus import Streams, build_lexicon
+
+        config = self.config(**sections)
+        return build_lexicon(config, self.result, Streams(config.seed))
+
+    def realizer(self, **sections: Any):
+        """The grammar of the same settings: a realizer over the lexicon of those settings."""
+        from semantic_world.corpus import Streams
+        from semantic_world.corpus.realize import Realizer
+
+        config = self.config(**sections)
+        return Realizer(config, self.lexicon(**sections), Streams(config.seed))

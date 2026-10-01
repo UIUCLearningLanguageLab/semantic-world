@@ -62,6 +62,7 @@ mention:
 # How a logical form is realized. These settings never change what a sentence says.
 grammar:
   adjective_order: {fixed: true}
+  class_can_rate: 0.5            # share of positive class-level capacity sentences with "can" ("penguins can swim")
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)

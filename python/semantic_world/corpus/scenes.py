@@ -16,8 +16,12 @@ drawn from the pool of possible events among the participants:
 - a transitive event for every ordered pair of distinct participants and every verb whose
   relation holds for the pair.
 
-An event is transitive with probability ``scene.transitive_share``, and within its kind the draw
-is weighted by ``scene.verb_weights``. The same event does not occur twice at one time step.
+Events are drawn verb first. An event is transitive with probability ``scene.transitive_share``.
+Then a CAN feature or a verb is drawn among those with at least one possible event in the scene,
+weighted by ``scene.verb_weights``. Then the agent, or the pair of agent and patient, is drawn
+uniformly among those for which that verb's event is possible. So a verb that holds for many
+pairs is no more frequent than one that holds for few. The same event does not occur twice at
+one time step.
 Nothing changes state, so the pool is the same at every step, and an event never contradicts a
 capacity.
 
@@ -235,25 +239,41 @@ class SceneGenerator:
             ]
         return intransitive, transitive
 
+    def _by_verb(self, pool: list) -> dict[str, list]:
+        """The possible events of one kind, by their CAN feature or verb, in the pool's order. A
+        verb with the weight 0 is left out."""
+        grouped: dict[str, list] = {}
+        for event in pool:
+            if self.verb_weight[event[0]] > 0:
+                grouped.setdefault(event[0], []).append(event)
+        return grouped
+
     def _draw_step(
         self, rng: np.random.Generator, pools: tuple[list, list]
     ) -> list[tuple[str, str, str | None]]:
-        """The events of one time step: a Poisson number of distinct events from the pools."""
+        """The events of one time step: a Poisson number of distinct events, each drawn verb
+        first. The kind is drawn by ``scene.transitive_share``. Then a CAN feature or a verb is
+        drawn, by its weight, among those with at least one possible event left at this step.
+        Then the agent, or the pair of agent and patient, is drawn uniformly among those for
+        which that verb's event is possible."""
         count = int(rng.poisson(self.settings.events_per_step))
         share = self.settings.transitive_share
-        weights = [
-            np.array([self.verb_weight[event[0]] for event in pool], dtype=float) for pool in pools
-        ]
+        left = [self._by_verb(pool) for pool in pools]
         drawn = []
         for _ in range(count):
-            intransitive = weights[0].sum() > 0 and share < 1
-            transitive = weights[1].sum() > 0 and share > 0
+            intransitive = bool(left[0]) and share < 1
+            transitive = bool(left[1]) and share > 0
             if not (intransitive or transitive):
                 break
             kind = 1 if transitive and (not intransitive or rng.random() < share) else 0
-            index = int(rng.choice(len(pools[kind]), p=weights[kind] / weights[kind].sum()))
-            weights[kind][index] = 0.0  # the same event does not occur twice at one time step
-            drawn.append(pools[kind][index])
+            verbs = list(left[kind])
+            weights = np.array([self.verb_weight[verb] for verb in verbs], dtype=float)
+            verb = verbs[int(rng.choice(len(verbs), p=weights / weights.sum()))]
+            options = left[kind][verb]
+            # the same event does not occur twice at one time step
+            drawn.append(options.pop(int(rng.integers(len(options)))))
+            if not options:
+                del left[kind][verb]
         return drawn
 
     def generate(self, rng: np.random.Generator, seed: str, label: str) -> Scene:
