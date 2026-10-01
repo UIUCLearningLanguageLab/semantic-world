@@ -41,7 +41,7 @@ python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/word
 
 **Licenses.** Piper, espeak-ng, and praat-parselmouth are GPL-3.0. The repository is Apache-2.0. The pipeline keeps them apart: espeak-ng runs as a separate program, and Piper and parselmouth are imported only in the modules that use them.
 
-**Disk.** A default run uses about 3 GB: the audio cache (1.2 GB), the run folder (1.8 GB, mostly the stored front ends), and the voice.
+**Disk.** A default run uses about 4 GB: the audio cache (1.8 GB), the run folder (1.8 GB, mostly the stored front ends), and the voice.
 
 ## Quick start
 
@@ -51,13 +51,13 @@ The tiny configuration runs in under a minute and needs only the fixed embedding
 PYTHONPATH=python python -m semantic_world.wordforms embed data/wordforms/tiny.yaml
 ```
 
-The full default configuration makes 500 words, 45 speakers, and 45,000 recordings:
+The full default configuration makes 500 content words and 15 function words, with 45 speakers and 46,350 recordings:
 
 ```
 PYTHONPATH=python python -m semantic_world.wordforms eval data/wordforms/default.yaml
 ```
 
-On a recent Mac, the default run takes about 25 minutes the first time: 12 minutes of synthesis, 4 of front ends, and about 6 for HuBERT on the Mac's GPU, plus the evaluation. A second run reads everything it can from the cache and the stored files, and takes a fraction of that.
+On a recent Mac, the default run takes about 35 minutes the first time: 12 minutes of synthesis, 4 of front ends, about 6 for HuBERT and 12 for the two learned encoders on the Mac's GPU, plus the evaluation. A second run reads everything it can from the cache and the stored files, and takes a fraction of that.
 
 Each subcommand runs the layers up to its name:
 
@@ -121,7 +121,7 @@ Each front end turns a clip into a sequence of frames:
 
 ### 4. Sound embeddings
 
-Each embedding gives one vector per token (recording). A word's embedding is the mean of its tokens from training speakers. The default configuration has three embeddings:
+Each embedding gives one vector per token (recording). A word's embedding is the mean of its tokens from training speakers. The default configuration has five embeddings:
 
 | Name | Encoder | Dimensions |
 | --- | --- | --- |
@@ -131,7 +131,7 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 | `contrastive_logmel` | a small convolutional encoder trained on the run's own clips so that tokens of the same word lie together (supervised by word identity) | 128 |
 | `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels; a weak baseline: it tells words apart across speakers far worse than the others | 128 |
 
-The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (37,080 training tokens) the contrastive encoder trains in about 1.5 minutes and the CPC encoder in about 16 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
+The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (29,880 training tokens: 415 training words, content and function, from 36 training speakers, twice each) the contrastive encoder trains in about 1 minute and the CPC encoder in about 10 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
 
 **Held-out words.** One word in five (`training.held_out_word_proportion`) is held out from everything that is trained: the two learned encoders and the fixed encoders' projection. Held-out words still get audio and embeddings, and `words.csv` marks them (`split`). The evaluation gives every measure for all words, the training words, and the held-out words (`word_split`); the held-out rows say how an encoder does on words it has never seen.
 
@@ -179,20 +179,28 @@ The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pi
 - **Same-different average precision.** Given pairs of tokens, how well does embedding distance pick out pairs of the same word? Reported within one speaker, across training speakers, and with held-out speakers. Chance is about 0.001 to 0.002.
 - **Fidelity.** Does embedding distance track sound distance, measured as phoneme edit distance? Three versions: the rank correlation over all word pairs (`fidelity_spearman`), and two neighbor tests (`fidelity_auc` and `fidelity_auc_1v2`). The neighbor tests ask whether words one phoneme apart are closer than words three or more phonemes apart, or two phonemes apart. Chance is 0.5 for the neighbor tests.
 
-Results for the default run:
+Results for the default run, for content words, without talker normalization:
 
 | Embedding | Within speaker | Across speakers | Held-out speakers | Spearman | Neighbors, 1 vs 3+ | Neighbors, 1 vs 2 |
 | --- | --- | --- | --- | --- | --- | --- |
-| cochleagram_fixed | 0.226 | 0.053 | 0.051 | 0.155 | 0.958 | 0.798 |
-| logmel_fixed | 0.295 | 0.089 | 0.091 | 0.148 | 0.951 | 0.797 |
-| hubert_base, layer 8 | 0.630 | 0.574 | 0.572 | 0.156 | 0.994 | 0.917 |
+| cochleagram_fixed | 0.218 | 0.053 | 0.049 | 0.169 | 0.949 | 0.844 |
+| logmel_fixed | 0.290 | 0.089 | 0.091 | 0.154 | 0.956 | 0.830 |
+| hubert_base, layer 8 | 0.600 | 0.566 | 0.559 | 0.155 | 0.987 | 0.887 |
+| contrastive_logmel | 0.947 | 0.954 | 0.935 | 0.181 | 0.991 | 0.897 |
+| cpc_logmel | 0.192 | 0.009 | 0.012 | −0.027 | 0.873 | 0.813 |
 
-Two things stand out:
+Four things stand out:
 
 - **The fixed embeddings show the lack-of-invariance problem.** They identify a word within one speaker, but barely across speakers. Raw spectra depend on the voice. That makes the fixed embeddings a meaningful baseline, not a failure.
-- **HuBERT generalizes across voices** and captures fine sound similarity (0.92 for words one phoneme apart against words two apart).
+- **HuBERT generalizes across voices** and captures fine sound similarity (0.89 for words one phoneme apart against words two apart).
+- **The contrastive encoder identifies words almost perfectly across voices**, including the held-out words it never trained on (0.98 across speakers among the 100 held-out words). It is supervised by word identity.
+- **The CPC encoder is weak on isolated words.** It identifies words within one speaker, but across speakers it is near chance. The spec keeps it as a baseline, to be revisited with connected speech.
 
-The evaluation also sweeps every HuBERT layer. Word identity across speakers peaks at layers 7 to 9. The rank correlation with edit distance peaks at layer 3. The spec's guidance: use layer 3 when graded similarity across the whole range of phoneme distances matters, and layer 8 otherwise. Sweep rows (`basis: sweep`) build word embeddings from the sample's tokens only, so compare layers within the sweep, not against stored rows.
+Rows for the held-out words (`word_split: held_out`) cover 100 words instead of 500, so chance is higher (about 0.006 to 0.010), and so is average precision. Compare each row with its own chance columns, not with the rows for all words.
+
+Talker normalization raises same-different precision across speakers for the fixed embeddings (0.053 to 0.091 for the cochleagram) and for HuBERT (0.566 to 0.644), and changes the contrastive encoder little.
+
+The evaluation also sweeps every HuBERT layer. Word identity across speakers peaks at layers 7 to 9. The rank correlation with edit distance peaks in the early layers: at layer 3 in the stage 4 sweep, and at layer 4 in the current default run (0.21, with layers 3 and 5 at 0.19). The spec's guidance: use layer 3 when graded similarity across the whole range of phoneme distances matters, and layer 8 otherwise. Sweep rows (`basis: sweep`) build word embeddings from the sample's tokens only, so compare layers within the sweep, not against stored rows.
 
 Every result appears twice, with and without the `long_synthesis` words. Leaving them out changes no number by more than 0.006.
 
@@ -221,8 +229,8 @@ Labels follow the project convention: words `W.12`, speakers `S.3`, and tokens `
 from semantic_world.wordforms import SoundEmbeddings
 
 emb = SoundEmbeddings.load("runs/wordforms/default_seed1", "hubert_base")
-emb.types          # word embeddings: 500 x 768, in the order of emb.words
-emb.tokens         # token embeddings: 45,000 x 768
+emb.types          # word embeddings: 515 x 768, in the order of emb.words
+emb.tokens         # token embeddings: 46,350 x 768
 emb.token_words    # each token's row in emb.words
 emb.token_speakers # each token's row in emb.speakers
 emb.token_held_out # True for tokens of held-out speakers
@@ -299,7 +307,7 @@ The sound distance is the phoneme edit distance, or, for the first two modes, th
 | `synthesis.tokens_per_speaker` | 2 | Recordings of each word by each speaker. |
 | `synthesis.held_out_speaker_proportion` | 0.2 | Share of speakers held out. |
 | `synthesis.cache_dir` | `runs/wordforms/cache` | Where the audio lives. |
-| `embeddings` | three embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
+| `embeddings` | five embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
 | `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
 | `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
 | `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
@@ -320,5 +328,6 @@ To turn an engine off, set it to null, for example `espeak: null` under `synthes
 
 ## Reference
 
-- `docs/specs/WORDFORM_PIPELINE.md`: the full design, including stages 5 to 8.
+- `docs/specs/WORDFORM_PIPELINE.md`: the full design, including the planned stage 8, a parametric formant synthesizer.
+- `docs/specs/CONNECTED_SPEECH.md`: the plan for whole utterances, pauses, speakers, and register.
 - `docs/proposals/`: decisions made during the build.

@@ -1,6 +1,6 @@
 # Corpus generator: propositions, documents, and grammar
 
-Draft, September 29, 2026. This document is the build specification for a Python program that turns the taxonomy generator's world into a corpus of documents written in an artificial language. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`, `docs/specs/TAXONOMY_RELATIONS.md`, and `docs/specs/WORDFORM_PIPELINE.md`.
+Draft, September 29, 2026. Reconciled with the built word-form pipeline on October 1, 2026. This document is the build specification for a Python program that turns the taxonomy generator's world into a corpus of documents written in an artificial language. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`, `docs/specs/TAXONOMY_RELATIONS.md`, and `docs/specs/WORDFORM_PIPELINE.md`.
 
 ## Goal
 
@@ -28,7 +28,7 @@ Out of scope for now:
 ## Inputs
 
 - **A taxonomy result** (required): a `TaxonomyResult`, or a taxonomy output folder. Verbs and scalar dimensions are used when the result has them. Without verbs, there are no transitive sentences and no thematic scene sampling.
-- **A word-form lexicon** (optional): a word-form pipeline run (`WORDFORM_PIPELINE.md`). Without one, the corpus is written in formal tokens only (see "Renderings").
+- **A word-form run** (optional): a word-form pipeline run (`WORDFORM_PIPELINE.md`) made from the corpus's own request. The corpus is generated first, without word forms, and the word forms are attached afterwards (see "Word forms for the corpus"). Without a word-form run, the corpus has every rendering except the spelled one (see "Renderings").
 
 ## Labels
 
@@ -42,6 +42,7 @@ Labels follow the project convention: formal labels, indices starting at 1, and 
 | Scene | `SN.<n>` | `SN.8` |
 | Event | `SN.<n>.<k>` | `SN.8.5` is event 5 of scene 8 |
 | Proposition | `PR.<n>` | `PR.310` |
+| Referent, within one document | `R.<n>` | `R.2` is the second referent introduced in its document |
 
 ## Layer 1: the lexicon
 
@@ -60,11 +61,13 @@ Labels follow the project convention: formal labels, indices starting at 1, and 
 | The generic head noun | noun | thing |
 | Function words (below) | function word | the |
 
+Each concept has a concept label, used by the conceptual and propositional renderings. Categories, features, verbs, and projections keep their taxonomy labels (`C1.3.2`, `IS.12`, `HAS.4`, `CAN.3`, `V1.2`, `CANBE.V1.1`). A scalar pole is its dimension's label with `HIGH` or `LOW` (`SC.1.HIGH`). The generic head noun is `THING`, and a function word's concept label is its gloss in capitals (`THE`).
+
 For each concept type, a parameter gives the proportion of concepts that get a word (default 1.0). A concept without a word cannot be expressed, and the discourse planner skips any proposition that needs one.
 
 ### Function words
 
-`a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that` (relative clauses), `it` (pronoun), and, when inflection is realized as separate words, one function word for each inflectional value (see "Morphology"). The set is fixed by the settings. Function words are ordinary lexemes with their own word forms.
+`a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that` (relative clauses), and `it` (pronoun). With verb agreement on, `are` and `have` are added as the plural forms of `is` and `has`. When an inflection is realized as a separate word, one function word is added for each inflectional value, glossed like the affix (`PLURAL`, `PAST`, `PROGRESSIVE`; see "Morphology"). The set is fixed by the settings. Function words are ordinary lexemes with their own word forms.
 
 ### Synonyms and homonyms
 
@@ -77,7 +80,7 @@ The lexicon records which concept or concepts each lexeme and word form expresse
 
 ### Word forms
 
-When a word-form lexicon is given, every lexeme gets a word form. Function words get the shortest forms: one syllable, drawn from the most frequent syllable shapes. Affixes (see "Morphology") need bound forms of one or two phonemes. The word-form pipeline makes function words, affixes, and inflected forms from a request the corpus generator writes (see "Word forms for closed-class items").
+When a word-form run is given, every lexeme gets a word form. Function words have one syllable each (CV, CVC, or VC), and the most frequent half get two-phoneme shapes. Affixes (see "Morphology") are bound forms of shape C or VC. The word-form pipeline makes every form, and assigns content words to lexemes, from a request the corpus generator writes (see "Word forms for the corpus").
 
 ## Layer 2: propositions
 
@@ -247,11 +250,14 @@ Each setting has an English default.
 
 Number, tense, and aspect are each off by default. When on, each is realized either as an affix joined to the word form (`realization: affix`, "swim-s") or as a separate function word (`realization: word`), set separately for each.
 
-- **Number:** singular and plural on nouns, with agreement on verbs and auxiliaries. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim".
+- **Number:** singular and plural on nouns. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim".
+- **Agreement:** with number on, verbs agree with their subjects unless `number.agreement` is false. The verb takes the same affix or word as a plural noun. `number.verb_marks` says which verbs take it: `plural` (the default) or `singular`, as in English ("the penguin swims", "penguins swim"). The auxiliaries `is` and `has` agree by switching to the function words `are` and `have`. `can` does not agree. Agreement holds across relative clauses, so relative clauses in subject position create long-distance dependencies between subject and verb.
 - **Tense:** present and past. Class-level and instance-level propositions are present. Event-level propositions take `tense.event_tense` (default past).
 - **Aspect:** simple and progressive, drawn for event-level propositions at `aspect.progressive_rate`.
 
-With every inflection off, the language is the one in your examples: "the penguin swim".
+A morphology word stands right after the word it marks, or right before it with `position: before`. With every inflection off, the language is the one in your examples: "the penguin swim".
+
+With English function words (the Jabberwocky option of the word-form pipeline), every function-word gloss must be an English word. So `realization: word` is an error with English function words, because `PLURAL` is not an English word. The English affixes are the suffixes for `PLURAL`, `PAST`, and `PROGRESSIVE` only.
 
 ### Scalar adjectives
 
@@ -259,10 +265,23 @@ Each scalar dimension has two adjectives, one for each pole. An instance counts 
 
 ## Renderings
 
-Every sentence is written in two renderings:
+Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 
-- **Formal:** lexeme labels with glosses, for example `the/L.1 penguin/L.57 swim/L.203`. The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`), so the formal rendering works without word forms.
-- **Spelled:** the word forms' readable spellings, when a word-form lexicon is given.
+- **Formal:** lexeme labels with glosses, for example `the/L.1 penguin/L.57 swim/L.203`. The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`).
+- **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering differs from the formal one only when synonyms or homonyms are on: synonyms share a concept label, and a homonym's two meanings get different concept labels.
+- **Propositional:** the sentence's logical form, written out as atomic propositions joined by `AND`. Every modifier, with-phrase, relative clause, and noun becomes its own proposition, so one sentence is usually several propositions. Determiners and pronouns disappear, and referents are named by label. Its format is below.
+- **Spelled:** the word forms' readable spellings, after word forms are attached.
+
+**The propositional format.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, `CAN.3(R.1)`, `SC.1.HIGH(R.1)`, and `V1.2(R.1, R.2)` (the relation holds, so the agent can do it to the patient). `NOT` before an atom negates it. An event-level proposition is prefixed with its event label: `SN.8.5: V1.2(R.1, R.2)`. A class-level proposition is a quantifier with a restrictor and a scope over the variables `x` and `y`: `MOST(C1.3(x) AND IS.4(x), CAN.3(x))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). Examples:
+
+| Sentence | Propositional rendering |
+| --- | --- |
+| the furry dog has legs | `C1.3.2(R.1) AND IS.12(R.1) AND HAS.4(R.1)` |
+| the dog that chased the cat ran | `C1.3.2(R.1) AND C1.4.1(R.2) AND SN.3.2: V1.2(R.1, R.2) AND SN.3.4: CAN.7(R.1)` |
+| things with wings and with feathers can fly | `ALL(HAS.2(x) AND HAS.5(x), CAN.1(x))` |
+| owls eat mice | `GEN(C1.2(x) AND C1.5(y), V2.1(x, y))` |
+
+Referents are numbered within each document in order of first mention (`R.1`, `R.2`), so a referent keeps its label across sentences and the propositional rendering shows coreference directly. With `renderings.propositional.referents: instance`, referents are named by their taxonomy instance labels instead. The document's `referents` field records each referent's instance either way.
 
 ## Outputs
 
@@ -275,6 +294,9 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | `documents.jsonl` | One JSON object per document (schema below). |
 | `corpus.txt` | Every document in the spelled rendering (or the formal rendering without word forms): one sentence per line, a blank line between documents. |
 | `corpus_formal.txt` | The same in the formal rendering. |
+| `corpus_conceptual.txt` | The same in the conceptual rendering. |
+| `corpus_propositional.txt` | The same in the propositional rendering. |
+| `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
 | `scenes.jsonl` | One JSON object per scene: participants, and events by time step. |
 | `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. |
 | `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; and the co-occurrence check below. |
@@ -286,6 +308,8 @@ Each document object holds its label, type, topic, scenes, and sentences. Each s
 - `words`: word form labels, or null;
 - `text`: the spelled rendering, or null;
 - `formal`: the formal rendering;
+- `conceptual`: the conceptual rendering;
+- `propositional`: the propositional rendering;
 - `tree`: the parse tree, as a nested list of the form `[label, child, ...]`;
 - `logical_form`: the proposition (schema below);
 - `referents`: for each noun phrase, the instance or category it refers to and the category its noun names;
@@ -302,15 +326,32 @@ A logical form, for example:
 
 **Co-occurrence check.** `stats.yaml` reports, over pairs of leaves, the correlation of within-document co-occurrence with thematic relatedness and with taxonomic similarity, separately for each document type. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness, and encyclopedic documents more with taxonomic similarity.
 
-## Word forms for closed-class items
+## Word forms for the corpus
 
-The word-form pipeline provides what the corpus needs for its closed class, as stage 4a of `WORDFORM_PIPELINE.md` (see its "Closed-class forms" section):
+The corpus comes first, and the word forms are made for it. The run has three steps:
 
-1. **Function words:** one syllable each, with the most frequent function words given the shortest shapes; or, as an option, the real English function words (a Jabberwocky condition).
-2. **Affixes:** bound forms joined to stems, with a schwa or a glide inserted where the plain join would be illegal; or, as an option, the English suffixes with English allomorphy.
-3. **Inflected forms:** stem-plus-affix forms, synthesized and embedded like any word form.
+1. **Generate.** `python -m semantic_world.corpus generate` writes the corpus in the formal, conceptual, and propositional renderings, and writes `wordform_request.yaml`.
+2. **Make the word forms.** The word-form pipeline runs with the request (`request:` in its configuration).
+3. **Render.** `python -m semantic_world.corpus render` reads the word-form run and adds the word labels, the spelled rendering (which `corpus.txt` then holds), and the word-form columns of `lexicon.csv`. Rendering changes nothing else in the corpus run.
 
-The corpus generator writes a closed-class request file: its function-word glosses in order of frequency, its affixes, and which words to inflect. The word-form pipeline reads the request and makes the forms.
+**The request** lists:
+
+- `lexemes`: every content lexeme, with its concept label and part of speech, and, for a homonym, the lexeme whose word form it shares (`same_form_as`);
+- `function_words`: the glosses of the function words the corpus uses, most frequent first, by their counts in the generated corpus;
+- `affixes`: the glosses and positions of the affixes the corpus uses;
+- `inflect`: the lexemes that appear inflected, with the affixes each one takes;
+- `meanings`: the taxonomy run's `categories_generative.csv`, for assigning category lexemes.
+
+**The word-form pipeline's part.** The pipeline already makes function words, affixes, and inflected forms from a request (stage 4a of `WORDFORM_PIPELINE.md`), and assigns words to categories (stage 7). Corpus stage 7 extends it:
+
+- the request becomes a top-level `request` setting that replaces `closed_class.request`, and gains `lexemes` and `meanings`;
+- lexemes are assigned to content words. Category lexemes are assigned by the configured assignment mode (arbitrary, target correlation, branch markers, or acoustic mapping). All other lexemes get words at random, from the words left over. A homonym gets its partner's word. The assignment is written to `assignment/lexicon.csv` with a `lexeme` column, and `words.csv` gains the part of speech of each assigned word (`pos`);
+- `inflect` entries can name lexemes, and the pipeline inflects whatever form the lexeme's concept got, including a marked form of branch-marker mode (`W.12.M.2.AF.1`);
+- a run whose content words are fewer than the lexemes that need distinct forms is an error. Content words that no lexeme gets are kept; they can serve as novel words in tests.
+
+The default taxonomy with verbs needs about 180 content lexemes, and the default word-form run makes 500 words.
+
+**English options.** The word-form pipeline can give the real English function words, and the English suffixes with English allomorphy (a Jabberwocky condition). The corpus needs nothing extra for them, apart from the restrictions in "Morphology".
 
 Spoken sentences, with coarticulation across word boundaries and reduced function words, are planned in `docs/specs/CONNECTED_SPEECH.md`. Stage 5 of that specification synthesizes the corpus's documents.
 
@@ -320,7 +361,6 @@ Spoken sentences, with coarticulation across word boundaries and reduced functio
 name: default
 seed: 1
 taxonomy: runs/taxonomy/relations_seed1      # a taxonomy output folder
-wordforms: null                              # a word-form run folder, or null for formal tokens only
 
 lexicon:
   named_proportion: {category: 1.0, is: 1.0, has: 1.0, can: 1.0, verb: 1.0, verb_category: 1.0, patient_projection: 1.0, scalar: 1.0}
@@ -371,11 +411,14 @@ grammar:
   relative_clauses: {rate: 0.1, max_depth: 1, object_share: 0.3}
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
-    number: {on: false, realization: affix}
-    tense: {on: false, realization: affix, event_tense: past}
-    aspect: {on: false, realization: word, progressive_rate: 0.3}
+    number: {on: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
+    tense: {on: false, realization: affix, position: after, event_tense: past}
+    aspect: {on: false, realization: word, position: after, progressive_rate: 0.3}
 
 scalar_adjectives: {z: 1.0}
+
+renderings:
+  propositional: {referents: local}          # local (R.1, R.2, ... within each document) or instance (taxonomy instance labels)
 
 test_sets:
   size: 500                                   # true items per set; each gets one matched false item
@@ -390,28 +433,31 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 - the same taxonomy run, word-form run, configuration, and seed give byte-identical output folders;
 - changing the grammar settings never changes the propositions or their order, only their realization;
+- rendering with a word-form run changes only the word labels, the spelled rendering (and with it `corpus.txt`), and the word-form columns of `lexicon.csv`; the rest of the output folder is byte-identical;
 - changing the test-set settings never changes the documents.
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `lexicon.py`, `propositions.py` (logical forms and truth tests), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `lexicon.py`, `propositions.py` (logical forms and truth tests), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
-python -m semantic_world.corpus data/corpus/default.yaml [--seed N] [--out DIR]
+python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
+python -m semantic_world.corpus render RUN_FOLDER --wordforms WORDFORM_RUN_FOLDER
 ```
 
 Add `data/corpus/default.yaml` and `data/corpus/tiny.yaml` (built on the tiny relations taxonomy, 20 documents).
 
 ## Build stages
 
-Work on one branch per stage (`corpus-stage-1`, and so on). Branch stage 1 from the latest taxonomy stage branch, or from `main` if the taxonomy work has been merged. Each stage ends with its tests passing, the full check list in `CLAUDE.md` passing, and a commit.
+Work on one branch per stage (`corpus-stage-1`, and so on). Branch stage 1 from `main`. Each stage ends with its tests passing, the full check list in `CLAUDE.md` passing, and a commit.
 
 1. **Configuration and lexicon.** Loading a taxonomy run, concepts, lexemes, function words, synonym and homonym knobs, and the formal rendering. *Accept:* every concept type gets lexemes in the configured proportions; with both knobs at 0, lexemes and concepts are one to one; with the knobs on, the realized rates are within tolerance.
 2. **Propositions and truth.** Class-level and instance-level propositions, quantifiers, restrictions, rule statements, negation, and the false-item generator. *Accept:* every generated proposition passes an independent recomputation of its truth from the taxonomy's output files; every false item fails it; each false item differs from its matched true item by exactly one change; rule statements are `all`-true.
 3. **Scenes and events.** *Accept:* every event is possible (its CAN feature or relation holds); no event repeats within a time step; with the thematic weight above 0, participants are more thematically related than with it at 0, on average.
-4. **Grammar and realization.** Phrase structure, word order, morphology, adjective order, relative clauses, and scalar adjectives. *Accept:* every tree's leaves equal its tokens; `interpret(tree)` recovers the logical form exactly for every sentence; all six clause orders and all two-way settings produce correct trees on a fixed set of propositions; relative-clause depth never exceeds the limit.
-5. **Documents.** The four document types, ordering, noun levels, first and later mentions, pronouns, and distinguishing modifiers. *Accept:* every distinguishing definite mention picks out exactly one participant of its scene; every pronoun's chain matches the referent recorded in its logical form; with shuffle 0, encyclopedic documents follow the template order exactly.
-6. **Outputs, test sets, statistics, and the command line.** *Accept:* `documents.jsonl` round-trips through a JSON parser with the documented schema; `corpus.txt` matches the spelled renderings; the determinism properties hold; on the default configuration, situational documents' co-occurrence correlates more with thematic relatedness than encyclopedic documents' does, and less with taxonomic similarity.
+4. **Grammar and realization.** Phrase structure, word order, morphology and agreement, adjective order, relative clauses, scalar adjectives, and the conceptual rendering. *Accept:* every tree's leaves equal its tokens; with agreement on, every verb and auxiliary agrees with its subject, including across relative clauses; `interpret(tree)` recovers the logical form exactly for every sentence; all six clause orders and all two-way settings produce correct trees on a fixed set of propositions; relative-clause depth never exceeds the limit.
+5. **Documents.** The four document types, ordering, noun levels, first and later mentions, pronouns, distinguishing modifiers, referent labels, and the propositional rendering. *Accept:* the propositional rendering of every sentence parses back to its logical form; every distinguishing definite mention picks out exactly one participant of its scene; every pronoun's chain matches the referent recorded in its logical form; with shuffle 0, encyclopedic documents follow the template order exactly.
+6. **Outputs, test sets, statistics, and the `generate` command.** *Accept:* `documents.jsonl` round-trips through a JSON parser with the documented schema; each corpus text file matches its rendering in `documents.jsonl`; the determinism properties hold; on the default configuration, situational documents' co-occurrence correlates more with thematic relatedness than encyclopedic documents' does, and less with taxonomic similarity.
+7. **Word forms.** The request, the word-form pipeline changes in "Word forms for the corpus" (with their tests in the word-form pipeline's suite, and its spec and guide updated), and the `render` command. *Accept:* on the tiny configuration, generate, make word forms, and render run end to end; every lexeme gets a word form, distinct lexemes get distinct forms unless they are homonyms, and category lexemes follow the assignment mode; function words are ordered by their corpus counts; only the inflections the corpus uses are synthesized; `corpus.txt` matches the spelled renderings; rendering leaves the rest of the output folder byte-identical; with branch markers and plural affixes, marked forms are inflected.
 
 ## Decisions to confirm
 
@@ -423,9 +469,23 @@ These choices were made while writing this specification. Each one is the workin
 4. Events never change state, and event-level propositions are never negated.
 5. Distinguishing modifiers follow the incremental algorithm, with one preference order per language.
 6. A pronoun is used only when its referent was the only referent, or the subject, of the previous sentence.
-7. Function words, affixes, and inflected forms come from stage 4a of the word-form pipeline, through a closed-class request file.
+7. Function words, affixes, and inflected forms come from stage 4a of the word-form pipeline, through the corpus's request file.
 8. Sibling contrasts are two adjacent sentences, not a contrastive construction.
+
+Jon decided the following on October 1, 2026:
+
+9. The corpus is generated first, and the word forms are made for it from a request. The corpus can be produced entirely in the propositional or the conceptual rendering, with no word forms.
+10. Category lexemes get words by the word-form pipeline's assignment mode. All other lexemes get words at random. Sound differences between parts of speech are a future addition.
+11. Subject–verb agreement is a parameter, on by default when number is on. Number, tense, and aspect can each be realized as affixes or as separate words.
+12. In branch-marker mode, marked forms can take affixes.
+
+## Future additions
+
+- **Sound differences between parts of speech.** In English and other languages, nouns and verbs differ in their sound: English nouns tend to have more syllables and initial stress, and verbs more often have final stress (Kelly, 1992; Monaghan, Christiansen, & Chater, 2007). The request already gives each lexeme's part of speech, so the word-form pipeline could later draw each part of speech's forms from its own sound profile.
+- **Case marking.** Richer systems of case marking than subject–verb agreement, such as nominative and accusative markers on noun phrases.
 
 ## References
 
 - Dale, R., & Reiter, E. (1995). Computational interpretations of the Gricean maxims in the generation of referring expressions. *Cognitive Science*, 19, 233–263.
+- Kelly, M. H. (1992). Using sound to solve syntactic problems: The role of phonology in grammatical category assignments. *Psychological Review*, 99, 349–364.
+- Monaghan, P., Christiansen, M. H., & Chater, N. (2007). The phonological-distributional coherence hypothesis: Cross-linguistic evidence in language acquisition. *Cognitive Psychology*, 55, 259–305.

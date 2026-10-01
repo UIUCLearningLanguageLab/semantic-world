@@ -9,7 +9,7 @@ The specifications in `docs/specs/` are a different kind of document. Specificat
 | Guide | Program | Status |
 | --- | --- | --- |
 | [`TAXONOMY.md`](TAXONOMY.md) | The taxonomy generator: categories, instances, features, rules, scalar dimensions, and verbs | Complete |
-| [`WORDFORMS.md`](WORDFORMS.md) | The word-form pipeline: spoken word forms, synthesis, auditory front ends, and sound embeddings | Stages 1–4 complete |
+| [`WORDFORMS.md`](WORDFORMS.md) | The word-form pipeline: spoken word forms, synthesis, auditory front ends, and sound embeddings | Stages 1–7 complete |
 | Corpus | The corpus generator: documents in an artificial language | Not yet built |
 
 ## Setup
