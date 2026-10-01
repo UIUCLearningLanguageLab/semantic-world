@@ -32,11 +32,14 @@ frontends:
   waveform: {store: false}                       # stored waveforms would repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
+  modulation: null                               # e.g. {rates: [2, 4, 8, 16, 32], scales: [0.25, 0.5, 1, 2, 4], bands: 8}
 
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
+  - {name: contrastive_logmel, encoder: learned, kind: contrastive, frontend: logmel, dims: 128, hidden: 128, layers: 3, kernel: 5, epochs: 20, batch_size: 64, learning_rate: 0.001, temperature: 0.1, train_on: clean}
+  - {name: cpc_logmel, encoder: learned, kind: cpc, frontend: logmel, dims: 64, hidden: 128, layers: 3, kernel: 5, epochs: 10, batch_size: 32, learning_rate: 0.001, steps_ahead: 8, negatives: 32, negatives_from: batch, embedding_from: context, train_on: clean}
 
 closed_class:                    # null: content words only
   request: null                  # a request file, in place of glosses, items, and inflect
@@ -54,6 +57,7 @@ closed_class:                    # null: content words only
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
-augmentation: null
+training: {held_out_word_proportion: 0.2}        # content words that no trained encoder sees
+augmentation: null                               # e.g. {recipes: [{name: noisy, noise: {kinds: [babble], snr_db: [5, 15]}}]}
 assignment: {mode: arbitrary, meanings: null}
 device: auto

@@ -359,9 +359,13 @@ def test_frontends_command_on_the_tiny_configuration(tmp_path, capsys):
     text = capsys.readouterr().out
     assert "front end logmel:" in text and "80 channels at 100 per second, computed" in text
     assert "front end cochleagram:" in text and "64 channels" in text
-    assert sorted(p.name for p in (out / "frontends").iterdir()) == ["cochleagram", "logmel"]
+    assert sorted(p.name for p in (out / "frontends").iterdir()) == [
+        "cochleagram",
+        "logmel",
+        "modulation",
+    ]
     tokens = pl.read_csv(out / "tokens.csv")
-    for name, channels in (("logmel", 80), ("cochleagram", 64)):
+    for name, channels in (("logmel", 80), ("cochleagram", 64), ("modulation", 16)):
         store = FrontendStore.load(out / "frontends" / name)
         assert store.labels == tokens["label"].to_list()
         expected = [math.ceil(round(d * RATE) / 160) for d in tokens["duration"]]
@@ -375,4 +379,4 @@ def test_frontends_command_on_the_tiny_configuration(tmp_path, capsys):
     assert main(["all", str(path), "--out", str(out)]) == 0
     text = capsys.readouterr().out
     assert f"0 synthesized, {summary['synthesis']['synthesized']} read from the cache" in text
-    assert text.count("already stored") == 2
+    assert text.count("already stored") == 3

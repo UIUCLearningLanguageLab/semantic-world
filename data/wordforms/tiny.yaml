@@ -13,6 +13,9 @@ synthesis:
     piper: {speakers: 3}
     espeak: {variants: [m1, m3, f2]}
 
+frontends:
+  modulation: {rates: [4, 16], scales: [0.5, 2], bands: 4}
+
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 16}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 16}

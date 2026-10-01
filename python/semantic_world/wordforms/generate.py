@@ -15,6 +15,7 @@ the same word table.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -71,6 +72,8 @@ class WordForm:
     """The label of an inflected form's affix."""
     join: str | None = None
     """How an inflected form's stem and affix were joined: ``none``, ``schwa``, or ``glide``."""
+    held_out: bool = False
+    """Whether the word is held out from the training of every trained encoder."""
     weak_forms: tuple[str, ...] = ()
     """The other dictionary pronunciations of an English function word (ARPAbet), for connected
     speech later."""
@@ -117,6 +120,7 @@ class WordForm:
             "affix": self.affix,
             "join": self.join,
             "weak_forms": "; ".join(self.weak_forms) if self.weak_forms else None,
+            "split": "held_out" if self.held_out else "train",
         }
 
 
@@ -405,3 +409,19 @@ def word_form_from_arpabet(
     form.espeak = espeak_table.render(syllables)
     form.spelling = Speller.load().spell(phones)
     return form
+
+
+def assign_word_splits(config: Config, streams, lexicon: Lexicon) -> None:
+    """Mark the words that no trained encoder sees: a seeded share of the content words
+    (``training.held_out_word_proportion``, drawn from the ``wordforms:train`` stream), and
+    every inflected form of a held-out stem. Function words are never held out: a closed class
+    is heard in full."""
+    content = lexicon.content
+    count = int(math.floor(config.training.held_out_word_proportion * len(content) + 0.5))
+    count = min(count, max(0, len(content) - 1))
+    held: set[str] = set()
+    if count > 0:
+        rng = streams.substream("train", "held_out_words")
+        held = {content[int(i)].label for i in rng.choice(len(content), size=count, replace=False)}
+    for word in lexicon.words:
+        word.held_out = word.label in held or (word.stem in held if word.stem else False)

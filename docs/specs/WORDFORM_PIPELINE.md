@@ -132,7 +132,7 @@ Each front end turns a clip into a matrix of frames by channels. The front ends 
 | `waveform` | The trimmed audio itself, for encoders that take waveforms. | 16 kHz |
 | `logmel` | Log-mel spectrogram, the standard input of speech recognition models. | 80 mel bands, 25 ms windows, 10 ms hops |
 | `cochleagram` | A model of the cochlea: a bank of filters spaced on the ERB scale, envelope extraction, power-law compression, and downsampling. | 64 channels, 50 Hz to 8 kHz, compression exponent 0.3, 100 frames per second |
-| `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales. | rates 2–32 Hz, scales 0.25–8 cycles per octave |
+| `modulation` (stage 5) | Spectrotemporal modulation, after the cortical model of Chi, Ru, and Shamma (2005): two-dimensional Gabor filters over the cochleagram at configured temporal rates and spectral scales, averaged in frequency bands. | rates 2–32 Hz, scales 0.25–4 cycles per octave (up to half the cochleagram's channels per octave), 8 bands; off by default |
 
 The cochleagram is a NumPy implementation, inside the package, of the filter bank of `pycochleagram` and `chcochleagram`, both from the McDermott lab. Neither package is on PyPI, so the pipeline does not depend on them. A test compares the implementation with saved outputs of `chcochleagram` (`tests/wordforms/fixtures/cochleagram_reference.npz`). The 64 channels are 62 band-pass filters plus the low-pass and high-pass filters that complete the bank.
 
@@ -156,9 +156,19 @@ Each embedding configuration names an encoder, and the encoder's output is one v
 
   Learned encoders train on training speakers only, and are frozen afterwards.
 
+  Both encoders read a front end's frames (`frontend`, log-mel by default), standardized by channel with statistics from the training tokens, through a stack of one-dimensional convolutions (`layers`, `hidden`, `kernel`). The contrastive encoder pools the convolutions over time (mean and maximum) and projects to `dims`; its loss is a supervised contrastive loss with a `temperature`, over batches of `batch_size` tokens drawn as pairs of tokens of the same word (from different speakers when the word has them). The CPC encoder projects the convolutions to latent frames of `dims`, summarizes them with a GRU of `hidden` units, and predicts the latents 1 to `steps_ahead` frames ahead against `negatives` other frames, drawn from the whole batch (`negatives_from: batch`, the default) or from the same clip (`clip`); its embedding is the mean of the context frames, of `hidden` numbers (`embedding_from: context`, the default), or of the latent frames (`latents`). A time-boxed comparison on the default run (September 30, 2026) set these defaults: the context beat the latents, batch negatives beat clip negatives, and 30 epochs were no better than 10. No CPC setting gave word embeddings near the fixed baselines across speakers, so the CPC encoder stands as a self-supervised baseline, not as a recommended embedding. CPC is trained on isolated words here, which leave little to predict; revisit it with continuous speech once `docs/specs/CONNECTED_SPEECH.md` is built. `train_on` chooses the training tokens: the clean tokens of training speakers (`clean`, the default) or all of them (`all`), in both cases without the held-out words. Training runs for `epochs` epochs with AdamW at `learning_rate`, seeded from the `wordforms:train` stream by the embedding's name, with PyTorch's deterministic algorithms, on the configured device; on the CPU, the same seed gives the same weights and embeddings. The stored embedding holds the frozen model (`model.pt`), the frame statistics, and a training report (epochs, steps, seconds, device, the loss of each epoch). The default configuration trains one of each on the log-mel front end (decided September 30, 2026).
+
+### Held-out words
+
+A configured share of the content words (`training.held_out_word_proportion`, 0.2 by default) is held out from the training of every trained encoder: the contrastive and CPC encoders, and the principal component projection of the fixed encoders. The held-out words are a seeded draw from the `wordforms:train` stream. An inflected form is held out with its stem, and a function word is never held out, because a closed class is heard in full. Held-out words still get tokens and embeddings, from the frozen encoders, and `words.csv` records each word's `split` (`train` or `held_out`). The evaluation reports every measure for all words, for the training words, and for the held-out words (`word_split`). The held-out rows are the fair test of an encoder on novel words (decided September 30, 2026).
+
+### Talker normalization
+
+Each embedding has an optional setting, `talker_normalization` (off by default for every embedding): each speaker's mean token embedding is subtracted from that speaker's tokens. The mean is taken over the speaker's clean tokens of training content words, so held-out words and closed-class forms never enter it. The speaker means are stored with the embedding, and `embed` subtracts them for new forms. Whatever the setting, the evaluation reports every embedding both ways (`talker_normalized`), and `configured` marks the variant that the run stores. Normalization is an option and not the default for two reasons. It uses speaker identity, which a learner does not get for free. And handling speaker variability is part of what learners must do, so embeddings that hand a model normalized speech hide part of the problem (decided September 30, 2026).
+
 ### Word embeddings
 
-A word's embedding is the mean of its tokens' embeddings over training speakers. Token embeddings are kept too, because token variability is part of what models should face.
+A word's embedding is the mean of its tokens' embeddings over training speakers, without augmented tokens; `word_embeddings.tokens: all` includes the augmented tokens of training speakers (decided September 30, 2026). Token embeddings are kept too, augmented ones included, because token variability is part of what models should face.
 
 ### Evaluation
 
@@ -271,6 +281,14 @@ Stage 5 adds seeded transformations of cached audio:
 
 Augmented tokens are new tokens with their own records. Augmentation is off by default.
 
+The configuration lists **recipes**. A recipe names the transformations it applies, in the order manipulation, speed and pitch, reverberation, noise, and gives each setting as a range that a value is drawn from (or one number). Every recipe is applied to a seeded share (`proportion`) of the eligible tokens (`speakers`: all, training, or held-out speakers). An augmented token keeps its source's word and speaker, takes the label `<source token>.A.<recipe number>` (`W.12.S.3.2.A.1`), and records its recipe and every drawn value in the `augmentation` column of `tokens.csv`. Its clip goes in the audio cache under a hash of the source clip and the drawn values. The draws come from a substream of `wordforms:augment` named by the source token and the recipe, so augmenting one token never changes another. The signal-to-noise ratio is set by the ratio of powers over the whole clip, before the mixture is leveled like every other clip. Speech-shaped noise takes the long-term average spectrum of the run's own clips; babble adds a configured number of other tokens. Reverberation simulates a shoebox room with random dimensions, source, and microphone positions for the drawn reverberation time. The walls' absorption comes from a calibration of the simulation (Eyring's formula with a fitted correction for the room's shape), which puts the measured reverberation time within 10% of the target for rooms with sides of 3 to 6 m; with Sabine's formula the measured time was 25 to 40% too long. Augmented tokens go through the front ends, the embeddings, and the evaluation like any token; `SoundEmbeddings.token_augmented` marks them, and `embed` returns synthesized tokens only. Every transformation's target is checked: the value aimed at and the value measured right after the transformation (median pitch, pitch range, formant ratio, duration, reverberation time, signal-to-noise ratio) go in the `achieved` column of `tokens.csv`, and the run's summary counts, for each quantity, the tokens that miss their target by more than 5% and by more than 10%.
+
+With augmentation on, the evaluation reports every measure separately for the clean tokens, the augmented tokens, and both together (`tokens`: `clean`, `augmented`, `all`), and once more for each recipe (`recipe:<name>`). It adds a **robustness** measure: how well a token retrieves its own word's clean embedding (the mean of the word's clean training tokens), as the same-different average precision over pairs of a sampled token and a word embedding (`robustness_ap`, chance one over the number of words) and the share of tokens whose nearest word embedding is their own (`robustness_top1`). A run without augmentation has the `clean` rows alone.
+
+The Praat tools (`praat.py`) work on any clip, whole or within a time range in seconds, so that later work on connected speech (`docs/specs/CONNECTED_SPEECH.md`) can apply them to an aligned span: measuring the median pitch and pitch range; moving the pitch median and scaling the range through Praat's pitch tier; stretching a span through the duration tier; and Praat's "Change gender" (formant shift, pitch median, pitch range, duration) on a span, spliced back. Praat's pitch analysis uses a floor of 75 Hz and a ceiling of 600 Hz.
+
+The modulation front end (`frontends.modulation`) filters the cochleagram with two-dimensional Gabor filters at the configured temporal rates (Hz) and spectral scales (cycles per octave), and averages the magnitude of the response within a configured number of frequency bands, so a frame has rates × scales × bands channels. The cochleagram's 64 channels sample the frequency axis about 8.6 times per octave, so scales above 4.3 cycles per octave cannot be resolved with the default cochleagram: the default scales stop at 4 (0.25, 0.5, 1, 2, 4), and finer scales need more cochleagram channels. The front end is off by default.
+
 ## Configuration
 
 A run is defined by one YAML file. Unknown keys are errors, and every error names the file and the field. The example shows the main parameters with their defaults.
@@ -309,11 +327,14 @@ frontends:
   waveform: {store: false}       # true also stores the waveforms, which repeat the audio cache
   logmel: {n_mels: 80, window_ms: 25, hop_ms: 10}
   cochleagram: {channels: 64, low_hz: 50, high_hz: 8000, compression: 0.3, frame_rate: 100}
+  modulation: null               # for example {rates: [2, 4, 8, 16, 32], scales: [0.25, 0.5, 1, 2, 4], bands: 8}
 
 embeddings:
   - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 256}
   - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 256}
   - {name: hubert_base, encoder: pretrained, model: facebook/hubert-base-ls960, layer: 8, pooling: mean, store_layers: false}
+  - {name: contrastive_logmel, encoder: learned, kind: contrastive, frontend: logmel, dims: 128, hidden: 128, layers: 3, kernel: 5, epochs: 20, batch_size: 64, learning_rate: 0.001, temperature: 0.1, train_on: clean}
+  - {name: cpc_logmel, encoder: learned, kind: cpc, frontend: logmel, dims: 64, hidden: 128, layers: 3, kernel: 5, epochs: 10, batch_size: 32, learning_rate: 0.001, steps_ahead: 8, negatives: 32, negatives_from: batch, embedding_from: context, train_on: clean}
 
 closed_class:                    # null: content words only
   request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
@@ -331,7 +352,16 @@ closed_class:                    # null: content words only
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
   inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
 
-augmentation: null
+word_embeddings: {tokens: clean} # clean: training-speaker tokens without augmentation; all: with
+training: {held_out_word_proportion: 0.2}   # content words that no trained encoder sees
+augmentation: null               # off; a recipe list turns it on, for example:
+#  recipes:
+#    - {name: noisy, noise: {kinds: [white, pink, speech, babble], snr_db: [0, 20], babble_voices: 6}}
+#    - {name: room, reverberation: {rt60: [0.2, 0.8], room_m: [3, 8]}}
+#    - {name: shifted, speed_pitch: {speed: [0.9, 1.1], pitch_semitones: [-2, 2]}}
+#    - {name: voice, manipulation: {pitch_median_hz: [100, 250], pitch_range_factor: [0.5, 2], formant_shift_ratio: [0.85, 1.2], duration_factor: [0.8, 1.25]}}
+#  proportion: 1.0                # the share of the eligible tokens each recipe is applied to
+#  speakers: all                  # all, train, or held_out
 assignment: {mode: arbitrary, meanings: null}
 device: auto                     # cpu, cuda, mps, or auto
 ```
@@ -349,13 +379,13 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word: label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
+| `words.csv` | One row per word (with `split`, `train` or `held_out`, for the trained encoders): label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
 | `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. An English affix lists its allomorphs. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
-| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation, duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
+| `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation (the recipe and drawn values of an augmented token), achieved (each transformation's target and measured value), duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
-| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. |
-| `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`). |
+| `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. A learned encoder writes its frozen model, `model.pt`, and its training report in `meta.yaml`. |
+| `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`), by kind of form (`kind`) and, with augmentation, by set of tokens (`tokens`). |
 | `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. |
 
 ## Python package

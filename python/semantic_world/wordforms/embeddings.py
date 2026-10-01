@@ -32,6 +32,7 @@ from semantic_world.wordforms.config import (
     Config,
     EmbeddingConfig,
     FixedEmbeddingConfig,
+    LearnedEmbeddingConfig,
     load_config,
 )
 from semantic_world.wordforms.encoders.fixed import FixedEncoder, Projection, fit_pca
@@ -68,6 +69,13 @@ class EmbeddingStore:
         return np.load(self.folder / "types.npy")
 
     @property
+    def speaker_means(self) -> np.ndarray | None:
+        """Each speaker's mean token embedding, when the embedding is talker-normalized: the
+        stored tokens are the encoder's output less their speaker's mean."""
+        path = self.folder / "speaker_means.npy"
+        return np.load(path) if path.exists() else None
+
+    @property
     def layers(self) -> np.ndarray | None:
         """A pretrained encoder's pooled output for every layer, memory-mapped: tokens by layers
         by dimensions. None unless the embedding was stored with ``store_layers``."""
@@ -76,7 +84,10 @@ class EmbeddingStore:
 
     def summary(self) -> dict[str, Any]:
         keys = ("encoder", "pretrained", "dims", "tokens", "words")
-        return {**{k: self.meta[k] for k in keys}, "reused": self.reused}
+        summary = {**{k: self.meta[k] for k in keys}, "reused": self.reused}
+        if "training" in self.meta:
+            summary["training"] = self.meta["training"]
+        return summary
 
 
 def token_layout(words: list[WordForm], synthesis: Synthesis):
@@ -90,15 +101,57 @@ def token_layout(words: list[WordForm], synthesis: Synthesis):
     return token_words, token_speakers, ~held_out[token_speakers]
 
 
-def word_means(tokens: np.ndarray, token_words: np.ndarray, train: np.ndarray, count: int):
-    """Each word's embedding: the mean of its training-speaker tokens."""
+def word_embedding_tokens(config: Config, synthesis: Synthesis, train: np.ndarray) -> np.ndarray:
+    """Which tokens make the word embeddings: the training-speaker tokens, without the augmented
+    ones unless ``word_embeddings.tokens`` is ``all``."""
+    if config.word_embeddings.tokens == "all":
+        return train
+    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    return train & clean
+
+
+def training_word_tokens(words: list[WordForm], token_words: np.ndarray) -> np.ndarray:
+    """Which tokens are of training words: the words that are not held out from trained
+    encoders."""
+    training = np.array([not word.held_out for word in words], dtype=bool)
+    return training[token_words]
+
+
+def normalization_basis(words: list[WordForm], synthesis: Synthesis, token_words: np.ndarray):
+    """The tokens that a speaker's mean is taken over for talker normalization: the clean tokens
+    of the training content words. Content words only, so that closed-class forms never change
+    a content word's embedding."""
+    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    content = np.array([word.kind == "content" for word in words], dtype=bool)
+    return clean & content[token_words] & training_word_tokens(words, token_words)
+
+
+def speaker_means(tokens: np.ndarray, token_speakers: np.ndarray, basis: np.ndarray, count: int):
+    """Each speaker's mean token embedding over the ``basis`` tokens (the speaker's clean tokens
+    of training words); zeros for a speaker without such a token."""
+    sums = np.zeros((count, tokens.shape[1]), dtype=np.float64)
+    totals = np.zeros(count, dtype=np.int64)
+    np.add.at(sums, token_speakers[basis], np.asarray(tokens, dtype=np.float64)[basis])
+    np.add.at(totals, token_speakers[basis], 1)
+    return (sums / np.maximum(totals, 1)[:, None]).astype(np.float32)
+
+
+def word_means(tokens: np.ndarray, token_words: np.ndarray, chosen: np.ndarray, count: int):
+    """Each word's embedding: the mean of its ``chosen`` tokens."""
     types = np.zeros((count, tokens.shape[1]), dtype=np.float64)
     totals = np.zeros(count, dtype=np.int64)
-    np.add.at(types, token_words[train], np.asarray(tokens, dtype=np.float64)[train])
-    np.add.at(totals, token_words[train], 1)
+    np.add.at(types, token_words[chosen], np.asarray(tokens, dtype=np.float64)[chosen])
+    np.add.at(totals, token_words[chosen], 1)
     if (totals == 0).any():
         raise ValueError("a word has no tokens from training speakers")
     return (types / totals[:, None]).astype(np.float32)
+
+
+def training_seed(config: Config, embedding: LearnedEmbeddingConfig) -> int:
+    """The seed of a learned encoder's training: the ``wordforms:train`` stream, by name."""
+    from semantic_world.wordforms.streams import Streams
+
+    return int(Streams(config.seed).substream("train", embedding.name).integers(2**31 - 1))
 
 
 def fingerprint(embedding: EmbeddingConfig, synthesis: Synthesis, extra: dict[str, Any]) -> str:
@@ -127,15 +180,25 @@ def compute_embedding(
     folder already holds the same embedding for the same audio, nothing is computed."""
     folder = Path(folder)
     fixed = isinstance(embedding, FixedEmbeddingConfig)
+    learned = isinstance(embedding, LearnedEmbeddingConfig)
     source: dict[str, Any]
-    if fixed:
+    if fixed or learned:
         frontend = make_frontends(config)[embedding.frontend]
         source = frontend.meta()
     else:
         source = {"sample_rate": config.synthesis.sample_rate}
+    source["word_embedding_tokens"] = config.word_embeddings.tokens
+    if learned or (fixed and embedding.pca_dims is not None) or embedding.talker_normalization:
+        # a trained encoder, and the speaker means, depend on which words are held out
+        source["held_out_words"] = [word.label for word in words if word.held_out]
+    if learned:
+        source["train_seed"] = training_seed(config, embedding)
+        source["device"] = "cpu" if config.device == "cpu" else "accelerator"
     mark = fingerprint(embedding, synthesis, source)
-    keep_layers = not fixed and embedding.store_layers
+    keep_layers = not fixed and not learned and embedding.store_layers
     files = ["tokens.npy", "types.npy", "meta.yaml"] + (["layers.npy"] if keep_layers else [])
+    if learned:
+        files.append("model.pt")
     if all((folder / name).exists() for name in files):
         store = EmbeddingStore.load(folder)
         if store.meta.get("fingerprint") == mark:
@@ -143,15 +206,55 @@ def compute_embedding(
             return store
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "meta.yaml").unlink(missing_ok=True)  # an unfinished write is never up to date
-    token_words, _, train = token_layout(words, synthesis)
+    token_words, token_speakers, train = token_layout(words, synthesis)
+    chosen = word_embedding_tokens(config, synthesis, train)
+    training_words = training_word_tokens(words, token_words)
     count = len(synthesis.tokens)
     meta: dict[str, Any] = {
         "name": embedding.name,
         "encoder": embedding.encoder,
-        "pretrained": not fixed,
+        "pretrained": not fixed and not learned,
         "settings": embedding.resolved(),
     }
-    if fixed:
+    if learned:
+        from semantic_world.wordforms.device import resolve_device
+        from semantic_world.wordforms.encoders import learned as learned_encoders
+
+        stored = (frontends or {}).get(embedding.frontend)
+        cache: dict[int, np.ndarray] = {}
+
+        def frames_of(index: int) -> np.ndarray:
+            if stored is not None:
+                return stored.token_frames(synthesis.tokens[index].label)
+            if index not in cache:
+                cache[index] = frontend.compute(synthesis.audio(synthesis.tokens[index]))
+            return cache[index]
+
+        clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+        trainable = train if embedding.train_on == "all" else train & clean
+        train_indices = np.flatnonzero(trainable & training_words)
+        mean, std = learned_encoders.frame_statistics(frames_of, train_indices)
+        frame_source = learned_encoders.FrameSource(frames_of, mean, std)
+        device = resolve_device(config.device)
+        model, report = learned_encoders.train_encoder(
+            embedding.kind,
+            embedding.settings(),
+            frame_source,
+            token_words,
+            train_indices,
+            training_seed(config, embedding),
+            device,
+            None if progress is None else (lambda e, n, loss: progress(e, n)),
+        )
+        learned_encoders.save_model(
+            folder / "model.pt", model, embedding.kind, embedding.settings(), mean, std
+        )
+        tokens = learned_encoders.encode_tokens(model, frame_source, count, device)
+        meta["frontend"] = embedding.frontend
+        meta["learned"] = True
+        meta["training"] = report.as_dict()
+        meta["device"] = device
+    elif fixed:
         encoder = FixedEncoder(frontend, embedding.time_bins)
         stored = (frontends or {}).get(embedding.frontend)
         features = np.zeros((count, encoder.feature_dims), dtype=np.float32)
@@ -168,7 +271,8 @@ def compute_embedding(
             # The projection is fitted on the content words, so that closed-class forms never
             # change a content word's embedding.
             content = np.array([word.kind == "content" for word in words], dtype=bool)
-            fitted = train & content[token_words]
+            clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+            fitted = train & content[token_words] & clean & training_words
             projection = fit_pca(features[fitted], embedding.pca_dims)
             projection.save(folder / "projection.npz")
             tokens = projection.apply(features)
@@ -177,7 +281,9 @@ def compute_embedding(
             meta["projection"] = {
                 "kind": "pca",
                 "fitted_on": "training-speaker tokens"
-                + ("" if content.all() else " of content words"),
+                + ("" if content.all() else " of content words")
+                + ("" if clean.all() else ", without augmented tokens")
+                + ("" if training_words.all() else ", without held-out words"),
                 "fitted_tokens": int(fitted.sum()),
                 "dims": projection.dims,
                 "explained_variance": round(kept / total, 6) if total > 0 else None,
@@ -224,14 +330,26 @@ def compute_embedding(
         meta["layers_stored"] = keep_layers
         meta["device"] = encoder.device
     tokens = np.ascontiguousarray(tokens, dtype=np.float32)
+    (folder / "speaker_means.npy").unlink(missing_ok=True)
+    if embedding.talker_normalization:
+        # Each speaker's mean over the speaker's clean tokens of training content words is
+        # subtracted from every token of that speaker. The means are stored for new forms.
+        basis = normalization_basis(words, synthesis, token_words)
+        means = speaker_means(tokens, token_speakers, basis, len(synthesis.speakers))
+        np.save(folder / "speaker_means.npy", means)
+        tokens = np.ascontiguousarray(tokens - means[token_speakers], dtype=np.float32)
+    meta["talker_normalization"] = embedding.talker_normalization
+    meta["held_out_words"] = int(sum(word.held_out for word in words))
     np.save(folder / "tokens.npy", tokens)
-    np.save(folder / "types.npy", word_means(tokens, token_words, train, len(words)))
+    np.save(folder / "types.npy", word_means(tokens, token_words, chosen, len(words)))
     meta.update(
         {
             "dims": int(tokens.shape[1]),
             "tokens": count,
             "words": len(words),
-            "word_embedding": "mean over training-speaker tokens",
+            "word_embedding": "mean over training-speaker tokens"
+            + (", without augmented tokens" if config.word_embeddings.tokens == "clean" else ""),
+            "word_embedding_tokens": config.word_embeddings.tokens,
             "fingerprint": mark,
         }
     )
@@ -278,8 +396,8 @@ class SoundEmbeddings:
 
     - ``types``: word embeddings, one row per word, in the order of ``words``;
     - ``tokens``: token embeddings, with ``token_words`` and ``token_speakers`` giving each
-      token's row in ``words`` and in ``speakers``, and ``token_held_out`` marking the tokens of
-      held-out speakers;
+      token's row in ``words`` and in ``speakers``, ``token_held_out`` marking the tokens of
+      held-out speakers, and ``token_augmented`` marking augmented tokens;
     - ``words``, ``speakers``: the word table and the speaker table. The word table holds the
       content words, then the function words, then the inflected forms, and ``word_kinds`` gives
       the kind of each row;
@@ -315,15 +433,20 @@ class SoundEmbeddings:
         self.token_speakers = np.array([speaker_index[s] for s in self.token_table["speaker"]])
         held_out = (self.speakers["split"] == "held_out").to_numpy()
         self.token_held_out = held_out[self.token_speakers]
+        self.token_augmented = self.token_table["augmentation"].fill_null("").to_numpy() != ""
         self._encoder: Any = None
         self._lexicon: dict[str, str] = {}
         for label, arpabet in self.words.select("label", "arpabet").iter_rows():
             self._lexicon.setdefault(arpabet, label)  # of two forms that sound alike, the first
+        # the synthesized tokens by word, speaker, and token number; augmented tokens are
+        # not a form's own recording, so ``embed`` never returns them
+        augmented = self.token_table["augmentation"].fill_null("").to_numpy()
         self._stored = {
             (word, speaker, int(label.rsplit(".", 1)[1])): i
             for i, (label, word, speaker) in enumerate(
                 self.token_table.select("label", "word", "speaker").iter_rows()
             )
+            if not augmented[i]
         }
 
     @classmethod
@@ -399,8 +522,16 @@ class SoundEmbeddings:
             form.join = row.get("join")
             weak = row.get("weak_forms")
             form.weak_forms = tuple(weak.split("; ")) if weak else ()
+            form.held_out = row.get("split") == "held_out"
             forms.append(form)
         return forms
+
+    @property
+    def word_held_out(self) -> np.ndarray:
+        """Which words were held out from the training of every trained encoder."""
+        if "split" not in self.words.columns:
+            return np.zeros(len(self.words), dtype=bool)
+        return (self.words["split"] == "held_out").to_numpy()
 
     @property
     def word_kinds(self) -> np.ndarray:
@@ -433,7 +564,15 @@ class SoundEmbeddings:
         """The frozen encoder of this embedding."""
         if self._encoder is None:
             settings = self.meta["settings"]
-            if self.meta["encoder"] == "fixed":
+            if self.meta["encoder"] == "learned":
+                from semantic_world.wordforms.device import resolve_device
+                from semantic_world.wordforms.encoders.learned import LearnedEncoder
+
+                frontend = make_frontends(self.config)[settings["frontend"]]
+                self._encoder = LearnedEncoder(
+                    frontend, self.store.folder / "model.pt", resolve_device(self.config.device)
+                )
+            elif self.meta["encoder"] == "fixed":
                 frontend = make_frontends(self.config)[settings["frontend"]]
                 path = self.store.folder / "projection.npz"
                 projection = Projection.load(path) if path.exists() else None
@@ -500,7 +639,18 @@ class SoundEmbeddings:
         """
         clips = self.clips(forms, speakers, token)
         encoder = self.encoder
-        return np.stack([np.stack([encoder.encode(clip) for clip in row]) for row in clips])
+        result = np.stack([np.stack([encoder.encode(clip) for clip in row]) for row in clips])
+        means = self.store.speaker_means
+        if means is not None:
+            # talker normalization: each speaker's stored mean is subtracted
+            rows = {label: i for i, label in enumerate(self.speakers["label"])}
+            for j, speaker in enumerate(self.speaker_list(speakers)):
+                if speaker.label not in rows:
+                    raise ValueError(
+                        f"talker normalization needs a speaker of the run, not {speaker.label!r}"
+                    )
+                result[:, j] -= means[rows[speaker.label]]
+        return result
 
     def embed_types(self, forms) -> np.ndarray:
         """Word embeddings for word forms: the mean over every token of every training speaker,
@@ -519,4 +669,5 @@ class SoundEmbeddings:
             "token_words": torch.from_numpy(self.token_words),
             "token_speakers": torch.from_numpy(self.token_speakers),
             "token_held_out": torch.from_numpy(self.token_held_out),
+            "token_augmented": torch.from_numpy(self.token_augmented),
         }

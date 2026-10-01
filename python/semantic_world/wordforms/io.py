@@ -44,6 +44,7 @@ WORD_COLUMNS = (
     "affix",
     "join",
     "weak_forms",
+    "split",
 )
 AFFIX_COLUMNS = ("label", "gloss", "position", "arpabet", "ipa")
 SPEAKER_COLUMNS = ("label", "engine", "voice", "speaker_id", "variant", "pitch", "rate", "split")
@@ -57,6 +58,7 @@ TOKEN_COLUMNS = (
     "rate_factor",
     "pitch_semitones",
     "augmentation",
+    "achieved",
     "duration",
     "tries",
     "peak",
@@ -76,6 +78,8 @@ PACKAGES = (
     "onnxruntime",
     "torch",
     "transformers",
+    "praat-parselmouth",
+    "pyroomacoustics",
 )
 
 
@@ -191,6 +195,7 @@ def write_tokens(synthesis: Synthesis, path: Path) -> None:
         "rate_factor": pl.Float64,
         "pitch_semitones": pl.Float64,
         "augmentation": pl.String,
+        "achieved": pl.String,
         "duration": pl.Float64,
         "tries": pl.Int64,
         "peak": pl.Float64,

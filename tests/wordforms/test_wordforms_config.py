@@ -32,7 +32,13 @@ def test_default_config_matches_the_spec_example(default_config):
     assert c.synthesis.engines == ("piper", "espeak")
     assert c.frontends.names == ("waveform", "logmel", "cochleagram")
     assert c.frontends.cochleagram.channels == 64
-    assert [e.name for e in c.embeddings] == ["cochleagram_fixed", "logmel_fixed", "hubert_base"]
+    assert [e.name for e in c.embeddings] == [
+        "cochleagram_fixed",
+        "logmel_fixed",
+        "hubert_base",
+        "contrastive_logmel",
+        "cpc_logmel",
+    ]
     assert isinstance(c.embeddings[0], FixedEmbeddingConfig) and c.embeddings[0].pca_dims == 256
     # HuBERT base layer 8 is the default, and only the configured layer is stored
     assert isinstance(c.embeddings[2], PretrainedEmbeddingConfig) and c.embeddings[2].layer == 8
@@ -239,14 +245,13 @@ def test_unknown_keys_name_the_file_and_the_field(data, field, tmp_path):
             "frontends.cochleagram.high_hz",
             "more than",
         ),
-        ({"frontends": {"modulation": {}}}, "frontends.modulation", "stage 5"),
         ({"embeddings": {"name": "a"}}, "embeddings", "expected a list"),
         (
             {"embeddings": [{"encoder": "fixed", "frontend": "logmel"}]},
             "embeddings[0].name",
             "required",
         ),
-        ({"embeddings": [{"name": "a", "encoder": "learned"}]}, "embeddings[0].encoder", "stage 6"),
+        ({"embeddings": [{"name": "a", "encoder": "learned"}]}, "embeddings[0].kind", "required"),
         (
             {
                 "embeddings": [
@@ -270,7 +275,7 @@ def test_unknown_keys_name_the_file_and_the_field(data, field, tmp_path):
             "embeddings[0].model",
             "required",
         ),
-        ({"augmentation": {"noise": {}}}, "augmentation", "stage 5"),
+        ({"augmentation": {"noise": {}}}, "augmentation.recipes", "required"),
         ({"assignment": {"mode": "branch_markers"}}, "assignment.mode", "stage 7"),
         ({"device": "tpu"}, "device", "expected one of"),
         ({"wordforms": 3}, "wordforms", "expected a mapping"),

@@ -4,7 +4,7 @@ The word-form pipeline makes the spoken words of Semantic World's language. It g
 
 This guide covers setup, running the pipeline, the ideas behind each layer, the output files, the evaluation table, and the Python interface. The design is specified in `docs/specs/WORDFORM_PIPELINE.md`.
 
-**Status.** Stages 1 to 4 and 4a are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, and closed-class forms (function words, affixes, and inflected forms). Augmentation, encoders trained on the world's own audio, and systematic sound–meaning assignment (stages 5 to 7) are not built yet.
+**Status.** Stages 1 to 6 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, and encoders trained on the world's own audio. Systematic sound–meaning assignment (stage 7) is not built yet.
 
 ## Setup
 
@@ -19,7 +19,7 @@ python -m pip install -e ".[speech]"
 That command builds the whole package, which needs the Rust toolchain. Without Rust, install the same packages directly and run with the `python/` folder on the path:
 
 ```
-python -m pip install numpy polars pyyaml cmudict wordfreq scipy soundfile piper-tts torch transformers
+python -m pip install numpy polars pyyaml cmudict wordfreq scipy soundfile piper-tts torch transformers praat-parselmouth pyroomacoustics
 PYTHONPATH=python python -m semantic_world.wordforms forms data/wordforms/tiny.yaml
 ```
 
@@ -39,7 +39,7 @@ python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/word
 
 **The HuBERT model.** The pretrained embedding downloads `facebook/hubert-base-ls960` from Hugging Face on its first run, into the usual Hugging Face cache.
 
-**Licenses.** Piper and espeak-ng are GPL-3.0. The repository is Apache-2.0. The pipeline keeps them apart: espeak-ng runs as a separate program, and Piper is imported only in the module that synthesizes with it.
+**Licenses.** Piper, espeak-ng, and praat-parselmouth are GPL-3.0. The repository is Apache-2.0. The pipeline keeps them apart: espeak-ng runs as a separate program, and Piper and parselmouth are imported only in the modules that use them.
 
 **Disk.** A default run uses about 3 GB: the audio cache (1.2 GB), the run folder (1.8 GB, mostly the stored front ends), and the voice.
 
@@ -117,6 +117,7 @@ Each front end turns a clip into a sequence of frames:
 | `waveform` | the audio itself | not stored, because it would repeat the cache |
 | `logmel` | log-mel spectrogram, the standard input of speech recognition models | 80 bands, 10 ms frames |
 | `cochleagram` | a model of the cochlea: a bank of filters spaced like the ear's frequency resolution, with compression | 64 channels, 50 Hz to 8 kHz, 10 ms frames |
+| `modulation` | spectrotemporal modulation: how fast the cochleagram changes in time (rates, in Hz) and how finely it ripples across frequency (scales, in cycles per octave), after the cortical model of Chi, Ru, and Shamma | off by default; rates 2–32 Hz, scales 0.25–4 cycles per octave, 8 frequency bands (200 channels) |
 
 ### 4. Sound embeddings
 
@@ -127,8 +128,14 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 | `cochleagram_fixed` | the cochleagram averaged in 10 time bins, reduced by principal components | 256 |
 | `logmel_fixed` | the same, from the log-mel spectrogram | 256 |
 | `hubert_base` | layer 8 of the pretrained HuBERT speech model, averaged over time | 768 |
+| `contrastive_logmel` | a small convolutional encoder trained on the run's own clips so that tokens of the same word lie together (supervised by word identity) | 128 |
+| `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels; a weak baseline: it tells words apart across speakers far worse than the others | 128 |
 
-The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained.
+The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (37,080 training tokens) the contrastive encoder trains in about 1.5 minutes and the CPC encoder in about 16 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
+
+**Held-out words.** One word in five (`training.held_out_word_proportion`) is held out from everything that is trained: the two learned encoders and the fixed encoders' projection. Held-out words still get audio and embeddings, and `words.csv` marks them (`split`). The evaluation gives every measure for all words, the training words, and the held-out words (`word_split`); the held-out rows say how an encoder does on words it has never seen.
+
+**Talker normalization.** Any embedding can take `talker_normalization: true`, which subtracts each speaker's mean embedding (from that speaker's training-word tokens) from the speaker's tokens. It is off by default: it uses speaker identity, which a learner does not get for free, and handling speaker variability is part of what learners must do. The evaluation reports every embedding both ways (`talker_normalized`).
 
 ## Closed-class forms
 
@@ -143,6 +150,27 @@ The request can come from a separate YAML file instead (`closed_class.request`),
 Closed-class forms never change a content word. They come from their own random stream, their audio is synthesized after the content words, the projection of a fixed embedding is fitted on content words only, and the content words' evaluation rows are the same with and without them. `words.csv` gains the columns `kind` (`content`, `function`, or `inflected`), `gloss`, `stem`, `affix`, and `epenthesis`, and a run with closed-class forms also writes `affixes.csv`.
 
 The evaluation reports every measure for each kind separately and for all forms together (the `kind` column), each kind on its own sample of tokens. Inflected forms add the **stem AUC**: the probability that an inflected form's embedding is closer to its own stem's than to another stem's. It says how visible morphology is in an embedding. On the tiny configuration, the fixed embeddings reach 0.84 to 0.90.
+
+## Augmentation and acoustic manipulation
+
+Augmentation makes new tokens from cached clips, with seeded transformations. It is off by default; an `augmentation` section with a list of recipes turns it on:
+
+```yaml
+augmentation:
+  recipes:
+    - {name: noisy, noise: {kinds: [babble, speech], snr_db: [0, 20]}}
+    - {name: room, reverberation: {rt60: [0.2, 0.8]}}
+    - {name: shifted, speed_pitch: {speed: [0.9, 1.1], pitch_semitones: [-2, 2]}}
+    - {name: voice, manipulation: {pitch_median_hz: [100, 250], formant_shift_ratio: [0.85, 1.2]}}
+  proportion: 0.5     # each recipe is applied to half the tokens
+  speakers: train     # all, train, or held_out
+```
+
+Each recipe applies its transformations in the order manipulation (Praat's "Change gender": pitch median, pitch range, formant shift, duration), speed and pitch, reverberation (a simulated room), and noise (white, pink, speech-shaped, or babble from other tokens), with every value drawn from its range. An augmented token is labeled after its source (`W.12.S.3.2.A.1` is recipe 1 applied to that token), keeps the source's word and speaker, and records the recipe and the drawn values in the `augmentation` column of `tokens.csv`. The `achieved` column holds each transformation's target beside the value measured right after it (median pitch, pitch range, formant ratio, duration, reverberation time, signal-to-noise ratio), and `summary.yaml` counts the tokens that miss a target by more than 5% and 10%. Augmented clips live in the cache like any clip. They go through the front ends and embeddings like any token; `SoundEmbeddings.token_augmented` marks them. Word embeddings leave augmented tokens out unless `word_embeddings: {tokens: all}`.
+
+With augmentation on, the evaluation gives every measure for clean tokens, augmented tokens, both, and each recipe (the `tokens` column), plus a robustness measure: how well a token retrieves its own word's clean embedding (`robustness_ap`, with `robustness_top1` for the share of tokens whose nearest word is their own).
+
+The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
 
 ## What the evaluation shows
 
@@ -177,7 +205,7 @@ Every result appears twice, with and without the `long_synthesis` words. Leaving
 | `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors` (content words one phoneme away), `real_word`, `long_synthesis`, `kind`, `gloss`, `stem`, `affix`, `join` (how an inflected form was joined: `none`, `schwa`, or `glide`), and `weak_forms` (an English function word's other pronunciations). Content words come first, then function words, then inflected forms. |
 | `affixes.csv` | One row per affix: `label`, `gloss`, `position`, `arpabet`, and `ipa`. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: engine, voice, speaker ID or variant, and `split` (`train` or `held_out`). |
-| `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, duration, retries, level, cache path, and SHA-256 hash. |
+| `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, `augmentation` (the recipe and drawn values of an augmented token), duration, retries, level, cache path, and SHA-256 hash. |
 | `frontends/<name>/` | `frames.npy` (all tokens' frames, one after another), `index.csv` (each token's first frame and frame count), and `meta.yaml`. |
 | `embeddings/<name>/` | `tokens.npy` (one row per token, in `tokens.csv` order), `types.npy` (one row per word, in `words.csv` order), and `meta.yaml`. |
 | `eval/embeddings.csv` | The evaluation table. |
@@ -241,6 +269,10 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `synthesis.cache_dir` | `runs/wordforms/cache` | Where the audio lives. |
 | `embeddings` | three embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
 | `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
+| `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
+| `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
+| `training.held_out_word_proportion` | 0.2 | Share of the content words held out from every trained encoder. |
+| `word_embeddings.tokens` | clean | Which training-speaker tokens make a word's embedding: `clean` leaves augmented tokens out, `all` includes them. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 
 To turn an engine off, set it to null, for example `espeak: null` under `synthesis.engines`. Leaving an engine out keeps it on, with its defaults.
