@@ -557,6 +557,7 @@ def test_sound_embeddings_interface(tmp_path):
         "token_speakers",
         "token_held_out",
         "token_augmented",
+        "token_mapped",
     }
     assert all(isinstance(t, torch.Tensor) for t in tensors.values())
     assert tensors["types"].shape == (6, 8) and tensors["types"].dtype == torch.float32

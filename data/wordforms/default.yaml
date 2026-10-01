@@ -59,5 +59,16 @@ closed_class:                    # null: content words only
 
 training: {held_out_word_proportion: 0.2}        # content words that no trained encoder sees
 augmentation: null                               # e.g. {recipes: [{name: noisy, noise: {kinds: [babble], snr_db: [5, 15]}}]}
-assignment: {mode: arbitrary, meanings: null}
+assignment:
+  mode: arbitrary                # arbitrary, target_correlation, branch_markers, or acoustic_mapping
+  meanings: null                 # a CSV file of IDs with 0 and 1 feature columns; null: no assignment
+  categories: all                # which meanings get words: all, leaves, or a list of IDs
+  non_binary: drop               # a column with other values than 0 and 1: drop (and report) or error
+  sound_distance: edit           # edit (phoneme edit distance) or the name of an embedding
+  meaning_distance: hamming      # hamming, cosine, or jaccard
+  null_samples: 1000
+  strict: false                  # true: a target correlation that is not reached within the tolerance is an error
+  target_correlation: {target: 0.3, tolerance: 0.01, max_swaps: 20000}
+  branch_markers: {depth: 1, position: initial, shape: CV}   # position: initial or final; shape: CV, VC, or CVC
+  acoustic_mapping: []           # for example [{feature: IS.3, property: pitch, amount: 2.0}]
 device: auto

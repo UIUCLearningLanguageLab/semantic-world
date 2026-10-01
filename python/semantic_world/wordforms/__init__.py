@@ -3,8 +3,8 @@
 See ``docs/specs/WORDFORM_PIPELINE.md``. Stages 1 to 4 provide the word forms, their audio, the
 auditory front ends, and the sound embeddings with their evaluation and the ``SoundEmbeddings``
 interface; stage 4a adds the closed-class forms (function words, affixes, and inflected forms);
-stage 5 adds augmentation, Praat manipulation, and the modulation front end; the later stages
-add learned encoders and sound-meaning assignment.
+stage 5 adds augmentation, Praat manipulation, and the modulation front end; stage 6 adds
+learned encoders; and stage 7 adds sound-meaning assignment.
 """
 
 from __future__ import annotations
@@ -126,6 +126,14 @@ def run_synthesis(run: Run, progress=None) -> Run:
     run.synthesis = synthesize_lexicon(
         run.config, run.streams, run.lexicon.words, progress=progress
     )
+    if run.assignment is not None and run.config.assignment.mode == "acoustic_mapping":
+        from semantic_world.wordforms.mapping import map_tokens
+
+        # The meaning of a word shifts the sound of its tokens. The mapped tokens are the
+        # word's tokens from here on, so the mapping comes before the augmentation.
+        run.assignment.summary["acoustic_mapping"] = map_tokens(
+            run.config, run.synthesis, run.assignment, progress=progress
+        )
     if run.config.augmentation is not None:
         from semantic_world.wordforms.augment import augment_synthesis
 
@@ -186,15 +194,34 @@ def run_evaluation(
     return run
 
 
-def run_assignment(run: Run) -> Run:
-    """Assign the content words to the meanings of ``assignment.meanings``. Without a meanings
-    table, nothing is assigned."""
-    from semantic_world.wordforms.assign import assign_arbitrary, load_meanings
+def run_assignment(run: Run, out: str | Path | None = None) -> Run:
+    """Assign the content words to the meanings of ``assignment.meanings``, in the configured
+    mode. Without a meanings table, nothing is assigned. With branch markers, the marked forms
+    join the run's word forms, so the assignment must come before the synthesis. With an
+    embedding's distance as the sound distance, the embeddings are computed first."""
+    from semantic_world.wordforms.assign import assign, needs_embeddings
 
-    if run.config.assignment.meanings is None:
+    config = run.config
+    if config.assignment.meanings is None or run.assignment is not None:
         return run
-    meanings, features = load_meanings(run.config.assignment.meanings)
-    run.assignment = assign_arbitrary(run.lexicon.content, meanings, features, run.streams.assign)
+    content = run.lexicon.content
+    types = None
+    if needs_embeddings(config):
+        if run.embeddings is None:
+            run_embeddings(run, out)
+        rows = [i for i, word in enumerate(run.lexicon.words) if word.kind == "content"]
+        types = run.embeddings[config.assignment.sound_distance].types[rows]
+    run.assignment = assign(
+        config,
+        content,
+        run.streams.assign,
+        types=types,
+        spellings={word.spelling for word in run.lexicon.words},
+        others=[word for word in run.lexicon.words if word.kind != "content"],
+        affixes=run.lexicon.affixes,
+    )
+    if run.assignment.marked:
+        run.lexicon.words = run.lexicon.words + run.assignment.marked
     return run
 
 

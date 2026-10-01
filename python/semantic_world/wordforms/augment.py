@@ -41,8 +41,10 @@ from semantic_world.wordforms.streams import Streams
 from semantic_world.wordforms.synth import CACHE_VERSION, Synthesis, Token
 from semantic_world.wordforms.synth import audio as audio_tools
 
-AUGMENT_VERSION = 1
-"""Part of every augmented clip's cache key. Raise it when the transformations change."""
+AUGMENT_VERSION = 2
+"""Part of every augmented clip's cache key. Raise it when the transformations or the measures
+of their achieved values change. Version 2 measures the formant shift and the pitch shift frame
+by frame."""
 SPECTRUM_BINS = 513
 """The resolution of the long-term average spectrum for speech-shaped noise."""
 SPECTRUM_TOKENS = 200
@@ -388,9 +390,7 @@ class Augmenter:
 
             m = settings["manipulation"]
             before = praat.measure_pitch(out, self.rate)
-            formants_before = (
-                praat.measure_formants(out, self.rate) if m["formant_shift_ratio"] else None
-            )
+            source = out
             duration_before = len(out) / self.rate
             out = praat.manipulate(
                 out,
@@ -408,10 +408,9 @@ class Augmenter:
                     before.range_semitones * m["pitch_range_factor"], after.range_semitones
                 )
             if m["formant_shift_ratio"]:
-                formants_after = praat.measure_formants(out, self.rate)
-                ratios = [b / a for a, b in zip(formants_before, formants_after, strict=True)]
+                # frame by frame, over the frames that are voiced before and after
                 achieved["formant_ratio"] = _achieved(
-                    m["formant_shift_ratio"], float(np.nanmean(ratios))
+                    m["formant_shift_ratio"], praat.measure_formant_shift(source, out, self.rate)
                 )
             if m["duration_factor"]:
                 achieved["duration_s"] = _achieved(
@@ -423,6 +422,7 @@ class Augmenter:
             speed = settings["speed_pitch"]["speed"]
             semitones = settings["speed_pitch"]["pitch_semitones"]
             before = praat.measure_pitch(out, self.rate)
+            source = out
             duration_before = len(out) / self.rate
             if speed != 1.0:
                 out = audio_tools.resample(out, self.rate * speed, self.rate)
@@ -430,9 +430,13 @@ class Augmenter:
                 out = praat.change_pitch(out, self.rate, factor=2.0 ** (semitones / 12.0))
             achieved["speed_duration_s"] = _achieved(duration_before / speed, len(out) / self.rate)
             if speed != 1.0 or semitones != 0.0:
+                # the median pitch that the measured shift gives: the shift is measured frame
+                # by frame, because a changed clip's own median also moves with the frames that
+                # Praat finds voiced
                 target = before.median_hz * speed * 2.0 ** (semitones / 12.0)
+                shift = praat.measure_pitch_shift(source, out, self.rate)
                 achieved["speed_pitch_median_hz"] = _achieved(
-                    target, praat.measure_pitch(out, self.rate).median_hz
+                    target, before.median_hz * 2.0 ** (shift / 12.0)
                 )
         if "reverberation" in settings:
             r = settings["reverberation"]
@@ -454,14 +458,14 @@ class Augmenter:
 
 
 def eligible_tokens(config: Config, synthesis: Synthesis) -> list[Token]:
-    """The tokens a recipe may be applied to: the unaugmented tokens of the configured
-    speakers."""
+    """The tokens a recipe may be applied to: the clean tokens of the configured speakers. With
+    acoustic mapping, a mapped word's clean tokens are its mapped tokens."""
     which = config.augmentation.speakers
     held_out = {s.label: s.held_out for s in synthesis.speakers}
     return [
         t
         for t in synthesis.tokens
-        if not t.augmentation and (which == "all" or (which == "held_out") == held_out[t.speaker])
+        if t.clean and (which == "all" or (which == "held_out") == held_out[t.speaker])
     ]
 
 
@@ -477,7 +481,7 @@ def augment_synthesis(
     result = Augmentation([], skipped=[])
     if settings is None:
         return result
-    originals = [t for t in synthesis.tokens if not t.augmentation]
+    originals = [t for t in synthesis.tokens if t.clean]
     candidates = eligible_tokens(config, synthesis)
     augmenter = Augmenter(config, synthesis, originals)
     cache_dir = Path(config.synthesis.cache_dir)

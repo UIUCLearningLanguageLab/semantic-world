@@ -98,3 +98,38 @@ def read_flac(path: Path) -> tuple[np.ndarray, int]:
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+TILT_BAND_HZ = (100.0, 5000.0)
+"""The band over which the spectral tilt is measured."""
+TILT_PIVOT_HZ = 1000.0
+"""The frequency whose level a tilt change leaves alone."""
+
+
+def spectral_tilt(audio: np.ndarray, rate: int, band: tuple[float, float] = TILT_BAND_HZ) -> float:
+    """The spectral tilt of a clip in decibels per octave: the slope of the long-term average
+    power spectrum (Hann windows of 1024 samples) against the logarithm of frequency, within
+    ``band``."""
+    size = 1024
+    data = np.asarray(audio, dtype=np.float64)
+    if len(data) < size:
+        data = np.pad(data, (0, size - len(data)))
+    window = np.hanning(size + 1)[:-1]
+    frames = np.lib.stride_tricks.sliding_window_view(data, size)[:: size // 2]
+    power = (np.abs(np.fft.rfft(frames * window, axis=1)) ** 2).mean(axis=0)
+    freqs = np.fft.rfftfreq(size, 1.0 / rate)
+    keep = (freqs >= band[0]) & (freqs <= band[1]) & (power > 0)
+    if keep.sum() < 3:
+        return float("nan")
+    slope, _ = np.polyfit(np.log2(freqs[keep]), 10.0 * np.log10(power[keep]), 1)
+    return float(slope)
+
+
+def change_tilt(audio: np.ndarray, rate: int, db_per_octave: float) -> np.ndarray:
+    """Tilt a clip's spectrum by ``db_per_octave`` around 1 kHz: a positive amount makes the clip
+    brighter, a negative one duller. Frequencies below 50 Hz take the gain of 50 Hz."""
+    data = np.asarray(audio, dtype=np.float64)
+    spectrum = np.fft.rfft(data)
+    freqs = np.maximum(np.fft.rfftfreq(len(data), 1.0 / rate), 50.0)
+    gain = 10.0 ** (db_per_octave * np.log2(freqs / TILT_PIVOT_HZ) / 20.0)
+    return np.fft.irfft(spectrum * gain, n=len(data)).astype(np.float32)

@@ -38,7 +38,7 @@ from semantic_world.wordforms.config import (
 from semantic_world.wordforms.encoders.fixed import FixedEncoder, Projection, fit_pca
 from semantic_world.wordforms.frontends import FrontendStore, make_frontends
 from semantic_world.wordforms.generate import WordForm
-from semantic_world.wordforms.synth import Synthesis
+from semantic_world.wordforms.synth import MAPPED_SUFFIX, Synthesis
 from semantic_world.wordforms.synth import audio as audio_tools
 from semantic_world.wordforms.synth.speakers import Speaker
 
@@ -103,10 +103,12 @@ def token_layout(words: list[WordForm], synthesis: Synthesis):
 
 def word_embedding_tokens(config: Config, synthesis: Synthesis, train: np.ndarray) -> np.ndarray:
     """Which tokens make the word embeddings: the training-speaker tokens, without the augmented
-    ones unless ``word_embeddings.tokens`` is ``all``."""
+    ones unless ``word_embeddings.tokens`` is ``all``, and never a control token (the unmapped
+    original of a mapped word's token)."""
     if config.word_embeddings.tokens == "all":
-        return train
-    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+        control = np.array([t.control for t in synthesis.tokens], dtype=bool)
+        return train & ~control
+    clean = np.array([t.clean for t in synthesis.tokens], dtype=bool)
     return train & clean
 
 
@@ -121,7 +123,7 @@ def normalization_basis(words: list[WordForm], synthesis: Synthesis, token_words
     """The tokens that a speaker's mean is taken over for talker normalization: the clean tokens
     of the training content words. Content words only, so that closed-class forms never change
     a content word's embedding."""
-    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    clean = np.array([t.clean for t in synthesis.tokens], dtype=bool)
     content = np.array([word.kind == "content" for word in words], dtype=bool)
     return clean & content[token_words] & training_word_tokens(words, token_words)
 
@@ -230,8 +232,9 @@ def compute_embedding(
                 cache[index] = frontend.compute(synthesis.audio(synthesis.tokens[index]))
             return cache[index]
 
-        clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
-        trainable = train if embedding.train_on == "all" else train & clean
+        clean = np.array([t.clean for t in synthesis.tokens], dtype=bool)
+        control = np.array([t.control for t in synthesis.tokens], dtype=bool)
+        trainable = train & ~control if embedding.train_on == "all" else train & clean
         train_indices = np.flatnonzero(trainable & training_words)
         mean, std = learned_encoders.frame_statistics(frames_of, train_indices)
         frame_source = learned_encoders.FrameSource(frames_of, mean, std)
@@ -271,7 +274,7 @@ def compute_embedding(
             # The projection is fitted on the content words, so that closed-class forms never
             # change a content word's embedding.
             content = np.array([word.kind == "content" for word in words], dtype=bool)
-            clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+            clean = np.array([t.clean for t in synthesis.tokens], dtype=bool)
             fitted = train & content[token_words] & clean & training_words
             projection = fit_pca(features[fitted], embedding.pca_dims)
             projection.save(folder / "projection.npz")
@@ -391,13 +394,28 @@ def compute_embeddings(
 # ---------------------------------------------------------------------------------------------
 
 
+TOKEN_TEXT_COLUMNS = {"augmentation": pl.String, "achieved": pl.String, "mapping": pl.String}
+"""Columns of ``tokens.csv`` that are empty in most runs, and text when they are not."""
+
+
+def _text_column(table: pl.DataFrame, name: str) -> np.ndarray:
+    """A text column of the token table, with empty strings for missing values; all empty when a
+    run folder from before the column has none."""
+    if name not in table.columns:
+        return np.full(table.height, "", dtype=object)
+    return table[name].fill_null("").to_numpy()
+
+
 class SoundEmbeddings:
     """The sound embeddings of a run, for use in other models.
 
     - ``types``: word embeddings, one row per word, in the order of ``words``;
     - ``tokens``: token embeddings, with ``token_words`` and ``token_speakers`` giving each
       token's row in ``words`` and in ``speakers``, ``token_held_out`` marking the tokens of
-      held-out speakers, and ``token_augmented`` marking augmented tokens;
+      held-out speakers, ``token_augmented`` marking augmented tokens, and ``token_mapped``
+      marking tokens changed by acoustic mapping. With acoustic mapping, a mapped word's tokens
+      are its mapped tokens. The unmapped originals are a control set, and they are left out of
+      every array here: ``control`` holds them, with the same fields, for comparison;
     - ``words``, ``speakers``: the word table and the speaker table. The word table holds the
       content words, then the function words, then the inflected forms, and ``word_kinds`` gives
       the kind of each row;
@@ -424,29 +442,58 @@ class SoundEmbeddings:
         self.meta = self.store.meta
         self.words = pl.read_csv(self.folder / "words.csv")
         self.speakers = pl.read_csv(self.folder / "speakers.csv")
-        self.token_table = pl.read_csv(self.folder / "tokens.csv")
+        table = pl.read_csv(self.folder / "tokens.csv", schema_overrides=TOKEN_TEXT_COLUMNS)
         self.types = self.store.types
-        self.tokens = self.store.tokens
         word_index = {label: i for i, label in enumerate(self.words["label"])}
         speaker_index = {label: i for i, label in enumerate(self.speakers["label"])}
-        self.token_words = np.array([word_index[w] for w in self.token_table["word"]])
-        self.token_speakers = np.array([speaker_index[s] for s in self.token_table["speaker"]])
         held_out = (self.speakers["split"] == "held_out").to_numpy()
-        self.token_held_out = held_out[self.token_speakers]
-        self.token_augmented = self.token_table["augmentation"].fill_null("").to_numpy() != ""
+
+        def arrays(rows: np.ndarray | None) -> dict[str, Any]:
+            part = table if rows is None else table[rows]
+            tokens = self.store.tokens if rows is None else self.store.tokens[rows]
+            token_speakers = np.array([speaker_index[s] for s in part["speaker"]], dtype=np.int64)
+            return {
+                "token_table": part,
+                "tokens": tokens,
+                "token_words": np.array([word_index[w] for w in part["word"]], dtype=np.int64),
+                "token_speakers": token_speakers,
+                "token_held_out": held_out[token_speakers],
+                "token_augmented": part["augmentation"].fill_null("").to_numpy() != "",
+                "token_mapped": _text_column(part, "mapping") != "",
+            }
+
+        # A run with acoustic mapping keeps the unmapped originals of the mapped tokens as a
+        # control set. They are no part of what a learner gets, so they are held apart.
+        control = (
+            table["control"].fill_null(False).to_numpy()
+            if "control" in table.columns
+            else np.zeros(table.height, dtype=bool)
+        )
+        own = arrays(None if not control.any() else np.flatnonzero(~control))
+        self.token_table = own["token_table"]
+        self.tokens = own["tokens"]
+        self.token_words = own["token_words"]
+        self.token_speakers = own["token_speakers"]
+        self.token_held_out = own["token_held_out"]
+        self.token_augmented = own["token_augmented"]
+        self.token_mapped = own["token_mapped"]
+        self.control: dict[str, Any] = arrays(np.flatnonzero(control))
+        """The control tokens of a run with acoustic mapping (the unmapped originals of the
+        mapped tokens): ``token_table``, ``tokens``, ``token_words``, ``token_speakers``, and
+        ``token_held_out``. Empty arrays in any other run."""
         self._encoder: Any = None
         self._lexicon: dict[str, str] = {}
         for label, arpabet in self.words.select("label", "arpabet").iter_rows():
             self._lexicon.setdefault(arpabet, label)  # of two forms that sound alike, the first
-        # the synthesized tokens by word, speaker, and token number; augmented tokens are
-        # not a form's own recording, so ``embed`` never returns them
-        augmented = self.token_table["augmentation"].fill_null("").to_numpy()
+        # the word's own tokens by word, speaker, and token number (a mapped token has its
+        # source's number); augmented tokens are not a form's own recording, so ``embed`` never
+        # returns them
         self._stored = {
-            (word, speaker, int(label.rsplit(".", 1)[1])): i
+            (word, speaker, int(label.removesuffix(MAPPED_SUFFIX).rsplit(".", 1)[1])): i
             for i, (label, word, speaker) in enumerate(
                 self.token_table.select("label", "word", "speaker").iter_rows()
             )
-            if not augmented[i]
+            if not self.token_augmented[i]
         }
 
     @classmethod
@@ -670,4 +717,5 @@ class SoundEmbeddings:
             "token_speakers": torch.from_numpy(self.token_speakers),
             "token_held_out": torch.from_numpy(self.token_held_out),
             "token_augmented": torch.from_numpy(self.token_augmented),
+            "token_mapped": torch.from_numpy(self.token_mapped),
         }

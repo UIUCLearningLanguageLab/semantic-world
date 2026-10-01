@@ -578,6 +578,14 @@ def augmented_tiny(tmp_path_factory):
             {"name": "noisy", "noise": {"snr_db": [0, 20]}},
             {"name": "room", "reverberation": {"rt60": [0.3, 0.8]}},
             {"name": "pitched", "manipulation": {"pitch_median_hz": [100, 250]}},
+            {
+                "name": "tract",
+                "manipulation": {
+                    "formant_shift_ratio": [0.85, 1.2],
+                    "duration_factor": [0.8, 1.25],
+                },
+            },
+            {"name": "shifted", "speed_pitch": {"speed": [0.9, 1.1], "pitch_semitones": [-2, 2]}},
         ],
         "proportion": 0.5,
     }
@@ -614,6 +622,34 @@ def test_praat_manipulation_moves_the_median_pitch_of_real_clips(augmented_tiny)
     # more, and the share within 5% is reported
     assert np.median(errors) < 0.05
     assert np.mean(errors <= 0.05) > 0.8, f"{np.mean(errors <= 0.05):.2f} within 5%"
+
+
+@needs_cmudict
+@needs_wordfreq
+@needs_audio
+@needs_espeak
+@needs_piper
+@needs_parselmouth
+@needs_pyroomacoustics
+def test_shifts_of_real_clips_are_measured_frame_by_frame(augmented_tiny):
+    """The formant shift and the pitch shift are measured over the frames that are voiced before
+    and after the change. A changed clip's own median pitch and mean formants move with the
+    frames that Praat finds voiced, and missed the targets of many more clips."""
+    misses: dict[str, list[float]] = {"formant_ratio": [], "speed_pitch_median_hz": []}
+    for token in augmented_tiny.synthesis.tokens:
+        if token.augmentation:
+            for quantity, entry in json.loads(token.achieved).items():
+                if quantity in misses and entry["miss"] is not None:
+                    misses[quantity].append(entry["miss"])
+    for quantity, values in misses.items():
+        values = np.array(values)
+        assert len(values) > 30, quantity
+        assert np.median(values) < 0.01, quantity
+        assert np.mean(values <= 0.05) > 0.95, (
+            f"{quantity}: {np.mean(values <= 0.05):.2f} within 5%"
+        )
+    summary = augmented_tiny.synthesis.augmentation["achieved"]
+    assert summary["duration_s"]["over_5_percent"] == 0
 
 
 @needs_cmudict

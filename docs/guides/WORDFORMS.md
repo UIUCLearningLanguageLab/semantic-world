@@ -4,7 +4,7 @@ The word-form pipeline makes the spoken words of Semantic World's language. It g
 
 This guide covers setup, running the pipeline, the ideas behind each layer, the output files, the evaluation table, and the Python interface. The design is specified in `docs/specs/WORDFORM_PIPELINE.md`.
 
-**Status.** Stages 1 to 6 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, and encoders trained on the world's own audio. Systematic sound–meaning assignment (stage 7) is not built yet.
+**Status.** Stages 1 to 7 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, encoders trained on the world's own audio, and sound–meaning assignment (arbitrary, target correlation, branch markers, and acoustic mapping).
 
 ## Setup
 
@@ -166,11 +166,11 @@ augmentation:
   speakers: train     # all, train, or held_out
 ```
 
-Each recipe applies its transformations in the order manipulation (Praat's "Change gender": pitch median, pitch range, formant shift, duration), speed and pitch, reverberation (a simulated room), and noise (white, pink, speech-shaped, or babble from other tokens), with every value drawn from its range. An augmented token is labeled after its source (`W.12.S.3.2.A.1` is recipe 1 applied to that token), keeps the source's word and speaker, and records the recipe and the drawn values in the `augmentation` column of `tokens.csv`. The `achieved` column holds each transformation's target beside the value measured right after it (median pitch, pitch range, formant ratio, duration, reverberation time, signal-to-noise ratio), and `summary.yaml` counts the tokens that miss a target by more than 5% and 10%. Augmented clips live in the cache like any clip. They go through the front ends and embeddings like any token; `SoundEmbeddings.token_augmented` marks them. Word embeddings leave augmented tokens out unless `word_embeddings: {tokens: all}`.
+Each recipe applies its transformations in the order manipulation (Praat's "Change gender": pitch median, pitch range, formant shift, duration), speed and pitch, reverberation (a simulated room), and noise (white, pink, speech-shaped, or babble from other tokens), with every value drawn from its range. An augmented token is labeled after its source (`W.12.S.3.2.A.1` is recipe 1 applied to that token), keeps the source's word and speaker, and records the recipe and the drawn values in the `augmentation` column of `tokens.csv`. The `achieved` column holds each transformation's target beside the value measured right after it (median pitch, pitch range, formant ratio, duration, reverberation time, signal-to-noise ratio), and `summary.yaml` counts the tokens that miss a target by more than 5% and 10%. The formant ratio and the pitch shift of `speed_pitch` are measured frame by frame, over the frames that are voiced before and after the change. Augmented clips live in the cache like any clip. They go through the front ends and embeddings like any token; `SoundEmbeddings.token_augmented` marks them. Word embeddings leave augmented tokens out unless `word_embeddings: {tokens: all}`.
 
 With augmentation on, the evaluation gives every measure for clean tokens, augmented tokens, both, and each recipe (the `tokens` column), plus a robustness measure: how well a token retrieves its own word's clean embedding (`robustness_ap`, with `robustness_top1` for the share of tokens whose nearest word is their own).
 
-The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
+The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`, `measure_pitch_shift`, `measure_formants`, `measure_formant_shift`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
 
 ## What the evaluation shows
 
@@ -205,10 +205,11 @@ Every result appears twice, with and without the `long_synthesis` words. Leaving
 | `words.csv` | One row per word: `label`, `arpabet`, `ipa`, `espeak`, `spelling`, `syllables`, `stress`, `log_probability` (under the English sound model), `english_neighbors` (English words one phoneme away), `nearest_english`, `lexicon_neighbors` (content words one phoneme away), `real_word`, `long_synthesis`, `kind`, `gloss`, `stem`, `affix`, `join` (how an inflected form was joined: `none`, `schwa`, or `glide`), and `weak_forms` (an English function word's other pronunciations). Content words come first, then function words, then inflected forms. |
 | `affixes.csv` | One row per affix: `label`, `gloss`, `position`, `arpabet`, and `ipa`. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: engine, voice, speaker ID or variant, and `split` (`train` or `held_out`). |
-| `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, `augmentation` (the recipe and drawn values of an augmented token), duration, retries, level, cache path, and SHA-256 hash. |
+| `tokens.csv` | One row per token: its word and speaker, synthesis settings, rate and pitch perturbations, `augmentation` (the recipe and drawn values of an augmented token), `mapping` and `control` (acoustic mapping: a mapped token's record, and true for an unmapped original), duration, retries, level, cache path, and SHA-256 hash. |
 | `frontends/<name>/` | `frames.npy` (all tokens' frames, one after another), `index.csv` (each token's first frame and frame count), and `meta.yaml`. |
 | `embeddings/<name>/` | `tokens.npy` (one row per token, in `tokens.csv` order), `types.npy` (one row per word, in `words.csv` order), and `meta.yaml`. |
 | `eval/embeddings.csv` | The evaluation table. |
+| `assignment/` | `lexicon.csv` (each meaning's word), `summary.yaml` (the sound–meaning correlation and its null distribution), and, with branch markers, `markers.csv`. Written when the run assigns words to meanings. |
 
 Labels follow the project convention: words `W.12`, speakers `S.3`, and tokens `W.12.S.3.2` (token 2 of word 12 by speaker 3). Function words are `F.2`, affixes `AF.1`, and inflected forms `W.12.AF.1`; their tokens extend the labels the same way.
 
@@ -225,8 +226,10 @@ emb.tokens         # token embeddings: 45,000 x 768
 emb.token_words    # each token's row in emb.words
 emb.token_speakers # each token's row in emb.speakers
 emb.token_held_out # True for tokens of held-out speakers
+emb.token_mapped   # True for tokens changed by acoustic mapping
+emb.control        # the control tokens of a run with acoustic mapping, held apart
 emb.words          # the word table, as a polars data frame
-emb.word_kinds     # each word's kind: content, function, or inflected
+emb.word_kinds     # each word's kind: content, function, inflected, or marked
 tensors = emb.to_torch()
 ```
 
@@ -248,7 +251,36 @@ Both run on the tiny configuration in under half a minute on a CPU. They are dem
 
 ## Assigning words to meanings
 
-With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns word forms to meanings at random and reports the correlation between sound distance and meaning distance, with a null distribution. The file's first column holds the meaning labels, and the other columns hold 0 or 1 features. The taxonomy generator's `categories_generative.csv` works when the taxonomy run has no scalar dimensions. Scalar columns hold other numbers, so drop them first. Systematic assignments, where sound tracks meaning, come in stage 7.
+With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns content words to meanings and reports the correlation between sound distance and meaning distance, with a null distribution from random reassignments. The file's first column holds the meaning labels, and the other columns hold 0 or 1 features. The taxonomy generator's `categories_generative.csv` works as it is. A column with other numbers, such as a scalar dimension, is dropped and listed in the summary (`non_binary: error` stops the run instead). `categories` chooses the meanings that get words: `all`, `leaves`, or a list of labels.
+
+```yaml
+assignment:
+  mode: target_correlation
+  meanings: runs/taxonomy/default_seed1/out/categories_generative.csv
+  target_correlation: {target: 0.3}
+```
+
+There are four modes:
+
+- `arbitrary`: a random assignment. Sound says nothing about meaning, and the correlation is near 0.
+- `target_correlation`: the assignment starts random, and words are exchanged while each exchange moves the correlation toward `target_correlation.target`. The summary says whether the target was reached within the tolerance. A target that the words cannot give is not an error: the closest value is reported, with `reached: false` and a warning in the summary and on the command line. `assignment.strict: true` makes a miss larger than the tolerance an error. With 500 words and 56 meanings, targets up to about 0.75 are reached.
+- `branch_markers`: the words of each branch of the taxonomy share a marker syllable, at the start (`position: initial`) or the end (`final`) of the word. `depth: 1` marks the top branches (`C1`, `C2`, and so on), and `depth: 2` the branches below them. A marker is joined like an affix, with the same glide and schwa repairs. The marked forms are new words of kind `marked` (`W.12.M.2` is word 12 with marker 2). They are synthesized and embedded like any word, and their stem AUC is reported.
+- `acoustic_mapping`: the assignment is random, and semantic features then change the sound of a word's recordings. Each mapping names a feature column, a property, and an amount:
+
+```yaml
+assignment:
+  mode: acoustic_mapping
+  meanings: runs/taxonomy/default_seed1/out/categories_generative.csv
+  acoustic_mapping:
+    - {feature: IS.3, property: pitch, amount: 2.0}       # semitones
+    - {feature: IS.7, property: formants, amount: 1.1}    # ratio; above 1 is a shorter vocal tract
+    - {feature: IS.9, property: duration, amount: 1.2}    # factor
+    - {feature: IS.12, property: tilt, amount: -3.0}      # decibels per octave; negative is duller
+```
+
+Every clean token of a word whose meaning has the feature gets a changed copy, labeled with `.M` (`W.12.S.3.2.M`). The mapped tokens are the mapped word's tokens from then on: they make the word's embedding, trained encoders and augmentation use them, and `SoundEmbeddings` returns them. The unmapped originals stay in the run as a control set (`control` is true in `tokens.csv`). The control tokens are used for nothing but comparison: `SoundEmbeddings` holds them apart in `emb.control`, and the evaluation reports the two sets as `mapped` and `control` in the `tokens` column. The `mapping` column of `tokens.csv` holds a mapped token's source, meaning, and mappings, and the `achieved` column holds each amount beside the shift measured on the changed clip. The summary reports the measured shifts, not the amounts: their mean and spread, how many tokens miss the amount by more than 5% and 10%, and the correlation between the feature and the measured shift. Acoustic mapping needs `praat-parselmouth`.
+
+The sound distance is the phoneme edit distance, or, for the first two modes, the cosine distance of an embedding (`sound_distance: hubert_base`). The meaning distance is `hamming`, `cosine`, or `jaccard`. The assignment is written to `assignment/lexicon.csv` and `assignment/summary.yaml`, with `assignment/markers.csv` for branch markers. `assign` runs the word forms and the assignment alone, and `all` runs every layer with the assignment in place, so marked forms and mapped tokens are synthesized, embedded, and evaluated.
 
 ## Configuration
 
@@ -272,6 +304,7 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
 | `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
 | `training.held_out_word_proportion` | 0.2 | Share of the content words held out from every trained encoder. |
+| `assignment` | arbitrary, no meanings | The assignment of words to meanings (see "Assigning words to meanings"). |
 | `word_embeddings.tokens` | clean | Which training-speaker tokens make a word's embedding: `clean` leaves augmented tokens out, `all` includes them. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 
