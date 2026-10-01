@@ -87,7 +87,7 @@ def test_default_values() -> None:
     assert (clauses.rate, clauses.max_depth, clauses.object_share) == (0.1, 1, 0.3)
     grammar = config.grammar
     assert grammar.adjective_order_fixed is True
-    assert grammar.class_can_rate == 0.5
+    assert grammar.can_rate == {"class": 0.5, "instance": 1.0}
     assert grammar.word_order.resolved() == {
         "clause": "SVO",
         "determiner": "before",
@@ -102,8 +102,11 @@ def test_default_values() -> None:
     assert not (morphology.number.enabled or morphology.tense.enabled or morphology.aspect.enabled)
     assert (morphology.number.realization, morphology.number.verb_marks) == ("affix", "plural")
     assert morphology.number.agreement is True and morphology.agreement is False
-    assert morphology.tense.event_tense == "past"
-    assert (morphology.aspect.realization, morphology.aspect.progressive_rate) == ("word", 0.3)
+    assert (morphology.tense.realization, morphology.aspect.realization) == ("affix", "word")
+    assert config.propositions.event_tense == "past"
+    assert config.propositions.progressive_rate == 0.3
+    assert config.propositions.restriction_rate == 0.1
+    assert config.documents.sibling_contrast_rate == 0.2
     assert config.scalar_z == 1.0
     assert config.propositional_referents == "local"
     assert config.test_sets.size == 500
@@ -389,7 +392,12 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "at most 1",
     ),
     ({"grammar": {"adjective_order": {"fixed": 1}}}, "grammar.adjective_order.fixed", "true or"),
-    ({"grammar": {"class_can_rate": 1.5}}, "grammar.class_can_rate", "at most 1"),
+    ({"grammar": {"can_rate": {"class": 1.5}}}, "grammar.can_rate.class", "at most 1"),
+    ({"grammar": {"can_rate": {"instance": -1}}}, "grammar.can_rate.instance", "at least 0"),
+    ({"grammar": {"can_rate": {"event": 1}}}, "grammar.can_rate.event", "unknown key"),
+    ({"grammar": {"class_can_rate": 0.5}}, "grammar.class_can_rate", "grammar.can_rate.class"),
+    ({"propositions": {"restriction_rate": 2}}, "propositions.restriction_rate", "at most 1"),
+    ({"documents": {"sibling_contrast_rate": 2}}, "documents.sibling_contrast_rate", "at most 1"),
     ({"grammar": {"word_order": {"clause": "SVV"}}}, "grammar.word_order.clause", "SVO, SOV"),
     ({"grammar": {"word_order": {"adjective": "left"}}}, "grammar.word_order.adjective", "before"),
     (
@@ -414,14 +422,24 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "plural, singular",
     ),
     (
-        {"grammar": {"morphology": {"tense": {"event_tense": "future"}}}},
-        "grammar.morphology.tense.event_tense",
+        {"propositions": {"events": {"tense": "future"}}},
+        "propositions.events.tense",
         "past, present",
     ),
     (
-        {"grammar": {"morphology": {"aspect": {"progressive_rate": 2}}}},
-        "grammar.morphology.aspect.progressive_rate",
+        {"propositions": {"events": {"progressive_rate": 2}}},
+        "propositions.events.progressive_rate",
         "at most 1",
+    ),
+    (
+        {"grammar": {"morphology": {"tense": {"event_tense": "past"}}}},
+        "grammar.morphology.tense.event_tense",
+        "is now propositions.events.tense",
+    ),
+    (
+        {"grammar": {"morphology": {"aspect": {"progressive_rate": 0.3}}}},
+        "grammar.morphology.aspect.progressive_rate",
+        "is now propositions.events.progressive_rate",
     ),
     (
         {"grammar": {"morphology": {"tense": {"enabled": "yes"}}}},

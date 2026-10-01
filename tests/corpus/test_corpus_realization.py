@@ -16,7 +16,7 @@ from semantic_world.corpus import Streams
 from semantic_world.corpus.grammar import CLASS_NP, check_plan
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.mentions import RelativeClauses, plan_for
-from semantic_world.corpus.propositions import HAS, IS, CategoryTerm, Literal
+from semantic_world.corpus.propositions import HAS, IS, VERB, CategoryTerm, Literal, Predicate
 from semantic_world.corpus.realize import leaves, token_parts, tree_depth
 
 WORLDS = ("tiny", "default", "deep")
@@ -40,14 +40,19 @@ GRAMMARS = {
     },
     "plural_verbs": {
         "morphology": {"number": {"enabled": True}, "aspect": {"enabled": True}},
-        "class_can_rate": 0.2,
+        "can_rate": {"class": 0.2},
     },
     "marker_words": {
         "morphology": {
             "number": {"enabled": True, "realization": "word", "position": "before"},
             "tense": {"enabled": True, "realization": "word"},
-            "aspect": {"enabled": True, "progressive_rate": 0.6},
+            "aspect": {"enabled": True},
         }
+    },
+    "bare": {"can_rate": {"class": 0.5, "instance": 0.3}},
+    "bare_english": {
+        "can_rate": {"class": 0.0, "instance": 0.0},
+        "morphology": {"number": {"enabled": True, "verb_marks": "singular"}},
     },
     "no_agreement": {"morphology": {"number": {"enabled": True, "agreement": False}}},
     "flipped": {
@@ -90,6 +95,18 @@ def plans_of(case, limit: int = 2):
                 literals.append(Literal(facts.poles[0]))
             term = CategoryTerm(category, tuple(literals))
             propositions += facts.class_facts(term, patients=facts.categories[:2])[::7]
+        # subjects and patients with a restrictive relative clause, of the three kinds
+        for _ in range(3):
+            term = facts.draw_clause(rng, CategoryTerm(category))
+            if term is not None:
+                propositions += facts.class_facts(term, patients=facts.categories[:2])[::7]
+                propositions += facts.patient_facts(category, agents=facts.categories[:2])[:1]
+                reversed_role = [
+                    facts.class_fact(CategoryTerm(agent), Predicate(VERB, verb, term))
+                    for agent in facts.categories[:2]
+                    for verb in facts.verbs[:2]
+                ]
+                propositions += [fact for fact in reversed_role if fact is not None]
     propositions += list(facts.rule_statements())
     propositions += [g for g in map(facts.generic, facts.rule_statements()[::2]) if g is not None]
     plans = [plan_for(facts, p) for p in propositions]
@@ -283,7 +300,7 @@ def test_relative_clause_depth_never_exceeds_the_limit(cases, limit) -> None:
         depth = tree_depth(sentence.tree)
         # a class-level restriction with negated IS literals is a relative clause of depth 1,
         # which is what the sentence says, and not a drawn clause
-        drawn_limit = limit if plan.subject.kind != CLASS_NP else 1
+        drawn_limit = limit if plan.subject.kind != CLASS_NP else max(limit, 1)
         assert depth == plan.depth() <= drawn_limit
         if plan.subject.kind != CLASS_NP:
             deepest = max(deepest, depth)

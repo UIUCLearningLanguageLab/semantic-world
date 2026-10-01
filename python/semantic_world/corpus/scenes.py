@@ -25,6 +25,10 @@ one time step.
 Nothing changes state, so the pool is the same at every step, and an event never contradicts a
 capacity.
 
+**Aspect.** Every event is simple or progressive: progressive with probability
+``propositions.events.progressive_rate``. The aspect belongs to the event, so every report of one
+event agrees. The aspects are drawn after the events, so the rate never changes what happens.
+
 Scenes are a fact about the world and not about the language: they use every CAN feature and
 every verb, with a word or without one, so the lexicon never changes a scene. A scene draws from
 its own part of the ``corpus:scenes`` stream, named by its label, so one scene never changes
@@ -39,7 +43,17 @@ from typing import Any
 import numpy as np
 
 from semantic_world.corpus.config import Config, ConfigError
-from semantic_world.corpus.propositions import CAN, EVENT, VERB, Predicate, Proposition, Truth
+from semantic_world.corpus.propositions import (
+    CAN,
+    EVENT,
+    PAST,
+    PROGRESSIVE,
+    SIMPLE,
+    VERB,
+    Predicate,
+    Proposition,
+    Truth,
+)
 from semantic_world.corpus.streams import Streams
 from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.similarity import similarity_matrix
@@ -56,6 +70,8 @@ class Event:
     """A CAN feature (an intransitive event) or a verb (a transitive event)."""
     agent: str
     patient: str | None = None
+    aspect: str = SIMPLE
+    """``simple`` or ``progressive``."""
 
     @property
     def transitive(self) -> bool:
@@ -69,12 +85,21 @@ class Event:
     def involves(self, instance: str) -> bool:
         return instance in (self.agent, self.patient)
 
-    def proposition(self, verb: str | None = None) -> Proposition:
+    def proposition(self, verb: str | None = None, tense: str = PAST) -> Proposition:
         """The event-level logical form that reports the event. ``verb`` names it with a verb
-        category above its own verb ("hunt" for a chase)."""
+        category above its own verb ("hunt" for a chase). ``tense`` is the corpus's tense for
+        events (``propositions.events.tense``)."""
         kind = VERB if self.transitive else CAN
         predicate = Predicate(kind, self.verb if verb is None else verb, self.patient)
-        return Proposition(EVENT, self.agent, predicate, scene=self.scene, event=self.label)
+        return Proposition(
+            EVENT,
+            self.agent,
+            predicate,
+            scene=self.scene,
+            event=self.label,
+            tense=tense,
+            aspect=self.aspect,
+        )
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -82,6 +107,7 @@ class Event:
             "verb": self.verb,
             "agent": self.agent,
             "patient": self.patient,
+            "aspect": self.aspect,
         }
 
 
@@ -119,7 +145,15 @@ class Scene:
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> Scene:
         events = tuple(
-            Event(e["label"], data["label"], step, e["verb"], e["agent"], e["patient"])
+            Event(
+                e["label"],
+                data["label"],
+                step,
+                e["verb"],
+                e["agent"],
+                e["patient"],
+                e.get("aspect", SIMPLE),
+            )
             for step, listed in enumerate(data["steps"], start=1)
             for e in listed
         )
@@ -133,6 +167,7 @@ class SceneGenerator:
 
     def __init__(self, config: Config, result: TaxonomyResult, truth: Truth | None = None) -> None:
         self.settings = config.scene
+        self.progressive_rate = config.propositions.progressive_rate
         self.result = result
         self.truth = truth or Truth(config, result)
         instances = result.instances
@@ -284,12 +319,23 @@ class SceneGenerator:
         participants = self.draw_participants(rng, seed)
         steps = int(rng.integers(self.settings.steps.min, self.settings.steps.max + 1))
         pools = self.possible_events(participants)
-        events: list[Event] = []
-        for step in range(1, steps + 1):
-            for verb, agent, patient in self._draw_step(rng, pools):
-                events.append(
-                    Event(f"{label}.{len(events) + 1}", label, step, verb, agent, patient)
-                )
+        drawn = [
+            (step, event) for step in range(1, steps + 1) for event in self._draw_step(rng, pools)
+        ]
+        # the aspects are drawn last, so the rate never changes the participants or the events
+        progressive = rng.random(len(drawn)) < self.progressive_rate
+        events = [
+            Event(
+                f"{label}.{k}",
+                label,
+                step,
+                verb,
+                agent,
+                patient,
+                PROGRESSIVE if progressive[k - 1] else SIMPLE,
+            )
+            for k, (step, (verb, agent, patient)) in enumerate(drawn, start=1)
+        ]
         scene = Scene(label, seed, participants, steps, tuple(events))
         self.truth.add_scene(scene)
         return scene

@@ -41,6 +41,7 @@ from semantic_world.corpus.propositions import (
     SOME,
     VERB,
     CategoryTerm,
+    Clause,
     Literal,
     Predicate,
     Proposition,
@@ -587,3 +588,130 @@ def test_draws_are_reproducible(cases) -> None:
     first = draws(facts, 50, seed=4, level=INSTANCE)
     assert first == draws(facts, 50, seed=4, level=INSTANCE)
     assert all(dataclasses.replace(p, grounding=None) == p for p in first)
+
+
+# ---------------------------------------------------------------------------------------------
+# Restricted subjects
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_a_restriction_is_drawn_among_those_that_do_work(cases, name) -> None:
+    case = cases(name)
+    facts = case.facts()
+    truth = facts.truth
+    rng = Streams(4).propositions
+    polarities: Counter = Counter()
+    kinds: Counter = Counter()
+    for category in facts.categories:
+        term = CategoryTerm(category)
+        total = len(truth.members(term))
+        options = facts.restriction_options(term)
+        for literal in options:
+            # some members satisfy the literal, and not all
+            inside = len(truth.members(CategoryTerm(category, (literal,))))
+            assert 0 < inside < total
+        # every literal that does work is an option
+        for feature in facts.features[IS] + facts.features[HAS]:
+            count = int(truth.values[truth.members(term), truth.features[feature].position].sum())
+            assert (Literal(feature) in options) == (0 < count < total)
+            assert (Literal(feature, False) in options) == (0 < count < total)
+        for _ in range(20):
+            drawn = facts.draw_restriction(rng, term)
+            if not options:
+                assert drawn is None
+                continue
+            (literal,) = drawn.restriction
+            assert drawn.category == category and literal in options
+            polarities[literal.positive] += 1
+            kinds[literal.feature.split(".")[0]] += 1
+            # a second literal narrows the subject again
+            again = facts.draw_restriction(rng, drawn)
+            if again is not None:
+                assert len(again.restriction) == 2
+                assert 0 < len(truth.members(again)) < len(truth.members(drawn))
+    # negative at the class-level negation rate (0.1)
+    assert 0.03 < polarities[False] / sum(polarities.values()) < 0.2
+    assert {"IS", "HAS"} <= set(kinds)
+
+
+def test_a_relative_clause_is_drawn_among_those_that_do_work(cases) -> None:
+    case = cases("default")
+    settings = {"mention": {"relative_clauses": {"rate": 0.5, "max_depth": 2, "object_share": 0.3}}}
+    facts = case.facts(**settings)
+    truth = facts.truth
+    rng = Streams(4).propositions
+    kinds: Counter = Counter()
+    nested = 0
+    for category in facts.categories:
+        term = CategoryTerm(category)
+        total = len(truth.members(term))
+        for object_relative in (False, True):
+            for clause in facts.clause_options(term, object_relative):
+                inside = len(truth.members(CategoryTerm(category, (), (clause,))))
+                assert 0 < inside < total
+                assert (clause.agent is not None) == object_relative
+                assert clause.kind in (CAN, VERB) and (clause.kind == CAN) == (clause.other is None)
+        for _ in range(12):
+            drawn = facts.draw_clause(rng, term)
+            if drawn is None:
+                assert not facts.clause_options(term, False)
+                assert not facts.clause_options(term, True)
+                continue
+            (clause,) = drawn.clauses
+            assert 0 < len(truth.members(drawn)) < total
+            kinds[(clause.kind, clause.agent is not None)] += 1
+            if clause.other is not None and clause.other.clauses:
+                # a clause inside the clause, down to the depth limit and no further
+                (inner,) = clause.other.clauses
+                assert inner.other is None or not inner.other.clauses
+                assert 0 < len(truth.members(clause.other)) < len(truth.members(clause.other.plain))
+                nested += 1
+            # a term takes one relative clause
+            assert facts.draw_clause(rng, drawn) is None
+    drawn = sum(kinds.values())
+    # an object relative with probability object_share, and a subject relative otherwise: a CAN
+    # feature or a verb, each with the same chance
+    assert abs(kinds[(VERB, True)] / drawn - 0.3) < 0.07
+    assert abs(kinds[(CAN, False)] / drawn - 0.35) < 0.07
+    assert abs(kinds[(VERB, False)] / drawn - 0.35) < 0.07
+    assert nested > 20
+
+
+def test_the_settings_of_a_drawn_relative_clause(cases) -> None:
+    case = cases("default")
+
+    def drawn(**clauses):
+        facts = case.facts(mention={"relative_clauses": clauses})
+        rng = Streams(4).propositions
+        terms = [
+            facts.draw_clause(rng, CategoryTerm(c)) for c in facts.categories for _ in range(4)
+        ]
+        return [term for term in terms if term is not None]
+
+    # the depth limit: none at 0, and no clause inside a clause at 1
+    assert drawn(rate=1.0, max_depth=0) == []
+    assert all(not t.clauses[0].other or not t.clauses[0].other.clauses for t in drawn(max_depth=1))
+    deep = drawn(rate=1.0, max_depth=3)
+    assert any(
+        t.clauses[0].other and t.clauses[0].other.clauses and t.clauses[0].other.clauses[0].other
+        for t in deep
+    )
+    # the share of object relatives
+    assert all(t.clauses[0].agent is None for t in drawn(object_share=0.0, max_depth=1))
+    most = drawn(object_share=1.0, max_depth=1)
+    assert np.mean([t.clauses[0].agent is not None for t in most]) > 0.9
+    # the negated IS literals need a subject relative to join, so no object relative is drawn
+    facts = case.facts(mention={"relative_clauses": {"object_share": 1.0}})
+    rng = Streams(4).propositions
+    checked = 0
+    for category in facts.categories:
+        negated = [x for x in facts.restriction_options(CategoryTerm(category)) if not x.positive]
+        negated = [x for x in negated if x.feature.startswith("IS.")]
+        for literal in negated[:2]:
+            term = facts.draw_clause(rng, CategoryTerm(category, (literal,)))
+            if term is not None:
+                assert term.clauses[0].agent is None and term.restriction == (literal,)
+                checked += 1
+    assert checked > 10
+    assert isinstance(drawn(max_depth=1)[0].clauses[0], Clause)

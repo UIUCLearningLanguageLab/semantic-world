@@ -393,7 +393,8 @@ def test_scene_json_round_trips(cases) -> None:
         assert len(form["steps"]) == scene.steps
         assert sum(len(step) for step in form["steps"]) == len(scene.events)
         for event in (e for step in form["steps"] for e in step):
-            assert list(event) == ["label", "verb", "agent", "patient"]
+            assert list(event) == ["label", "verb", "agent", "patient", "aspect"]
+            assert event["aspect"] in ("simple", "progressive")
         assert Scene.from_json(json.loads(json.dumps(form))) == scene
 
 
@@ -453,6 +454,8 @@ def test_event_logical_forms(cases) -> None:
         "level": "event",
         "scene": scene.label,
         "event": event.label,
+        "tense": "past",
+        "aspect": event.aspect,
         "polarity": True,
         "subject": {"instance": event.agent},
         "predicate": {"kind": "verb", "verb": event.verb, "patient": {"instance": event.patient}},
@@ -478,6 +481,9 @@ def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
     not_happened = {True: 0, False: 0}
     for scene in scenes:
         happened = {e.key for e in scene.events}
+        # a claim names an aspect, and is true when an event of that aspect happened
+        simple = {e.key for e in scene.events if e.aspect == "simple"}
+        progressive = {e.key for e in scene.events if e.aspect == "progressive"}
         intransitive, transitive = generator.possible_events(scene.participants)
         possible = set(intransitive) | set(transitive)
         for verb in generator.verbs[:3]:
@@ -485,23 +491,40 @@ def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
                 for patient in scene.participants:
                     if agent == patient:
                         continue
-                    claim = Proposition(
-                        EVENT, agent, Predicate(VERB, verb, patient), scene=scene.label
-                    )
-                    evaluation = truth.evaluate(claim)
                     key = (verb, agent, patient)
-                    assert evaluation.valid and evaluation.true == (key in happened)
+                    ongoing = Proposition(
+                        EVENT,
+                        agent,
+                        Predicate(VERB, verb, patient),
+                        scene=scene.label,
+                        tense="past",
+                        aspect="progressive",
+                    )
+                    assert truth.evaluate(ongoing).valid
+                    assert truth.evaluate(ongoing).true == (key in progressive)
+                    claim = dataclasses.replace(ongoing, aspect="simple")
+                    evaluation = truth.evaluate(claim)
+                    assert evaluation.valid and evaluation.true == (key in simple)
+                    if key not in happened:
+                        assert not evaluation.true and not truth.evaluate(ongoing).true
                     # the grounding says whether the world allows the event: what tells an
                     # impossible false item from one that merely did not happen
                     assert evaluation.grounding["possible"] == (key in possible)
                     assert ("step" in evaluation.grounding) == evaluation.true
-                    if not evaluation.true:
+                    if key not in happened:
                         not_happened[key in possible] += 1
         for feature in generator.can_features[:4]:
             for agent in scene.participants:
-                claim = Proposition(EVENT, agent, Predicate(CAN, feature), scene=scene.label)
+                claim = Proposition(
+                    EVENT,
+                    agent,
+                    Predicate(CAN, feature),
+                    scene=scene.label,
+                    tense="past",
+                    aspect="simple",
+                )
                 evaluation = truth.evaluate(claim)
-                assert evaluation.true == ((feature, agent, None) in happened)
+                assert evaluation.true == ((feature, agent, None) in simple)
                 assert evaluation.grounding["possible"] == ((feature, agent, None) in possible)
     assert not_happened[True] > 50 and not_happened[False] > 50
     # what happened in one scene did not happen in another
@@ -534,9 +557,10 @@ def test_a_report_names_one_event(cases) -> None:
     other = next(e for e in scene.events if e.key != repeated)
     report = again[1].proposition()
     assert truth.evaluate(report).grounding["step"] == again[1].step
-    # without an event label, the first such event grounds the proposition
+    # without an event label, the first such event of the same aspect grounds the proposition
     unlabeled = dataclasses.replace(report, event=None)
-    assert truth.evaluate(unlabeled).grounding["step"] == again[0].step
+    first = next(e for e in again if e.aspect == again[1].aspect)
+    assert truth.evaluate(unlabeled).grounding["step"] == first.step
     # a label of another event, or of no event, makes the report false
     for label in (other.label, f"{scene.label}.999"):
         wrong = dataclasses.replace(report, event=label)
@@ -568,6 +592,10 @@ def test_event_forms_that_cannot_be_judged(cases) -> None:
         "only a verb, has a patient": dataclasses.replace(
             report, predicate=Predicate(VERB, event.verb)
         ),
+        "events are in the past tense": dataclasses.replace(report, tense="present"),
+        "events are in the past tense ": dataclasses.replace(report, tense=None),
+        "simple or progressive": dataclasses.replace(report, aspect=None),
+        "simple or progressive ": dataclasses.replace(report, aspect="perfect"),
     }
     for reason, proposition in bad.items():
         evaluation = truth.evaluate(proposition)
@@ -575,6 +603,56 @@ def test_event_forms_that_cannot_be_judged(cases) -> None:
     # a scene and an event belong to the event level only
     instance = Proposition(INSTANCE, event.agent, Predicate(IS, "IS.1"), scene=scene.label)
     assert not truth.evaluate(instance).valid
+
+
+# ---------------------------------------------------------------------------------------------
+# Tense and aspect
+# ---------------------------------------------------------------------------------------------
+
+
+def events_settings(**events) -> dict:
+    return {"propositions": {"events": events}}
+
+
+def test_every_event_has_an_aspect_drawn_at_the_rate(cases) -> None:
+    case = cases("default")
+    base = make(case.scenes(), 300)
+    events = [e for s in base for e in s.events]
+    share = np.mean([e.aspect == "progressive" for e in events])
+    assert abs(share - 0.3) < 0.03  # the default rate
+    # the aspect is part of the event's logical form, and a report with the other aspect is false
+    truth = case.scenes().truth
+    for scene in base[:20]:
+        truth.add_scene(scene)
+        for event in scene.events:
+            report = event.proposition()
+            assert (report.tense, report.aspect) == ("past", event.aspect)
+            assert truth.is_true(report)
+            other = "simple" if event.aspect == "progressive" else "progressive"
+            wrong = dataclasses.replace(report, aspect=other)
+            assert truth.evaluate(wrong).valid and not truth.is_true(wrong)
+    # the rate never changes what happens: the same participants and events, with other aspects
+    for rate, expected in ((0.0, {"simple"}), (1.0, {"progressive"})):
+        changed = make(case.scenes(**events_settings(progressive_rate=rate)), 300)
+        assert [s.participants for s in changed] == [s.participants for s in base]
+        assert [[e.key for e in s.events] for s in changed] == [
+            [e.key for e in s.events] for s in base
+        ]
+        assert {e.aspect for s in changed for e in s.events} == expected
+
+
+def test_the_tense_of_events_is_the_corpus_s(cases) -> None:
+    case = cases("tiny")
+    settings = events_settings(tense="present")
+    generator = case.scenes(**settings)
+    facts = case.facts(**settings)
+    scene = next(s for s in make(generator, 50) if s.events)
+    event = scene.events[0]
+    report = facts.event_fact(event)
+    assert report.tense == "present" and report.to_json()["tense"] == "present"
+    assert generator.truth.is_true(report)
+    past = event.proposition()  # the default tense of a report is the past
+    assert past.tense == "past" and not generator.truth.evaluate(past).valid
 
 
 # ---------------------------------------------------------------------------------------------

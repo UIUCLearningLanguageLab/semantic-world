@@ -16,12 +16,20 @@ never has a negative one ("no fish have fur", never "all fish do not have fur").
 
 **Instance level.** The subject is an instance, and truth is read from the instance's values.
 
+**Relative clauses.** A category term can also be restricted by relative clauses, which are
+restrictive: "penguins that can swim" are the penguins with the CAN feature, "owls that eat mice"
+are the owls that can eat at least one mouse, and "mice that owls eat" are the mice that at least
+one owl can eat. With such a subject, ``most``, ``some``, and the generic are judged by the share
+of the subject set, and ``all`` and ``no`` are allowed only under the observed reading.
+
 **Event level.** The proposition says that something happened in a scene: the subject is the
 agent, and the predicate is a CAN feature, or a verb with a patient instance. The verb can be the
 event's own verb or a verb category above it, as a noun can name a category above a leaf. The
 proposition is true when such an event occurred in the scene. An event-level proposition is
-never negated. Its grounding says whether the world allows the event (``possible``), which is
-what tells an impossible false test item from one that merely did not happen.
+never negated. Its tense and aspect are part of the logical form: the tense is the corpus's
+(``propositions.events.tense``), and the aspect is the event's own. Its grounding says whether
+the world allows the event (``possible``), which is what tells an impossible false test item from
+one that merely did not happen.
 
 The truth tests follow "Truth grounding" in ``docs/specs/CORPUS_GENERATOR.md``.
 """
@@ -65,6 +73,13 @@ PROJECTION = "projection"
 VERB = "verb"
 KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB)
 FEATURE_KINDS = (IS, HAS, CAN)
+
+PAST = "past"
+PRESENT = "present"
+TENSES = (PAST, PRESENT)
+SIMPLE = "simple"
+PROGRESSIVE = "progressive"
+ASPECTS = (SIMPLE, PROGRESSIVE)
 
 # How a proposition's truth was decided: the ``test`` of its grounding.
 EXACT = "exact"
@@ -134,24 +149,90 @@ class Literal:
 
 
 @dataclass(frozen=True)
+class Clause:
+    """A relative clause that restricts a category term. It keeps the members that have a CAN
+    feature ("penguins that can swim"), the members that have a verb's relation with at least
+    one member of another category as its agent ("owls that eat mice", with ``patient``), or as
+    its patient ("mice that owls eat", with ``agent``)."""
+
+    kind: str
+    """``can`` or ``verb``."""
+    label: str
+    patient: CategoryTerm | None = None
+    """A verb in a subject relative: the other category, which the head acts on."""
+    agent: CategoryTerm | None = None
+    """A verb in an object relative: the other category, which acts on the head."""
+
+    @property
+    def other(self) -> CategoryTerm | None:
+        return self.patient if self.patient is not None else self.agent
+
+    def to_json(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"kind": self.kind, _JSON_KEY[self.kind]: self.label}
+        if self.patient is not None:
+            data["patient"] = self.patient.to_json()
+        if self.agent is not None:
+            data["agent"] = self.agent.to_json()
+        return data
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Clause:
+        kind = data["kind"]
+        patient, agent = data.get("patient"), data.get("agent")
+        return cls(
+            kind,
+            data[_JSON_KEY[kind]],
+            None if patient is None else CategoryTerm.from_json(patient),
+            None if agent is None else CategoryTerm.from_json(agent),
+        )
+
+
+@dataclass(frozen=True)
 class CategoryTerm:
     """A category with a restriction: the subject of a class-level proposition, or the patient
     of a class-level verb. The category is a category label or ``THING``. The restriction is a
-    set, kept in one order: IS literals, HAS literals, then scalar poles, each by index."""
+    set, kept in one order: IS literals, HAS literals, then scalar poles, each by index. The
+    relative clauses restrict the category further, and are kept in the order given."""
 
     category: str
     restriction: tuple[Literal, ...] = ()
+    clauses: tuple[Clause, ...] = ()
 
     def __post_init__(self) -> None:
         ordered = tuple(sorted(set(self.restriction), key=lambda x: x.sort_key))
         object.__setattr__(self, "restriction", ordered)
+        object.__setattr__(self, "clauses", tuple(self.clauses))
+
+    @property
+    def plain(self) -> CategoryTerm:
+        """The term without its relative clauses."""
+        return CategoryTerm(self.category, self.restriction) if self.clauses else self
+
+    def concepts(self) -> list[str]:
+        """The concepts that the term needs words for, its clauses' included."""
+        labels = [self.category] + [x.feature for x in self.restriction]
+        for clause in self.clauses:
+            labels.append(clause.label)
+            if clause.other is not None:
+                labels += clause.other.concepts()
+        return labels
 
     def to_json(self) -> dict[str, Any]:
-        return {"category": self.category, "restriction": [str(x) for x in self.restriction]}
+        data: dict[str, Any] = {
+            "category": self.category,
+            "restriction": [str(x) for x in self.restriction],
+        }
+        if self.clauses:
+            data["clauses"] = [clause.to_json() for clause in self.clauses]
+        return data
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> CategoryTerm:
-        return cls(data["category"], tuple(Literal.parse(x) for x in data.get("restriction", ())))
+        return cls(
+            data["category"],
+            tuple(Literal.parse(x) for x in data.get("restriction", ())),
+            tuple(Clause.from_json(x) for x in data.get("clauses", ())),
+        )
 
 
 @dataclass(frozen=True)
@@ -211,6 +292,10 @@ class Proposition:
     event: str | None = None
     """Event level only: the event that the proposition reports (``SN.8.5``). A false test item
     reports no event, and has None."""
+    tense: str | None = None
+    """Event level only: ``past`` or ``present``."""
+    aspect: str | None = None
+    """Event level only: ``simple`` or ``progressive``."""
 
     @property
     def negative(self) -> bool:
@@ -225,8 +310,7 @@ class Proposition:
         labels: list[str] = []
         for term in (self.subject, self.predicate.patient):
             if isinstance(term, CategoryTerm):
-                labels.append(term.category)
-                labels += [x.feature for x in term.restriction]
+                labels += term.concepts()
         labels.append(self.predicate.label)
         if self.predicate.comparison is not None:
             labels.append(self.predicate.comparison)
@@ -244,6 +328,8 @@ class Proposition:
             if self.level == EVENT:
                 data["scene"] = self.scene
                 data["event"] = self.event
+                data["tense"] = self.tense
+                data["aspect"] = self.aspect
             data["polarity"] = self.polarity
             data["subject"] = {"instance": self.subject}
         data["predicate"] = self.predicate.to_json()
@@ -256,12 +342,17 @@ class Proposition:
     def from_json(cls, data: dict[str, Any]) -> Proposition:
         subject = data["subject"]
         rule = data.get("rule")
+        predicate = Predicate.from_json(data["predicate"])
+        if data["level"] == CLASS and predicate.comparison is not None:
+            # a sentence's logical form writes the comparison class of a class-level pole for
+            # the reader. The class comes from the tree, so it is no part of the proposition.
+            predicate = dataclasses.replace(predicate, comparison=None)
         return cls(
             level=data["level"],
             subject=subject["instance"]
             if "instance" in subject
             else CategoryTerm.from_json(subject),
-            predicate=Predicate.from_json(data["predicate"]),
+            predicate=predicate,
             polarity=data["polarity"],
             quantifier=data.get("quantifier"),
             grounding=data.get("grounding"),
@@ -269,6 +360,8 @@ class Proposition:
             rule=None if rule is None else (rule["feature"], rule["term"]),
             scene=data.get("scene"),
             event=data.get("event"),
+            tense=data.get("tense"),
+            aspect=data.get("aspect"),
         )
 
 
@@ -305,6 +398,7 @@ class Truth:
     ) -> None:
         self.result = result
         self.quantifiers = config.quantifiers
+        self.event_tense = config.propositions.event_tense
         self.z = config.scalar_z
         self.cone_limit = cone_limit
         self.features = result.features
@@ -349,8 +443,9 @@ class Truth:
 
     def members(self, term: CategoryTerm) -> np.ndarray:
         """The subject set of a category term: the indices of the instances below its category
-        that satisfy its restriction. A scalar pole in the restriction is relative to the
-        category: "big penguins" are big for a penguin."""
+        that satisfy its restriction and its relative clauses. A scalar pole in the restriction
+        is relative to the category: "big penguins" are big for a penguin. A relative clause
+        about another category keeps the members related to at least one member of it."""
         if term not in self._members:
             below = self._below[term.category]
             keep = np.ones(len(below), dtype=bool)
@@ -360,6 +455,16 @@ class Truth:
                 else:
                     column = self.values[below, self.features[literal.feature].position]
                     keep &= column == int(literal.positive)
+            for clause in term.clauses:
+                if clause.kind == CAN:
+                    keep &= self.values[below, self.features[clause.label].position] == 1
+                elif clause.patient is not None:
+                    others = self.members(clause.patient)
+                    keep &= self.matrix(clause.label)[np.ix_(below, others)].any(axis=1)
+                else:
+                    assert clause.agent is not None
+                    others = self.members(clause.agent)
+                    keep &= self.matrix(clause.label)[np.ix_(others, below)].any(axis=0)
             self._members[term] = below[keep]
         return self._members[term]
 
@@ -421,9 +526,9 @@ class Truth:
         satisfy it. A scalar pole in the restriction holds nothing, because no rule reads a
         pole. Above ``2 ** cone_limit`` settings, the local test is used instead.
         """
-        key = (term, feature)
+        key = (term.plain, feature)
         if key not in self._fixed:
-            self._fixed[key] = self._fixed_test(term, self.features[feature])
+            self._fixed[key] = self._fixed_test(term.plain, self.features[feature])
         return self._fixed[key]
 
     def _fixed_test(self, term: CategoryTerm, feature: Feature) -> tuple[int | None, str]:
@@ -564,6 +669,27 @@ class Truth:
                 HAS,
             ):
                 return f"{literal.feature!r} is not an IS or HAS feature"
+        for clause in term.clauses:
+            if clause.kind == CAN:
+                if clause.label not in self.features or self.features[clause.label].type != CAN:
+                    return f"{clause.label!r} is not a CAN feature"
+                if clause.other is not None:
+                    return "a CAN feature in a relative clause has no other category"
+            elif clause.kind == VERB:
+                if clause.label not in self.verbs:
+                    return f"unknown verb {clause.label!r}"
+                if (clause.patient is None) == (clause.agent is None):
+                    return "a verb in a relative clause has a patient category or an agent category"
+                problem = self._term_problem(clause.other, "category of a relative clause")
+                if problem:
+                    return problem
+                if clause.other.category == THING:
+                    return "a relative clause is about a category, not about the generic noun"
+            else:
+                return (
+                    "a class-level relative clause holds a CAN feature or a verb, not "
+                    f"{clause.kind!r}"
+                )
         return ""
 
     def _predicate_problem(self, predicate: Predicate) -> str:
@@ -607,6 +733,10 @@ class Truth:
         if len(members) == 0:
             return _invalid("the subject set is empty")
         observed = self.quantifiers.all_grounding == "observed"
+        if subject.clauses and quantifier in (ALL, NO) and not observed:
+            return _invalid(
+                "a subject with a relative clause takes all and no only under the observed reading"
+            )
 
         if kind == SCALAR:
             if quantifier != GENERIC:
@@ -643,7 +773,7 @@ class Truth:
                 by_law = False
             else:
                 column = self.values[members, self.features[predicate.label].position]
-                by_law = not observed
+                by_law = not observed and not subject.clauses
             count, total = int(column.sum()), len(members)
             grounding = {"proportion": _number(count / total), "instances": total}
             if kind in FEATURE_KINDS:
@@ -797,6 +927,13 @@ class Truth:
             return _invalid("an event-level proposition has no quantifier")
         if not proposition.polarity:
             return _invalid("an event-level proposition is never negated")
+        if proposition.tense != self.event_tense:
+            return _invalid(
+                f"events are in the {self.event_tense} tense (propositions.events.tense), and "
+                f"the proposition has {proposition.tense!r}"
+            )
+        if proposition.aspect not in ASPECTS:
+            return _invalid(f"an event is simple or progressive, not {proposition.aspect!r}")
         scene = self.scenes.get(proposition.scene)
         if scene is None:
             return _invalid(f"unknown scene {proposition.scene!r}")
@@ -821,6 +958,7 @@ class Truth:
             and event.patient == patient
             and predicate.label in self.verb_names(event.verb)
             and proposition.event in (None, event.label)
+            and proposition.aspect == event.aspect
         ]
         grounding: dict[str, Any] = {"scene": scene.label}
         if matching:

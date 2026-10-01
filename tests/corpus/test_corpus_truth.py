@@ -38,6 +38,7 @@ from semantic_world.corpus.propositions import (
     VALUE,
     VERB,
     CategoryTerm,
+    Clause,
     Literal,
     Predicate,
     Proposition,
@@ -151,6 +152,223 @@ def test_restricted_patients_are_judged_as_the_output_files_say(cases) -> None:
             for quantifier in QUANTIFIERS:
                 forms.append(Proposition(CLASS, CategoryTerm(agent), predicate, True, quantifier))
     assert agree(case, {}, forms) > 500
+
+
+# ---------------------------------------------------------------------------------------------
+# Relative clauses
+# ---------------------------------------------------------------------------------------------
+
+
+def clauses_of(facts, rng: np.random.Generator, count: int) -> list[Clause]:
+    """Random relative clauses of the three kinds: a CAN feature, a verb with a patient category
+    (a subject relative), and a verb with an agent category (an object relative). The other
+    category sometimes has a restriction, or a relative clause of its own."""
+    cans, verbs, categories = facts.features[CAN], facts.verbs, facts.categories
+    features = facts.features[IS] + facts.features[HAS]
+
+    def other() -> CategoryTerm:
+        category = categories[int(rng.integers(len(categories)))]
+        kind = rng.random()
+        if kind < 0.25:
+            feature = features[int(rng.integers(len(features)))]
+            return CategoryTerm(category, (Literal(feature, bool(rng.integers(2))),))
+        if kind < 0.5:
+            return CategoryTerm(category, (), (clause(nested=False),))
+        return CategoryTerm(category)
+
+    def clause(nested: bool = True) -> Clause:
+        kind = int(rng.integers(3))
+        if kind == 0 or not verbs:
+            return Clause(CAN, cans[int(rng.integers(len(cans)))])
+        verb = verbs[int(rng.integers(len(verbs)))]
+        term = other() if nested else CategoryTerm(categories[int(rng.integers(len(categories)))])
+        return Clause(VERB, verb, patient=term) if kind == 1 else Clause(VERB, verb, agent=term)
+
+    return [clause() for _ in range(count)]
+
+
+@pytest.mark.parametrize("name", SMALL)
+@pytest.mark.parametrize("setting", ["default", "observed", "generic_all"])
+def test_subjects_with_relative_clauses_are_judged_as_the_output_files_say(
+    cases, name, setting
+) -> None:
+    case = cases(name)
+    facts = case.facts(**SETTINGS[setting])
+    rng = np.random.default_rng(21)
+    clauses = clauses_of(facts, rng, 10)
+    assert {(c.kind, c.patient is None, c.agent is None) for c in clauses} == {
+        (CAN, True, True),
+        (VERB, False, True),
+        (VERB, True, False),
+    }
+    restrictions = [(), *restrictions_of(facts, rng, 2)]
+    forms = []
+    for category in facts.categories:
+        for clause in clauses:
+            restriction = restrictions[int(rng.integers(len(restrictions)))]
+            subject = CategoryTerm(category, restriction, (clause,))
+            for predicate in facts.class_predicates(category, patients=facts.categories[:3]):
+                for quantifier, polarity in itertools.product(QUANTIFIERS, (True, False)):
+                    forms.append(Proposition(CLASS, subject, predicate, polarity, quantifier))
+    assert agree(case, SETTINGS[setting], forms) > 1000
+
+
+def test_patients_with_relative_clauses_are_judged_as_the_output_files_say(cases) -> None:
+    case = cases("deep")
+    facts = case.facts()
+    rng = np.random.default_rng(6)
+    forms = []
+    for clause in clauses_of(facts, rng, 10):
+        for agent, patient, verb in itertools.product(
+            facts.categories[:4], facts.categories, facts.verbs
+        ):
+            predicate = Predicate(VERB, verb, CategoryTerm(patient, (), (clause,)))
+            for quantifier in QUANTIFIERS:
+                forms.append(Proposition(CLASS, CategoryTerm(agent), predicate, True, quantifier))
+    assert agree(case, {}, forms) > 500
+
+
+def test_a_relative_clause_is_restrictive_and_means_at_least_one(cases) -> None:
+    case = cases("default")
+    facts = case.facts()
+    truth = facts.truth
+    labels = case.result.instances.labels
+    checked = 0
+    for verb in facts.verbs:
+        holds = truth.matrix(verb)
+        for agent, patient in itertools.product(facts.categories[::7], facts.categories[::5]):
+            agents = truth.members(CategoryTerm(agent))
+            patients = truth.members(CategoryTerm(patient))
+            # "owls that eat mice": the owls that can eat at least one mouse
+            eaters = truth.members(
+                CategoryTerm(agent, (), (Clause(VERB, verb, patient=CategoryTerm(patient)),))
+            )
+            expected = [a for a in agents if any(holds[a, p] for p in patients if p != a)]
+            assert list(eaters) == expected
+            # "mice that owls eat": the mice that at least one owl can eat
+            eaten = truth.members(
+                CategoryTerm(patient, (), (Clause(VERB, verb, agent=CategoryTerm(agent)),))
+            )
+            assert list(eaten) == [
+                p for p in patients if any(holds[a, p] for a in agents if a != p)
+            ]
+            checked += bool(expected)
+    assert checked > 10
+    # "penguins that can swim": the members with the CAN feature
+    category, feature = facts.categories[0], facts.features[CAN][0]
+    swimmers = truth.members(CategoryTerm(category, (), (Clause(CAN, feature),)))
+    column = truth.values[:, truth.features[feature].position]
+    assert [labels[i] for i in swimmers] == [
+        labels[i] for i in truth.members(CategoryTerm(category)) if column[i]
+    ]
+
+
+def restricted_subject(facts, minimum: int = 3):
+    """A category term with a relative clause that some of its members satisfy, and not all,
+    and an IS, HAS, or CAN feature that every member of the restricted set has."""
+    truth = facts.truth
+    for category in facts.categories:
+        for object_relative in (False, True):
+            for clause in facts.clause_options(CategoryTerm(category), object_relative):
+                term = CategoryTerm(category, (), (clause,))
+                members = truth.members(term)
+                if len(members) < minimum:
+                    continue
+                for kind in (IS, HAS, CAN):
+                    for feature in facts.features[kind]:
+                        column = truth.values[members, truth.features[feature].position]
+                        if column.all() and feature != clause.label:
+                            return term, Predicate(kind, feature)
+    raise AssertionError("no restricted subject with a feature that every member has")
+
+
+def test_a_subject_with_a_relative_clause_is_judged_by_proportion(cases) -> None:
+    case = cases("default")
+    facts = case.facts()
+    subject, predicate = restricted_subject(facts)
+    truth = facts.truth
+
+    def judge(quantifier: str, polarity: bool = True, truth=truth):
+        return truth.evaluate(Proposition(CLASS, subject, predicate, polarity, quantifier))
+
+    # most, some, and the generic are judged by the share of the subject set
+    most = judge(MOST)
+    assert most.valid and most.true
+    assert most.grounding["proportion"] == 1.0 and most.grounding["test"] == OBSERVED
+    assert most.grounding["instances"] == len(truth.members(subject))
+    assert judge(GENERIC).true and not judge(MOST, False).true
+    # all and no are allowed only under the observed reading, as for patient projections
+    for quantifier in (ALL, NO):
+        evaluation = judge(quantifier)
+        assert not evaluation.valid and "only under the observed reading" in evaluation.reason
+    observed = case.facts(quantifiers={"all_grounding": "observed"}).truth
+    assert judge(ALL, truth=observed).true and not judge(NO, truth=observed).true
+    # so a document states "most", the strongest quantifier that the law-like reading allows
+    stated = facts.class_fact(subject, predicate)
+    assert stated.quantifier == MOST and stated.subject == subject
+    # every member has the feature, so "some" is true and is not used
+    assert judge(SOME).true and not judge(SOME).felicitous
+    # the generic that means all is judged over the instances
+    generic_all = case.facts(quantifiers={"generic": {"means": "all"}}).truth
+    assert judge(GENERIC, truth=generic_all).true
+    # a clause that no member satisfies makes a vacuous subject
+    nobody = CategoryTerm(
+        subject.category, (), (Clause(VERB, facts.verbs[0], patient=subject), subject.clauses[0])
+    )
+    if len(truth.members(nobody)) == 0:
+        assert not truth.evaluate(Proposition(CLASS, nobody, predicate, True, MOST)).valid
+
+
+def test_relative_clauses_in_the_logical_form() -> None:
+    mice = CategoryTerm("C1.5", (Literal("IS.4"),))
+    owls = CategoryTerm("C1.2", (), (Clause(VERB, "V2.1", patient=mice), Clause(CAN, "CAN.3")))
+    assert owls.to_json() == {
+        "category": "C1.2",
+        "restriction": [],
+        "clauses": [
+            {
+                "kind": "verb",
+                "verb": "V2.1",
+                "patient": {"category": "C1.5", "restriction": ["IS.4"]},
+            },
+            {"kind": "can", "feature": "CAN.3"},
+        ],
+    }
+    assert CategoryTerm.from_json(owls.to_json()) == owls
+    eaten = CategoryTerm("C1.5", (), (Clause(VERB, "V2.1", agent=CategoryTerm("C1.2")),))
+    assert eaten.to_json()["clauses"] == [
+        {"kind": "verb", "verb": "V2.1", "agent": {"category": "C1.2", "restriction": []}}
+    ]
+    assert CategoryTerm.from_json(eaten.to_json()) == eaten
+    assert eaten != CategoryTerm("C1.5") and eaten.plain == CategoryTerm("C1.5")
+    # a term without clauses is written as before
+    assert "clauses" not in mice.to_json()
+    proposition = Proposition(CLASS, owls, Predicate(SCALAR, "SC.1.HIGH"), True, GENERIC)
+    assert Proposition.from_json(proposition.to_json()) == proposition
+    # the words a sentence needs: the clauses' verbs, features, and categories too
+    assert proposition.concepts() == ("C1.2", "V2.1", "C1.5", "IS.4", "CAN.3", "SC.1.HIGH")
+
+
+def test_relative_clauses_that_cannot_be_judged(tiny) -> None:
+    truth = tiny.facts().truth
+    bad = {
+        "is not a CAN feature": Clause(CAN, "IS.1"),
+        "has no other category": Clause(CAN, "CAN.1", patient=CategoryTerm("C1")),
+        "unknown verb": Clause(VERB, "V9", patient=CategoryTerm("C1")),
+        "a patient category or an agent category": Clause(VERB, "V1.1"),
+        "a patient category or an agent category ": Clause(
+            VERB, "V1.1", CategoryTerm("C1"), CategoryTerm("C2")
+        ),
+        "unknown category": Clause(VERB, "V1.1", patient=CategoryTerm("C9")),
+        "not about the generic noun": Clause(VERB, "V1.1", agent=CategoryTerm(THING)),
+        "holds a CAN feature or a verb": Clause(IS, "IS.1"),
+    }
+    for reason, clause in bad.items():
+        subject = CategoryTerm("C1.1", (), (clause,))
+        evaluation = truth.evaluate(
+            Proposition(CLASS, subject, Predicate(HAS, "HAS.1"), True, MOST)
+        )
+        assert not evaluation.valid and reason.strip() in evaluation.reason, reason
 
 
 # ---------------------------------------------------------------------------------------------

@@ -3,8 +3,8 @@
 ``interpret`` reads a tree by its labels, so it does not need the word-order settings: a subject
 is ``NP-SBJ`` wherever it stands. The words give the concepts. What the words cannot give comes
 from the sentence's record: which instance each noun phrase refers to (``referents``), and which
-event each verb phrase reports (``events``), both in the order of the tree, a node before its
-children.
+event each verb phrase reports, with its tense and aspect (``events``), both in the order of the
+tree, a node before its children.
 
 The reading undoes the grammar's fixed choices:
 
@@ -13,8 +13,11 @@ The reading undoes the grammar's fixed choices:
 - a verb phrase "is not A" in a relative clause is a negated IS literal of the restriction;
 - a noun phrase with ``a`` or ``the``, or a pronoun, names an instance, and any other noun
   phrase names a category;
-- a verb with no auxiliary reports an event when its subject is an instance, and states a
-  capacity when its subject is a category, with ``can`` or without;
+- a verb states a capacity when its subject is a category, with ``can`` or without. With an
+  instance as its subject, a verb with ``can`` states a capacity, and a verb without ``can``
+  reports an event or states a capacity. The words cannot tell the two apart when the tense and
+  the aspect are not marked, so the record decides: the verb phrase reports the event that the
+  record gives, and states a capacity when the record gives none;
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
 
@@ -54,10 +57,11 @@ def interpret(
     tree: Tree,
     lexicon: Lexicon,
     referents: Sequence[tuple[str, str | None]] | Sequence[str],
-    events: Sequence[str | None] = (),
+    events: Sequence[tuple[str, str, str] | None] = (),
 ) -> SentencePlan:
     """The sentence plan that a tree realizes. ``referents`` gives the referent of every noun
-    phrase, and ``events`` the event of every verb phrase, in the order of the tree."""
+    phrase, and ``events`` the event of every verb phrase, as its label, its tense, and its
+    aspect, or None, in the order of the tree."""
     return _Reader(tree, lexicon, referents, events).sentence()
 
 
@@ -95,6 +99,21 @@ class _Reader:
             if child[0] == node[0]:
                 return self.token(child)
         raise GrammarError(f"the node {node[0]} holds no word")
+
+    def marks(self, node: Tree) -> set[str]:
+        """The inflections of a word node: its affix, and the markers that stand beside it."""
+        found: set[str] = set()
+        for child in node[1:]:
+            if isinstance(child, str):
+                affix = token_parts(child)[1]
+            elif child[0] == node[0]:
+                found |= self.marks(child)
+                continue
+            else:
+                affix = child[0]
+            if affix is not None:
+                found.add(affix)
+        return found
 
     def concept(self, node: Tree) -> str:
         return self.lexicon.lexeme(token_parts(self.token(node))[0]).concept
@@ -201,15 +220,22 @@ class _Reader:
             concept = self.concept(verb)
             kind = CAN if concept.startswith("CAN.") else VERB
             patient = None if target is None else self.noun_phrase(target)
-            event = None
-            if auxiliary is None and subject_kind == INSTANCE_NP:
-                event = self.event[id(node)]
-                if event is None:
+            report = self.event[id(node)]
+            if report is None:
+                marks = self.marks(verb) & {"PAST", "PROGRESSIVE"}
+                if marks:
                     raise GrammarError(
-                        "a verb with no auxiliary and an instance as its subject reports an "
-                        "event, and no event was given for it"
+                        f"the verb is marked {sorted(marks)}, so it reports an event, and no "
+                        "event was given for it"
                     )
-            return Predication(kind, concept, polarity, patient, event), auxiliary
+                return Predication(kind, concept, polarity, patient), auxiliary
+            if auxiliary is not None or subject_kind != INSTANCE_NP:
+                raise GrammarError(
+                    "an event is reported by a verb with no auxiliary and an instance as its "
+                    "subject"
+                )
+            event, tense, aspect = report
+            return Predication(kind, concept, polarity, patient, event, tense, aspect), auxiliary
         if adjective is not None:
             concept = self.concept(adjective)
             if concept.startswith("SC."):

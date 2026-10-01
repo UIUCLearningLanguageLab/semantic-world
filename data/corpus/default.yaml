@@ -22,13 +22,16 @@ documents:
   mix: {encyclopedic_category: 0.3, encyclopedic_feature: 0.2, entity: 0.2, situational: 0.3}
   sentences: {encyclopedic_category: [5, 15], encyclopedic_feature: [5, 15], entity: [5, 20], situational: [5, 20]}
   topic_level_weights: {schedule: linear, start: 1, end: 2}   # weights over category levels for category topics
-  shuffle: 0.3
-  instance_description_rate: 0.2
+  shuffle: 0.3                   # 0: encyclopedic documents follow the template order; 1: a random order
+  instance_description_rate: 0.2 # the probability that an event sentence of a narrative is followed by a description
+  sibling_contrast_rate: 0.2     # the probability that a fact in a category document is followed by the matching fact about a sibling
 
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}
   rule_statement_rate: 0.3       # share of feature-topic sentences that state rules
   rule_statements: {max_literals: null}   # a number skips the rule terms with more literals; null: no cap
+  restriction_rate: 0.1          # the probability that a class-level subject takes a restriction ("red penguins")
+  events: {tense: past, progressive_rate: 0.3}   # the tense of every event (past or present), and the share of progressive events
 
 quantifiers:
   all_grounding: fixed           # fixed or observed
@@ -62,12 +65,12 @@ mention:
 # How a logical form is realized. These settings never change what a sentence says.
 grammar:
   adjective_order: {fixed: true}
-  class_can_rate: 0.5            # share of positive class-level capacity sentences with "can" ("penguins can swim")
+  can_rate: {class: 0.5, instance: 1.0}   # share of positive capacities that say "can"; below 1 at the instance level, "the penguin swim" is ambiguous
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
-    tense: {enabled: false, realization: affix, position: after, event_tense: past}
-    aspect: {enabled: false, realization: word, position: after, progressive_rate: 0.3}
+    tense: {enabled: false, realization: affix, position: after}    # whether and how the past is marked
+    aspect: {enabled: false, realization: word, position: after}    # whether and how the progressive is marked
 
 scalar_adjectives: {z: 1.0}
 
