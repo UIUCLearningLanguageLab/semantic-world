@@ -1,0 +1,76 @@
+# The default corpus: 10,000 documents about the default taxonomy with scalar dimensions and
+# verbs. Every parameter appears with its default value. See docs/specs/CORPUS_GENERATOR.md.
+# Paths are read from the folder the command runs in: run from the root of the repository.
+
+name: default
+seed: 1                          # the corpus's master seed, independent of the taxonomy's seed
+
+# The world the corpus is about: a taxonomy configuration file and a taxonomy seed, generated in
+# memory (seed: null uses the seed in the taxonomy file). Or a taxonomy output folder, which is
+# regenerated in memory and checked against its files: {run: runs/taxonomy/relations_seed1}.
+taxonomy: {config: data/taxonomy/relations.yaml, seed: 1}
+
+lexicon:
+  # the proportion of concepts of each type that get a word
+  named_proportion: {category: 1.0, is: 1.0, has: 1.0, can: 1.0, verb: 1.0, verb_category: 1.0, patient_projection: 1.0, scalar: 1.0}
+  synonym_rate: 0.0              # the probability that a content concept gets a second lexeme
+  homonym_rate: 0.0              # the probability that a content lexeme shares its word form
+  homonym_same_pos: 0.5          # the share of homonym pairs within one part of speech
+
+documents:
+  count: 10000
+  mix: {encyclopedic_category: 0.3, encyclopedic_feature: 0.2, entity: 0.2, situational: 0.3}
+  sentences: {encyclopedic_category: [5, 15], encyclopedic_feature: [5, 15], entity: [5, 20], situational: [5, 20]}
+  topic_level_weights: {schedule: linear, start: 1, end: 2}   # weights over category levels for category topics
+  shuffle: 0.3
+  instance_description_rate: 0.2
+
+propositions:
+  negation_rate: {class: 0.1, instance: 0.1}
+  rule_statement_rate: 0.3       # share of feature-topic sentences that state rules
+
+quantifiers:
+  all_grounding: fixed           # fixed or observed
+  most: {min_proportion: 0.7}
+  some: {exclude_all: true}
+  generic: {means: most}         # all, most, or some
+  generic_rate: 0.5              # share of class-level sentences that use a bare generic when it is true
+
+scene:
+  size: [2, 6]
+  steps: [3, 8]
+  events_per_step: 1.5
+  transitive_share: 0.5
+  verb_weights: uniform          # or a mapping from CAN features and verbs to weights
+  participant_weights: {thematic: 1.0, taxonomic: 0.5, constant: 0.1}
+
+entity:
+  scenes: [1, 3]
+
+# How referents are mentioned. These settings can change what a sentence says.
+mention:
+  level_weights: {schedule: linear, start: 1, end: 4}         # heaviest at the leaf level
+  pronoun_rate: 0.5
+  modifier_rate: 0.3
+  max_adjectives: 3
+  max_with_phrases: 2
+  max_content_words: 20          # nouns, adjectives, and verbs in one sentence
+  relative_clauses: {rate: 0.1, max_depth: 1, object_share: 0.3}
+
+# How a logical form is realized. These settings never change what a sentence says.
+grammar:
+  adjective_order: {fixed: true}
+  word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
+  morphology:
+    number: {on: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
+    tense: {on: false, realization: affix, position: after, event_tense: past}
+    aspect: {on: false, realization: word, position: after, progressive_rate: 0.3}
+
+scalar_adjectives: {z: 1.0}
+
+renderings:
+  propositional: {referents: local}   # local (R.1, R.2, ... within each document) or instance (taxonomy instance labels)
+
+test_sets:
+  size: 500                      # true items per set; each gets one matched false item
+  changes: [predicate, subject, quantifier, role]
