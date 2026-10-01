@@ -95,7 +95,7 @@ A proposition is a logical form with a type, a polarity, and a truth grounding. 
 A class-level proposition says something about a category: "all penguins can swim", "red penguins swim", "penguins are birds".
 
 - **Subject:** a category, optionally restricted by literals: "red penguins" is the category restricted to members with the IS feature for red. A restriction is a set of IS and HAS literals, positive or negative ("with fins", "without fins"), and scalar pole literals ("big").
-- **Predicate:** one of IS feature, HAS feature, CAN feature, scalar pole ("are big"), membership in a category above the subject ("are birds"), or a verb with a patient category ("chase fish").
+- **Predicate:** one of IS feature, HAS feature, CAN feature, exposed patient projection ("are edible"), scalar pole ("are big"), membership in a category above the subject ("are birds"), or a verb with a patient category ("chase fish"). The verb can be a verb or a verb category ("owls hunt mice"). The patient category can take a restriction too.
 - **Quantifier:** `all`, `most`, `some`, `no`, or `generic` (a bare plural with no quantifier word: "penguins swim").
 
 **Truth grounding.** A class-level proposition needs at least one instance in its subject set: the instances below the subject category that satisfy the restriction. A proposition with an empty subject set is vacuous, and is never generated, in documents or in test sets. For one-place predicates:
@@ -103,23 +103,29 @@ A class-level proposition says something about a category: "all penguins can swi
 - `all` is true when the predicate is fixed at 1 for the category, given its defining features, any fixed-by-rule features, and the restriction. The test uses the cone enumeration of the fixed-by-rule test, with the restriction's literals added as fixed. With `quantifiers.all_grounding: observed`, `all` is true instead when every instance in the subject set satisfies the predicate.
 - `no` is true when the predicate is fixed at 0, by the same test.
 - `most` is true when the proportion of instances in the subject set that satisfy the predicate is at least `quantifiers.most.min_proportion` (default 0.7).
-- `some` is true when that proportion is above 0. With `quantifiers.some.exclude_all` on (the default), `some` is used only when `all` is false, following the usual implicature.
+- `some` is true when that proportion is above 0. With `quantifiers.some.exclude_all` on (the default), `some` is used only when `all` is false, following the usual implicature. The rule limits what documents state. It does not make a `some` sentence false.
 - `generic` means whatever `quantifiers.generic.means` says: `all`, `most`, or `some`. "Penguins swim" can therefore mean all, most, or some penguins swim, set by a parameter.
+
+For each subject and predicate, a document states the strongest true quantifier: `all` before `most` before `some`. A scalar pole in a restriction holds no binary feature fixed, so the fixed test ignores it.
 
 For verbs, the proportion is the proportion of pairs of distinct instances, an agent from the subject set and a patient from the patient category, for which the relation holds. The proportion is computed from the relation matrices (`result.relations.matrix`), for any pair of categories, at the same level or not, and for any verb or verb category. A verb category's relation is its base relation. The proportions are not limited to the rows of `relation_proportions.csv`. `all` means a proportion of 1 over the existing pairs.
 
-For membership ("penguins are birds"), the predicate is true exactly when the predicate category is an ancestor of the subject category. Membership sentences take `all` or `generic` only.
+For membership ("penguins are birds"), the predicate is true exactly when the predicate category is an ancestor of the subject category. Membership sentences take `all` or `generic` only, and the generic of a membership sentence always means all. A negative membership sentence ("no penguins are fish", "penguins are not fish") is true exactly when the two categories share no instance.
 
-For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances. A top-level category has no parent, and is compared with all instances in the world. A class-level scalar pole takes the generic only, never a quantifier word.
+For exposed patient projections ("most mice are edible"), truth for `most`, `some`, and the generic comes from the share of instances in the subject set that have the projection. The share uses the same instance values as the instance-level sentences. A projection has no fixed test, so `all` and `no` are allowed only under the observed reading (`quantifiers.all_grounding: observed`).
 
-**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". The same holds for a negated IS literal in any restriction. A term is skipped when it would need more than one relative clause, or when it reads a scalar threshold, which no pole adjective states. `stats.yaml` reports how many terms were skipped, and why.
+For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances. A top-level category has no parent, and is compared with all instances in the world. A class-level scalar pole takes the generic only, never a quantifier word. The category's mean value is the mean over its subject set. A comparison class whose values do not vary has no poles.
+
+**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". The same holds for a negated IS literal in any restriction. A term is skipped when it would need more than one relative clause, or when it reads a scalar threshold, which no pole adjective states. A term that no instance satisfies is skipped too, because the statement would be vacuous. `stats.yaml` reports how many terms were skipped, and why.
+
+Rule statements are exempt from the limits on adjectives, with-phrases, and content words (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). Rules of varied complexity are a core feature of the world, so long terms must still be stated. An optional cap, `propositions.rule_statements.max_literals`, is null by default (no cap). When a cap is set, a term with more literals is skipped and counted.
 
 ### Instance level
 
 An instance-level proposition says something about one instance: "the penguin can swim", "the penguin has stripes", "the penguin is a bird", "the owl can eat the mouse".
 
 - **Subject:** an instance.
-- **Predicate:** IS, HAS, or CAN feature; exposed patient projection ("is edible"); scalar pole; membership in any category above the instance's leaf; or a verb capacity with a patient instance ("can eat the mouse").
+- **Predicate:** IS, HAS, or CAN feature; exposed patient projection ("is edible"); scalar pole; membership in the instance's leaf or in any category above it; or a verb capacity with a patient instance ("can eat the mouse"), for a verb or a verb category ("can hunt the mouse").
 - **Truth:** read from the instance's values. Verb capacity is `result.relations.holds`. Scalar poles use the category named by the subject's noun as the comparison class: "the big mouse" is big for a mouse, and "the small animal" can be the same mouse.
 
 ### Event level
@@ -135,6 +141,8 @@ Event-level propositions are never negated.
 
 Class-level and instance-level propositions can be negative: "penguins cannot fly", "the owl has no fins", "no fish have fur". Negative propositions are true negations, grounded by the same tests with the predicate's value 0. The rate of negative propositions is a parameter for each level. The default is 0.1.
 
+In the logical form, a negative polarity denies the predicate: `most` with a negative polarity says that most members of the subject set lack the predicate ("most penguins can not fly"). The quantifier `no` replaces sentence negation. So `no` always has a positive polarity in the logical form and counts as a negative proposition, and `all` never has a negative polarity. For a negative fact, a document states `no` before "most ... not" before "some ... not".
+
 ### False propositions and test sets
 
 Training documents contain true propositions only. False propositions go into separate test sets, each item labeled true or false. A false proposition is made from a true one by one minimal change:
@@ -144,7 +152,7 @@ Training documents contain true propositions only. False propositions go into se
 - **quantifier swap:** replace the quantifier with one that makes the proposition false ("all" for a "most" fact);
 - **role swap** (verbs only): exchange agent and patient, when the reversed relation does not hold.
 
-Every false item is checked false by the same truth tests. Test sets come in matched pairs: each false item sits beside the true item it was made from. There is one test set for each proposition level and change type, with a configured size.
+A predicate swap keeps the predicate's kind, its patient, and its comparison class: a verb is replaced by another verb or verb category, and a category by another category of its level. A quantifier swap keeps the polarity, so a proposition with a negative polarity never becomes a `no` sentence. A false item is never vacuous: its subject set has at least one instance. Every false item is checked false by the same truth tests. Test sets come in matched pairs: each false item sits beside the true item it was made from. There is one test set for each proposition level and change type, with a configured size.
 
 ## Scenes and events
 
@@ -202,6 +210,7 @@ Encyclopedic documents follow a loose template: membership first, then defining 
 ### Mentioning referents
 
 - **Noun level.** A category or instance is named with the noun of a category drawn from its own level and the levels above it. `mention.level_weights` give the weights, with the leaf level heaviest by default. The logical form records which category the noun names.
+- **Verb level.** An event's verb is named at a level of the verb tree, in the same way: the verb itself, or a verb category above it ("chase" or "hunt"). `mention.verb_level_weights` give the weights, with the leaf level (the verb) heaviest by default. Words for verb categories are also used in class-level and instance-level capacity sentences ("owls hunt mice"), whose truth is the verb category's own base relation.
 - **First and later mentions.** In narratives, an instance is introduced with the indefinite determiner ("a penguin") and mentioned later with the definite determiner ("the penguin") or a pronoun.
 - **Pronouns.** A later mention becomes "it" at `mention.pronoun_rate`, when the referent was mentioned in the previous sentence and was either the only referent mentioned there or its subject. Coreference chains are recorded, including for ambiguous pronouns.
 - **Relative clauses and limits.** The planner decides everything that changes what a sentence says. So the planner, and not the grammar, decides which noun phrases take relative clauses (`mention.relative_clauses`), and applies the limits on adjectives, with-phrases, and sentence length (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). The grammar section describes how they are realized.
@@ -329,6 +338,28 @@ A logical form, for example:
  "grounding": {"proportion": 0.93, "fixed": false, "test": "observed"}}
 ```
 
+The subject of an instance-level proposition is `{"instance": "I1.3.2.5"}`, and an instance-level proposition has no quantifier. The predicate takes one of these forms:
+
+| Kind | Predicate |
+| --- | --- |
+| `is`, `has`, `can` | `{"kind": "can", "feature": "CAN.3"}` |
+| `projection` | `{"kind": "projection", "projection": "CANBE.V1.1"}` |
+| `scalar` | `{"kind": "scalar", "pole": "SC.1.HIGH"}`, with `"class": "C1.3"` at the instance level: the comparison class, which the subject's noun must name |
+| `member` | `{"kind": "member", "category": "C1"}` |
+| `verb` | `{"kind": "verb", "verb": "V1.2", "patient": {"category": "C1.5", "restriction": []}}` at the class level, and `"patient": {"instance": "I1.5.1.2"}` at the instance level |
+
+A rule statement also has `"rule": {"feature": "CAN.1", "term": 2}`: the determined feature, and the number of the term of its rule's minimal DNF. A restriction is written in one order: IS literals, HAS literals, then scalar poles, each by index.
+
+The grounding says how the truth was decided (`test`):
+
+- `exact`: the fixed test, by enumerating the cone. `local`: the fixed test for a cone too large to enumerate;
+- `observed`: a proportion over the instances of the subject set (`instances`), or over pairs of an agent and a patient (`pairs`);
+- `tree`: membership, read from the tree;
+- `mean`: a class-level scalar pole, with the subject set's mean (`value`) and the comparison class's label, mean, and standard deviation;
+- `value`: an instance's own value.
+
+`proportion` is always the share that has the predicate, whatever the polarity. `fixed` says whether the predicate's value is fixed for the subject, for IS, HAS, and CAN features.
+
 **Co-occurrence check.** `stats.yaml` reports, over pairs of leaves, the correlation of within-document co-occurrence with thematic relatedness and with taxonomic similarity, separately for each document type. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness, and encyclopedic documents more with taxonomic similarity.
 
 ## Word forms for the corpus
@@ -387,6 +418,7 @@ documents:
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}
   rule_statement_rate: 0.3                    # share of feature-topic sentences that state rules
+  rule_statements: {max_literals: null}       # a number skips the rule terms with more literals; null: no cap
 
 quantifiers:
   all_grounding: fixed                        # fixed or observed
@@ -407,7 +439,8 @@ entity:
   scenes: [1, 3]
 
 mention:
-  level_weights: {schedule: linear, start: 1, end: 4}         # heaviest at the leaf level
+  level_weights: {schedule: linear, start: 1, end: 4}         # noun levels, heaviest at the leaf level
+  verb_level_weights: {schedule: linear, start: 1, end: 4}    # verb levels for naming events, heaviest at the leaf (the verb)
   pronoun_rate: 0.5
   modifier_rate: 0.3
   max_adjectives: 3
@@ -419,9 +452,9 @@ grammar:
   adjective_order: {fixed: true}
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
-    number: {on: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
-    tense: {on: false, realization: affix, position: after, event_tense: past}
-    aspect: {on: false, realization: word, position: after, progressive_rate: 0.3}
+    number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
+    tense: {enabled: false, realization: affix, position: after, event_tense: past}
+    aspect: {enabled: false, realization: word, position: after, progressive_rate: 0.3}
 
 scalar_adjectives: {z: 1.0}
 
@@ -433,7 +466,7 @@ test_sets:
   changes: [predicate, subject, quantifier, role]
 ```
 
-Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. YAML reads a bare `on` as the boolean true, so the loader accepts either reading of the `on` key in the morphology settings.
+Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. The morphology switch is `enabled`. It was `on` at first, which YAML reads as the boolean true when written bare.
 
 ## Determinism
 
@@ -446,7 +479,7 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, and the rule statements), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -499,6 +532,13 @@ Jon decided the following on October 1, 2026, before stage 1 (`docs/proposals/20
 20. In a rule statement, a negated IS literal is a subject relative clause. A term that needs more than one relative clause, or that reads a scalar threshold, is skipped and counted.
 21. Class-level verb proportions come from the relation matrices, for any category pair and any verb or verb category.
 22. Class-level scalar poles take the generic only. A top-level category is compared with all instances in the world.
+
+Jon decided the following on October 1, 2026, before stage 2 (`docs/proposals/2026-10-01-corpus-stage-2-decisions.md`):
+
+23. Words for verb categories are used in two places: in class-level and instance-level capacity sentences ("owls hunt mice"), and in naming events, where each event's verb is named at a level drawn by weight (`mention.verb_level_weights`, heaviest at the leaf). Stage 2 builds the capacity sentences. Stages 3 and 5 build the event half.
+24. Patient projections also appear at the class level ("most mice are edible"). Truth for `most`, `some`, and the generic comes from the share of instances in the subject set that have the projection. `all` and `no` are allowed only under the observed reading.
+25. Rule statements are exempt from the limits on adjectives, with-phrases, and content words. An optional cap, `propositions.rule_statements.max_literals`, is null by default. When a cap is set, terms above it are skipped and counted.
+26. The morphology switch is `enabled`, not `on`.
 
 ## Future additions
 

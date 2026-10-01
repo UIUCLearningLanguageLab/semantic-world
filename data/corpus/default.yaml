@@ -28,6 +28,7 @@ documents:
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}
   rule_statement_rate: 0.3       # share of feature-topic sentences that state rules
+  rule_statements: {max_literals: null}   # a number skips the rule terms with more literals; null: no cap
 
 quantifiers:
   all_grounding: fixed           # fixed or observed
@@ -49,7 +50,8 @@ entity:
 
 # How referents are mentioned. These settings can change what a sentence says.
 mention:
-  level_weights: {schedule: linear, start: 1, end: 4}         # heaviest at the leaf level
+  level_weights: {schedule: linear, start: 1, end: 4}         # noun levels, heaviest at the leaf level
+  verb_level_weights: {schedule: linear, start: 1, end: 4}    # verb levels for naming events, heaviest at the leaf (the verb)
   pronoun_rate: 0.5
   modifier_rate: 0.3
   max_adjectives: 3
@@ -62,9 +64,9 @@ grammar:
   adjective_order: {fixed: true}
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
-    number: {on: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
-    tense: {on: false, realization: affix, position: after, event_tense: past}
-    aspect: {on: false, realization: word, position: after, progressive_rate: 0.3}
+    number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
+    tense: {enabled: false, realization: affix, position: after, event_tense: past}
+    aspect: {enabled: false, realization: word, position: after, progressive_rate: 0.3}
 
 scalar_adjectives: {z: 1.0}
 
