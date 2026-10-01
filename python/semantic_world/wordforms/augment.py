@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -198,12 +199,43 @@ def measured_snr_db(mixture: np.ndarray, clip: np.ndarray) -> float:
 # ---------------------------------------------------------------------------------------------
 
 
+SOUND_SPEED = 343.0
+REVERB_CALIBRATION = (0.1975, 0.1988, -0.0330, -0.0873)
+"""The fit of the simulated reverberation time against Eyring's formula, on 300 random rooms
+with sides of 3 to 6 m: the measured T30 is ``g`` times ``0.161 V / (S L)``, where ``L`` is
+``-ln(1 - absorption)``, and ``log g = c0 + c1 log(longest side / shortest side) + c2
+log(V / S) + c3 log L``. Solving for the absorption puts the measured time within 10% of the
+target for 99% of such rooms (it was 25 to 40% too long with Sabine's formula)."""
+MAX_ABSORPTION = 0.99
+
+
+def calibrated_absorption(dimensions: tuple[float, float, float], rt60: float) -> float:
+    """The wall absorption that gives a shoebox room the reverberation time ``rt60``, from the
+    calibration of the image-source simulation (:data:`REVERB_CALIBRATION`)."""
+    c0, c1, c2, c3 = REVERB_CALIBRATION
+    x, y, z = dimensions
+    volume = x * y * z
+    surface = 2.0 * (x * y + y * z + x * z)
+    aspect = max(dimensions) / min(dimensions)
+    ratio = volume / surface
+    log_l = (
+        c0 + c1 * math.log(aspect) + c2 * math.log(ratio) + math.log(0.161 * ratio) - math.log(rt60)
+    ) / (1.0 - c3)
+    absorption = 1.0 - math.exp(-math.exp(log_l))
+    if not 0.0 < absorption <= MAX_ABSORPTION:
+        raise audio_tools.AudioError(
+            f"no room of {dimensions} m has a reverberation time of {rt60} s: the walls would "
+            f"need an absorption of {absorption:.3f}"
+        )
+    return absorption
+
+
 def room_impulse_response(
     rate: int, dimensions: tuple[float, float, float], rt60: float, source, microphone
 ) -> tuple[np.ndarray, float]:
     """The impulse response of a shoebox room with the given reverberation time, from the
-    image-source method of ``pyroomacoustics``; and the wall absorption that gives the
-    reverberation time."""
+    image-source method of ``pyroomacoustics``, with the wall absorption from the calibration;
+    and that absorption."""
     try:
         import pyroomacoustics as pra
     except ImportError as error:  # pragma: no cover - depends on the environment
@@ -211,12 +243,8 @@ def room_impulse_response(
             "reverberation needs the pyroomacoustics package; install the 'speech' extra"
         ) from error
 
-    try:
-        absorption, order = pra.inverse_sabine(rt60, dimensions)
-    except ValueError as error:
-        raise audio_tools.AudioError(
-            f"no room of {dimensions} m has a reverberation time of {rt60} s: {error}"
-        ) from error
+    absorption = calibrated_absorption(dimensions, rt60)
+    order = math.ceil(SOUND_SPEED * 1.5 * rt60 / min(dimensions)) + 2
     room = pra.ShoeBox(
         dimensions,
         fs=rate,

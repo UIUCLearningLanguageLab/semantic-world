@@ -9,7 +9,7 @@ import polars as pl
 import pytest
 import yaml
 from test_wordforms_embeddings import WordEngine
-from wordforms_support import (  # fmt: skip
+from wordforms_support import (
     DATA,
     VOICE_DIR,
     needs_audio,
@@ -18,6 +18,7 @@ from wordforms_support import (  # fmt: skip
     needs_piper,
     needs_torch,
     needs_wordfreq,
+    plain_rows,  # fmt: skip
 )
 
 from semantic_world.wordforms import Run, run_forms
@@ -48,6 +49,7 @@ def learned_config(tmp_path, embeddings=None, count: int = 12, **extra):
             },
             "embeddings": embeddings or [FIXED, CONTRASTIVE, CPC],
             "closed_class": None,
+            "training": {"held_out_word_proportion": 0},
             "device": "cpu",
             **extra,
         },
@@ -205,6 +207,7 @@ def test_learned_encoders_are_evaluated_beside_the_others(tmp_path):
     config = learned_config(tmp_path)
     run = learned_run(tmp_path, config)
     table = evaluate_embeddings(run.embeddings, run.lexicon.words, run.synthesis, run.streams.eval, config=config)  # fmt: skip
+    table = plain_rows(table)
     assert table["embedding"].to_list() == ["logmel_fixed", "contrastive", "cpc"]
     assert table["encoder"].to_list() == ["fixed", "learned", "learned"]
     assert table["source"].to_list() == ["logmel"] * 3
@@ -282,6 +285,7 @@ def test_learned_encoders_on_the_tiny_configuration(tmp_path, capsys):
     assert "embedding contrastive (learned): 16 dimensions, computed" in text
     assert "trained contrastive on" in text and "trained cpc on" in text
     table = pl.read_csv(out / "eval" / "embeddings.csv")
+    table = plain_rows(table)
     assert table["embedding"].to_list() == ["logmel_fixed", "contrastive", "cpc"]
     for row in table.iter_rows(named=True):
         assert row["ap_across_train"] > row["chance_across_train"]

@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from semantic_world.wordforms.config import Config, ConfigError, load_config
-from semantic_world.wordforms.generate import GenerationError, Lexicon, generate_lexicon
+from semantic_world.wordforms.generate import (
+    GenerationError,
+    Lexicon,
+    assign_word_splits,
+    generate_lexicon,
+)
 from semantic_world.wordforms.streams import Streams
 
 __all__ = [
@@ -108,6 +113,7 @@ def run_forms(config: Config) -> Run:
     streams = Streams(config.seed)
     lexicon = generate_lexicon(config, streams.generate)
     add_closed_class(config, streams, lexicon)
+    assign_word_splits(config, streams, lexicon)
     return Run(config, streams, lexicon)
 
 

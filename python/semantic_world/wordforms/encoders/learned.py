@@ -11,8 +11,11 @@ afterwards (``docs/specs/WORDFORM_PIPELINE.md``, layer 4, stage 6).
   predictive coding (van den Oord, Li, and Vinyals, 2018), with no word labels. The same
   convolutions give a latent frame sequence, a GRU summarizes the past into a context, and the
   context predicts the latents ``steps_ahead`` frames ahead against negatives drawn from the
-  batch. A token's embedding is the mean of its context frames, like a pretrained model's
-  pooled layer.
+  batch (or, with ``negatives_from: clip``, from the same clip). A token's embedding is the
+  mean of its context frames, like a pretrained model's pooled layer, or of its latent frames
+  (``embedding_from``). In a comparison on the default run (September 30, 2026), the context
+  with batch negatives gave the best word embeddings, 30 epochs were no better than 10, and no
+  setting made the encoder good at telling words apart.
 
 Training draws its batches from the ``wordforms:train`` stream and seeds PyTorch from it, and
 PyTorch runs its deterministic algorithms, so training on the CPU with a fixed seed gives the
@@ -134,6 +137,8 @@ def build_model(kind: str, channels: int, settings: dict[str, Any]):
                     for _ in range(settings["steps_ahead"])
                 ]
             )
+            self.embedding_from = settings.get("embedding_from", "context")
+            """What the embedding is the mean of: the context frames or the latents."""
 
         def latents(self, frames, mask):
             z = self.latent(self.stack(frames, mask))
@@ -141,8 +146,9 @@ def build_model(kind: str, channels: int, settings: dict[str, Any]):
             return z, c * mask.unsqueeze(-1)
 
         def forward(self, frames, mask):
-            _, c = self.latents(frames, mask)
-            return c.sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
+            z, c = self.latents(frames, mask)
+            pooled = z * mask.unsqueeze(-1) if self.embedding_from == "latents" else c
+            return pooled.sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
 
     return Contrastive() if kind == "contrastive" else CPC()
 
@@ -171,10 +177,14 @@ def supervised_contrastive_loss(embeddings, words, temperature: float):
     return per_anchor[anchors].mean()
 
 
-def cpc_loss(z, c, mask, heads, negatives: int, generator):
+def cpc_loss(z, c, mask, heads, negatives: int, generator, negatives_from: str = "batch"):
     """The InfoNCE loss of predicting the latent ``k`` frames ahead from the context, for each
-    prediction head, against ``negatives`` latent frames drawn from the batch."""
+    prediction head, against ``negatives`` other latent frames. With ``negatives_from``
+    ``batch`` they are drawn from every clip of the batch; with ``clip`` they are other frames
+    of the same clip, so that the speaker's voice, which every frame of a clip shares, cannot
+    tell the target from them."""
     torch = _torch()
+    lengths = mask.sum(dim=1)
     valid = mask.reshape(-1).nonzero().squeeze(1)  # the frames of the clips, over the batch
     pool = z.reshape(-1, z.shape[-1])[valid]
     total = z.new_zeros(())
@@ -187,10 +197,21 @@ def cpc_loss(z, c, mask, heads, negatives: int, generator):
         keep = mask[:, k:] & mask[:, :-k]
         if not keep.any():
             continue
+        clips, times = keep.nonzero(as_tuple=True)
         prediction = prediction[keep]
         target = target[keep]
-        draws = torch.randint(len(pool), (len(prediction), negatives), generator=generator)
-        candidates = torch.cat([target.unsqueeze(1), pool[draws]], dim=1)
+        if negatives_from == "clip":
+            # other frames of the same clip: the target's position plus a random offset, modulo
+            # the clip's length, which never lands on the target itself
+            span = (lengths[clips] - 1).clamp(min=1).unsqueeze(1)
+            draws = torch.rand(len(prediction), negatives, generator=generator).to(span.device)
+            offsets = 1 + (draws * span).long().clamp(max=span - 1)
+            positions = (times.unsqueeze(1) + k + offsets) % lengths[clips].unsqueeze(1)
+            others = z[clips.unsqueeze(1), positions]
+        else:
+            draws = torch.randint(len(pool), (len(prediction), negatives), generator=generator)
+            others = pool[draws]
+        candidates = torch.cat([target.unsqueeze(1), others], dim=1)
         scores = (candidates * prediction.unsqueeze(1)).sum(dim=-1)
         labels = torch.zeros(len(prediction), dtype=torch.long, device=scores.device)
         total = total + torch.nn.functional.cross_entropy(scores, labels)
@@ -284,9 +305,11 @@ def train_encoder(
     seed: int,
     device: str = "cpu",
     progress=None,
+    checkpoint=None,
 ) -> tuple[Any, TrainingReport]:
     """Train a learned encoder on the training tokens and return the frozen model with its
-    report. ``seed`` seeds PyTorch and the batch draws."""
+    report. ``seed`` seeds PyTorch and the batch draws. ``checkpoint(epoch, model)`` is called
+    after every epoch with the model in evaluation mode."""
     torch = _torch()
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(True, warn_only=True)
@@ -315,7 +338,15 @@ def train_encoder(
                 )
             else:
                 z, c = model.latents(frames, mask)
-                loss = cpc_loss(z, c, mask, model.heads, settings["negatives"], generator)
+                loss = cpc_loss(
+                    z,
+                    c,
+                    mask,
+                    model.heads,
+                    settings["negatives"],
+                    generator,
+                    settings.get("negatives_from", "batch"),
+                )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -324,6 +355,10 @@ def train_encoder(
         report.losses.append(total / steps_per_epoch)
         if progress is not None:
             progress(epoch + 1, settings["epochs"], report.losses[-1])
+        if checkpoint is not None:
+            model.eval()
+            checkpoint(epoch + 1, model)
+            model.train()
     report.seconds = time.time() - started
     model.eval()
     return model, report

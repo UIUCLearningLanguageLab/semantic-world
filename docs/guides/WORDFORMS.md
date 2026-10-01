@@ -129,9 +129,13 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 | `logmel_fixed` | the same, from the log-mel spectrogram | 256 |
 | `hubert_base` | layer 8 of the pretrained HuBERT speech model, averaged over time | 768 |
 | `contrastive_logmel` | a small convolutional encoder trained on the run's own clips so that tokens of the same word lie together (supervised by word identity) | 128 |
-| `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels | 128 |
+| `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels; a weak baseline: it tells words apart across speakers far worse than the others | 128 |
 
 The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (37,080 training tokens) the contrastive encoder trains in about 1.5 minutes and the CPC encoder in about 16 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
+
+**Held-out words.** One word in five (`training.held_out_word_proportion`) is held out from everything that is trained: the two learned encoders and the fixed encoders' projection. Held-out words still get audio and embeddings, and `words.csv` marks them (`split`). The evaluation gives every measure for all words, the training words, and the held-out words (`word_split`); the held-out rows say how an encoder does on words it has never seen.
+
+**Talker normalization.** Any embedding can take `talker_normalization: true`, which subtracts each speaker's mean embedding (from that speaker's training-word tokens) from the speaker's tokens. It is off by default: it uses speaker identity, which a learner does not get for free, and handling speaker variability is part of what learners must do. The evaluation reports every embedding both ways (`talker_normalized`).
 
 ## Closed-class forms
 
@@ -267,6 +271,7 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns wo
 | `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
 | `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
 | `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
+| `training.held_out_word_proportion` | 0.2 | Share of the content words held out from every trained encoder. |
 | `word_embeddings.tokens` | clean | Which training-speaker tokens make a word's embedding: `clean` leaves augmented tokens out, `all` includes them. |
 | `device` | auto | `cpu`, `cuda`, `mps`, or `auto`. CPU results are bit-identical across runs; GPU results differ by about 1e-6. |
 

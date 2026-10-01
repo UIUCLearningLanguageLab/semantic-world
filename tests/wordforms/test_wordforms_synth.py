@@ -84,6 +84,7 @@ def espeak_only(tmp_path, **wordforms):
             },
             "embeddings": [],
             "closed_class": None,
+            "training": {"held_out_word_proportion": 0},
         },
         "synth_test",
     )
@@ -721,6 +722,7 @@ def piper_only(tmp_path):
             },
             "embeddings": [],
             "closed_class": None,
+            "training": {"held_out_word_proportion": 0},
         },
         "piper_test",
     )

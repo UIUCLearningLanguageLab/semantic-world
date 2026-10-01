@@ -11,7 +11,14 @@ import polars as pl
 import pytest
 import yaml
 from test_wordforms_embeddings import WordEngine
-from wordforms_support import DATA, FIXTURES, needs_audio, needs_cmudict, needs_wordfreq
+from wordforms_support import (
+    DATA,
+    FIXTURES,
+    needs_audio,
+    needs_cmudict,
+    needs_wordfreq,
+    plain_rows,
+)
 
 from semantic_world.wordforms import Run, run_forms
 from semantic_world.wordforms.__main__ import main
@@ -559,6 +566,7 @@ def stand_in_run(tmp_path, closed_class, count: int = 8) -> Run:
                 for f in ("cochleagram", "logmel")
             ],
             "closed_class": closed_class,
+            "training": {"held_out_word_proportion": 0},
         },
         "closed_test",
     )
@@ -613,7 +621,7 @@ def test_turning_closed_class_forms_on_changes_no_audio_embedding_or_evaluation(
 @needs_audio
 def test_evaluation_by_kind_and_the_stem_auc(tmp_path):
     run = stand_in_run(tmp_path, {"inflect": INFLECT_ALL})
-    table = run.evaluation
+    table = plain_rows(run.evaluation)
     kinds = ["content", "function", "inflected", "all"]
     assert table["kind"].to_list() == kinds * 2
     counts = {kind: len(forms_of(run, kind)) for kind in kinds[:3]}
@@ -627,7 +635,7 @@ def test_evaluation_by_kind_and_the_stem_auc(tmp_path):
         else:
             assert row["stem_auc"] is None and row["stem_auc_forms"] is None
     # the stem AUC is reported for every embedding, in the run's folder
-    stored = pl.read_csv(tmp_path / "run" / "eval" / "embeddings.csv")
+    stored = plain_rows(pl.read_csv(tmp_path / "run" / "eval" / "embeddings.csv"))
     assert stored["stem_auc"].drop_nulls().len() == 4
     assert stored.columns == table.columns and "kind" in stored.columns
 

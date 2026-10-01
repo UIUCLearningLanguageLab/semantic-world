@@ -21,6 +21,7 @@ from wordforms_support import (
     needs_torch,
     needs_whisper,
     needs_wordfreq,
+    plain_rows,
 )
 
 from semantic_world.wordforms import Run, run_forms
@@ -431,6 +432,7 @@ def test_evaluation_sample():
 def test_evaluation_table_is_above_chance(tmp_path):
     run, _ = embed_run(tmp_path, count=10)
     table = evaluate_embeddings(run.embeddings, run.lexicon.words, run.synthesis, run.streams.eval)
+    table = plain_rows(table)
     assert table.columns == list(EVAL_COLUMNS) and table.height == 2
     assert table["embedding"].to_list() == ["cochleagram_fixed", "logmel_fixed"]
     assert table["encoder"].to_list() == ["fixed", "fixed"]
@@ -449,11 +451,13 @@ def test_evaluation_table_is_above_chance(tmp_path):
     again = evaluate_embeddings(
         run.embeddings, run.lexicon.words, run.synthesis, np.random.default_rng(1), max_tokens=40
     )
+    again = plain_rows(again)
     assert again["tokens_evaluated"].to_list() == [40, 40]
     assert (again["ap_across_train"] > again["chance_across_train"]).all()
     run.evaluation = table
     folder = run.write(tmp_path / "run")
     written = pl.read_csv(folder / "eval" / "embeddings.csv")
+    written = plain_rows(written)
     assert written.columns == list(EVAL_COLUMNS) and written.height == 2
     assert written["ap_held_out"].to_list() == pytest.approx(
         table["ap_held_out"].to_list(), abs=1e-6
@@ -464,10 +468,12 @@ def test_evaluation_with_and_without_the_long_synthesis_words(tmp_path):
     run, _ = embed_run(tmp_path, count=10)
     words = run.lexicon.words
     plain = evaluate_embeddings(run.embeddings, words, run.synthesis, np.random.default_rng(0))
+    plain = plain_rows(plain)
     assert set(plain["word_set"]) == {"all"}  # no word is flagged: one set of rows
     for word in words:
         word.long_synthesis = word.label in ("W.2", "W.7")
     table = evaluate_embeddings(run.embeddings, words, run.synthesis, np.random.default_rng(0))
+    table = plain_rows(table)
     assert table.height == 4
     assert table["word_set"].to_list() == ["all", "without_long_synthesis"] * 2
     everything = table.filter(pl.col("word_set") == "all")
@@ -506,6 +512,7 @@ def test_neighbor_auc_in_the_table(tmp_path):
     table = evaluate_embeddings(
         run.embeddings, run.lexicon.words, run.synthesis, np.random.default_rng(0)
     )
+    table = plain_rows(table)
     assert table["auc_words"].to_list() == [with_neighbor, with_neighbor]
     for name, value in zip(table["embedding"], table["fidelity_auc"], strict=True):
         expected, _ = neighbor_auc(run.embeddings[name].types, matrix)
@@ -702,6 +709,7 @@ def test_layer_sweep_runs_on_the_sample_without_stored_layers(tmp_path):
     table = evaluate_embeddings(
         *arguments, np.random.default_rng(0), config=run.config, local_only=True
     )
+    table = plain_rows(table)
     # one row for the stored embedding, and one sweep row for each of the 13 layers
     assert table.height == 14 and table["basis"].to_list() == ["stored"] + ["sweep"] * 13
     assert table["layer"].to_list() == [8, *range(13)]
@@ -717,7 +725,8 @@ def test_layer_sweep_runs_on_the_sample_without_stored_layers(tmp_path):
     # the sweep needs the configuration to run the model, and can be left out
     with pytest.raises(ValueError, match="needs the run's configuration"):
         evaluate_embeddings(*arguments, np.random.default_rng(0))
-    assert evaluate_embeddings(*arguments, np.random.default_rng(0), sweep=False).height == 1
+    plain = plain_rows(evaluate_embeddings(*arguments, np.random.default_rng(0), sweep=False))
+    assert plain.height == 1
     # a sample of the tokens: the model runs on the sample only
     seen = []
     small = evaluate_embeddings(
@@ -728,6 +737,7 @@ def test_layer_sweep_runs_on_the_sample_without_stored_layers(tmp_path):
         local_only=True,
         progress=lambda name, done, total: seen.append((name, done, total)),
     )
+    small = plain_rows(small)
     assert seen[-1] == ("hubert", 10, 10) and len(seen) == 10
     assert set(small["tokens_evaluated"]) == {10}
     # with store_layers, every layer is stored, and the sweep reads the stored layers
@@ -739,6 +749,7 @@ def test_layer_sweep_runs_on_the_sample_without_stored_layers(tmp_path):
     from_stored = evaluate_embeddings(
         kept.embeddings, kept.lexicon.words, kept.synthesis, np.random.default_rng(0)
     )
+    from_stored = plain_rows(from_stored)
     assert from_stored.height == 14 and from_stored["layer"][0] == 3
     both = ["ap_across_train", "ap_held_out", "fidelity_pearson"]
     ours = table.filter(pl.col("basis") == "sweep").select(both).to_numpy()
@@ -920,6 +931,7 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
         "words.csv",
     ]
     table = pl.read_csv(run / "eval" / "embeddings.csv")
+    table = plain_rows(table)
     assert table["embedding"].to_list() == ["cochleagram_fixed"] * 4 + ["logmel_fixed"] * 4
     assert table["kind"].to_list() == ["content", "function", "inflected", "all"] * 2
     for row in table.iter_rows(named=True):
@@ -945,7 +957,7 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
     assert text.count("already stored") == 5 and "0 synthesized" in text
     assert "closed-class forms: 15 function words, 3 affixes" in text
     assert "cochleagram_fixed" in text and "held-out" in text
-    assert pl.read_csv(run / "eval" / "embeddings.csv").equals(table)
+    assert plain_rows(pl.read_csv(run / "eval" / "embeddings.csv")).equals(table)
 
 
 @needs_espeak

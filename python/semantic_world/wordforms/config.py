@@ -49,6 +49,8 @@ LATER_STAGES = {
 }
 LEARNED_KINDS = ("contrastive", "cpc")
 TRAINING_TOKENS = ("clean", "all")
+CPC_EMBEDDINGS = ("context", "latents")
+CPC_NEGATIVES = ("batch", "clip")
 FRONTENDS = ("waveform", "logmel", "cochleagram", "modulation")
 NOISE_KINDS = ("white", "pink", "speech", "babble")
 AUGMENTED_SPEAKERS = ("all", "train", "held_out")
@@ -307,6 +309,8 @@ class FixedEmbeddingConfig:
     frontend: str
     time_bins: int
     pca_dims: int | None
+    talker_normalization: bool = False
+    """Whether each speaker's mean token embedding is subtracted from that speaker's tokens."""
 
     encoder = "fixed"
 
@@ -317,6 +321,7 @@ class FixedEmbeddingConfig:
             "frontend": self.frontend,
             "time_bins": self.time_bins,
             "pca_dims": self.pca_dims,
+            "talker_normalization": self.talker_normalization,
         }
 
 
@@ -329,6 +334,7 @@ class PretrainedEmbeddingConfig:
     store_layers: bool = False
     """Whether the run also stores the pooled output of every layer (``layers.npy``). The
     evaluation's layer sweep does not need the stored layers."""
+    talker_normalization: bool = False
 
     encoder = "pretrained"
 
@@ -340,6 +346,7 @@ class PretrainedEmbeddingConfig:
             "layer": self.layer,
             "pooling": self.pooling,
             "store_layers": self.store_layers,
+            "talker_normalization": self.talker_normalization,
         }
 
 
@@ -369,6 +376,13 @@ class LearnedEmbeddingConfig:
     train_on: str
     """Which training-speaker tokens the encoder trains on: ``clean``, or ``all`` with the
     augmented ones."""
+    embedding_from: str = "context"
+    """What the CPC encoder's embedding is the mean of: its ``context`` frames (``hidden``
+    numbers) or its ``latents`` (``dims`` numbers). The contrastive encoder ignores it."""
+    negatives_from: str = "batch"
+    """Where the CPC encoder's negative frames come from: the whole ``batch``, or the same
+    ``clip``."""
+    talker_normalization: bool = False
 
     encoder = "learned"
 
@@ -385,6 +399,8 @@ class LearnedEmbeddingConfig:
             "temperature": self.temperature,
             "steps_ahead": self.steps_ahead,
             "negatives": self.negatives,
+            "embedding_from": self.embedding_from,
+            "negatives_from": self.negatives_from,
         }
 
     def resolved(self) -> dict[str, Any]:
@@ -395,6 +411,7 @@ class LearnedEmbeddingConfig:
             "frontend": self.frontend,
             **self.settings(),
             "train_on": self.train_on,
+            "talker_normalization": self.talker_normalization,
         }
 
 
@@ -410,6 +427,17 @@ class WordEmbeddingsConfig:
 
     def resolved(self) -> dict[str, Any]:
         return {"tokens": self.tokens}
+
+
+@dataclass(frozen=True)
+class TrainingConfig:
+    """What every trained encoder (a learned encoder, or a fixed encoder's projection) shares."""
+
+    held_out_word_proportion: float
+    """The share of the content words that no trained encoder sees; they test novel words."""
+
+    def resolved(self) -> dict[str, Any]:
+        return {"held_out_word_proportion": self.held_out_word_proportion}
 
 
 @dataclass(frozen=True)
@@ -612,6 +640,7 @@ class Config:
     augmentation: AugmentationConfig | None
     """None: no augmented tokens."""
     word_embeddings: WordEmbeddingsConfig
+    training: TrainingConfig
     assignment: AssignmentConfig
     device: str
 
@@ -627,6 +656,7 @@ class Config:
             "closed_class": None if self.closed_class is None else self.closed_class.resolved(),
             "augmentation": None if self.augmentation is None else self.augmentation.resolved(),
             "word_embeddings": self.word_embeddings.resolved(),
+            "training": self.training.resolved(),
             "assignment": self.assignment.resolved(),
             "device": self.device,
         }
@@ -1091,6 +1121,7 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
                     frontend=frontend,
                     time_bins=node.int("time_bins", 10, min=1),
                     pca_dims=None if pca is None else node.check_int("pca_dims", pca, min=1),
+                    talker_normalization=node.bool("talker_normalization", False),
                 )
             )
         elif encoder == "learned":
@@ -1114,6 +1145,9 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
                     steps_ahead=node.int("steps_ahead", 8, min=1),
                     negatives=node.int("negatives", 32, min=1),
                     train_on=node.choice("train_on", "clean", TRAINING_TOKENS),
+                    embedding_from=node.choice("embedding_from", "context", CPC_EMBEDDINGS),
+                    negatives_from=node.choice("negatives_from", "batch", CPC_NEGATIVES),
+                    talker_normalization=node.bool("talker_normalization", False),
                 )
             )
         else:
@@ -1124,6 +1158,7 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
                     layer=node.int("layer", DEFAULT_PRETRAINED_LAYER, min=0),
                     pooling=node.choice("pooling", "mean", POOLINGS),
                     store_layers=node.bool("store_layers", False),
+                    talker_normalization=node.bool("talker_normalization", False),
                 )
             )
         node.finish()
@@ -1444,6 +1479,11 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         tokens=word_node.choice("tokens", "clean", WORD_EMBEDDING_TOKENS)
     )
     word_node.finish()
+    training_node = root.mapping("training")
+    training = TrainingConfig(
+        held_out_word_proportion=training_node.probability("held_out_word_proportion", 0.2)
+    )
+    training_node.finish()
     assignment = _read_assignment(root.mapping("assignment"))
     device = root.choice("device", "auto", DEVICES)
     root.get("provenance", None, nullable=True)  # written by a run; ignored when read back
@@ -1459,6 +1499,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         closed_class=closed_class,
         augmentation=augmentation,
         word_embeddings=word_embeddings,
+        training=training,
         assignment=assignment,
         device=device,
     )

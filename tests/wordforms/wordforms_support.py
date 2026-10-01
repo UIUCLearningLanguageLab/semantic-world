@@ -94,3 +94,11 @@ needs_whisper = pytest.mark.skipif(
         "python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml)"
     ),
 )
+
+
+def plain_rows(table):
+    """The rows of an evaluation table for all words, without talker normalization: the rows
+    that the table had before held-out words and talker normalization were added."""
+    import polars as pl
+
+    return table.filter(~pl.col("talker_normalized") & (pl.col("word_split") == "all"))

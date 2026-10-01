@@ -44,6 +44,7 @@ WORD_COLUMNS = (
     "affix",
     "join",
     "weak_forms",
+    "split",
 )
 AFFIX_COLUMNS = ("label", "gloss", "position", "arpabet", "ipa")
 SPEAKER_COLUMNS = ("label", "engine", "voice", "speaker_id", "variant", "pitch", "rate", "split")

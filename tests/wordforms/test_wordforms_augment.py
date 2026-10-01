@@ -21,6 +21,7 @@ from wordforms_support import (
     needs_piper,
     needs_pyroomacoustics,
     needs_wordfreq,
+    plain_rows,
 )
 
 from semantic_world.wordforms import Run, run_forms, run_synthesis
@@ -182,7 +183,7 @@ def test_room_impulse_response_decays_at_the_reverberation_time():
     )
     assert rir.ndim == 1 and len(rir) > RATE * 0.4 and 0 < absorption < 1
     with pytest.raises(Exception, match="no room"):
-        room_impulse_response(RATE, (12.0, 12.0, 12.0), 0.1, [1, 1, 1.5], [3.5, 2.5, 1.5])
+        room_impulse_response(RATE, (30.0, 30.0, 30.0), 0.05, [1, 1, 1.5], [3.5, 2.5, 1.5])
     # the Schroeder decay curve falls by 60 dB in about rt60 seconds
     energy = np.cumsum(rir[::-1] ** 2)[::-1]
     decay = 10 * np.log10(energy / energy[0])
@@ -331,6 +332,7 @@ def stand_in_config(tmp_path, recipes, **augmentation):
                 {"name": "modulation_fixed", "encoder": "fixed", "frontend": "modulation", "pca_dims": 8},
             ],
             "closed_class": None,
+            "training": {"held_out_word_proportion": 0},
             "augmentation": {"recipes": recipes, **augmentation},
         },
         "augment_test",
@@ -775,6 +777,7 @@ def test_evaluation_by_token_set_and_robustness(tmp_path):
     run.frontends = compute_frontends(config, run.synthesis, tmp_path / "run")
     stores = compute_embeddings(config, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "run")  # fmt: skip
     table = evaluate_embeddings(stores, run.lexicon.words, run.synthesis, run.streams.eval, config=config)  # fmt: skip
+    table = plain_rows(table)
     sets = ["clean", "augmented", "all", "recipe:noisy", "recipe:faster"]
     assert table["tokens"].to_list() == sets * 2
     assert table["kind"].to_list() == ["content"] * 10
@@ -797,5 +800,6 @@ def test_evaluation_by_token_set_and_robustness(tmp_path):
     run.frontends = compute_frontends(plain, run.synthesis, tmp_path / "plain" / "run")
     stores = compute_embeddings(plain, run.lexicon.words, run.synthesis, run.frontends, tmp_path / "plain" / "run")  # fmt: skip
     table = evaluate_embeddings(stores, run.lexicon.words, run.synthesis, run.streams.eval, config=plain)  # fmt: skip
+    table = plain_rows(table)
     assert table["tokens"].to_list() == ["clean", "clean"]
     assert table["robustness_ap"].drop_nulls().len() == 2
