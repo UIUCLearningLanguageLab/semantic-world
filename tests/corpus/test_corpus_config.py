@@ -65,6 +65,7 @@ def test_default_values() -> None:
     assert (documents.shuffle, documents.instance_description_rate) == (0.3, 0.2)
     assert config.propositions.negation_rate == {"class": 0.1, "instance": 0.1}
     assert config.propositions.rule_statement_rate == 0.3
+    assert config.propositions.rule_max_literals is None
     quantifiers = config.quantifiers
     assert quantifiers.all_grounding == "fixed"
     assert quantifiers.most_min_proportion == 0.7
@@ -78,6 +79,7 @@ def test_default_values() -> None:
     assert config.entity_scenes == Range(1, 3)
     mention = config.mention
     assert mention.level_weights == (1.0, 2.5, 4.0)
+    assert mention.verb_level_weights == (1.0, 4.0)  # the default verb tree has two levels
     assert (mention.pronoun_rate, mention.modifier_rate) == (0.5, 0.3)
     assert (mention.max_adjectives, mention.max_with_phrases) == (3, 2)
     assert mention.max_content_words == 20
@@ -96,7 +98,7 @@ def test_default_values() -> None:
         "negation": "after_auxiliary",
     }
     morphology = grammar.morphology
-    assert not (morphology.number.on or morphology.tense.on or morphology.aspect.on)
+    assert not (morphology.number.enabled or morphology.tense.enabled or morphology.aspect.enabled)
     assert (morphology.number.realization, morphology.number.verb_marks) == ("affix", "plural")
     assert morphology.number.agreement is True and morphology.agreement is False
     assert morphology.tense.event_tense == "past"
@@ -117,13 +119,12 @@ def test_default_file_lists_every_default() -> None:
 
 
 def _key_paths(data: Any, prefix: str = "") -> set[str]:
-    """Every dotted key of a nested mapping. Schedules and the YAML reading of ``on`` are
-    written differently in a file and in the resolved form, so they are made alike first."""
+    """Every dotted key of a nested mapping. A schedule is written differently in a file and
+    in the resolved form, so it counts as one value."""
     if not isinstance(data, dict) or "schedule" in data:
         return {prefix}
     paths: set[str] = set()
     for key, value in data.items():
-        key = "on" if key is True else key
         paths |= _key_paths(value, f"{prefix}.{key}" if prefix else str(key))
     return paths
 
@@ -136,6 +137,21 @@ def test_tiny_configuration() -> None:
     assert config.taxonomy.depth == 2
     assert config.mention.level_weights == (1.0, 4.0)
     assert config.documents.topic_level_weights == (1.0, 2.0)
+
+
+def test_rule_statement_cap_and_verb_level_weights() -> None:
+    config = corpus_config(
+        propositions={"rule_statements": {"max_literals": 3}},
+        mention={"verb_level_weights": {"schedule": "list", "values": [0, 1]}},
+    )
+    assert config.propositions.rule_max_literals == 3
+    assert config.mention.verb_level_weights == (0.0, 1.0)
+    assert config.resolved()["propositions"]["rule_statements"] == {"max_literals": 3}
+    assert config_from_mapping(config.resolved()) == config
+    # a taxonomy without verbs has no verb levels to weigh
+    plain = corpus_config("data/taxonomy/tiny.yaml")
+    assert plain.taxonomy.verb_depth is None and plain.mention.verb_level_weights == ()
+    assert config_from_mapping(plain.resolved()) == plain
 
 
 def test_seed_override_is_the_corpus_seed_only() -> None:
@@ -161,7 +177,7 @@ def test_resolved_configuration_keeps_changed_values() -> None:
         lexicon={"synonym_rate": 0.2, "named_proportion": {"is": 0.5}},
         documents={"mix": {"situational": 1}, "sentences": {"entity": 7}},
         scene={"verb_weights": {"CAN.1": 2, "V1.1": 0.5}},
-        grammar={"morphology": {"number": {"on": True, "realization": "word"}}},
+        grammar={"morphology": {"number": {"enabled": True, "realization": "word"}}},
         test_sets={"changes": ["role"]},
     )
     resolved = config.resolved()
@@ -174,7 +190,7 @@ def test_resolved_configuration_keeps_changed_values() -> None:
     }
     assert resolved["documents"]["sentences"]["entity"] == [7, 7]
     assert resolved["scene"]["verb_weights"] == {"CAN.1": 2.0, "V1.1": 0.5}
-    assert resolved["grammar"]["morphology"]["number"]["on"] is True
+    assert resolved["grammar"]["morphology"]["number"]["enabled"] is True
     assert config_from_mapping(yaml.safe_load(config.to_yaml())) == config
 
 
@@ -308,6 +324,27 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "at most 1",
     ),
     ({"propositions": {"rule_statement_rate": None}}, "propositions.rule_statement_rate", "null"),
+    (
+        {"propositions": {"rule_statements": {"max_literals": 0}}},
+        "propositions.rule_statements.max_literals",
+        "at least 1",
+    ),
+    (
+        {"propositions": {"rule_statements": {"max_literals": 2.5}}},
+        "propositions.rule_statements.max_literals",
+        "expected an integer",
+    ),
+    (
+        {"propositions": {"rule_statements": {"cap": 3}}},
+        "propositions.rule_statements.cap",
+        "unknown key",
+    ),
+    (
+        {"mention": {"verb_level_weights": {"schedule": "list", "values": [1, 2, 3]}}},
+        "mention.verb_level_weights.values",
+        "exactly 2 values",
+    ),
+    ({"mention": {"verb_level_weights": -1}}, "mention.verb_level_weights", "must not be negative"),
     ({"quantifiers": {"all_grounding": "law"}}, "quantifiers.all_grounding", "fixed, observed"),
     ({"quantifiers": {"most": {"min_proportion": 0}}}, "quantifiers.most.min_proportion", "more"),
     ({"quantifiers": {"most": {"min_proportion": 1.2}}}, "quantifiers.most.min_proportion", "1"),
@@ -385,12 +422,12 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "at most 1",
     ),
     (
-        {"grammar": {"morphology": {"tense": {"on": "yes"}}}},
-        "grammar.morphology.tense.on",
+        {"grammar": {"morphology": {"tense": {"enabled": "yes"}}}},
+        "grammar.morphology.tense.enabled",
         "true or false",
     ),
     (
-        {"grammar": {"morphology": {"case": {"on": True}}}},
+        {"grammar": {"morphology": {"case": {"enabled": True}}}},
         "grammar.morphology.case",
         "unknown key",
     ),
@@ -463,29 +500,28 @@ def test_file_errors(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_bare_on_key_in_a_file_is_read_as_the_setting(tmp_path: Path) -> None:
-    # YAML reads a bare `on` as the boolean true. The specification writes `on: true`.
+def test_the_old_on_key_says_where_it_went(tmp_path: Path) -> None:
+    # The switch was `on` in stage 1. YAML reads a bare `on` as the boolean true, so the error
+    # covers both readings of the old key.
     path = tmp_path / "corpus.yaml"
+    for written in ("on: true", '"on": true'):
+        path.write_text(
+            f"taxonomy: {{config: {TINY_TAXONOMY}}}\n"
+            f"grammar: {{morphology: {{number: {{{written}}}}}}}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ConfigError) as info:
+            load_config(path)
+        assert info.value.field == "grammar.morphology.number.on"
+        assert "is now enabled" in info.value.message
     path.write_text(
         f"taxonomy: {{config: {TINY_TAXONOMY}}}\n"
-        "grammar:\n"
-        "  morphology:\n"
-        "    number: {on: true, realization: word}\n"
-        '    tense: {"on": true}\n',
+        "grammar: {morphology: {number: {enabled: true}, aspect: {enabled: true}}}\n",
         encoding="utf-8",
     )
     morphology = load_config(path).grammar.morphology
-    assert morphology.number.on and morphology.tense.on and not morphology.aspect.on
-    config = load_config(path)
-    assert config_from_mapping(yaml.safe_load(config.to_yaml()), source=str(path)) == config
-    path.write_text(
-        f"taxonomy: {{config: {TINY_TAXONOMY}}}\n"
-        'grammar: {morphology: {number: {on: true, "on": false}}}\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError) as info:
-        load_config(path)
-    assert info.value.field == "grammar.morphology.number.on"
+    assert morphology.number.enabled and morphology.aspect.enabled and not morphology.tense.enabled
+    assert "enabled: true" in load_config(path).to_yaml()  # no quoted key in the resolved form
 
 
 def test_agreement_needs_number() -> None:
@@ -493,8 +529,8 @@ def test_agreement_needs_number() -> None:
         return corpus_config(grammar={"morphology": {"number": number}}).grammar.morphology
 
     assert morphology().agreement is False
-    assert morphology(on=True).agreement is True
-    assert morphology(on=True, agreement=False).agreement is False
+    assert morphology(enabled=True).agreement is True
+    assert morphology(enabled=True, agreement=False).agreement is False
 
 
 def test_inflection_words() -> None:
@@ -502,11 +538,11 @@ def test_inflection_words() -> None:
         return corpus_config(grammar={"morphology": parts}).grammar.morphology.inflection_words()
 
     assert words() == ()
-    assert words(number={"on": True}, tense={"on": True}) == ()  # affixes, not words
-    assert words(aspect={"on": True}) == ("PROGRESSIVE",)  # aspect is a word by default
+    assert words(number={"enabled": True}, tense={"enabled": True}) == ()  # affixes, not words
+    assert words(aspect={"enabled": True}) == ("PROGRESSIVE",)  # aspect is a word by default
     assert words(
-        number={"on": True, "realization": "word"},
-        tense={"on": True, "realization": "word"},
-        aspect={"on": True},
+        number={"enabled": True, "realization": "word"},
+        tense={"enabled": True, "realization": "word"},
+        aspect={"enabled": True},
     ) == ("PLURAL", "PAST", "PROGRESSIVE")
-    assert words(number={"on": False, "realization": "word"}) == ()
+    assert words(number={"enabled": False, "realization": "word"}) == ()

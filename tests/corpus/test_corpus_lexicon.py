@@ -365,24 +365,24 @@ def test_function_words(tiny_world) -> None:
     assert list(FUNCTION_WORDS) == base and AGREEMENT_WORDS == ("are", "have")
     assert function_glosses(tiny_world) == base
     # with agreement on, are and have are the plural forms of is and has
-    assert function_glosses(tiny_world, number={"on": True}) == base + ["are", "have"]
-    assert function_glosses(tiny_world, number={"on": True, "agreement": False}) == base
-    assert function_glosses(tiny_world, number={"on": False, "agreement": True}) == base
+    assert function_glosses(tiny_world, number={"enabled": True}) == base + ["are", "have"]
+    assert function_glosses(tiny_world, number={"enabled": True, "agreement": False}) == base
+    assert function_glosses(tiny_world, number={"enabled": False, "agreement": True}) == base
     # an inflection realized as a separate word adds a function word, glossed like the affix
-    assert function_glosses(tiny_world, number={"on": True, "realization": "word"}) == base + [
+    assert function_glosses(tiny_world, number={"enabled": True, "realization": "word"}) == base + [
         "are",
         "have",
         "PLURAL",
     ]
-    assert function_glosses(tiny_world, tense={"on": True}) == base  # an affix
-    assert function_glosses(tiny_world, tense={"on": True, "realization": "word"}) == base + [
+    assert function_glosses(tiny_world, tense={"enabled": True}) == base  # an affix
+    assert function_glosses(tiny_world, tense={"enabled": True, "realization": "word"}) == base + [
         "PAST"
     ]
-    assert function_glosses(tiny_world, aspect={"on": True}) == base + ["PROGRESSIVE"]
+    assert function_glosses(tiny_world, aspect={"enabled": True}) == base + ["PROGRESSIVE"]
     everything = {
-        "number": {"on": True, "realization": "word"},
-        "tense": {"on": True, "realization": "word"},
-        "aspect": {"on": True, "realization": "word"},
+        "number": {"enabled": True, "realization": "word"},
+        "tense": {"enabled": True, "realization": "word"},
+        "aspect": {"enabled": True, "realization": "word"},
     }
     assert function_glosses(tiny_world, **everything) == base + [
         "are",
@@ -397,7 +397,7 @@ def test_function_words(tiny_world) -> None:
 
 def test_function_words_are_ordinary_lexemes(tiny_world) -> None:
     lexicon = lexicon_of(
-        tiny_world, TINY_TAXONOMY, grammar={"morphology": {"aspect": {"on": True}}}
+        tiny_world, TINY_TAXONOMY, grammar={"morphology": {"aspect": {"enabled": True}}}
     )
     the = lexicon.function_word("the")
     assert (the.pos, the.concept, the.gloss) == (FUNCTION_WORD, "THE", "the")
@@ -416,9 +416,9 @@ def test_grammar_settings_never_change_a_content_lexeme(default_world) -> None:
     grammar = {
         "word_order": {"clause": "SOV", "adjective": "after"},
         "morphology": {
-            "number": {"on": True, "realization": "word"},
-            "tense": {"on": True},
-            "aspect": {"on": True},
+            "number": {"enabled": True, "realization": "word"},
+            "tense": {"enabled": True},
+            "aspect": {"enabled": True},
         },
     }
     changed = lexicon_of(default_world, lexicon=knobs, grammar=grammar)

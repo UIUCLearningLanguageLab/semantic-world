@@ -86,6 +86,12 @@ class TaxonomySource:
     def depth(self) -> int:
         return self.config.taxonomy.depth
 
+    @property
+    def verb_depth(self) -> int | None:
+        """The depth of the verb tree, or None when the taxonomy has no verbs."""
+        verbs = self.config.verbs
+        return None if verbs is None else verbs.taxonomy.depth
+
     def resolved(self) -> dict[str, Any]:
         if self.kind == "run":
             return {"run": self.path}
@@ -137,11 +143,15 @@ class PropositionsConfig:
     negation_rate: dict[str, float]
     """The rate of negative propositions at the class level and at the instance level."""
     rule_statement_rate: float
+    rule_max_literals: int | None
+    """The most literals in the term of a rule statement; a longer term is skipped and counted.
+    None: no cap."""
 
     def resolved(self) -> dict[str, Any]:
         return {
             "negation_rate": dict(self.negation_rate),
             "rule_statement_rate": self.rule_statement_rate,
+            "rule_statements": {"max_literals": self.rule_max_literals},
         }
 
 
@@ -204,6 +214,9 @@ class MentionConfig:
     level_weights: tuple[float, ...]
     """The weight of every category level, 1 to the taxonomy's depth, for the noun of a
     mention."""
+    verb_level_weights: tuple[float, ...]
+    """The weight of every level of the verb tree, 1 to its depth, for the verb that names an
+    event. Empty when the taxonomy has no verbs."""
     pronoun_rate: float
     modifier_rate: float
     max_adjectives: int
@@ -215,6 +228,7 @@ class MentionConfig:
     def resolved(self) -> dict[str, Any]:
         return {
             "level_weights": _list_schedule(self.level_weights),
+            "verb_level_weights": _list_schedule(self.verb_level_weights),
             "pronoun_rate": self.pronoun_rate,
             "modifier_rate": self.modifier_rate,
             "max_adjectives": self.max_adjectives,
@@ -241,7 +255,7 @@ class WordOrderConfig:
 
 @dataclass(frozen=True)
 class NumberConfig:
-    on: bool
+    enabled: bool
     realization: str
     position: str
     agreement: bool
@@ -253,7 +267,7 @@ class NumberConfig:
 
 @dataclass(frozen=True)
 class TenseConfig:
-    on: bool
+    enabled: bool
     realization: str
     position: str
     event_tense: str
@@ -264,7 +278,7 @@ class TenseConfig:
 
 @dataclass(frozen=True)
 class AspectConfig:
-    on: bool
+    enabled: bool
     realization: str
     position: str
     progressive_rate: float
@@ -282,7 +296,7 @@ class MorphologyConfig:
     @property
     def agreement(self) -> bool:
         """Whether verbs agree with their subjects: number is on, and agreement is not off."""
-        return self.number.on and self.number.agreement
+        return self.number.enabled and self.number.agreement
 
     def inflection_words(self) -> tuple[str, ...]:
         """The glosses of the inflections that are realized as separate function words."""
@@ -291,7 +305,7 @@ class MorphologyConfig:
             ("PAST", self.tense),
             ("PROGRESSIVE", self.aspect),
         )
-        return tuple(g for g, part in marked if part.on and part.realization == "word")
+        return tuple(g for g, part in marked if part.enabled and part.realization == "word")
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -475,9 +489,15 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
 
 
 def _read_propositions(node: _Node) -> PropositionsConfig:
+    statements = node.mapping("rule_statements")
+    max_literals = statements.get("max_literals", None, nullable=True)
+    if max_literals is not None:
+        statements.check_int("max_literals", max_literals, min=1)
+    statements.finish()
     config = PropositionsConfig(
         negation_rate=_probabilities(node.mapping("negation_rate"), NEGATION_LEVELS, 0.1),
         rule_statement_rate=node.probability("rule_statement_rate", 0.3),
+        rule_max_literals=max_literals,
     )
     node.finish()
     return config
@@ -543,7 +563,13 @@ def _read_scene(node: _Node) -> SceneConfig:
     return config
 
 
-def _read_mention(node: _Node, depth: int) -> MentionConfig:
+def _read_mention(node: _Node, depth: int, verb_depth: int | None) -> MentionConfig:
+    default_weights = {"schedule": "linear", "start": 1, "end": 4}
+    if verb_depth is None:
+        node.get("verb_level_weights", default_weights)  # no verbs, so no levels to weigh
+        verb_level_weights: tuple[float, ...] = ()
+    else:
+        verb_level_weights = _level_weights(node, "verb_level_weights", default_weights, verb_depth)
     clauses = node.mapping("relative_clauses")
     relative_clauses = RelativeClausesConfig(
         rate=clauses.probability("rate", 0.1),
@@ -552,9 +578,8 @@ def _read_mention(node: _Node, depth: int) -> MentionConfig:
     )
     clauses.finish()
     config = MentionConfig(
-        level_weights=_level_weights(
-            node, "level_weights", {"schedule": "linear", "start": 1, "end": 4}, depth
-        ),
+        level_weights=_level_weights(node, "level_weights", default_weights, depth),
+        verb_level_weights=verb_level_weights,
         pronoun_rate=node.probability("pronoun_rate", 0.5),
         modifier_rate=node.probability("modifier_rate", 0.3),
         max_adjectives=node.int("max_adjectives", 3, min=0),
@@ -567,20 +592,19 @@ def _read_mention(node: _Node, depth: int) -> MentionConfig:
 
 
 def _inflection(node: _Node, key: str) -> _Node:
-    """The settings of one inflection. YAML reads a bare ``on`` key as the boolean true, so the
-    key is put back before the settings are read."""
+    """The settings of one inflection. The switch is ``enabled``. It was ``on`` in stage 1,
+    which YAML reads as the boolean true when the key is written bare, so the error for the old
+    key covers both readings."""
     part = node.mapping(key)
-    if any(k is True for k in part.data):
-        if "on" in part.data:
-            raise part.error("on", "is given twice")
-        part.data = {("on" if k is True else k): v for k, v in part.data.items()}
+    if any(k is True or k == "on" for k in part.data):
+        raise part.error("on", "is now enabled")
     return part
 
 
 def _read_morphology(node: _Node) -> MorphologyConfig:
     number_node = _inflection(node, "number")
     number = NumberConfig(
-        on=number_node.bool("on", False),
+        enabled=number_node.bool("enabled", False),
         realization=number_node.choice("realization", "affix", REALIZATIONS),
         position=number_node.choice("position", "after", SIDES),
         agreement=number_node.bool("agreement", True),
@@ -589,7 +613,7 @@ def _read_morphology(node: _Node) -> MorphologyConfig:
     number_node.finish()
     tense_node = _inflection(node, "tense")
     tense = TenseConfig(
-        on=tense_node.bool("on", False),
+        enabled=tense_node.bool("enabled", False),
         realization=tense_node.choice("realization", "affix", REALIZATIONS),
         position=tense_node.choice("position", "after", SIDES),
         event_tense=tense_node.choice("event_tense", "past", EVENT_TENSES),
@@ -597,7 +621,7 @@ def _read_morphology(node: _Node) -> MorphologyConfig:
     tense_node.finish()
     aspect_node = _inflection(node, "aspect")
     aspect = AspectConfig(
-        on=aspect_node.bool("on", False),
+        enabled=aspect_node.bool("enabled", False),
         realization=aspect_node.choice("realization", "word", REALIZATIONS),
         position=aspect_node.choice("position", "after", SIDES),
         progressive_rate=aspect_node.probability("progressive_rate", 0.3),
@@ -691,7 +715,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     entity = root.mapping("entity")
     entity_scenes = entity.range("scenes", [1, 3], min=1)
     entity.finish()
-    mention = _read_mention(root.mapping("mention"), depth)
+    mention = _read_mention(root.mapping("mention"), depth, taxonomy.verb_depth)
     grammar = _read_grammar(root.mapping("grammar"))
     scalar = root.mapping("scalar_adjectives")
     z = scalar.get("z", 1.0)
