@@ -20,7 +20,6 @@ from semantic_world.corpus.facts import (
     SKIP_NO_INSTANCE,
     SKIP_NO_WORD,
     SKIP_REASONS,
-    SKIP_RELATIVE_CLAUSES,
     SKIP_THRESHOLD,
     SKIP_UNCONFIRMED,
 )
@@ -374,8 +373,6 @@ def test_rule_statements_are_the_terms_of_the_minimal_dnf(cases, name) -> None:
             key = (rule["output"], number)
             if any(name.startswith("SC.") for name, _ in used):
                 expected[SKIP_THRESHOLD] += 1
-            elif sum(1 for name, bit in used if name.startswith("IS.") and bit == 0) > 1:
-                expected[SKIP_RELATIVE_CLAUSES] += 1
             else:
                 subject = CategoryTerm(THING, tuple(Literal(name, bool(bit)) for name, bit in used))
                 if len(truth.members(subject)) == 0:
@@ -405,10 +402,9 @@ def test_rule_statement_counts_of_the_default_world(cases) -> None:
     assert report == {
         "rules": 40,
         "terms": 103,
-        "stated": 59,
+        "stated": 86,
         "skipped": {
             SKIP_THRESHOLD: 13,
-            SKIP_RELATIVE_CLAUSES: 27,
             SKIP_MAX_LITERALS: 0,
             SKIP_NO_WORD: 0,
             SKIP_NO_INSTANCE: 4,
@@ -423,7 +419,7 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
     lengths = Counter(len(s.subject.restriction) for s in uncapped.rule_statements())
     # rule statements are exempt from the limits on adjectives and with-phrases: one of the
     # default world's statements has four with-phrases, and the limit is two
-    assert lengths == {1: 14, 2: 24, 3: 8, 4: 13}
+    assert lengths == {1: 14, 2: 31, 3: 10, 4: 31}
     assert case.config().mention.max_with_phrases == 2
     with_phrases = [
         sum(x.feature.startswith("HAS.") for x in s.subject.restriction)
@@ -444,28 +440,50 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
         assert capped.rule_report["stated"] + sum(skipped.values()) == 103
 
 
-def test_a_negated_is_literal_needs_a_relative_clause(cases) -> None:
+def test_negated_is_literals_share_one_relative_clause(cases) -> None:
+    # "things with wings that are not red and not big can fly": a relative clause joins several
+    # verb phrases with "and", so a term with any number of negated IS literals is stated.
     facts = cases("default").facts()
-    for statement in facts.rule_statements():
-        negated = [
-            x
-            for x in statement.subject.restriction
-            if not x.positive and x.feature.startswith("IS.")
-        ]
-        assert len(negated) <= 1
-    assert any(
-        not x.positive and x.feature.startswith("IS.")
+    negated = [
+        sum(not x.positive and x.feature.startswith("IS.") for x in s.subject.restriction)
         for s in facts.rule_statements()
-        for x in s.subject.restriction
-    )
-    # a negated HAS literal is a without-phrase, so any number of them can be stated
-    assert (
-        max(
-            sum(not x.positive and x.feature.startswith("HAS.") for x in s.subject.restriction)
-            for s in facts.rule_statements()
-        )
-        >= 2
-    )
+    ]
+    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 27
+    assert max(negated) == 4
+    assert "relative_clauses" not in facts.rule_report["skipped"]
+    # only a term that reads a scalar threshold, or that no instance satisfies, stays unstated
+    skipped = facts.rule_report["skipped"]
+    assert {reason for reason, count in skipped.items() if count} == {
+        SKIP_THRESHOLD,
+        SKIP_NO_INSTANCE,
+    }
+
+
+def test_the_quantifier_of_a_rule_statement_is_drawn_like_any_other(cases) -> None:
+    case = cases("default")
+    facts = case.facts()
+    oracle = case.oracle()
+    rng = Streams(2).propositions
+    drawn = [facts.draw_rule_statement(rng) for _ in range(1000)]
+    # "all things with wings ..." or the bare plural, at the generic rate; true under both
+    assert {p.quantifier for p in drawn} == {ALL, GENERIC}
+    assert abs(sum(p.quantifier == GENERIC for p in drawn) / len(drawn) - 0.5) < 0.05
+    for statement in drawn[:200]:
+        assert oracle.truth(statement.to_json()) is True
+        assert statement.rule is not None and statement.polarity
+        assert statement.subject.category == THING
+    assert len({p.rule for p in drawn}) == 86  # every rule statement is drawn
+    for means in ("all", "most", "some"):
+        other = case.facts(quantifiers={"generic": {"means": means}, "generic_rate": 1.0})
+        generic = [other.draw_rule_statement(rng) for _ in range(100)]
+        assert all(p.quantifier == GENERIC for p in generic)
+    never = case.facts(quantifiers={"generic_rate": 0.0})
+    assert all(never.draw_rule_statement(rng).quantifier == ALL for _ in range(100))
+    # a pool limits the draw: the sufficient conditions of one feature
+    feature = facts.rule_statements()[0].predicate.label
+    pool = facts.rule_statements(feature)
+    assert all(facts.draw_rule_statement(rng, pool).predicate.label == feature for _ in range(50))
+    assert facts.draw_rule_statement(rng, ()) is None
 
 
 def test_rule_statements_by_feature(cases) -> None:

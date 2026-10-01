@@ -1,8 +1,8 @@
 """Layer 2: propositions. Logical forms, and the tests of their truth.
 
 A proposition is a logical form with a level, a polarity, and a truth grounding. This module
-holds the logical forms of the class level and the instance level, and :class:`Truth`, which
-checks any logical form against the world. Event-level propositions come with the scenes.
+holds the logical forms of the three levels, and :class:`Truth`, which checks any logical form
+against the world and, for the event level, against the scenes.
 
 **Class level.** The subject is a :class:`CategoryTerm`: a category, or the generic ``THING``,
 with a restriction of literals. Its *subject set* is the set of instances below the category that
@@ -15,6 +15,13 @@ sentence negation, so ``no`` always has a positive polarity in the logical form,
 never has a negative one ("no fish have fur", never "all fish do not have fur").
 
 **Instance level.** The subject is an instance, and truth is read from the instance's values.
+
+**Event level.** The proposition says that something happened in a scene: the subject is the
+agent, and the predicate is a CAN feature, or a verb with a patient instance. The verb can be the
+event's own verb or a verb category above it, as a noun can name a category above a leaf. The
+proposition is true when such an event occurred in the scene. An event-level proposition is
+never negated. Its grounding says whether the world allows the event (``possible``), which is
+what tells an impossible false test item from one that merely did not happen.
 
 The truth tests follow "Truth grounding" in ``docs/specs/CORPUS_GENERATOR.md``.
 """
@@ -39,7 +46,8 @@ from semantic_world.taxonomy.tree import Category, Role
 
 CLASS = "class"
 INSTANCE = "instance"
-LEVELS = (CLASS, INSTANCE)
+EVENT = "event"
+LEVELS = (CLASS, INSTANCE, EVENT)
 
 ALL = "all"
 MOST = "most"
@@ -72,6 +80,8 @@ MEAN = "mean"
 """A class-level scalar pole: the subject set's mean against its comparison class."""
 VALUE = "value"
 """An instance's own value."""
+OCCURRED = "event"
+"""An event-level proposition: whether such an event occurred in the scene."""
 
 _JSON_KEY = {
     IS: "feature",
@@ -196,6 +206,11 @@ class Proposition:
     rule: tuple[str, int] | None = field(default=None, compare=False)
     """For a rule statement: the determined feature, and the number of the term of its rule's
     minimal DNF, from 1."""
+    scene: str | None = None
+    """Event level only: the scene the event belongs to."""
+    event: str | None = None
+    """Event level only: the event that the proposition reports (``SN.8.5``). A false test item
+    reports no event, and has None."""
 
     @property
     def negative(self) -> bool:
@@ -226,6 +241,9 @@ class Proposition:
             data["polarity"] = self.polarity
             data["subject"] = self.subject.to_json()
         else:
+            if self.level == EVENT:
+                data["scene"] = self.scene
+                data["event"] = self.event
             data["polarity"] = self.polarity
             data["subject"] = {"instance": self.subject}
         data["predicate"] = self.predicate.to_json()
@@ -249,6 +267,8 @@ class Proposition:
             grounding=data.get("grounding"),
             id=data.get("id"),
             rule=None if rule is None else (rule["feature"], rule["term"]),
+            scene=data.get("scene"),
+            event=data.get("event"),
         )
 
 
@@ -315,6 +335,12 @@ class Truth:
             self.verbs = tuple(c.label for c in result.verbs.categories)
             for i, verb in enumerate(result.projections.verb_labels):
                 self._projection[f"CANBE.{verb}"] = result.projections.patient[:, i].astype(bool)
+        self._verb_ancestors: dict[str, tuple[str, ...]] = {}
+        if result.verbs is not None:
+            for category in result.verbs.categories:
+                self._verb_ancestors[category.label] = tuple(a.label for a in category.ancestors())
+        self.scenes: dict[str, Any] = {}
+        """The scenes that event-level propositions are judged against, by label."""
         self._matrices: dict[str, np.ndarray] = {}
         self._members: dict[CategoryTerm, np.ndarray] = {}
         self._fixed: dict[tuple[CategoryTerm, str], tuple[int | None, str]] = {}
@@ -505,6 +531,8 @@ class Truth:
             return self._evaluate_class(proposition)
         if proposition.level == INSTANCE:
             return self._evaluate_instance(proposition)
+        if proposition.level == EVENT:
+            return self._evaluate_event(proposition)
         return _invalid(f"unknown level {proposition.level!r}")
 
     def is_true(self, proposition: Proposition) -> bool:
@@ -700,6 +728,8 @@ class Truth:
         subject, predicate = proposition.subject, proposition.predicate
         if proposition.quantifier is not None:
             return _invalid("an instance-level proposition has no quantifier")
+        if proposition.scene is not None or proposition.event is not None:
+            return _invalid("only an event-level proposition has a scene and an event")
         if not isinstance(subject, str) or subject not in self.instance_index:
             return _invalid(f"unknown instance {subject!r}")
         problem = self._predicate_problem(predicate)
@@ -741,3 +771,60 @@ class Truth:
             grounding = {"value": int(value), "test": VALUE}
         true = value == proposition.polarity
         return Evaluation(True, true, true, grounding)
+
+    # Events ----------------------------------------------------------------------------------
+
+    def add_scene(self, scene: Any) -> None:
+        """Make a scene known, so that event-level propositions about it can be judged."""
+        self.scenes[scene.label] = scene
+
+    def verb_names(self, verb: str) -> tuple[str, ...]:
+        """The labels that can name an event of a verb: the verb, then the verb categories above
+        it, from the nearest. A CAN feature has only its own label."""
+        return (verb,) + self._verb_ancestors.get(verb, ())
+
+    def allows(self, label: str, agent: str, patient: str | None) -> bool:
+        """Whether the world allows an event: the agent has the CAN feature, or the verb's
+        relation (a verb category's base relation) holds for the agent and the patient."""
+        row = self.instance_index[agent]
+        if patient is None:
+            return bool(self.values[row, self.features[label].position])
+        return bool(self.matrix(label)[row, self.instance_index[patient]])
+
+    def _evaluate_event(self, proposition: Proposition) -> Evaluation:
+        subject, predicate = proposition.subject, proposition.predicate
+        if proposition.quantifier is not None:
+            return _invalid("an event-level proposition has no quantifier")
+        if not proposition.polarity:
+            return _invalid("an event-level proposition is never negated")
+        scene = self.scenes.get(proposition.scene)
+        if scene is None:
+            return _invalid(f"unknown scene {proposition.scene!r}")
+        if predicate.kind not in (CAN, VERB):
+            return _invalid("an event is a CAN feature, or a verb with a patient instance")
+        problem = self._predicate_problem(predicate)
+        if problem:
+            return _invalid(problem)
+        patient = predicate.patient
+        if predicate.kind == VERB and not isinstance(patient, str):
+            return _invalid("the patient of an event is an instance")
+        for instance in (subject, patient):
+            if instance is not None and instance not in scene.participants:
+                return _invalid(f"{instance!r} takes no part in the scene {scene.label}")
+        if patient == subject:
+            return _invalid("an instance is never related to itself")
+        assert isinstance(subject, str)
+        matching = [
+            event
+            for event in scene.events
+            if event.agent == subject
+            and event.patient == patient
+            and predicate.label in self.verb_names(event.verb)
+            and proposition.event in (None, event.label)
+        ]
+        grounding: dict[str, Any] = {"scene": scene.label}
+        if matching:
+            grounding["step"] = matching[0].step
+        grounding["possible"] = self.allows(predicate.label, subject, patient)
+        grounding["test"] = OCCURRED
+        return Evaluation(True, bool(matching), bool(matching), grounding)

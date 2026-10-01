@@ -116,7 +116,7 @@ For exposed patient projections ("most mice are edible"), truth for `most`, `som
 
 For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances. A top-level category has no parent, and is compared with all instances in the world. A class-level scalar pole takes the generic only, never a quantifier word. The category's mean value is the mean over its subject set. A comparison class whose values do not vary has no poles.
 
-**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". The same holds for a negated IS literal in any restriction. A term is skipped when it would need more than one relative clause, or when it reads a scalar threshold, which no pole adjective states. A term that no instance satisfies is skipped too, because the statement would be vacuous. `stats.yaml` reports how many terms were skipped, and why.
+**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A rule statement's quantifier is drawn like that of any class-level proposition: `all`, or the generic at the generic rate. The logical form then matches the surface: "all things with wings and with feathers can fly" is `ALL`, and the bare plural is `GEN`. A rule statement is true under both. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". A relative clause can join several verb phrases with "and", so all of a term's negated IS literals go into one relative clause: "things with wings that are not red and not big can fly". The same holds for the negated IS literals of any restriction. A term is skipped when it reads a scalar threshold, which no pole adjective states. A term that no instance satisfies is skipped too, because the statement would be vacuous. `stats.yaml` reports how many terms were skipped, and why.
 
 Rule statements are exempt from the limits on adjectives, with-phrases, and content words (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). Rules of varied complexity are a core feature of the world, so long terms must still be stated. An optional cap, `propositions.rule_statements.max_literals`, is null by default (no cap). When a cap is set, a term with more literals is skipped and counted.
 
@@ -132,8 +132,8 @@ An instance-level proposition says something about one instance: "the penguin ca
 
 An event-level proposition says that something happened in a scene: "the penguin swims", "the owl chases the mouse".
 
-- **Content:** an event from the scene generator, which records the scene, the time step, the verb, the agent, and the patient if any.
-- **Truth:** the event occurred. Events are generated only where the world allows them (see "Scenes and events"), so an event never contradicts a capacity.
+- **Content:** an event from the scene generator, which records the scene, the time step, the verb, the agent, and the patient if any. The proposition's verb is the event's own verb, or a verb category above it (see "Verb level" under "Mentioning referents").
+- **Truth:** the event occurred. Events are generated only where the world allows them (see "Scenes and events"), so an event never contradicts a capacity. A proposition that names no event (a test item) is true when such an event occurred at any time step of its scene. The grounding also says whether the world allows the event (`possible`): the agent has the CAN feature, or the verb's relation holds for the agent and the patient.
 
 Event-level propositions are never negated.
 
@@ -154,6 +154,12 @@ Training documents contain true propositions only. False propositions go into se
 
 A predicate swap keeps the predicate's kind, its patient, and its comparison class: a verb is replaced by another verb or verb category, and a category by another category of its level. A quantifier swap keeps the polarity, so a proposition with a negative polarity never becomes a `no` sentence. A false item is never vacuous: its subject set has at least one instance. Every false item is checked false by the same truth tests. Test sets come in matched pairs: each false item sits beside the true item it was made from. There is one test set for each proposition level and change type, with a configured size.
 
+Three more rules shape the test sets. Stage 6 builds them.
+
+- **Law-like items.** Under the law-like reading, a false `all` or `no` item can be one that no instance contradicts: every penguin in the world swims, but nothing fixes it. Such an item is marked, and goes into a test set of its own. The ordinary test sets then hold only items that observing the instances could decide.
+- **False events.** A false event-level item is an event that did not happen in the scene. Each item is marked possible (the world allows the event) or impossible (the world rules it out), and the two kinds go into separate test sets.
+- **Context.** Every instance-level and event-level test item names a document. The item is tested as a continuation of that document, so its definite noun phrases refer to that document's referents.
+
 ## Scenes and events
 
 Event-level sentences and situational documents need things to happen. The scene generator is a simple stand-in until event schemas or world-simulation logs can supply events.
@@ -164,14 +170,18 @@ Event-level sentences and situational documents need things to happen. The scene
 - the taxonomic similarity of the two leaves;
 - a constant.
 
-The weights are parameters. With verbs off, the thematic weight has no effect.
+The weights are parameters. With verbs off, the thematic weight has no effect. The instances are drawn without replacement, and the seed is never drawn again. An instance whose weighted sum is 0 is never drawn, so a scene can be smaller than `scene.size`. The taxonomic similarity is the one in `thematic.csv`: the configured metric over the leaves' generative vectors. An undefined or negative similarity counts as 0.
 
 **Timeline.** A scene has a number of time steps drawn from `scene.steps`. At each step, the number of events is drawn from a Poisson distribution with mean `scene.events_per_step`. Each event is drawn from the pool of possible events among the participants:
 
 - an intransitive event for every participant and every CAN feature the participant has;
 - a transitive event for every ordered pair of distinct participants and every verb whose relation holds for the pair.
 
-Draws are weighted by `scene.verb_weights` (uniform by default) and by `scene.transitive_share`. The same event does not occur twice at one time step. Nothing changes state: events do not alter the participants.
+Draws are weighted by `scene.verb_weights` (uniform by default) and by `scene.transitive_share`. An event is transitive with probability `scene.transitive_share`, when both kinds of event are possible. Within its kind, an event is drawn with a probability proportional to the weight of its CAN feature or verb. `scene.verb_weights` maps CAN features and verbs to weights, and a label that is left out has the weight 1. The same event does not occur twice at one time step, but the same event can occur again at a later step. Nothing changes state: events do not alter the participants, so the pool of possible events is the same at every step.
+
+**Scenes and the lexicon.** Scenes are a fact about the world, not about the language. The generator uses every CAN feature and every verb (the leaves of the verb tree), with a word or without one, so the lexicon settings never change a scene. The planner leaves out an event that no word can report. Each scene draws from its own part of the `corpus:scenes` stream, named by its label, so a scene depends only on the corpus seed, its number, its seed instance, and the scene settings.
+
+**Labels.** Events are numbered within their scene in time order, and within a time step in the order they were drawn.
 
 ## Layer 3: documents
 
@@ -229,6 +239,7 @@ NP   → NP-core AP? WITH* RC?               (modifiers attach inside NP)
 AP   → A | AP A                            (up to max_adjectives)
 WITH → with N | without N                  (joined by "and"; up to max_with_phrases)
 RC   → that VP | that NP V                 (subject and object relatives)
+RC   → that VP and VP ...                  (a subject relative that joins verb phrases)
 VP   → V | V NP                            (intransitive, transitive)
 VP   → can V | can V NP                    (capacity)
 VP   → can not V | can not V NP            (negated capacity)
@@ -239,7 +250,7 @@ VP   → is a N | is not a N                 (membership)
 
 Quantifiers occupy the determiner slot: "all penguins", "no fish". The negative class-level quantifier "no" replaces sentence negation: "no fish have fur".
 
-**Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction.
+**Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction. A subject relative can join several verb phrases with "and": "things that are not red and not big". The negated IS literals of one restriction always share one relative clause.
 
 **Adjective order.** When a noun takes several adjectives, they appear in a fixed order: a random ordering of adjective concepts drawn once per language. `adjective_order.fixed: false` makes the order random for each phrase.
 
@@ -292,7 +303,8 @@ Every sentence is written in up to four renderings. The first three need no word
 | --- | --- |
 | the furry dog has legs | `C1.3.2(R.1) AND IS.12(R.1) AND HAS.4(R.1)` |
 | the dog that chased the cat ran | `C1.3.2(R.1) AND C1.4.1(R.2) AND SN.3.2: V1.2(R.1, R.2) AND SN.3.4: CAN.7(R.1)` |
-| things with wings and with feathers can fly | `ALL(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
+| all things with wings and with feathers can fly | `ALL(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
+| things with wings and with feathers can fly | `GEN(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
 | owls eat mice | `GEN(C1.2(X.1) AND C1.5(X.2), V2.1(X.1, X.2))` |
 
 Referents are numbered within each document in order of first mention (`R.1`, `R.2`), so a referent keeps its label across sentences and the propositional rendering shows coreference directly. With `renderings.propositional.referents: instance`, referents are named by their taxonomy instance labels instead. The document's `referents` field records each referent's instance either way.
@@ -311,8 +323,8 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | `corpus_conceptual.txt` | The same in the conceptual rendering. |
 | `corpus_propositional.txt` | The same in the propositional rendering. |
 | `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
-| `scenes.jsonl` | One JSON object per scene: participants, and events by time step. |
-| `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. |
+| `scenes.jsonl` | One JSON object per scene: its label, its seed instance, its participants (the seed first), and `steps`, a list with one list of events for each time step. An event holds its label, verb, agent, and patient (null for an intransitive event). |
+| `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. The law-like items, the possible false events, and the impossible false events have test sets of their own. An instance-level or event-level item names its document. |
 | `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; and the co-occurrence check below. |
 
 Each document object holds its label, type, topic, scenes, and sentences. Each sentence holds:
@@ -347,6 +359,8 @@ The subject of an instance-level proposition is `{"instance": "I1.3.2.5"}`, and 
 | `scalar` | `{"kind": "scalar", "pole": "SC.1.HIGH"}`, with `"class": "C1.3"` at the instance level: the comparison class, which the subject's noun must name |
 | `member` | `{"kind": "member", "category": "C1"}` |
 | `verb` | `{"kind": "verb", "verb": "V1.2", "patient": {"category": "C1.5", "restriction": []}}` at the class level, and `"patient": {"instance": "I1.5.1.2"}` at the instance level |
+
+An event-level proposition has the instance-level form, with `"level": "event"`, the scene (`"scene": "SN.8"`), and the event it reports (`"event": "SN.8.5"`). Its predicate is a CAN feature, or a verb with a patient instance. Its grounding holds the scene, the time step, `possible`, and the test `event`.
 
 A rule statement also has `"rule": {"feature": "CAN.1", "term": 2}`: the determined feature, and the number of the term of its rule's minimal DNF. A restriction is written in one order: IS literals, HAS literals, then scalar poles, each by index.
 
@@ -479,7 +493,7 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, and the rule statements), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -539,6 +553,14 @@ Jon decided the following on October 1, 2026, before stage 2 (`docs/proposals/20
 24. Patient projections also appear at the class level ("most mice are edible"). Truth for `most`, `some`, and the generic comes from the share of instances in the subject set that have the projection. `all` and `no` are allowed only under the observed reading.
 25. Rule statements are exempt from the limits on adjectives, with-phrases, and content words. An optional cap, `propositions.rule_statements.max_literals`, is null by default. When a cap is set, terms above it are skipped and counted.
 26. The morphology switch is `enabled`, not `on`.
+
+Jon decided the following on October 1, 2026, before stage 3 (`docs/proposals/2026-10-01-corpus-stage-3-decisions.md`):
+
+27. A relative clause can join several verb phrases with "and": "things with wings that are not red and not big can fly". All of a rule term's negated IS literals go into one relative clause, so such terms are stated. This replaces the skip rule of decision 20 for relative clauses. Terms that read a scalar threshold stay unstated. Stage 4 builds the grammar.
+28. A false `all` or `no` test item that no instance contradicts is marked, and such items go into a test set of their own. Ordinary test sets hold only items that observing the instances could decide.
+29. A false event-level test item is an event that did not happen in the scene. Each item is marked possible or impossible, and the two kinds go into separate test sets.
+30. Every instance-level and event-level test item names a document. The item is tested as a continuation of that document, so its definite noun phrases refer to that document's referents.
+31. A rule statement's quantifier is drawn like that of any class-level proposition: `all` or the generic, at the generic rate. "All things with wings ..." is `ALL`, and the bare plural is `GEN`. A rule statement is true under both.
 
 ## Future additions
 

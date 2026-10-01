@@ -7,8 +7,9 @@ against the world, documents, and sentences. The specification is
 
 Stage 1 builds the configuration, the loading of the taxonomy, the lexicon, and the formal
 rendering. Stage 2 builds the class-level and instance-level propositions, their truth tests,
-the facts and rule statements of a world, and the false items of the test sets. The generator is
-pure Python and does not use the Rust engine.
+the facts and rule statements of a world, and the false items of the test sets. Stage 3 builds
+scenes, events, and event-level propositions. The generator is pure Python and does not use the
+Rust engine.
 """
 
 from semantic_world.corpus.config import Config, ConfigError, config_from_mapping, load_config
@@ -24,6 +25,7 @@ from semantic_world.corpus.propositions import (
     Truth,
 )
 from semantic_world.corpus.renderings import formal
+from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
 from semantic_world.corpus.streams import STREAM_NAMES, Streams
 from semantic_world.corpus.testsets import falsify
 from semantic_world.corpus.world import load_taxonomy, taxonomy_identity
@@ -36,12 +38,15 @@ __all__ = [
     "ConfigError",
     "CorpusError",
     "Evaluation",
+    "Event",
     "Facts",
     "Lexeme",
     "Lexicon",
     "Literal",
     "Predicate",
     "Proposition",
+    "Scene",
+    "SceneGenerator",
     "Streams",
     "Truth",
     "build_lexicon",
