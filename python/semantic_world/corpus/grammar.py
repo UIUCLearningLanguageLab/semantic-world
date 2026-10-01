@@ -8,14 +8,20 @@ predication. It holds everything that the planner decides, and nothing that the 
   noun names, the determiner ``a`` or ``the``, or as a pronoun. Either can carry a restriction
   (adjectives, with-phrases, and negated IS literals) and one relative clause;
 - a :class:`Predication` is the content of one verb phrase: a predicate, a polarity, an object
-  noun phrase for a verb, and the event it reports at the event level;
+  noun phrase for a verb, and, at the event level, the event it reports with its tense and
+  aspect;
 - a :class:`RelativeClause` is a subject relative, with one or more predications about the head
   joined by "and", or an object relative, with the clause's own subject (``agent``) and one verb.
 
 The grammar turns a plan into words and a tree (``realize``), and a tree back into the plan
-(``interpret``). Word order, morphology, adjective order, the choice between synonyms, the aspect
-of an event, and the optional ``can`` of a class-level capacity are the grammar's own, and are
-not in the plan.
+(``interpret``). Word order, morphology, adjective order, the choice between synonyms, and the
+optional ``can`` of a positive capacity are the grammar's own, and are not in the plan. The
+tense and the aspect of an event are part of the plan: the morphology only decides whether and
+how they are marked.
+
+A relative clause on a class-level noun phrase is restrictive, and holds CAN features and verbs
+only: "penguins that can swim", "owls that eat mice", and "mice that owls eat". It is part of
+the category term that the truth tests judge (:func:`term_of`).
 
 How a restriction is realized is fixed, so that a tree has one reading:
 
@@ -32,6 +38,7 @@ from dataclasses import dataclass
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.propositions import (
     ALL,
+    ASPECTS,
     CAN,
     CLASS,
     EVENT,
@@ -45,8 +52,10 @@ from semantic_world.corpus.propositions import (
     PROJECTION,
     SCALAR,
     SOME,
+    TENSES,
     VERB,
     CategoryTerm,
+    Clause,
     Literal,
     Predicate,
     Proposition,
@@ -115,6 +124,10 @@ class Predication:
     patient."""
     event: str | None = None
     """Event level only: the label of the event that the verb phrase reports."""
+    tense: str | None = None
+    """Event level only: ``past`` or ``present``."""
+    aspect: str | None = None
+    """Event level only: ``simple`` or ``progressive``."""
 
 
 @dataclass(frozen=True)
@@ -147,10 +160,10 @@ class SentencePlan:
         predication = self.predication
         target = predication.object
         if self.subject.kind == CLASS_NP:
-            patient = None if target is None else CategoryTerm(target.referent, target.restriction)
+            patient = None if target is None else term_of(target)
             return Proposition(
                 CLASS,
-                CategoryTerm(self.subject.referent, self.subject.restriction),
+                term_of(self.subject),
                 Predicate(predication.kind, predication.label, patient),
                 predication.polarity,
                 self.subject.determiner or GENERIC,
@@ -163,6 +176,8 @@ class SentencePlan:
                 Predicate(predication.kind, predication.label, patient),
                 scene=predication.event.rsplit(".", 1)[0],
                 event=predication.event,
+                tense=predication.tense,
+                aspect=predication.aspect,
             )
         comparison = self.subject.noun if predication.kind == SCALAR else None
         return Proposition(
@@ -194,6 +209,43 @@ class SentencePlan:
         noun phrase of the main clause, 2 when a noun phrase inside it has one, and so on. The
         negated IS literals of a restriction make a relative clause too."""
         return max(_depth(self.subject), _depth(self.predication.object))
+
+
+def term_of(phrase: NounPhrase) -> CategoryTerm:
+    """The category term of a class-level noun phrase: its category, its restriction, and its
+    relative clause as restrictive clauses."""
+    clauses: tuple[Clause, ...] = ()
+    clause = phrase.clause
+    if clause is not None and clause.agent is not None:
+        clauses = (Clause(VERB, clause.predications[0].label, agent=term_of(clause.agent)),)
+    elif clause is not None:
+        clauses = tuple(
+            Clause(p.kind, p.label, patient=None if p.object is None else term_of(p.object))
+            for p in clause.predications
+        )
+    return CategoryTerm(phrase.referent, phrase.restriction, clauses)
+
+
+def phrase_of(term: CategoryTerm, determiner: str | None = None) -> NounPhrase:
+    """The class-level noun phrase of a category term. Its clauses make one relative clause: an
+    object relative for a clause with an agent category, and a subject relative otherwise."""
+    clause: RelativeClause | None = None
+    if any(c.agent is not None for c in term.clauses):
+        if len(term.clauses) != 1:
+            raise GrammarError("an object relative is the only relative clause of its noun phrase")
+        only = term.clauses[0]
+        assert only.agent is not None
+        clause = RelativeClause((Predication(VERB, only.label),), phrase_of(only.agent))
+    elif term.clauses:
+        clause = RelativeClause(
+            tuple(
+                Predication(
+                    c.kind, c.label, True, None if c.patient is None else phrase_of(c.patient)
+                )
+                for c in term.clauses
+            )
+        )
+    return NounPhrase(CLASS_NP, term.category, term.category, determiner, term.restriction, clause)
 
 
 def _depth(phrase: NounPhrase | None) -> int:
@@ -294,6 +346,10 @@ def _check_predication(
         )
     if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB):
         raise GrammarError(f"unknown predicate kind {kind!r}")
+    if in_clause and level == CLASS and (kind not in (CAN, VERB) or not predication.polarity):
+        raise GrammarError(
+            "a class-level relative clause holds a CAN feature or a verb, and is never negated"
+        )
     if (kind == VERB) != (predication.object is not None or gap):
         raise GrammarError("a verb, and only a verb, has an object")
     if (predication.event is not None) != (level == EVENT):
@@ -305,5 +361,11 @@ def _check_predication(
             raise GrammarError("an event is a CAN feature, or a verb with a patient")
         if not predication.polarity:
             raise GrammarError("an event-level proposition is never negated")
+        if predication.tense not in TENSES or predication.aspect not in ASPECTS:
+            raise GrammarError(
+                "an event has a tense (past or present) and an aspect (simple or progressive)"
+            )
+    elif predication.tense is not None or predication.aspect is not None:
+        raise GrammarError("only an event has a tense and an aspect")
     if predication.object is not None:
         _check_phrase(predication.object, level)

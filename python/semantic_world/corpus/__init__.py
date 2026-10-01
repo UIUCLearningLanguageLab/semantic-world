@@ -10,6 +10,8 @@ rendering. Stage 2 builds the class-level and instance-level propositions, their
 the facts and rule statements of a world, and the false items of the test sets. Stage 3 builds
 scenes, events, and event-level propositions. Stage 4 builds the grammar: sentence plans, their
 realization as words and trees, the reading of a tree back into its plan, and relative clauses.
+Stage 5 builds the documents: the planner of the four document types, the mentions of referents,
+the readings of a sentence, the JSON logical form, and the propositional rendering.
 The generator is pure Python and does not use the Rust engine.
 """
 
@@ -25,17 +27,26 @@ from semantic_world.corpus.grammar import (
 )
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.lexicon import Concept, Lexeme, Lexicon, build_lexicon
-from semantic_world.corpus.mentions import RelativeClauses, plan_for
+from semantic_world.corpus.logical import logical_form
+from semantic_world.corpus.mentions import MentionRules, Mentions, RelativeClauses, plan_for
+from semantic_world.corpus.planner import Document, DocumentSentence, Planner
 from semantic_world.corpus.propositions import (
     CategoryTerm,
+    Clause,
     Evaluation,
     Literal,
     Predicate,
     Proposition,
     Truth,
 )
+from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import Realizer, Sentence
-from semantic_world.corpus.renderings import formal
+from semantic_world.corpus.renderings import (
+    formal,
+    parse_propositional,
+    proposition_of,
+    propositional,
+)
 from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
 from semantic_world.corpus.streams import STREAM_NAMES, Streams
 from semantic_world.corpus.testsets import falsify
@@ -44,10 +55,13 @@ from semantic_world.corpus.world import load_taxonomy, taxonomy_identity
 __all__ = [
     "STREAM_NAMES",
     "CategoryTerm",
+    "Clause",
     "Concept",
     "Config",
     "ConfigError",
     "CorpusError",
+    "Document",
+    "DocumentSentence",
     "Evaluation",
     "Event",
     "Facts",
@@ -55,7 +69,10 @@ __all__ = [
     "Lexeme",
     "Lexicon",
     "Literal",
+    "MentionRules",
+    "Mentions",
     "NounPhrase",
+    "Planner",
     "Predicate",
     "Predication",
     "Proposition",
@@ -75,6 +92,11 @@ __all__ = [
     "interpret",
     "load_config",
     "load_taxonomy",
+    "logical_form",
+    "parse_propositional",
     "plan_for",
+    "proposition_of",
+    "propositional",
+    "readings",
     "taxonomy_identity",
 ]

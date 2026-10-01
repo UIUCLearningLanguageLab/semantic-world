@@ -13,8 +13,10 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 3. `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and nervous systems are defined.
 4. `docs/specs/TAXONOMY_GENERATOR.md` — the taxonomy feature generator: a standalone Python program in `python/semantic_world/taxonomy/` that builds datasets of categories, instances, and binary features with recorded rules. It does not use the Rust engine.
 5. `docs/specs/TAXONOMY_RELATIONS.md` — the extension of the generator with scalar dimensions, transitive verbs, and a verb taxonomy. The decided proposals in `docs/proposals/` are part of both taxonomy specifications.
-6. `docs/guides/` — user guides, starting with `docs/guides/TAXONOMY.md`, for running the taxonomy generator and reading its outputs.
-7. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
+6. `docs/specs/WORDFORM_PIPELINE.md` — the word-form pipeline: a Python program in `python/semantic_world/wordforms/` that makes spoken word forms, synthesizes them, and builds sound embeddings.
+7. `docs/specs/CORPUS_GENERATOR.md` — the corpus generator: a Python program in `python/semantic_world/corpus/` that writes documents about the taxonomy's world in an artificial language, with a parse tree and a logical form for every sentence. Its numbered decisions, and the proposals they point to, are part of the specification.
+8. `docs/guides/` — user guides, starting with `docs/guides/TAXONOMY.md`, for running the taxonomy generator and reading its outputs.
+9. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
 
 The project's planning documents (decisions, to-do lists, research goals, and the first study) live in a private folder that is not available in this repository. Everything needed to build is in `docs/`. If something seems missing, ask rather than guess.
 

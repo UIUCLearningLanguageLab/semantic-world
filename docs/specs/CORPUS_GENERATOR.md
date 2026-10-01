@@ -94,7 +94,7 @@ A proposition is a logical form with a type, a polarity, and a truth grounding. 
 
 A class-level proposition says something about a category: "all penguins can swim", "red penguins swim", "penguins are birds".
 
-- **Subject:** a category, optionally restricted by literals: "red penguins" is the category restricted to members with the IS feature for red. A restriction is a set of IS and HAS literals, positive or negative ("with fins", "without fins"), and scalar pole literals ("big").
+- **Subject:** a category, optionally restricted by literals: "red penguins" is the category restricted to members with the IS feature for red. A restriction is a set of IS and HAS literals, positive or negative ("with fins", "without fins"), and scalar pole literals ("big"). A subject can also take a restrictive relative clause (see "Restricted subjects" below).
 - **Predicate:** one of IS feature, HAS feature, CAN feature, exposed patient projection ("are edible"), scalar pole ("are big"), membership in a category above the subject ("are birds"), or a verb with a patient category ("chase fish"). The verb can be a verb or a verb category ("owls hunt mice"). The patient category can take a restriction too.
 - **Quantifier:** `all`, `most`, `some`, `no`, or `generic` (a bare plural with no quantifier word: "penguins swim").
 
@@ -116,6 +116,10 @@ For exposed patient projections ("most mice are edible"), truth for `most`, `som
 
 For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances. A top-level category has no parent, and is compared with all instances in the world. A class-level scalar pole takes the generic only, never a quantifier word. The category's mean value is the mean over its subject set. A comparison class whose values do not vary has no poles.
 
+**Restricted subjects.** A relative clause on a class-level noun phrase is restrictive: the clause narrows the subject set. Three kinds are drawn: a CAN-feature clause ("penguins that can swim"), a subject relative with a verb ("owls that eat mice"), and an object relative ("mice that owls eat"). A clause about another category means at least one member of that category. So "owls that eat mice are big" has as its subject set the owls that can eat at least one mouse, and "mice that owls eat" are the mice that at least one owl can eat. With such a subject, `most`, `some`, and the generic are judged by the share of the subject set. `all` and `no` are allowed only under the observed reading, as for patient projections. A clause on a verb's patient category narrows the patient set in the same way.
+
+Restrictions and relative clauses on class-level noun phrases come only from the proposition layer, where their truth is grounded. In an encyclopedic document, a subject takes one more literal at `propositions.restriction_rate` ("red penguins"), and a relative clause at `mention.relative_clauses.rate`. Both are drawn among those that some members of the category satisfy, and not all, so the restriction does work. The fact is then drawn for the restricted subject, so the sentence is true of it.
+
 **Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A rule statement's quantifier is drawn like that of any class-level proposition: `all`, or the generic at the generic rate. The logical form then matches the surface: "all things with wings and with feathers can fly" is `ALL`, and the bare plural is `GEN`. A rule statement is true under both. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". A relative clause can join several verb phrases with "and", so all of a term's negated IS literals go into one relative clause: "things with wings that are not red and not big can fly". The same holds for the negated IS literals of any restriction. A term is skipped when it reads a scalar threshold, which no pole adjective states. A term that no instance satisfies is skipped too, because the statement would be vacuous. `stats.yaml` reports how many terms were skipped, and why.
 
 Rule statements are exempt from the limits on adjectives, with-phrases, and content words (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). Rules of varied complexity are a core feature of the world, so long terms must still be stated. An optional cap, `propositions.rule_statements.max_literals`, is null by default (no cap). When a cap is set, a term with more literals is skipped and counted.
@@ -133,6 +137,7 @@ An instance-level proposition says something about one instance: "the penguin ca
 An event-level proposition says that something happened in a scene: "the penguin swims", "the owl chases the mouse".
 
 - **Content:** an event from the scene generator, which records the scene, the time step, the verb, the agent, and the patient if any. The proposition's verb is the event's own verb, or a verb category above it (see "Verb level" under "Mentioning referents").
+- **Tense and aspect:** every event has a tense and an aspect, and both are part of its logical form. The tense is the same for every event: `propositions.events.tense`, past by default. The aspect is simple or progressive. The aspect is drawn once for each event, at `propositions.events.progressive_rate`, so every report of one event has the same aspect. The aspect is drawn for every event, even when the grammar does not mark aspect. The grammar decides only whether and how tense and aspect are marked (see "Morphology").
 - **Truth:** the event occurred. Events are generated only where the world allows them (see "Scenes and events"), so an event never contradicts a capacity. A proposition that names no event (a test item) is true when such an event occurred at any time step of its scene. The grounding also says whether the world allows the event (`possible`): the agent has the CAN feature, or the verb's relation holds for the agent and the patient.
 
 Event-level propositions are never negated.
@@ -179,6 +184,8 @@ The weights are parameters. With verbs off, the thematic weight has no effect. T
 
 Events are drawn verb first. `scene.transitive_share` decides the kind first: an event is transitive with that probability, when both kinds of event are possible. Then a CAN feature or a leaf verb is chosen among those with at least one possible event in the scene, weighted by `scene.verb_weights` (uniform by default). Then the participants are chosen uniformly among the pairs, or the agents, for which that verb's event is possible. So a verb that holds for many pairs is no more frequent than a verb that holds for few. `scene.verb_weights` maps CAN features and verbs to weights, and a label that is left out has the weight 1. The same event does not occur twice at one time step, but the same event can occur again at a later step. Nothing changes state: events do not alter the participants, so the pool of possible events is the same at every step.
 
+**Aspect.** Each event is progressive with probability `propositions.events.progressive_rate`, and simple otherwise. The aspects of a scene are drawn after its events, from the scene's own part of the stream. So the rate never changes the participants or the events.
+
 **Scenes and the lexicon.** Scenes are a fact about the world, not about the language. The generator uses every CAN feature and every verb (the leaves of the verb tree), with a word or without one, so the lexicon settings never change a scene. The planner leaves out an event that no word can report. Each scene draws from its own part of the `corpus:scenes` stream, named by its label, so a scene depends only on the corpus seed, its number, its seed instance, and the scene settings.
 
 **Labels.** Events are numbered within their scene in time order, and within a time step in the order they were drawn.
@@ -189,13 +196,13 @@ Events are drawn verb first. `scene.transitive_share` decides the kind first: an
 
 The corpus mixes four document types. Their proportions are parameters.
 
-**Encyclopedic, about a category.** The topic is a category, drawn with configured weights over levels. The content pool holds:
+**Encyclopedic, about a category.** The topic is a category, drawn with configured weights over levels. Each sentence draws one kind of content, each kind with the same chance: a membership fact, a fact about the topic, a fact about a subcategory, or a relation fact. The content pool holds:
 
 - membership facts: the topic's ancestors ("penguins are birds") and its children ("emperor penguins are penguins");
 - class-level facts about the topic: defining features (quantified `all` or generic), characteristic features (`most` or generic), and rarer features (`some`);
 - class-level facts about the topic's subcategories;
 - relation facts with the topic as agent or as patient;
-- optionally, contrasts with sibling categories, realized as two adjacent sentences, one about each category. A contrastive construction ("unlike penguins, gulls can fly") is out of scope.
+- contrasts with sibling categories. At `documents.sibling_contrast_rate` (default 0.2), a fact about the topic is followed by the matching fact about a sibling category: the same predicate, where the sibling differs. A contrast is two adjacent sentences, one about each category ("penguins can not fly", then "gulls can fly"). A fact has a contrast only when it is a strong fact (`all`, `no`, `most`, or a scalar pole) and the sibling's fact of the other polarity is strong too. With no differing sibling, no contrast sentence is added. A contrastive construction ("unlike penguins, gulls can fly") is out of scope.
 
 **Encyclopedic, about a feature.** The topic is an IS, HAS, or CAN feature, or a verb. The content pool holds:
 
@@ -211,20 +218,24 @@ The corpus mixes four document types. Their proportions are parameters.
 
 **Situational narrative.** One scene. The document introduces the participants as they first take part in events, narrates the events in time order, and adds instance-level descriptions of participants at a configured rate.
 
-Each document's length is drawn from a configured range for its type.
+In both narratives, an event sentence is followed by a description at `documents.instance_description_rate`. In an entity narrative, the description is about the topic instance. In a situational narrative, the description is about a participant of the event, and a participant that the sentence introduced comes first. The patient of a verb in a description is another participant of the document's scenes.
+
+Each document's length is drawn from a configured range for its type. A document can be shorter than its drawn length: a narrative ends when its events run out, and an encyclopedic document ends when it has nothing more to say. A document with no sentence is drawn again. A document states a proposition once. The polarity of each class-level fact is drawn at the negation rate and kept, so the share of negative sentences does not rise when the positive facts run out.
 
 ### Ordering
 
-Encyclopedic documents follow a loose template: membership first, then defining facts, characteristic facts, rarer facts, and relation facts. A shuffle parameter moves from the strict template (0) to a random order (1): each sentence is displaced by a random amount scaled by the parameter. Narratives follow time order, with descriptions inserted near the referent's first mention.
+Encyclopedic documents follow a loose template: membership first, then defining facts (`all` and `no`), characteristic facts (`most`, and scalar poles), rarer facts (`some`), relation facts, and rule statements. A shuffle parameter moves from the strict template (0) to a random order (1): each sentence is displaced by a random amount scaled by the parameter. A sibling contrast stays right after the fact it matches. Narratives follow time order, with descriptions inserted near the referent's first mention.
 
 ### Mentioning referents
 
-- **Noun level.** A category or instance is named with the noun of a category drawn from its own level and the levels above it. `mention.level_weights` give the weights, with the leaf level heaviest by default. The logical form records which category the noun names.
+- **Noun level.** Noun levels apply to instances only. An instance is named with the noun of its own leaf or of any category above it ("the bird"). The level is drawn for each mention. `mention.level_weights` give the weights, with the leaf level heaviest by default. The logical form records which category the noun names. A class-level noun phrase is always named by its own noun, because a higher noun would make a different proposition. Propositions about higher categories come from the proposition layer.
 - **Verb level.** An event's verb is named at a level of the verb tree, in the same way: the verb itself, or a verb category above it ("chase" or "hunt"). `mention.verb_level_weights` give the weights, with the leaf level (the verb) heaviest by default. Words for verb categories are also used in class-level and instance-level capacity sentences ("owls hunt mice"), whose truth is the verb category's own base relation.
 - **First and later mentions.** In narratives, an instance is introduced with the indefinite determiner ("a penguin") and mentioned later with the definite determiner ("the penguin") or a pronoun.
-- **Pronouns.** A later mention becomes "it" at `mention.pronoun_rate`, when the referent was mentioned in the previous sentence and was either the only referent mentioned there or its subject. Coreference chains are recorded, including for ambiguous pronouns.
+- **Pronouns.** A later mention becomes "it" at `mention.pronoun_rate`, when the referent was mentioned in the previous sentence and was either the only referent mentioned there or its subject. A pronoun stands only in the main clause, never inside a relative clause. Coreference chains are recorded, including for ambiguous pronouns.
+- **Referent labels.** The referents of a document are labeled `R.1`, `R.2`, and so on, in the order of first mention. The order is that of the logical form (the subject, the noun phrases of its relative clause, then the object), so the word order never changes a label.
 - **Relative clauses and limits.** The planner decides everything that changes what a sentence says. So the planner, and not the grammar, decides which noun phrases take relative clauses (`mention.relative_clauses`), and applies the limits on adjectives, with-phrases, and sentence length (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). The grammar section describes how they are realized.
-- **Distinguishing modifiers.** When a scene has two or more participants that the chosen noun fits, a definite mention adds adjectives or with-phrases until it picks out one referent, following the incremental algorithm of Dale and Reiter (1995), with the preference order fixed per language. In situational documents, adjectives therefore do referential work. Elsewhere, modifiers are added at `mention.modifier_rate`, chosen from features true of the referent.
+- **Distinguishing modifiers.** When the document's scenes have two or more participants that the chosen noun fits, a definite mention adds adjectives or with-phrases until it picks out one referent, following the incremental algorithm of Dale and Reiter (1995), with the preference order fixed per language. The distractors are all participants of the document's scenes. When the modifiers cannot tell the referent apart, the mention falls back to the noun of the leaf. A mention that still fits another participant is kept, marked as not distinguished, and counted. In situational documents, adjectives therefore do referential work only.
+- **Other modifiers.** Modifiers at `mention.modifier_rate` go on instance mentions only, in entity narratives. A modifier is chosen from the features true of the referent. Restrictions on class-level subjects come only from the proposition layer, where their truth is grounded.
 
 ## Layer 4: grammar
 
@@ -250,7 +261,7 @@ VP   → is a N | is not a N                 (membership)
 
 Quantifiers occupy the determiner slot: "all penguins", "no fish". The negative class-level quantifier "no" replaces sentence negation: "no fish have fur".
 
-**`can` and the bare verb.** An instance-level capacity always takes `can` ("the penguin can swim"), because a bare verb after an instance reports an event ("the penguin swims"). A negative capacity takes `can` too, to carry `not`. A positive class-level capacity can be said either way: "penguins can swim" or "penguins swim". Both say the same. `grammar.class_can_rate` (default 0.5) is the share of them that take `can`. **Proposed:** the setting and its default wait for Jon (`docs/proposals/2026-10-01-corpus-stage-4-decisions.md`).
+**`can` and the bare verb.** A positive capacity can be said with `can` or with the bare verb. Both say the same. `grammar.can_rate` gives the share that take `can`: `class` for class-level capacities (default 0.5: "penguins can swim" or "penguins swim"), and `instance` for instance-level capacities (default 1.0: "the penguin can swim"). The rate applies inside relative clauses too. A negative capacity always keeps `can`, because `not` needs it. With an instance rate below 1, an instance capacity can appear without `can`. Together with tense and number off, "the penguin swim" is then ambiguous between a capacity and an event (see "Logical form and surface form").
 
 **The tree.** The parse tree is a nested list, and its leaves are the sentence's tokens. Its labels are `S`; `NP-SBJ` and `NP-OBJ`, the subject and the object; `VP`; `NP-PRD`, the noun of a "has" or "is a" predicate; `AP`; `PP`, a with-phrase; `RC`; and the words `N`, `V`, `A`, `Det`, `Pro`, `P`, `Conj`, `Rel`, `AUX`, and `Neg`. The subject and the object are labeled by their function, so a tree reads the same in every word order. When the verb and the object are neighbors (SVO, SOV, VOS, OVS), the object is inside the verb phrase. When the subject stands between them (VSO, OSV), the object is a daughter of `S`.
 
@@ -258,16 +269,17 @@ Quantifiers occupy the determiner slot: "all penguins", "no fish". The negative 
 
 **Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction. A subject relative can join several verb phrases with "and": "things that are not red and not big". The negated IS literals of one restriction always share one relative clause. A verb phrase with the same auxiliary as the one before it does not say the auxiliary again. A noun phrase has at most one relative clause. A relative clause holds CAN features, verbs, exposed patient projections, and membership, beside the negated IS literals. It never holds a positive IS literal, a scalar pole, or a HAS literal, which are adjectives and with-phrases. `that` comes first in every relative clause. An object relative is the clause's subject and its verb, in the order of `word_order.clause`.
 
-A drawn relative clause expresses one of these propositions (`mentions.py`):
+A drawn relative clause expresses one of these propositions (`mentions.py`, and `facts.py` for a class-level sentence):
 
 - in an event-level sentence, another event of the same scene that the referent takes part in: as its agent (a subject relative, "the dog that chased the cat") or as its patient (an object relative, "the cat that the dog chased");
-- in an instance-level sentence, a capacity of the referent: a CAN feature it has, or a verb's relation with another referent of the document, as agent ("the owl that can eat the mouse") or as patient ("the mouse that the owl can eat").
+- in an instance-level sentence, a capacity of the referent: a CAN feature it has, or a verb's relation with another referent of the document, as agent ("the owl that can eat the mouse") or as patient ("the mouse that the owl can eat");
+- in a class-level sentence, a restriction of the category: a CAN feature ("penguins that can swim"), a verb with a patient category ("owls that eat mice"), or a verb with an agent category ("mice that owls eat"). The clause narrows the subject set, so it is drawn with the proposition (see "Restricted subjects"). A subject relative holds a CAN feature or a verb, each with the same chance.
 
-When the drawn kind of clause has no true proposition, the other kind is used. A relative clause never repeats what its sentence already says. **Open:** class-level noun phrases take no drawn relative clause yet, because the specification does not say what "owls that eat mice are big" means for the truth of the sentence (`docs/proposals/2026-10-01-corpus-stage-4-decisions.md`).
+When the drawn kind of clause has no true proposition, the other kind is used. A relative clause never repeats what its sentence already says. In a document, an event-level clause reports an earlier event of the same scene.
 
 **Adjective order.** When a noun takes several adjectives, they appear in a fixed order: a random ordering of adjective concepts drawn once per language. `adjective_order.fixed: false` makes the order random for each phrase.
 
-**Limits.** `mention.max_adjectives` (default 3), `mention.max_with_phrases` (default 2), and `mention.max_content_words` (default 20). The planner applies the limits: a proposition that would pass a limit gets fewer optional modifiers. The sentence limit counts content words only (nouns, adjectives, and verbs), because the number of function words depends on the morphology settings, and a grammar setting must never change what a sentence says.
+**Limits.** `mention.max_adjectives` (default 3), `mention.max_with_phrases` (default 2), and `mention.max_content_words` (default 20). The planner applies the limits: a proposition that would pass a limit gets fewer optional modifiers. A sentence over the content-word limit is said again without its drawn relative clauses. The modifiers that tell referents apart are kept. The sentence limit counts content words only (nouns, adjectives, and verbs), because the number of function words depends on the morphology settings, and a grammar setting must never change what a sentence says.
 
 ### Word order
 
@@ -292,12 +304,30 @@ Number, tense, and aspect are each off by default. When on, each is realized eit
 
 - **Number:** singular and plural on nouns. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim". Every class-level noun is plural, and every instance is singular. A part noun ("with fins", "has fur") is never marked. A plural predicate noun takes no `a`: "penguins are birds".
 - **Agreement:** with number on, verbs agree with their subjects unless `number.agreement` is false. The verb takes the same affix or word as a plural noun. `number.verb_marks` says which verbs take it: `plural` (the default) or `singular`, as in English ("the penguin swims", "penguins swim"). The auxiliaries `is` and `has` agree by switching to the function words `are` and `have`. `can` does not agree, and the verb after `can` is not marked. A verb that carries a tense or aspect marker takes no agreement marker, as in English "chased". Agreement holds across relative clauses, so relative clauses in subject position create long-distance dependencies between subject and verb. In an object relative, the verb agrees with the clause's own subject.
-- **Tense:** present and past. Class-level and instance-level propositions are present. Event-level propositions take `tense.event_tense` (default past).
-- **Aspect:** simple and progressive, drawn for event-level propositions at `aspect.progressive_rate`.
+- **Tense:** present and past. Class-level and instance-level propositions are present. An event's tense is part of its logical form (`propositions.events.tense`, default past). With tense on, a past event is marked. The present is never marked.
+- **Aspect:** simple and progressive. An event's aspect is part of its logical form, and is drawn for every event (`propositions.events.progressive_rate`). With aspect on, a progressive event is marked. The simple aspect is never marked.
 
-A morphology word stands right after the word it marks, or right before it with `position: before`. A word takes at most one affix, because a word form has one. So tense and aspect cannot both be affixes when the event tense is the past: one of them must be a word, and the configuration is an error otherwise. With every inflection off, the language is the one in your examples: "the penguin swim".
+`grammar.morphology` holds only whether and how number, tense, and aspect are marked. It never decides what tense or aspect an event has.
+
+A morphology word stands right after the word it marks, or right before it with `position: before`. A word takes at most one affix, because a word form has one. So tense and aspect cannot both be affixes when the event tense is the past: one of them must be a word, and the configuration is an error otherwise. Stacked affixes are a future addition. With every inflection off, the language is the one in your examples: "the penguin swim".
 
 With English function words (the Jabberwocky option of the word-form pipeline), every function-word gloss must be an English word. So `realization: word` is an error with English function words, because `PLURAL` is not an English word. The English affixes are the suffixes for `PLURAL`, `PAST`, and `PROGRESSIVE` only.
+
+### Logical form and surface form
+
+The logical form of a sentence is never ambiguous. Capacity versus event, tense, aspect, and number are explicit in it, whatever the grammar settings. The propositional rendering writes the logical form (see "Renderings").
+
+The surface language may be ambiguous. With `grammar.can_rate.instance` below 1 and the tense and the aspect unmarked, a capacity and an event have the same words: "the penguin swim". The two sentences also have the same tree. Only the sentence's record tells them apart: its `events` field and its logical form.
+
+**Readings.** Each sentence records `readings`: the kinds of logical form that its surface string allows. There are three kinds, one for each level: `generic` (a class-level sentence), `capacity` (an instance-level sentence), and `event` (an event-level sentence). A sentence without a verb ("the penguin is red") has the one reading of its level. A noun phrase shows whether it names a category or an instance, so a class-level sentence has the one reading `generic`. A sentence about instances can have the two readings `capacity` and `event`.
+
+Readings are worked out from the tree and the lexeme tokens alone, never from the sentence's `events` or its logical form. The tree carries no information about the reading: a capacity without `can` and an unmarked event have the same tokens and the same tree. Lexemes are read, not word forms, so homonyms do not count as ambiguity. The readings of a sentence are those that every one of its verb phrases allows:
+
+- a verb phrase with `can` or `not`, and one whose predicate word is not a verb ("is red", "has fins", "is a bird"), states a capacity. A relative clause "that is not red" belongs to the restriction of its noun phrase, and allows both readings;
+- a verb marked for tense or aspect reports an event;
+- a bare verb states a capacity when the language lets a capacity drop `can` (`grammar.can_rate.instance` below 1). A bare verb reports an event when the language has events that no marker shows: the tense is the present or is not marked, and the simple aspect occurs or the aspect is not marked.
+
+`stats.yaml` reports how often sentences are ambiguous.
 
 ### Scalar adjectives
 
@@ -308,19 +338,38 @@ Each scalar dimension has two adjectives, one for each pole. An instance counts 
 Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 
 - **Formal:** lexeme labels with glosses, for example `the/L.176 C1.3/L.5 CAN.2/L.138` for "the penguin swim". The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`), and the gloss of a function word is its English gloss (`the`). An inflected word is followed by its affix's gloss: `C1.3/L.5-PLURAL`. Its token is `L.5-PLURAL`.
-- **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering carries different information from the formal rendering only when synonyms are on, because synonyms share a concept label. Homonyms are two lexemes, so both renderings tell a homonym's two meanings apart.
-- **Propositional:** the sentence's logical form, written out as atomic propositions joined by `AND`. Every modifier, with-phrase, relative clause, and noun becomes its own proposition, so one sentence is usually several propositions. Determiners and pronouns disappear, and referents are named by label. Its format is below.
+- **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering is the same sentence as the spelled rendering, with the same tree, word order, morphology, and ambiguities. Only the lexical forms differ: concept labels instead of word forms. The conceptual rendering carries different information from the formal rendering only when synonyms are on, because synonyms share a concept label. Homonyms are two lexemes, so both renderings tell a homonym's two meanings apart.
+- **Propositional:** the sentence's logical form, written out as atomic propositions joined by `AND`. Every modifier, with-phrase, relative clause, and noun becomes its own proposition, so one sentence is usually several propositions. Determiners and pronouns disappear, and referents are named by label. The propositional rendering is the logical form, and it is never ambiguous. Its format is below.
 - **Spelled:** the word forms' readable spellings, after word forms are attached.
 
-**The propositional format.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, `CAN.3(R.1)`, `SC.1.HIGH(R.1)`, and `V1.2(R.1, R.2)` (the relation holds, so the agent can do it to the patient). `NOT` before an atom negates it. An event-level proposition is prefixed with its event label: `SN.8.5: V1.2(R.1, R.2)`. A class-level proposition is a quantifier with a restrictor and a scope over variables: `MOST(C1.3(X.1) AND IS.4(X.1), CAN.3(X.1))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). Variables are labeled `X.1`, `X.2`, and so on, numbered within each sentence in order of first mention, like referents. So a relative clause at any depth can introduce a new variable. Examples:
+**The propositional format.** The propositional rendering is made from the JSON logical form alone, and parses back. A class-level rendering gives back the whole proposition, with its restrictions and relative clauses. A rendering about instances gives back the proposition of the main clause, and the other propositions in order. The noun phrase that a relative clause hangs on is recorded in the JSON form and in the tree. Capacity versus event, tense, aspect, and number are explicit, whatever the grammar settings.
+
+- **Atoms.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, and `CANBE.V1.1(R.1)`. `NOT` before an atom negates it.
+- **Scalar poles.** A scalar pole names its comparison class as a second argument, at both levels. At the instance level, the comparison class is the category that the noun names: `SC.1.HIGH(R.1, C1.5)`. A class-level pole names the comparison class of decision 22: the subject category's parent, as in `SC.1.HIGH(X.1, C1)`, or `THING` for a top-level category. A pole in a restriction ("big penguins") names the subject's own category: `SC.1.HIGH(X.1, C1.3)`.
+- **Capacities.** A capacity is wrapped in `ABLE`: `ABLE(CAN.3(R.1))` and `ABLE(V1.2(R.1, R.2))`, with the agent first. `ABLE` wraps only CAN features and verbs. A negative capacity is `NOT ABLE(...)`.
+- **Events.** An event is `EVENT(<event label>, <tense>, <aspect>, <atom>)`. Tense is `PAST` or `PRESENT`, and aspect is `SIMPLE` or `PROGRESSIVE`: `EVENT(SN.8.5, PAST, PROGRESSIVE, V1.2(R.1, R.2))` and `EVENT(SN.8.5, PAST, SIMPLE, CAN.7(R.1))`. The tense and the aspect are always written, even when the surface does not mark them.
+- **Number.** `R.n` is always one individual, and `X.n` is a variable bound by a quantifier. If a construction ever gives a plural individual referent, we write it `R.n:PL`. None exist yet.
+- **Quantifiers.** A class-level proposition is a quantifier with a restrictor and a scope over variables: `MOST(C1.3(X.1) AND IS.4(X.1), ABLE(CAN.3(X.1)))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). A verb's patient category stands in the restrictor with a variable of its own, so the quantifier ranges over pairs. Inside a quantifier, a capacity is wrapped in `ABLE` too: `GEN(C1.3(X.1), ABLE(CAN.3(X.1)))`.
+- **"At least one".** A relative clause about another category is `EXISTS(X.n, ...)` inside the restrictor: `EXISTS(X.2, C1.5(X.2) AND ABLE(V2.1(X.1, X.2)))` for "that eat mice". A CAN-feature clause is `ABLE(CAN.3(X.1))` in the restrictor.
+- **Variables.** Variables are labeled `X.1`, `X.2`, and so on, numbered within each sentence in the order of the logical form: the subject, its relative clauses, then the patient and its relative clauses. So a relative clause at any depth can introduce a new variable, and the word order never changes the rendering.
+- **Order.** In a sentence about instances, each noun phrase gives its noun and its modifiers, then the propositions of its relative clause. The proposition of the main clause comes last. A proposition that would be written twice is written once.
+
+Examples:
 
 | Sentence | Propositional rendering |
 | --- | --- |
 | the furry dog has legs | `C1.3.2(R.1) AND IS.12(R.1) AND HAS.4(R.1)` |
-| the dog that chased the cat ran | `C1.3.2(R.1) AND C1.4.1(R.2) AND SN.3.2: V1.2(R.1, R.2) AND SN.3.4: CAN.7(R.1)` |
-| all things with wings and with feathers can fly | `ALL(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
-| things with wings and with feathers can fly | `GEN(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
-| owls eat mice | `GEN(C1.2(X.1) AND C1.5(X.2), V2.1(X.1, X.2))` |
+| the penguin can swim | `C1.3(R.1) AND ABLE(CAN.3(R.1))` |
+| the penguin swam | `C1.3(R.1) AND EVENT(SN.8.5, PAST, SIMPLE, CAN.3(R.1))` |
+| the dog that chased the cat ran | `C1.3.2(R.1) AND C1.4.1(R.2) AND EVENT(SN.3.2, PAST, SIMPLE, V1.2(R.1, R.2)) AND EVENT(SN.3.4, PAST, SIMPLE, CAN.7(R.1))` |
+| the big mouse is edible | `C1.5(R.1) AND SC.1.HIGH(R.1, C1.5) AND CANBE.V2.1(R.1)` |
+| all things with wings and with feathers can fly | `ALL(HAS.2(X.1) AND HAS.5(X.1), ABLE(CAN.1(X.1)))` |
+| things with wings and with feathers can fly | `GEN(HAS.2(X.1) AND HAS.5(X.1), ABLE(CAN.1(X.1)))` |
+| most penguins can not fly | `MOST(C1.3(X.1), NOT ABLE(CAN.1(X.1)))` |
+| owls eat mice | `GEN(C1.2(X.1) AND C1.5(X.2), ABLE(V2.1(X.1, X.2)))` |
+| owls that eat mice are big | `GEN(C1.2(X.1) AND EXISTS(X.2, C1.5(X.2) AND ABLE(V2.1(X.1, X.2))), SC.1.HIGH(X.1, C1))` |
+| most mice that owls eat are red | `MOST(C1.5(X.1) AND EXISTS(X.2, C1.2(X.2) AND ABLE(V2.1(X.2, X.1))), IS.4(X.1))` |
+| penguins that can swim have fins | `GEN(C1.3(X.1) AND ABLE(CAN.3(X.1)), HAS.2(X.1))` |
 
 Referents are numbered within each document in order of first mention (`R.1`, `R.2`), so a referent keeps its label across sentences and the propositional rendering shows coreference directly. With `renderings.propositional.referents: instance`, referents are named by their taxonomy instance labels instead. The document's `referents` field records each referent's instance either way.
 
@@ -338,11 +387,11 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | `corpus_conceptual.txt` | The same in the conceptual rendering. |
 | `corpus_propositional.txt` | The same in the propositional rendering. |
 | `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
-| `scenes.jsonl` | One JSON object per scene: its label, its seed instance, its participants (the seed first), and `steps`, a list with one list of events for each time step. An event holds its label, verb, agent, and patient (null for an intransitive event). |
+| `scenes.jsonl` | One JSON object per scene: its label, its seed instance, its participants (the seed first), and `steps`, a list with one list of events for each time step. An event holds its label, verb, agent, patient (null for an intransitive event), and aspect (`simple` or `progressive`). |
 | `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. The law-like items, the possible false events, and the impossible false events have test sets of their own. An instance-level or event-level item names its document. |
-| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; and the co-occurrence check below. |
+| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; how often sentences are ambiguous, by their readings; how many definite mentions could not be told apart; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; and the co-occurrence check below. |
 
-Each document object holds its label, type, topic, scenes, and sentences. Each sentence holds:
+Each document object holds its label, type, topic, scenes, referents, and sentences. The topic is a category, a feature or a verb, an instance, or, for a situational narrative, its scene. `referents` maps each referent label to its instance, in the order of first mention. Each sentence holds:
 
 - `label`;
 - `tokens`: lexeme labels;
@@ -353,9 +402,11 @@ Each document object holds its label, type, topic, scenes, and sentences. Each s
 - `propositional`: the propositional rendering;
 - `tree`: the parse tree, as a nested list of the form `[label, child, ...]`;
 - `logical_form`: the proposition (schema below);
-- `referents`: for each noun phrase, the instance or category it refers to and the category its noun names, in the order of the tree, a node before its children;
-- `events`: for each verb phrase, the event it reports, or null, in the same order;
-- `coreference`: the chain each referring noun phrase belongs to.
+- `referents`: for each noun phrase, the instance or category it refers to (`referent`) and the category its noun names (`noun`, null for a pronoun), in the order of the tree, a node before its children;
+- `events`: for each verb phrase, the label of the event it reports, or null, in the same order;
+- `coreference`: for each noun phrase, in the order of `referents`, the chain it belongs to: its referent's label (`R.2`), or null for a noun phrase that names a category;
+- `distinguished`: for each noun phrase, in the same order: for a definite mention with a noun, whether the noun and the modifiers pick out the referent alone among the participants of the document's scenes. Null for any other noun phrase;
+- `readings`: the kinds of logical form that the sentence's surface string allows (see "Logical form and surface form").
 
 A logical form, for example:
 
@@ -376,7 +427,27 @@ The subject of an instance-level proposition is `{"instance": "I1.3.2.5"}`, and 
 | `member` | `{"kind": "member", "category": "C1"}` |
 | `verb` | `{"kind": "verb", "verb": "V1.2", "patient": {"category": "C1.5", "restriction": []}}` at the class level, and `"patient": {"instance": "I1.5.1.2"}` at the instance level |
 
-An event-level proposition has the instance-level form, with `"level": "event"`, the scene (`"scene": "SN.8"`), and the event it reports (`"event": "SN.8.5"`). Its predicate is a CAN feature, or a verb with a patient instance. Its grounding holds the scene, the time step, `possible`, and the test `event`.
+An event-level proposition has the instance-level form, with `"level": "event"`, the scene (`"scene": "SN.8"`), the event it reports (`"event": "SN.8.5"`), and its tense and aspect (`"tense": "past", "aspect": "progressive"`). Its predicate is a CAN feature, or a verb with a patient instance. Its grounding holds the scene, the time step, `possible`, and the test `event`.
+
+**Relative clauses in a category term.** A subject or a patient category with relative clauses has a `clauses` list. A clause is written like a predicate: `{"kind": "can", "feature": "CAN.3"}`, or a verb with the other category. The other category is the `patient` when the head is the agent ("owls that eat mice"), and the `agent` when the head is the patient ("mice that owls eat"):
+
+```json
+{"category": "C1.2", "restriction": [],
+ "clauses": [{"kind": "verb", "verb": "V2.1", "patient": {"category": "C1.5", "restriction": []}}]}
+```
+
+The other category is a category term too, so it can have a restriction and clauses of its own. `clauses` is left out when there is none. In a sentence's logical form, the predicate of a class-level scalar pole also holds its comparison class (`"class": "C1"`, or `"THING"` for a top-level category).
+
+**Mentions.** In a sentence's logical form, the subject of an instance-level or event-level proposition, and the patient of its verb, are mentions:
+
+```json
+{"instance": "I1.3.2.5", "referent": "R.1", "noun": "C1.3.2", "restriction": ["IS.12"],
+ "clauses": [{"kind": "verb", "verb": "V1.2",
+              "patient": {"instance": "I1.4.1.2", "referent": "R.2", "noun": "C1.4.1", "restriction": []},
+              "event": "SN.3.2", "tense": "past", "aspect": "simple"}]}
+```
+
+`referent` is the referent's label in its document. `noun` is the category that the noun names, or null for a pronoun. `restriction` holds the modifiers. `clauses` holds the propositions of the relative clause. Each one is written like a predicate, with its other mention as `patient` (a subject relative) or `agent` (an object relative), with `"polarity": false` when it is negative, and, at the event level, with the event it reports and its tense and aspect. A determiner is no part of the logical form. The propositional rendering is made from this JSON form alone.
 
 A rule statement also has `"rule": {"feature": "CAN.1", "term": 2}`: the determined feature, and the number of the term of its rule's minimal DNF. A restriction is written in one order: IS literals, HAS literals, then scalar poles, each by index.
 
@@ -443,12 +514,15 @@ documents:
   sentences: {encyclopedic_category: [5, 15], encyclopedic_feature: [5, 15], entity: [5, 20], situational: [5, 20]}
   topic_level_weights: {schedule: linear, start: 1, end: 2}   # weights over category levels for category topics
   shuffle: 0.3
-  instance_description_rate: 0.2
+  instance_description_rate: 0.2              # the probability that an event sentence of a narrative is followed by a description
+  sibling_contrast_rate: 0.2                  # the probability that a fact in a category document is followed by the matching fact about a sibling
 
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}
   rule_statement_rate: 0.3                    # share of feature-topic sentences that state rules
   rule_statements: {max_literals: null}       # a number skips the rule terms with more literals; null: no cap
+  restriction_rate: 0.1                       # the probability that a class-level subject takes a restriction ("red penguins")
+  events: {tense: past, progressive_rate: 0.3}   # the tense of every event (past or present), and the share of progressive events
 
 quantifiers:
   all_grounding: fixed                        # fixed or observed
@@ -480,12 +554,12 @@ mention:
 
 grammar:
   adjective_order: {fixed: true}
-  class_can_rate: 0.5                         # share of positive class-level capacity sentences with "can" (proposed)
+  can_rate: {class: 0.5, instance: 1.0}       # share of positive capacities that say "can", at each level
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
-    tense: {enabled: false, realization: affix, position: after, event_tense: past}
-    aspect: {enabled: false, realization: word, position: after, progressive_rate: 0.3}
+    tense: {enabled: false, realization: affix, position: after}     # whether and how the past is marked
+    aspect: {enabled: false, realization: word, position: after}     # whether and how the progressive is marked
 
 scalar_adjectives: {z: 1.0}
 
@@ -497,11 +571,11 @@ test_sets:
   changes: [predicate, subject, quantifier, role]
 ```
 
-Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. The morphology switch is `enabled`. It was `on` at first, which YAML reads as the boolean true when written bare.
+Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. The morphology switch is `enabled`. It was `on` at first, which YAML reads as the boolean true when written bare. A configuration that still has `grammar.class_can_rate`, `grammar.morphology.tense.event_tense`, or `grammar.morphology.aspect.progressive_rate` gets an error that names the new key.
 
 ## Determinism
 
-Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `corpus:lexicon`, `corpus:scenes`, `corpus:documents`, `corpus:propositions`, `corpus:mentions`, `corpus:grammar`, and `corpus:tests`. The corpus seed is its own master seed, independent of the taxonomy's seed. Properties, each tested:
+Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `corpus:lexicon`, `corpus:scenes`, `corpus:documents`, `corpus:propositions`, `corpus:mentions`, `corpus:grammar`, and `corpus:tests`. The corpus seed is its own master seed, independent of the taxonomy's seed. Each document draws from its own parts of four streams, named by its label (`corpus:documents:D.17`): its type, topic, length, and order from `corpus:documents`, its facts from `corpus:propositions`, its mentions from `corpus:mentions`, and the grammar's choices from `corpus:grammar`. Properties, each tested:
 
 - the same taxonomy run, word-form run, configuration, and seed give byte-identical output folders;
 - changing the grammar settings (word order, adjective order, and morphology) never changes any logical form or the order of the sentences, only their realization;
@@ -510,7 +584,7 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `mentions.py` (the sentence plan of a proposition, and relative clauses), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -583,10 +657,28 @@ Jon decided the following on October 1, 2026, before stage 4 (`docs/proposals/20
 
 32. Events are drawn verb first. `scene.transitive_share` decides the kind. Then a CAN feature or leaf verb is chosen among those with at least one possible event in the scene, weighted by `scene.verb_weights`. Then the participants are chosen uniformly among the pairs, or the agents, for which that verb's event is possible.
 
+Jon decided the following on October 1, 2026, before stage 5 (`docs/proposals/2026-10-01-corpus-stage-5-decisions.md`):
+
+33. Logical form versus surface form. An event's tense and aspect are part of its logical form: the settings are `propositions.events: {tense, progressive_rate}`, and `grammar.morphology` keeps only whether and how tense and aspect are marked. Aspect is drawn for every event, even when aspect marking is off. The propositional rendering is the logical form, and it is never ambiguous: a capacity is wrapped in `ABLE`, an event is `EVENT(<event label>, <tense>, <aspect>, <atom>)`, `R.n` is one individual and `X.n` a bound variable, and "at least one" is `EXISTS(X.n, ...)`. The surface language may be ambiguous: `grammar.can_rate: {class: 0.5, instance: 1.0}` replaces `grammar.class_can_rate`, and a negative capacity always keeps `can`. Each sentence records its `readings`, worked out from the lexeme tokens alone, and `stats.yaml` reports how often sentences are ambiguous. The conceptual rendering is the same sentence as the spelled rendering, and only the lexical forms differ.
+34. Class-level relative clauses are restrictive, by proportion. All three kinds are drawn: subject relatives with a verb, object relatives, and CAN-feature clauses. A clause about another category means at least one member of it. `most`, `some`, and the generic are judged by the share of the subject set, and `all` and `no` are allowed only under the observed reading.
+35. One affix per word. The limit stays, with its configuration error. Stacked affixes are a future addition.
+36. Noun levels apply to instances only. An instance can be named by the noun of its own leaf or of any category above it. A class-level subject is always named by its own noun.
+37. Modifiers at `mention.modifier_rate` go on instance mentions only. Restrictions on class-level subjects come only from the proposition layer. Distinguishing modifiers are unchanged.
+38. Sibling contrasts get a rate: `documents.sibling_contrast_rate` (default 0.2) is the probability that a class-level fact in a category-topic document is followed by the matching fact about a sibling category.
+39. Aspect is drawn once for each event, so every report of one event agrees. The event carries its aspect, and `scenes.jsonl` gains the key `aspect`. The aspects are drawn after the events, so the rate never changes a scene.
+40. `readings` is one list per sentence, computed from the tree and the lexeme tokens, never from `events` or the logical form. `generic`, `capacity`, and `event` stand for the three levels, and a sentence without a verb has the one reading of its level. A test shows that the tree carries no information about the reading: a capacity and an event with the same tokens have identical trees and identical readings.
+41. A class-level subject takes a restriction at `propositions.restriction_rate` (default 0.1). Class-level relative clauses use `mention.relative_clauses`, and are drawn in the proposition layer.
+42. A sibling contrast is added only for a sibling where the fact differs. With no differing sibling, no contrast sentence is added.
+43. When modifiers cannot tell a referent apart, the mention falls back to the noun of the leaf. A mention that still fits another participant is kept, marked as not distinguished, and counted.
+44. A scalar pole writes its comparison class in the propositional rendering, at both levels: `SC.1.HIGH(R.1, C1.5)` for an instance, and the comparison class of decision 22 for a category, as in `SC.1.HIGH(X.1, C1)`.
+45. The JSON logical form holds relative clauses as a `clauses` list on the subject and the patient, and `tense` and `aspect` on event-level forms. The propositional rendering is generated from the JSON logical form, and a test checks that the two always agree.
+
 ## Future additions
 
 - **Sound differences between parts of speech.** In English and other languages, nouns and verbs differ in their sound: English nouns tend to have more syllables and initial stress, and verbs more often have final stress (Kelly, 1992; Monaghan, Christiansen, & Chater, 2007). The request already gives each lexeme's part of speech, so the word-form pipeline could later draw each part of speech's forms from its own sound profile.
 - **Case marking.** Richer systems of case marking than subject–verb agreement, such as nominative and accusative markers on noun phrases.
+- **Plural events.** Events with several agents. Plural events would allow the event reading of "penguins swim", which today has only the generic reading.
+- **Stacked affixes.** More than one affix on a word, for example tense plus agreement on one verb. Today a word takes one affix.
 
 ## References
 

@@ -8,6 +8,7 @@ hyphen.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 
 import numpy as np
@@ -23,6 +24,8 @@ from semantic_world.corpus.grammar import (
     RelativeClause,
     SentencePlan,
     check_plan,
+    phrase_of,
+    term_of,
 )
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.propositions import (
@@ -36,13 +39,22 @@ from semantic_world.corpus.propositions import (
     PROJECTION,
     SCALAR,
     VERB,
+    CategoryTerm,
+    Clause,
     Literal,
 )
+from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import leaves, tree_depth
 
 CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
-ALWAYS_CAN = {"class_can_rate": 1.0}
-NEVER_CAN = {"class_can_rate": 0.0}
+ALWAYS_CAN = {"can_rate": {"class": 1.0}}
+NEVER_CAN = {"can_rate": {"class": 0.0}}
+BARE = {"can_rate": {"class": 0.0, "instance": 0.0}}
+
+
+def report(label: str, aspect: str = "simple") -> tuple[str, str, str]:
+    """An event as a sentence records it: its label, its tense, and its aspect."""
+    return (label, "past", aspect)
 
 
 def the(instance: str, noun: str, *restriction: Literal, clause=None, determiner="the"):
@@ -97,7 +109,9 @@ PLANS = {
         the(
             "I1.1.1",
             "C1.1",
-            clause=RelativeClause((Predication(CAN, "CAN.3", event="SN.1.1"),)),
+            clause=RelativeClause(
+                (Predication(CAN, "CAN.3", event="SN.1.1", tense="past", aspect="simple"),)
+            ),
         ),
         Predication(
             VERB,
@@ -107,14 +121,18 @@ PLANS = {
                 "I2.1.1",
                 "C2.1",
                 clause=RelativeClause(
-                    (Predication(VERB, "V2.1", event="SN.1.2"),), the("I1.2.1", "C1.2")
+                    (Predication(VERB, "V2.1", event="SN.1.2", tense="past", aspect="simple"),),
+                    the("I1.2.1", "C1.2"),
                 ),
             ),
             "SN.1.3",
+            "past",
+            "simple",
         ),
     ),
     "ran": SentencePlan(
-        the("I1.2.1", "C1.2", determiner="a"), Predication(CAN, "CAN.1", event="SN.1.4")
+        the("I1.2.1", "C1.2", determiner="a"),
+        Predication(CAN, "CAN.1", event="SN.1.4", tense="past", aspect="simple"),
     ),
 }
 
@@ -290,7 +308,9 @@ def test_trees_of_the_default_order(tiny) -> None:
     ]
     # the referents and the events follow the tree, a node before its children
     assert event.referents == (("I1.1.1", "C1.1"), ("I2.1.1", "C2.1"), ("I1.2.1", "C1.2"))
-    assert event.events == ("SN.1.1", "SN.1.3", "SN.1.2")
+    assert event.events == (report("SN.1.1"), report("SN.1.3"), report("SN.1.2"))
+    assert event.event_labels == ("SN.1.1", "SN.1.3", "SN.1.2")
+    assert [phrase.referent for phrase in event.phrases] == ["I1.1.1", "I2.1.1", "I1.2.1"]
     pronoun = realize(tiny, "pronoun")
     assert pronoun.tree[1] == ["NP-SBJ", ["Pro", word("it")]]
     assert pronoun.referents == (("I1.1.1", None),)
@@ -550,10 +570,11 @@ def test_agreement_across_a_relative_clause(tiny) -> None:
             "I2.1.1",
             "C2.1",
             clause=RelativeClause(
-                (Predication(VERB, "V2.1", event="SN.1.2"),), the("I1.2.1", "C1.2")
+                (Predication(VERB, "V2.1", event="SN.1.2", tense="past", aspect="simple"),),
+                the("I1.2.1", "C1.2"),
             ),
         ),
-        Predication(CAN, "CAN.1", event="SN.1.4"),
+        Predication(CAN, "CAN.1", event="SN.1.4", tense="past", aspect="simple"),
     )
     english = {"number": {"enabled": True, "verb_marks": "singular"}}
     realizer = tiny.realizer(grammar={"morphology": english})
@@ -599,8 +620,19 @@ def test_tense_marks_events_only(tiny) -> None:
     # class-level and instance-level propositions are present, and the present is not marked
     for name in ("generic", "capacity", "swims", "rule"):
         assert "PAST" not in bare(tiny, name, **past)
-    present = {"tense": {"enabled": True, "event_tense": "present"}}
-    assert bare(tiny, "event", **present) == ENGLISH["event"]
+    # the tense is part of the plan, and the present is not marked
+    ran = PLANS["ran"]
+    present = SentencePlan(ran.subject, dataclasses.replace(ran.predication, tense="present"))
+    realizer = tiny.realizer(grammar={"morphology": past})
+    sentence = realizer.realize(present, np.random.default_rng(0))
+    assert glosses(sentence) == "a C1.2 CAN.1"
+    lexicon = tiny.lexicon(grammar={"morphology": past})
+    assert interpret(sentence.tree, lexicon, sentence.referents, sentence.events) == present
+    # with tense marking off, a past event is not marked either, and still reads back as past
+    plain = tiny.realizer().realize(ran, np.random.default_rng(0))
+    assert glosses(plain) == "a C1.2 CAN.1"
+    assert plain.events == (report("SN.1.4"),)
+    assert interpret(plain.tree, tiny.lexicon(), plain.referents, plain.events) == ran
     word = {"tense": {"enabled": True, "realization": "word", "position": "before"}}
     assert bare(tiny, "ran", **word) == "a C1.2 PAST CAN.1"
     # a verb with a tense marker takes no agreement marker, as in English "chased"
@@ -609,28 +641,63 @@ def test_tense_marks_events_only(tiny) -> None:
     assert bare(tiny, "generic", **both) == "C1.1-PLURAL CAN.1"
 
 
-def test_aspect_is_drawn_for_events(tiny) -> None:
-    always = {"aspect": {"enabled": True, "progressive_rate": 1.0}}
-    assert bare(tiny, "ran", **always) == "a C1.2 CAN.1 PROGRESSIVE"  # a word, by default
-    assert bare(tiny, "event", **always) == (
+def progressive(name: str) -> SentencePlan:
+    """A plan of the fixed set with every event progressive."""
+
+    def phrase(noun_phrase):
+        if noun_phrase is None or noun_phrase.clause is None:
+            return noun_phrase
+        clause = noun_phrase.clause
+        return dataclasses.replace(
+            noun_phrase,
+            clause=RelativeClause(
+                tuple(predication(p) for p in clause.predications), phrase(clause.agent)
+            ),
+        )
+
+    def predication(p):
+        aspect = None if p.event is None else "progressive"
+        return dataclasses.replace(p, object=phrase(p.object), aspect=aspect)
+
+    plan = PLANS[name]
+    return SentencePlan(phrase(plan.subject), predication(plan.predication))
+
+
+def test_aspect_is_part_of_the_plan(tiny) -> None:
+    def said(plan, **morphology) -> str:
+        realizer = tiny.realizer(grammar={**NEVER_CAN, "morphology": morphology})
+        return glosses(realizer.realize(plan, np.random.default_rng(0)))
+
+    aspect = {"aspect": {"enabled": True}}
+    assert said(progressive("ran"), **aspect) == "a C1.2 CAN.1 PROGRESSIVE"  # a word, by default
+    assert said(progressive("event"), **aspect) == (
         "the C1.1 that CAN.3 PROGRESSIVE V1.1 PROGRESSIVE the C2.1 that the C1.2 V2.1 PROGRESSIVE"
     )
-    assert "PROGRESSIVE" not in bare(tiny, "capacity", **always)
-    never = {"aspect": {"enabled": True, "progressive_rate": 0.0}}
-    assert bare(tiny, "ran", **never) == "a C1.2 CAN.1"
-    affix = {"aspect": {"enabled": True, "progressive_rate": 1.0, "realization": "affix"}}
-    assert bare(tiny, "ran", **affix) == "a C1.2 CAN.1-PROGRESSIVE"
+    # a simple event is not marked, and neither is a capacity
+    assert said(PLANS["ran"], **aspect) == "a C1.2 CAN.1"
+    assert "PROGRESSIVE" not in said(PLANS["capacity"], **aspect)
+    affix = {"aspect": {"enabled": True, "realization": "affix"}}
+    assert said(progressive("ran"), **affix) == "a C1.2 CAN.1-PROGRESSIVE"
     # past and progressive together: an affix and a word
-    both = {"tense": {"enabled": True}, **always}
-    assert bare(tiny, "ran", **both) == "a C1.2 CAN.1-PAST PROGRESSIVE"
-    realizer = tiny.realizer(grammar={"morphology": {"aspect": {"enabled": True}}})
+    both = {"tense": {"enabled": True}, **aspect}
+    assert said(progressive("ran"), **both) == "a C1.2 CAN.1-PAST PROGRESSIVE"
+    # the grammar never draws the aspect: the same plan gives the same marker every time
+    realizer = tiny.realizer(grammar={"morphology": aspect})
     rng = np.random.default_rng(5)
-    drawn = [glosses(realizer.realize(PLANS["ran"], rng)) for _ in range(600)]
-    share = np.mean(["PROGRESSIVE" in words for words in drawn])
-    assert abs(share - 0.3) < 0.05  # the default rate
+    assert {glosses(realizer.realize(PLANS["ran"], rng)) for _ in range(50)} == {"a C1.2 CAN.1"}
+    # with aspect marking off, a progressive event has no marker, and still reads back
+    plain = tiny.realizer().realize(progressive("ran"), np.random.default_rng(0))
+    assert glosses(plain) == "a C1.2 CAN.1"
+    assert plain.events == (report("SN.1.4", "progressive"),)
+    assert interpret(plain.tree, tiny.lexicon(), plain.referents, plain.events) == progressive(
+        "ran"
+    )
     for name in PLANS:
         grammar = {"morphology": {**both, **NUMBER}}
         check(tiny, realize(tiny, name, **grammar), **grammar)
+        realizer = tiny.realizer(**settings(**grammar))
+        sentence = realizer.realize(progressive(name), np.random.default_rng(0))
+        check(tiny, sentence, **grammar)
 
 
 def test_a_word_takes_one_affix(tiny) -> None:
@@ -649,10 +716,11 @@ def test_a_word_takes_one_affix(tiny) -> None:
     tiny.config(
         grammar={
             "morphology": {
-                "tense": {"enabled": True, "event_tense": "present"},
+                "tense": {"enabled": True},
                 "aspect": {"enabled": True, "realization": "affix"},
             }
-        }
+        },
+        propositions={"events": {"tense": "present"}},
     )
     tiny.config(
         grammar={
@@ -669,27 +737,129 @@ def test_a_word_takes_one_affix(tiny) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_the_optional_can_of_a_class_level_capacity(tiny) -> None:
-    assert say(tiny, "generic", class_can_rate=1.0) == "C1.1 can CAN.1"
-    assert say(tiny, "generic", class_can_rate=0.0) == "C1.1 CAN.1"
+def test_the_optional_can_of_a_capacity(tiny) -> None:
+    assert say(tiny, "generic", can_rate={"class": 1.0}) == "C1.1 can CAN.1"
+    assert say(tiny, "generic", can_rate={"class": 0.0}) == "C1.1 CAN.1"
     realizer = tiny.realizer()
     rng = np.random.default_rng(2)
     drawn = [glosses(realizer.realize(PLANS["generic"], rng)) for _ in range(800)]
     assert set(drawn) == {"C1.1 can CAN.1", "C1.1 CAN.1"}
     assert abs(np.mean([words == "C1.1 can CAN.1" for words in drawn]) - 0.5) < 0.05
     # both say the same: the tree reads back as the same plan
-    for sentence in (realize(tiny, "generic", class_can_rate=rate) for rate in (0.0, 1.0)):
+    for rate in (0.0, 1.0):
+        sentence = realize(tiny, "generic", can_rate={"class": rate})
         assert interpret(sentence.tree, tiny.lexicon(), sentence.referents) == PLANS["generic"]
-    # a negative capacity needs "can" to carry "not", and an instance's capacity always has it,
-    # because a bare verb after an instance reports an event
-    never = tiny.realizer(grammar=NEVER_CAN)
+    # a negative capacity needs "can" to carry "not", at both levels and at any rate
+    never = tiny.realizer(grammar=BARE)
     rng = np.random.default_rng(0)
     assert glosses(never.realize(PLANS["negative"], rng)) == ENGLISH["negative"]
-    assert glosses(never.realize(PLANS["swims"], rng)) == "the C1.1 can CAN.3"
     assert glosses(never.realize(PLANS["capacity"], rng)) == ENGLISH["capacity"]
     # "no" replaces the negation, so the rate applies
     none = SentencePlan(kind_of("C1.1", quantifier="no"), Predication(CAN, "CAN.1"))
     assert glosses(never.realize(none, rng)) == "no C1.1 CAN.1"
+    # an instance's capacity says "can" by default, and drops it at the instance rate
+    assert glosses(tiny.realizer(grammar=NEVER_CAN).realize(PLANS["swims"], rng)) == (
+        "the C1.1 can CAN.3"
+    )
+    assert glosses(never.realize(PLANS["swims"], rng)) == "the C1.1 CAN.3"
+    half = tiny.realizer(grammar={"can_rate": {"instance": 0.5}})
+    drawn = [glosses(half.realize(PLANS["swims"], rng)) for _ in range(800)]
+    assert set(drawn) == {"the C1.1 can CAN.3", "the C1.1 CAN.3"}
+    assert abs(np.mean([words == "the C1.1 can CAN.3" for words in drawn]) - 0.5) < 0.05
+    # the rate applies inside a relative clause too
+    clause = SentencePlan(
+        the("I1.1.1", "C1.1", clause=RelativeClause((Predication(CAN, "CAN.1"),))),
+        Predication(IS, "IS.2"),
+    )
+    sentence = never.realize(clause, rng)
+    assert glosses(sentence) == "the C1.1 that CAN.1 is IS.2"
+    assert interpret(sentence.tree, tiny.lexicon(), sentence.referents, sentence.events) == clause
+
+
+def test_a_capacity_and_an_event_can_have_the_same_words(tiny) -> None:
+    """With "can" dropped and the tense and the aspect unmarked, "the penguin swim" is a
+    capacity or an event. The two sentences have the same tokens and the same tree, so the tree
+    carries no information about the reading, and both get the same readings. Only the
+    sentence's record tells them apart."""
+    subject = the("I1.1.1", "C1.1")
+    target = the("I2.1.1", "C2.1")
+    pairs = [
+        (Predication(CAN, "CAN.3"), Predication(CAN, "CAN.3", True, None, *report("SN.1.1"))),
+        (
+            Predication(VERB, "V1.1", True, target),
+            Predication(VERB, "V1.1", True, target, *report("SN.1.2", "progressive")),
+        ),
+    ]
+    config = tiny.config(grammar=BARE)
+    lexicon = tiny.lexicon(grammar=BARE)
+    realizer = tiny.realizer(grammar=BARE)
+    for order in CLAUSE_ORDERS:
+        grammar = {**BARE, "word_order": {"clause": order}}
+        config, lexicon = tiny.config(grammar=grammar), tiny.lexicon(grammar=grammar)
+        realizer = tiny.realizer(grammar=grammar)
+        for able, happened in pairs:
+            capacity = realizer.realize(SentencePlan(subject, able), np.random.default_rng(0))
+            event = realizer.realize(SentencePlan(subject, happened), np.random.default_rng(0))
+            assert capacity.tokens == event.tokens
+            assert capacity.tree == event.tree
+            assert capacity.formal == event.formal and capacity.conceptual == event.conceptual
+            assert readings(capacity.tree, lexicon, config) == ("capacity", "event")
+            assert readings(event.tree, lexicon, config) == ("capacity", "event")
+            # the logical forms differ, and the record of the sentence says which one it is
+            assert capacity.plan != event.plan
+            assert capacity.events == (None,) and event.events == (
+                (happened.event, happened.tense, happened.aspect),
+            )
+            for sentence in (capacity, event):
+                read = interpret(sentence.tree, lexicon, sentence.referents, sentence.events)
+                assert read == sentence.plan
+    # with "can" kept, or with the tense marked, each sentence has one reading
+    for grammar, expected in (
+        ({}, (("capacity",), ("event",))),
+        ({**BARE, "morphology": {"tense": {"enabled": True}}}, (("capacity",), ("event",))),
+        (
+            {"can_rate": {"instance": 1.0}, "morphology": {"aspect": {"enabled": True}}},
+            (("capacity",), ("event",)),
+        ),
+    ):
+        config, lexicon = tiny.config(grammar=grammar), tiny.lexicon(grammar=grammar)
+        realizer = tiny.realizer(grammar=grammar)
+        for (able, happened), _ in zip(pairs, range(2), strict=True):
+            capacity = realizer.realize(SentencePlan(subject, able), np.random.default_rng(0))
+            event = realizer.realize(SentencePlan(subject, happened), np.random.default_rng(0))
+            assert (
+                readings(capacity.tree, lexicon, config),
+                readings(event.tree, lexicon, config),
+            ) == expected
+
+
+def test_readings_of_the_fixed_set(tiny) -> None:
+    config, lexicon = tiny.config(), tiny.lexicon()
+    expected = {"class": ("generic",), "instance": ("capacity",), "event": ("event",)}
+    for name, plan in PLANS.items():
+        sentence = realize(tiny, name)
+        assert readings(sentence.tree, lexicon, config) == expected[plan.level], name
+    # with "can" dropped, a bare verb after an instance has two readings, and the sentences
+    # that say "is", "has", "not", or name a category keep one
+    config, lexicon = tiny.config(grammar=BARE), tiny.lexicon(grammar=BARE)
+    realizer = tiny.realizer(grammar=BARE)
+    found = {}
+    for name, plan in PLANS.items():
+        sentence = realizer.realize(plan, np.random.default_rng(0))
+        found[name] = readings(sentence.tree, lexicon, config)
+        level = {"class": "generic", "instance": "capacity", "event": "event"}[plan.level]
+        assert level in found[name]
+    both = ("capacity", "event")
+    assert {name for name, kinds in found.items() if kinds == both} == {"swims", "event", "ran"}
+    assert found["capacity"] == found["lacks"] == found["pronoun"] == ("capacity",)
+    assert found["generic"] == found["rule"] == ("generic",)
+    # a language whose events are always marked has no ambiguous sentence
+    marked = {**BARE, "morphology": {"aspect": {"enabled": True}}}
+    always = {"events": {"progressive_rate": 1.0}}
+    config = tiny.config(grammar=marked, propositions=always)
+    lexicon = tiny.lexicon(grammar=marked)
+    sentence = tiny.realizer(grammar=marked).realize(PLANS["swims"], np.random.default_rng(0))
+    assert readings(sentence.tree, lexicon, config) == ("capacity",)
 
 
 def test_adjective_order(cases) -> None:
@@ -742,7 +912,7 @@ def test_a_mention_picks_one_of_a_concepts_lexemes(tiny) -> None:
 
 def test_word_order_never_changes_the_grammars_draws(tiny) -> None:
     knobs = {"lexicon": {"synonym_rate": 1.0}}
-    morphology = {"aspect": {"enabled": True, "progressive_rate": 0.5}}
+    morphology = {"aspect": {"enabled": True}}
     base = None
     for order in CLAUSE_ORDERS:
         for side in ("before", "after"):
@@ -819,24 +989,34 @@ def test_negated_literals_alone_make_a_relative_clause(tiny) -> None:
 def test_relative_clauses_nest(tiny) -> None:
     # "the C1.1 that chased the C2.1 that the C1.2 that ran saw ran": depth 3
     inner = the(
-        "I1.2.1", "C1.2", clause=RelativeClause((Predication(CAN, "CAN.1", event="SN.1.1"),))
+        "I1.2.1",
+        "C1.2",
+        clause=RelativeClause(
+            (Predication(CAN, "CAN.1", event="SN.1.1", tense="past", aspect="simple"),)
+        ),
     )
     middle = the(
         "I2.1.1",
         "C2.1",
-        clause=RelativeClause((Predication(VERB, "V2.1", event="SN.1.2"),), inner),
+        clause=RelativeClause(
+            (Predication(VERB, "V2.1", event="SN.1.2", tense="past", aspect="simple"),), inner
+        ),
     )
     outer = the(
         "I1.1.1",
         "C1.1",
-        clause=RelativeClause((Predication(VERB, "V1.1", True, middle, "SN.1.3"),)),
+        clause=RelativeClause(
+            (Predication(VERB, "V1.1", True, middle, "SN.1.3", "past", "simple"),)
+        ),
     )
-    plan = SentencePlan(outer, Predication(CAN, "CAN.3", event="SN.1.4"))
+    plan = SentencePlan(
+        outer, Predication(CAN, "CAN.3", event="SN.1.4", tense="past", aspect="simple")
+    )
     sentence = realize_plan(tiny, plan)
     assert glosses(sentence) == ("the C1.1 that V1.1 the C2.1 that the C1.2 that CAN.1 V2.1 CAN.3")
     assert plan.depth() == 3 and tree_depth(sentence.tree) == 3
     # a node before its children: the innermost clause comes before the verb that follows it
-    assert sentence.events == ("SN.1.3", "SN.1.1", "SN.1.2", "SN.1.4")
+    assert sentence.event_labels == ("SN.1.3", "SN.1.1", "SN.1.2", "SN.1.4")
     assert [r for r, _ in sentence.referents] == ["I1.1.1", "I2.1.1", "I1.2.1"]
     for name, plan in PLANS.items():
         expected = {"rule": 1, "event": 1}.get(name, 0)
@@ -844,9 +1024,102 @@ def test_relative_clauses_nest(tiny) -> None:
     for order in CLAUSE_ORDERS:
         realize_plan(
             tiny,
-            SentencePlan(outer, Predication(CAN, "CAN.3", event="SN.1.4")),
+            SentencePlan(
+                outer, Predication(CAN, "CAN.3", event="SN.1.4", tense="past", aspect="simple")
+            ),
             word_order={"clause": order},
         )
+
+
+def test_class_level_relative_clauses(tiny) -> None:
+    swim = RelativeClause((Predication(CAN, "CAN.1"),))
+    chase = RelativeClause((Predication(VERB, "V1.1", True, kind_of("C2")),))
+    chased = RelativeClause((Predication(VERB, "V1.1"),), kind_of("C2"))
+    swimmers = kind_of("C2", clause=swim)
+    plans = {
+        # "penguins that can swim", "owls that eat mice", and "mice that owls eat"
+        "can": SentencePlan(kind_of("C1.1", clause=swim), Predication(HAS, "HAS.2")),
+        "subject": SentencePlan(
+            kind_of("C1.1", clause=chase, quantifier="most"), Predication(IS, "IS.2")
+        ),
+        "object": SentencePlan(
+            kind_of("C1.1", clause=chased), Predication(SCALAR, "SC.1.HIGH", False)
+        ),
+        # a clause inside a clause, and a clause on the patient
+        "nested": SentencePlan(
+            kind_of(
+                "C1.1",
+                clause=RelativeClause((Predication(VERB, "V1.1", True, swimmers),)),
+                quantifier="some",
+            ),
+            Predication(HAS, "HAS.2"),
+        ),
+        "patient": SentencePlan(kind_of("C1"), Predication(VERB, "V1.1", True, swimmers)),
+        # the negated IS literals join the clause
+        "joined": SentencePlan(
+            kind_of("C1.1", Literal("IS.3", False), clause=swim), Predication(HAS, "HAS.2")
+        ),
+    }
+    english = {
+        "can": "C1.1 that can CAN.1 has HAS.2",
+        "subject": "most C1.1 that can V1.1 C2 is IS.2",
+        "object": "C1.1 that C2 can V1.1 is not SC.1.HIGH",
+        "nested": "some C1.1 that can V1.1 C2 that can CAN.1 has HAS.2",
+        "patient": "C1 can V1.1 C2 that can CAN.1",
+        "joined": "C1.1 that is not IS.3 and can CAN.1 has HAS.2",
+    }
+    bare = {
+        "can": "C1.1 that CAN.1 has HAS.2",
+        "subject": "most C1.1 that V1.1 C2 is IS.2",
+        "object": "C1.1 that C2 V1.1 is not SC.1.HIGH",
+        "nested": "some C1.1 that V1.1 C2 that CAN.1 has HAS.2",
+        "patient": "C1 V1.1 C2 that CAN.1",
+        "joined": "C1.1 that is not IS.3 and CAN.1 has HAS.2",
+    }
+    plural = {
+        # the verbs of a subject relative agree with the head, and those of an object relative
+        # with the clause's own subject
+        "can": "C1.1-PLURAL that CAN.1-PLURAL have HAS.2",
+        "subject": "most C1.1-PLURAL that V1.1-PLURAL C2-PLURAL are IS.2",
+        "object": "C1.1-PLURAL that C2-PLURAL V1.1-PLURAL are not SC.1.HIGH",
+    }
+    for name, plan in plans.items():
+        assert glosses(realize_plan(tiny, plan)) == english[name]
+        assert glosses(realize_plan(tiny, plan, **NEVER_CAN)) == bare[name]
+        for order in CLAUSE_ORDERS:
+            realize_plan(tiny, plan, word_order={"clause": order, "relative_clause": "before"})
+        if name in plural:
+            grammar = {**NEVER_CAN, "morphology": NUMBER}
+            assert glosses(realize_plan(tiny, plan, **grammar)) == plural[name]
+        # the clause is part of the category term that the truth tests judge
+        proposition = plan.proposition()
+        assert phrase_of(term_of(plan.subject), plan.subject.determiner) == plan.subject
+        assert proposition.subject == term_of(plan.subject)
+    assert term_of(plans["can"].subject) == CategoryTerm("C1.1", (), (Clause(CAN, "CAN.1"),))
+    assert term_of(plans["subject"].subject).clauses == (
+        Clause(VERB, "V1.1", patient=CategoryTerm("C2")),
+    )
+    assert term_of(plans["object"].subject).clauses == (
+        Clause(VERB, "V1.1", agent=CategoryTerm("C2")),
+    )
+    assert term_of(plans["nested"].subject).clauses == (
+        Clause(VERB, "V1.1", patient=CategoryTerm("C2", (), (Clause(CAN, "CAN.1"),))),
+    )
+    assert plans["nested"].depth() == 2 and plans["joined"].depth() == 1
+    assert plans["patient"].proposition().predicate.patient.clauses == (Clause(CAN, "CAN.1"),)
+    # a term with an object relative has that one clause
+    both = CategoryTerm(
+        "C1.1", (), (Clause(CAN, "CAN.1"), Clause(VERB, "V1.1", agent=CategoryTerm("C2")))
+    )
+    with pytest.raises(GrammarError, match="the only relative clause"):
+        phrase_of(both)
+    # a term with several subject relatives joins them: "that can swim and chase fish"
+    joined = CategoryTerm(
+        "C1.1", (), (Clause(CAN, "CAN.1"), Clause(VERB, "V1.1", patient=CategoryTerm("C2")))
+    )
+    plan = SentencePlan(phrase_of(joined), Predication(HAS, "HAS.2"))
+    assert glosses(realize_plan(tiny, plan)) == "C1.1 that can CAN.1 and V1.1 C2 has HAS.2"
+    assert plan.proposition().subject == joined
 
 
 # ---------------------------------------------------------------------------------------------
@@ -868,13 +1141,19 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
         "about categories": SentencePlan(kind_of("C1"), Predication(VERB, "V1.1", True, target)),
         "a verb, and only a verb": SentencePlan(subject, Predication(VERB, "V1.1")),
         "a verb, and only a verb ": SentencePlan(subject, Predication(CAN, "CAN.1", True, target)),
-        "never negated": SentencePlan(subject, Predication(CAN, "CAN.1", False, event="SN.1.1")),
-        "an event is a CAN feature": SentencePlan(subject, Predication(IS, "IS.1", event="SN.1.1")),
+        "never negated": SentencePlan(
+            subject, Predication(CAN, "CAN.1", False, event="SN.1.1", tense="past", aspect="simple")
+        ),
+        "an event is a CAN feature": SentencePlan(
+            subject, Predication(IS, "IS.1", event="SN.1.1", tense="past", aspect="simple")
+        ),
         "every verb phrase of an event-level sentence": SentencePlan(
             the("I1.1.1", "C1.1", clause=RelativeClause((swims,))),
-            Predication(CAN, "CAN.3", event="SN.1.1"),
+            Predication(CAN, "CAN.3", event="SN.1.1", tense="past", aspect="simple"),
         ),
-        "about an instance": SentencePlan(kind_of("C1"), Predication(CAN, "CAN.1", event="SN.1.1")),
+        "about an instance": SentencePlan(
+            kind_of("C1"), Predication(CAN, "CAN.1", event="SN.1.1", tense="past", aspect="simple")
+        ),
         "no comparison class": SentencePlan(IT, Predication(SCALAR, "SC.1.HIGH")),
         "already named": SentencePlan(subject, Predication(MEMBER, "C1.1")),
         "says something about its head": SentencePlan(
@@ -899,6 +1178,16 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
             swims,
         ),
         "never negated ": SentencePlan(the("I1.1.1", "C1.1", Literal("SC.1.HIGH", False)), swims),
+        "an event has a tense": SentencePlan(subject, Predication(CAN, "CAN.1", event="SN.1.9")),
+        "only an event has a tense": SentencePlan(subject, Predication(CAN, "CAN.1", tense="past")),
+        "a class-level relative clause holds": SentencePlan(
+            kind_of("C1.1", clause=RelativeClause((Predication(PROJECTION, "CANBE.V2.2"),))),
+            Predication(HAS, "HAS.2"),
+        ),
+        "a class-level relative clause holds ": SentencePlan(
+            kind_of("C1.1", clause=RelativeClause((Predication(CAN, "CAN.1", False),))),
+            Predication(HAS, "HAS.2"),
+        ),
     }
     realizer = tiny.realizer()
     for reason, plan in bad.items():
@@ -923,9 +1212,18 @@ def test_trees_that_cannot_be_read(tiny) -> None:
         interpret(sentence.tree, lexicon, sentence.referents[:2], sentence.events)
     with pytest.raises(GrammarError, match="3 verb phrases, and 1 events"):
         interpret(sentence.tree, lexicon, sentence.referents, sentence.events[:1])
-    # a verb with no auxiliary after an instance reports an event, and needs its label
+    # a verb with a tense marker reports an event, and needs its record
+    past = {"morphology": {"tense": {"enabled": True}}}
+    marked = realize(tiny, "ran", **past)
     with pytest.raises(GrammarError, match="no event was given"):
-        interpret(sentence.tree, lexicon, sentence.referents, (None, None, None))
+        interpret(marked.tree, tiny.lexicon(**settings(**past)), marked.referents, (None,))
+    # a verb with "can" states a capacity, and reports no event
+    able = realize(tiny, "swims")
+    with pytest.raises(GrammarError, match="an event is reported by a verb with no auxiliary"):
+        interpret(able.tree, lexicon, able.referents, (report("SN.1.1"),))
+    with pytest.raises(GrammarError, match="an event is reported by a verb with no auxiliary"):
+        generic = realize(tiny, "generic")
+        interpret(generic.tree, lexicon, generic.referents, (report("SN.1.1"),))
     with pytest.raises(GrammarError, match="a sentence is an S"):
         interpret(sentence.tree[1], lexicon, sentence.referents[:1])
     generic = realize(tiny, "generic")

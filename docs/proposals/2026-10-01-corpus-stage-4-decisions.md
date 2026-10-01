@@ -1,6 +1,6 @@
 # Proposal: decisions for stage 4 of the corpus generator
 
-October 1, 2026. Raised at the end of stage 3 of `docs/specs/CORPUS_GENERATOR.md` and while building stage 4 (grammar and realization). Status: decision 32 is decided. The three questions under "Questions for Jon" are open: stage 4 builds the recommended option of each, and each is easy to change.
+October 1, 2026. Raised at the end of stage 3 of `docs/specs/CORPUS_GENERATOR.md` and while building stage 4 (grammar and realization). Status: decided. Decision 32 was decided before stage 4. Jon answered the three questions under "Questions for Jon" before stage 5, as decisions 33 to 35 (`docs/proposals/2026-10-01-corpus-stage-5-decisions.md`): the answers change question A (`grammar.can_rate` replaces `grammar.class_can_rate`) and settle questions B and C as recommended.
 
 ## Jon's decision
 

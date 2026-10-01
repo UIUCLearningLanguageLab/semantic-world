@@ -32,10 +32,18 @@ agrees with its subject: it takes the plural marker when ``number.verb_marks`` n
 subject's number. A verb that carries a tense or aspect marker takes no agreement marker, and a
 verb after ``can`` takes none. ``is`` and ``has`` agree by becoming ``are`` and ``have``.
 
+**Tense and aspect.** An event's tense and aspect are in the plan. The morphology marks them or
+not: a past event takes the past marker when tense is on, and a progressive event takes the
+progressive marker when aspect is on. The present and the simple aspect are never marked.
+
+**``can``.** A negative capacity always says ``can``. A positive capacity says ``can`` at
+``grammar.can_rate``, for a category and for an instance. Without ``can``, and without a tense
+or aspect marker, an instance's capacity and an event have the same words and the same tree.
+
 The grammar's own choices are drawn from the generator it is given: a synonym for a concept
-with two lexemes, the adjective order when it is not fixed, the aspect of an event, and the
-``can`` of a positive class-level capacity. The draws are made in one order, whatever the word
-order, so a word-order setting never changes them.
+with two lexemes, the adjective order when it is not fixed, and the ``can`` of a positive
+capacity. The draws are made in one order, whatever the word order, so a word-order setting
+never changes them.
 """
 
 from __future__ import annotations
@@ -56,6 +64,8 @@ from semantic_world.corpus.grammar import (
 )
 from semantic_world.corpus.lexicon import ADJECTIVE, Lexeme, Lexicon
 from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, VERB
+from semantic_world.corpus.propositions import PAST as PAST_TENSE
+from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
 
 PLURAL = "PLURAL"
@@ -107,9 +117,16 @@ class Sentence:
     referents: tuple[tuple[str, str | None], ...]
     """For each noun phrase (``NP-SBJ`` and ``NP-OBJ``), a node before its children: the
     instance or category it refers to, and the category its noun names (None for a pronoun)."""
-    events: tuple[str | None, ...]
-    """For each verb phrase (``VP``), a node before its children: the event it reports, or
-    None."""
+    phrases: tuple[NounPhrase, ...]
+    """For each noun phrase, in the same order: its part of the plan."""
+    events: tuple[tuple[str, str, str] | None, ...]
+    """For each verb phrase (``VP``), a node before its children: the event it reports, with
+    its tense and its aspect, or None."""
+
+    @property
+    def event_labels(self) -> tuple[str | None, ...]:
+        """For each verb phrase, the label of the event it reports, or None."""
+        return tuple(None if e is None else e[0] for e in self.events)
 
 
 class Realizer:
@@ -170,7 +187,8 @@ class _Builder:
         self.morphology = realizer.morphology
         self.rng = rng
         self.referents: dict[int, tuple[str, str | None]] = {}
-        self.events: dict[int, str | None] = {}
+        self.phrases: dict[int, NounPhrase] = {}
+        self.events: dict[int, tuple[str, str, str] | None] = {}
         clause = self.order.clause
         self.subject_first = clause.index("S") < clause.index("V")
         self.verb_first = clause.index("V") < clause.index("O")
@@ -221,6 +239,7 @@ class _Builder:
         if phrase.pronoun:
             node = [label, self.function("Pro", "it")]
             self.referents[id(node)] = (phrase.referent, None)
+            self.phrases[id(node)] = phrase
             return node
         assert phrase.noun is not None
         plural = self.plural(phrase)
@@ -251,6 +270,7 @@ class _Builder:
             parts = self.place(parts, [clause], self.order.relative_clause)
         node = [label, *parts]
         self.referents[id(node)] = (phrase.referent, phrase.noun)
+        self.phrases[id(node)] = phrase
         return node
 
     @staticmethod
@@ -287,7 +307,11 @@ class _Builder:
 
     def verb_node(self, parts: list[Tree], predication: Predication) -> Tree:
         node = ["VP", *parts]
-        self.events[id(node)] = predication.event
+        if predication.event is None:
+            self.events[id(node)] = None
+        else:
+            assert predication.tense is not None and predication.aspect is not None
+            self.events[id(node)] = (predication.event, predication.tense, predication.aspect)
         return node
 
     def verb_phrase(
@@ -306,18 +330,16 @@ class _Builder:
         if kind in (CAN, VERB):
             marks: tuple[str, ...] = ()
             if predication.event is not None:
-                if morphology.tense.enabled and morphology.tense.event_tense == "past":
+                if morphology.tense.enabled and predication.tense == PAST_TENSE:
                     marks += (PAST,)
-                if morphology.aspect.enabled and (
-                    self.rng.random() < morphology.aspect.progressive_rate
-                ):
+                if morphology.aspect.enabled and predication.aspect == PROGRESSIVE_ASPECT:
                     marks += (PROGRESSIVE,)
             elif not predication.polarity:
                 auxiliary, negated = "can", True
-            elif subject.kind != CLASS_NP:
-                auxiliary = "can"
-            elif self.rng.random() < self.realizer.settings.class_can_rate:
-                auxiliary = "can"
+            else:
+                level = "class" if subject.kind == CLASS_NP else "instance"
+                if self.rng.random() < self.realizer.settings.can_rate[level]:
+                    auxiliary = "can"
             marked_number = "plural" if plural else "singular"
             if (
                 auxiliary is None
@@ -390,6 +412,7 @@ class _Builder:
             formal=self.realizer.formal(tokens),
             conceptual=self.realizer.conceptual(tokens),
             referents=tuple(self.referents[id(n)] for n in nodes_in_order if n[0] in NP_LABELS),
+            phrases=tuple(self.phrases[id(n)] for n in nodes_in_order if n[0] in NP_LABELS),
             events=tuple(self.events[id(n)] for n in nodes_in_order if n[0] == "VP"),
         )
 

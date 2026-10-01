@@ -17,6 +17,11 @@ literals than ``propositions.rule_statements.max_literals``, when one of its con
 word, or when no instance satisfies it. A rule statement is true with ``all`` and as a bare
 generic, and its quantifier is drawn like that of any class-level proposition.
 
+A class-level subject can be restricted, in the proposition layer, where the truth of the
+sentence is grounded. A restriction is one literal ("red penguins"), and a relative clause is
+restrictive ("penguins that can swim", "owls that eat mice", "mice that owls eat"). Both are drawn
+among those that some members of the category satisfy, and not all, so the restriction does work.
+
 An event is reported by an event-level proposition. Its verb is named at a level of the verb
 tree, as a noun names a category at a level of the noun tree: the verb itself, or a verb category
 above it ("chase" or "hunt"), drawn by ``mention.verb_level_weights``.
@@ -47,6 +52,7 @@ from semantic_world.corpus.propositions import (
     SOME,
     VERB,
     CategoryTerm,
+    Clause,
     Literal,
     Predicate,
     Proposition,
@@ -105,6 +111,8 @@ class Facts:
         self.verbs = of_type("verb", "verb_category")
         self.level = {c.label: c.level for c in result.tree.categories}
         self._class_facts: dict[tuple, tuple[Proposition, ...]] = {}
+        self._restrictions: dict[CategoryTerm, tuple[Literal, ...]] = {}
+        self._clauses: dict[tuple[CategoryTerm, bool], tuple[Clause, ...]] = {}
         self._rules: tuple[Proposition, ...] | None = None
         self.rule_report: dict[str, Any] = {}
 
@@ -239,6 +247,116 @@ class Facts:
         ]
         return tuple(f for f in facts if f is not None)
 
+    # Restricted subjects ---------------------------------------------------------------------
+
+    def restriction_options(self, term: CategoryTerm) -> tuple[Literal, ...]:
+        """The literals that can restrict a category term further: the IS and HAS literals,
+        positive and negative, and the scalar poles, that some members satisfy and not all."""
+        if term not in self._restrictions:
+            truth = self.truth
+            members = truth.members(term)
+            stated = {literal.feature for literal in term.restriction}
+            options: list[Literal] = []
+            for feature in self.features[IS] + self.features[HAS]:
+                if feature in stated:
+                    continue
+                count = int(truth.values[members, truth.features[feature].position].sum())
+                if 0 < count < len(members):
+                    options += [Literal(feature), Literal(feature, False)]
+            for pole in self.poles:
+                if pole in stated:
+                    continue
+                mask = truth.pole_mask(pole, truth._below[term.category])[0]
+                if 0 < int(mask[members].sum()) < len(members):
+                    options.append(Literal(pole))
+            self._restrictions[term] = tuple(options)
+        return self._restrictions[term]
+
+    def draw_restriction(self, rng: np.random.Generator, term: CategoryTerm) -> CategoryTerm | None:
+        """The term with one more literal in its restriction ("red penguins"): negative at the
+        class-level negation rate, and drawn among the literals that some members satisfy and
+        not all. None when there is none."""
+        options = self.restriction_options(term)
+        if not options:
+            return None
+        negative = rng.random() < self.config.propositions.negation_rate[CLASS]
+        pool = [x for x in options if x.positive != negative] or list(options)
+        literal = pool[int(rng.integers(len(pool)))]
+        return CategoryTerm(term.category, term.restriction + (literal,), term.clauses)
+
+    def clause_options(self, term: CategoryTerm, object_relative: bool) -> tuple[Clause, ...]:
+        """The relative clauses that can restrict a category term: those that some members
+        satisfy and not all. A subject relative holds a CAN feature ("that can swim") or a verb
+        with a patient category ("that eat mice"). An object relative holds a verb with an agent
+        category ("that owls eat")."""
+        key = (term, object_relative)
+        if key not in self._clauses:
+            truth = self.truth
+            members = truth.members(term)
+            total = len(members)
+            options: list[Clause] = []
+            if not object_relative:
+                for feature in self.features[CAN]:
+                    count = int(truth.values[members, truth.features[feature].position].sum())
+                    if 0 < count < total:
+                        options.append(Clause(CAN, feature))
+            for verb in self.verbs:
+                matrix = truth.matrix(verb)
+                block = matrix[:, members].T if object_relative else matrix[members]
+                for category in self.categories:
+                    others = truth.members(CategoryTerm(category))
+                    count = int(block[:, others].any(axis=1).sum())
+                    if 0 < count < total:
+                        other = CategoryTerm(category)
+                        if object_relative:
+                            options.append(Clause(VERB, verb, agent=other))
+                        else:
+                            options.append(Clause(VERB, verb, patient=other))
+            self._clauses[key] = tuple(options)
+        return self._clauses[key]
+
+    def draw_clause(
+        self, rng: np.random.Generator, term: CategoryTerm, depth: int = 1
+    ) -> CategoryTerm | None:
+        """The term with a restrictive relative clause. The clause is an object relative with
+        probability ``mention.relative_clauses.object_share``, and a subject relative otherwise:
+        a CAN feature or a verb, each kind with the same chance. When the drawn kind has no
+        clause, the other kind is used. The other category of a verb can take a relative clause
+        of its own, at the rate, up to ``max_depth``. None when the term has a clause already,
+        or when no clause restricts it."""
+        settings = self.config.mention.relative_clauses
+        if term.clauses or depth > settings.max_depth:
+            return None
+        negated = any(not x.positive and x.feature.startswith("IS.") for x in term.restriction)
+        as_object = rng.random() < settings.object_share and not negated
+        total = len(self.truth.members(term))
+        for object_relative in (as_object, not as_object):
+            if object_relative and negated:
+                continue  # the negated IS literals need a subject relative to join
+            options = self.clause_options(term, object_relative)
+            if not options:
+                continue
+            groups = [
+                [c for c in options if c.kind == CAN],
+                [c for c in options if c.kind == VERB],
+            ]
+            groups = [group for group in groups if group]
+            group = groups[int(rng.integers(len(groups)))]
+            clause = group[int(rng.integers(len(group)))]
+            if clause.other is not None and rng.random() < settings.rate:
+                inner = self.draw_clause(rng, clause.other, depth + 1)
+                if inner is not None:
+                    deeper = (
+                        Clause(VERB, clause.label, agent=inner)
+                        if object_relative
+                        else Clause(VERB, clause.label, patient=inner)
+                    )
+                    candidate = CategoryTerm(term.category, term.restriction, (deeper,))
+                    if 0 < len(self.truth.members(candidate)) < total:
+                        clause = deeper
+            return CategoryTerm(term.category, term.restriction, (clause,))
+        return None
+
     # Rule statements -------------------------------------------------------------------------
 
     def rule_statements(self, feature: str | None = None) -> tuple[Proposition, ...]:
@@ -318,7 +436,7 @@ class Facts:
         """The event-level proposition that reports an event, named by its own verb or by
         ``verb``, a verb category above it. None when the name has no word, or does not name
         the event."""
-        candidate = event.proposition(verb)
+        candidate = event.proposition(verb, self.config.propositions.event_tense)
         if not self.expressible(candidate):
             return None
         return self.truth.grounded(candidate)

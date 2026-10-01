@@ -17,6 +17,8 @@ from semantic_world.corpus.grammar import (
     check_plan,
 )
 from semantic_world.corpus.mentions import (
+    MentionRules,
+    Mentions,
     RelativeClauses,
     clause_propositions,
     leaf_of,
@@ -256,7 +258,8 @@ def test_what_takes_no_drawn_relative_clause(cases) -> None:
     facts = case.facts(**settings)
     clauses = RelativeClauses(case.config(**settings), facts)
     rng = np.random.default_rng(0)
-    # a class-level sentence: what a clause there would mean is not settled
+    # a class-level sentence: its relative clauses restrict the subject, so they are drawn with
+    # the proposition (facts.draw_clause), and not for a finished plan
     for fact in facts.class_facts("C1.1", patients=("C2",))[:40]:
         plan = plan_for(facts, fact)
         assert clauses.attach(rng, plan) == plan
@@ -310,7 +313,7 @@ def test_clauses_are_drawn_from_the_mentions_stream_alone(cases) -> None:
         "grammar": {
             "word_order": {"clause": "OSV", "relative_clause": "before"},
             "morphology": {"number": {"enabled": True}, "aspect": {"enabled": True}},
-            "class_can_rate": 0.9,
+            "can_rate": {"class": 0.9, "instance": 0.4},
             "adjective_order": {"fixed": False},
         }
     }
@@ -318,3 +321,235 @@ def test_clauses_are_drawn_from_the_mentions_stream_alone(cases) -> None:
         case, {**rate_settings(rate=0.6, max_depth=2), **grammar}, EVENT, seed=3
     )
     assert changed == base
+
+
+# ---------------------------------------------------------------------------------------------
+# Class-level plans with relative clauses
+# ---------------------------------------------------------------------------------------------
+
+
+def test_the_plan_of_a_proposition_with_a_restrictive_clause(cases) -> None:
+    case = cases("default")
+    settings = rate_settings(rate=0.6, max_depth=2)
+    facts = case.facts(**settings)
+    rng = Streams(2).propositions
+    made = 0
+    for category in facts.categories[::3]:
+        for _ in range(4):
+            term = facts.draw_clause(rng, CategoryTerm(category))
+            if term is None:
+                continue
+            for fact in facts.class_facts(term, patients=facts.categories[:3])[::5]:
+                plan = plan_for(facts, fact)
+                check_plan(plan)
+                # the clause of the noun phrase is the clause of the category term
+                assert plan.proposition() == fact
+                assert plan.subject.clause is not None and plan.depth() >= 1
+                clause = term.clauses[0]
+                assert plan.subject.clause.object_relative == (clause.agent is not None)
+                made += 1
+    assert made > 100
+
+
+# ---------------------------------------------------------------------------------------------
+# Mentions in a document
+# ---------------------------------------------------------------------------------------------
+
+
+def rules_of(case, **mention_settings) -> MentionRules:
+    settings = {"mention": mention_settings}
+    config = case.config(**settings)
+    return MentionRules(config, case.facts(**settings), Streams(config.seed))
+
+
+def test_the_preference_order_is_fixed_for_the_language(cases) -> None:
+    case = cases("default")
+    rules = rules_of(case)
+    facts = case.facts()
+    scalars = sorted({pole.rsplit(".", 1)[0] for pole in facts.poles})
+    assert (
+        sorted(rules.preference) == sorted(facts.features["is"] + facts.features["has"]) + scalars
+    )
+    assert rules_of(case).preference == rules.preference
+    other = MentionRules(case.config(seed=2), facts, Streams(2))
+    assert other.preference != rules.preference
+
+
+def test_the_incremental_algorithm(cases) -> None:
+    case = cases("default")
+    rules = rules_of(case)
+    labels = case.result.instances.labels
+    rank = {attribute: n for n, attribute in enumerate(rules.preference)}
+    told_apart = 0
+    for start in range(0, len(labels) - 6, 5):
+        cast = labels[start : start + 6]
+        for instance in cast[:2]:
+            for noun in rules.path(instance):
+                literals, alone = rules.distinguish(instance, noun, cast)
+                phrase = NounPhrase(INSTANCE_NP, instance, noun, "the", literals)
+                fitting = rules.matches(phrase, cast)
+                # what the noun phrase says is true of the instance
+                assert instance in fitting and alone == (fitting == [instance])
+                others = [c for c in cast if c != instance and noun in rules.path(c)]
+                if not others:
+                    assert literals == () and alone
+                    continue
+                # the attributes are tried in the preference order, and each one that is added
+                # rules out a participant that was still left
+                order = [
+                    rank[x.feature.rsplit(".", 1)[0] if x.pole else x.feature] for x in literals
+                ]
+                assert order == sorted(order)
+                left = list(others)
+                for literal in literals:
+                    row = [rules.truth.instance_index[c] for c in left]
+                    kept = [
+                        c for c, r in zip(left, row, strict=True) if rules.fits(r, literal, noun)
+                    ]
+                    assert len(kept) < len(left)
+                    left = kept
+                assert alone == (not left)
+                # no negated IS literal: adjectives and with-phrases only
+                assert all(x.positive or x.feature.startswith("HAS.") for x in literals)
+                assert sum(not x.feature.startswith("HAS.") for x in literals) <= 3
+                assert sum(x.feature.startswith("HAS.") for x in literals) <= 2
+                told_apart += alone
+    assert told_apart > 50
+    # the features that the sentence states are not said again
+    instance, noun = labels[0], rules.path(labels[0])[0]
+    literals, _ = rules.distinguish(instance, noun, labels[:30])
+    assert literals
+    avoided, _ = rules.distinguish(instance, noun, labels[:30], avoid=(literals[0].feature,))
+    assert literals[0].feature not in [x.feature for x in avoided]
+
+
+def test_a_document_s_mentions(cases) -> None:
+    case = cases("default")
+    labels = case.result.instances.labels
+    first, second, third = "I1.1.1.1", "I1.1.1.2", "I2.1.1.1"
+    assert {first, second, third} <= set(labels)
+    cast = (first, second, third)
+    rng = np.random.default_rng(0)
+    # with the pronoun rate at 0, a later mention is always a noun phrase
+    mentions = Mentions(rules_of(case, pronoun_rate=0.0), cast)
+    opening = mentions.noun_phrase(rng, first)
+    assert opening.determiner == "a" and opening.restriction == ()
+    assert opening.noun in ("C1", "C1.1", "C1.1.1")
+    assert mentions.referents == {first: "R.1"} and mentions.label(first) == "R.1"
+    assert mentions.distinguished(opening) is None  # an indefinite mention picks out no one
+    mentions.end_sentence(first)
+    later = mentions.noun_phrase(rng, first)
+    assert later.determiner == "the"
+    # the noun fits the other instance of the leaf, so modifiers tell the two apart
+    assert later.restriction and mentions.distinguished(later) is True
+    assert mentions.rules.matches(later, cast) == [first]
+    other = mentions.noun_phrase(rng, third)
+    assert other.determiner == "a" and mentions.referents == {first: "R.1", third: "R.2"}
+    mentions.end_sentence(first)
+    # a noun that is given is used, and a noun that is excluded is not
+    for _ in range(20):
+        assert mentions.noun_phrase(rng, first, noun="C1").noun == "C1"
+        assert mentions.noun_phrase(rng, first, exclude="C1.1.1").noun != "C1.1.1"
+    mentions.end_sentence(first)
+    # a sentence that is dropped leaves no mention behind
+    known = dict(mentions.referents)
+    mentions.noun_phrase(rng, second)
+    assert second in mentions.referents
+    mentions.drop_sentence(known)
+    assert mentions.referents == known
+    assert mentions.noun_phrase(rng, second).determiner == "a"
+
+
+def test_when_a_mention_can_be_a_pronoun(cases) -> None:
+    case = cases("default")
+    first, second = "I1.1.1.1", "I2.1.1.1"
+    rng = np.random.default_rng(0)
+    mentions = Mentions(rules_of(case, pronoun_rate=1.0), (first, second))
+    # a first mention is never a pronoun
+    assert not mentions.noun_phrase(rng, first).pronoun
+    assert not mentions.pronoun_allowed(first)  # not in the same sentence
+    mentions.end_sentence(first)
+    # the only referent of the sentence before
+    assert mentions.pronoun_allowed(first) and not mentions.pronoun_allowed(second)
+    assert mentions.noun_phrase(rng, first).pronoun
+    assert not mentions.noun_phrase(rng, first).pronoun  # said once in a sentence
+    assert not mentions.noun_phrase(rng, second).pronoun
+    mentions.end_sentence(first)
+    # two referents: the subject can be a pronoun, and the other one cannot
+    assert mentions.pronoun_allowed(first) and not mentions.pronoun_allowed(second)
+    assert not mentions.noun_phrase(rng, second).pronoun
+    mentions.end_sentence(second)
+    # the referent was not mentioned in the sentence before
+    assert not mentions.pronoun_allowed(first) and mentions.pronoun_allowed(second)
+    # a mention whose noun is given, or that must not be a pronoun, is a noun phrase
+    assert not mentions.noun_phrase(rng, second, noun="C2").pronoun
+    mentions.end_sentence(second)
+    assert not mentions.noun_phrase(rng, second, pronoun=False).pronoun
+    mentions.end_sentence(second)
+    assert mentions.noun_phrase(rng, second).pronoun
+    assert mentions.distinguished(mentions.noun_phrase(rng, first)) is not None
+
+
+def test_a_referent_that_cannot_be_told_apart(cases) -> None:
+    """With no adjective and no with-phrase allowed, two instances of one leaf cannot be told
+    apart. The mention falls back to the noun of the leaf, is kept, and is marked."""
+    case = cases("default")
+    first, second, third = "I1.1.1.1", "I1.1.1.2", "I1.1.2.1"
+    rules = rules_of(case, max_adjectives=0, max_with_phrases=0, pronoun_rate=0.0)
+    assert rules.distinguish(first, "C1.1.1", (first, second)) == ((), False)
+    rng = np.random.default_rng(3)
+    mentions = Mentions(rules, (first, second, third))
+    mentions.noun_phrase(rng, first)
+    mentions.end_sentence(first)
+    for _ in range(20):
+        later = mentions.noun_phrase(rng, first)
+        mentions.end_sentence(first)
+        # the noun of the leaf fits the fewest participants, and still fits two
+        assert later.noun == "C1.1.1" and later.restriction == ()
+        assert mentions.distinguished(later) is False
+    # the other leaf's instance is alone under its leaf's noun
+    mentions.noun_phrase(rng, third)
+    mentions.end_sentence(third)
+    for _ in range(20):
+        later = mentions.noun_phrase(rng, third)
+        mentions.end_sentence(third)
+        assert later.noun == "C1.1.2" and mentions.distinguished(later) is True
+    # a noun that is given is kept, whatever it fits
+    fixed = mentions.noun_phrase(rng, third, noun="C1")
+    assert fixed.noun == "C1" and mentions.distinguished(fixed) is False
+
+
+def test_modifiers_at_the_modifier_rate(cases) -> None:
+    case = cases("default")
+    instance = "I1.1.1.1"
+    rng = np.random.default_rng(1)
+
+    def first_mentions(modifiers: bool, **settings):
+        rules = rules_of(case, **settings)
+        return [
+            Mentions(rules, (instance,), modifiers=modifiers).noun_phrase(
+                rng, instance, avoid=("IS.1",)
+            )
+            for _ in range(300)
+        ]
+
+    # only in the documents that ask for them
+    assert all(not phrase.restriction for phrase in first_mentions(False))
+    drawn = first_mentions(True)
+    share = np.mean([bool(phrase.restriction) for phrase in drawn])
+    assert abs(share - 0.3) < 0.08
+    rules = rules_of(case)
+    row = rules.truth.instance_index[instance]
+    kinds = set()
+    for phrase in drawn:
+        for literal in phrase.restriction:
+            # one modifier, true of the referent, positive, and not what the sentence says
+            assert len(phrase.restriction) == 1 and literal.positive
+            assert rules.fits(row, literal, phrase.noun) and literal.feature != "IS.1"
+            kinds.add(literal.feature.split(".")[0])
+    assert {"IS", "HAS"} <= kinds
+    assert all(phrase.restriction for phrase in first_mentions(True, modifier_rate=1.0))
+    assert all(
+        not phrase.restriction
+        for phrase in first_mentions(True, max_adjectives=0, max_with_phrases=0)
+    )

@@ -126,6 +126,9 @@ class DocumentsConfig:
     """The weight of every category level, 1 to the taxonomy's depth, for category topics."""
     shuffle: float
     instance_description_rate: float
+    sibling_contrast_rate: float
+    """The probability that a class-level fact in a category-topic document is followed by the
+    matching fact about a sibling category."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -135,6 +138,7 @@ class DocumentsConfig:
             "topic_level_weights": _list_schedule(self.topic_level_weights),
             "shuffle": self.shuffle,
             "instance_description_rate": self.instance_description_rate,
+            "sibling_contrast_rate": self.sibling_contrast_rate,
         }
 
 
@@ -146,12 +150,23 @@ class PropositionsConfig:
     rule_max_literals: int | None
     """The most literals in the term of a rule statement; a longer term is skipped and counted.
     None: no cap."""
+    restriction_rate: float
+    """The probability that the subject of a class-level fact in an encyclopedic document takes
+    a restriction ("red penguins")."""
+    event_tense: str
+    """The tense of every event: ``past`` or ``present``. It is part of an event's logical
+    form."""
+    progressive_rate: float
+    """The probability that an event is progressive. The aspect is drawn for every event, and is
+    part of the event's logical form, whether or not the grammar marks it."""
 
     def resolved(self) -> dict[str, Any]:
         return {
             "negation_rate": dict(self.negation_rate),
             "rule_statement_rate": self.rule_statement_rate,
             "rule_statements": {"max_literals": self.rule_max_literals},
+            "restriction_rate": self.restriction_rate,
+            "events": {"tense": self.event_tense, "progressive_rate": self.progressive_rate},
         }
 
 
@@ -270,7 +285,6 @@ class TenseConfig:
     enabled: bool
     realization: str
     position: str
-    event_tense: str
 
     def resolved(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -281,7 +295,6 @@ class AspectConfig:
     enabled: bool
     realization: str
     position: str
-    progressive_rate: float
 
     def resolved(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -320,16 +333,17 @@ class GrammarConfig:
     """How a logical form is realized. Nothing here changes what a sentence says."""
 
     adjective_order_fixed: bool
-    class_can_rate: float
-    """The share of positive class-level capacity sentences that use ``can`` ("penguins can
-    swim") and not the bare verb ("penguins swim"). Both say the same."""
+    can_rate: dict[str, float]
+    """The share of positive capacities that say ``can``, at the class level ("penguins can
+    swim" and not "penguins swim") and at the instance level ("the penguin can swim" and not
+    "the penguin swim"). Both forms say the same. A negative capacity always says ``can``."""
     word_order: WordOrderConfig
     morphology: MorphologyConfig
 
     def resolved(self) -> dict[str, Any]:
         return {
             "adjective_order": {"fixed": self.adjective_order_fixed},
-            "class_can_rate": self.class_can_rate,
+            "can_rate": dict(self.can_rate),
             "word_order": self.word_order.resolved(),
             "morphology": self.morphology.resolved(),
         }
@@ -487,6 +501,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         ),
         shuffle=node.probability("shuffle", 0.3),
         instance_description_rate=node.probability("instance_description_rate", 0.2),
+        sibling_contrast_rate=node.probability("sibling_contrast_rate", 0.2),
     )
     node.finish()
     return config
@@ -498,10 +513,17 @@ def _read_propositions(node: _Node) -> PropositionsConfig:
     if max_literals is not None:
         statements.check_int("max_literals", max_literals, min=1)
     statements.finish()
+    events = node.mapping("events")
+    event_tense = events.choice("tense", "past", EVENT_TENSES)
+    progressive_rate = events.probability("progressive_rate", 0.3)
+    events.finish()
     config = PropositionsConfig(
         negation_rate=_probabilities(node.mapping("negation_rate"), NEGATION_LEVELS, 0.1),
         rule_statement_rate=node.probability("rule_statement_rate", 0.3),
         rule_max_literals=max_literals,
+        restriction_rate=node.probability("restriction_rate", 0.1),
+        event_tense=event_tense,
+        progressive_rate=progressive_rate,
     )
     node.finish()
     return config
@@ -595,17 +617,24 @@ def _read_mention(node: _Node, depth: int, verb_depth: int | None) -> MentionCon
     return config
 
 
-def _inflection(node: _Node, key: str) -> _Node:
+def _inflection(node: _Node, key: str, moved: dict[str, str] | None = None) -> _Node:
     """The settings of one inflection. The switch is ``enabled``. It was ``on`` in stage 1,
     which YAML reads as the boolean true when the key is written bare, so the error for the old
-    key covers both readings."""
+    key covers both readings. ``moved`` names the keys that now live elsewhere."""
     part = node.mapping(key)
     if any(k is True or k == "on" for k in part.data):
         raise part.error("on", "is now enabled")
+    for old, new in (moved or {}).items():
+        if old in part.data:
+            raise part.error(
+                old,
+                f"is now {new}: an event's tense and aspect are part of its logical form, and "
+                f"the morphology only says whether and how they are marked",
+            )
     return part
 
 
-def _read_morphology(node: _Node) -> MorphologyConfig:
+def _read_morphology(node: _Node, event_tense: str) -> MorphologyConfig:
     number_node = _inflection(node, "number")
     number = NumberConfig(
         enabled=number_node.bool("enabled", False),
@@ -615,27 +644,27 @@ def _read_morphology(node: _Node) -> MorphologyConfig:
         verb_marks=number_node.choice("verb_marks", "plural", VERB_MARKS),
     )
     number_node.finish()
-    tense_node = _inflection(node, "tense")
+    tense_node = _inflection(node, "tense", {"event_tense": "propositions.events.tense"})
     tense = TenseConfig(
         enabled=tense_node.bool("enabled", False),
         realization=tense_node.choice("realization", "affix", REALIZATIONS),
         position=tense_node.choice("position", "after", SIDES),
-        event_tense=tense_node.choice("event_tense", "past", EVENT_TENSES),
     )
     tense_node.finish()
-    aspect_node = _inflection(node, "aspect")
+    aspect_node = _inflection(
+        node, "aspect", {"progressive_rate": "propositions.events.progressive_rate"}
+    )
     aspect = AspectConfig(
         enabled=aspect_node.bool("enabled", False),
         realization=aspect_node.choice("realization", "word", REALIZATIONS),
         position=aspect_node.choice("position", "after", SIDES),
-        progressive_rate=aspect_node.probability("progressive_rate", 0.3),
     )
     aspect_node.finish()
     node.finish()
     if (
         tense.enabled
         and aspect.enabled
-        and tense.event_tense == "past"
+        and event_tense == "past"
         and tense.realization == aspect.realization == "affix"
     ):
         raise aspect_node.error(
@@ -646,7 +675,9 @@ def _read_morphology(node: _Node) -> MorphologyConfig:
     return MorphologyConfig(number, tense, aspect)
 
 
-def _read_grammar(node: _Node) -> GrammarConfig:
+def _read_grammar(node: _Node, event_tense: str) -> GrammarConfig:
+    if "class_can_rate" in node.data:
+        raise node.error("class_can_rate", "is now grammar.can_rate.class")
     moved = {
         "max_adjectives": "mention.max_adjectives",
         "max_with_phrases": "mention.max_with_phrases",
@@ -675,11 +706,17 @@ def _read_grammar(node: _Node) -> GrammarConfig:
         negation=words.choice("negation", "after_auxiliary", NEGATION_POSITIONS),
     )
     words.finish()
+    can_node = node.mapping("can_rate")
+    can_rate = {
+        "class": can_node.probability("class", 0.5),
+        "instance": can_node.probability("instance", 1.0),
+    }
+    can_node.finish()
     config = GrammarConfig(
         adjective_order_fixed=fixed,
-        class_can_rate=node.probability("class_can_rate", 0.5),
+        can_rate=can_rate,
         word_order=word_order,
-        morphology=_read_morphology(node.mapping("morphology")),
+        morphology=_read_morphology(node.mapping("morphology"), event_tense),
     )
     node.finish()
     return config
@@ -736,7 +773,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     entity_scenes = entity.range("scenes", [1, 3], min=1)
     entity.finish()
     mention = _read_mention(root.mapping("mention"), depth, taxonomy.verb_depth)
-    grammar = _read_grammar(root.mapping("grammar"))
+    grammar = _read_grammar(root.mapping("grammar"), propositions.event_tense)
     scalar = root.mapping("scalar_adjectives")
     z = scalar.get("z", 1.0)
     if not _is_number(z) or z <= 0:

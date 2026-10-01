@@ -7,6 +7,10 @@ code with ``semantic_world.corpus``: subject sets are filtered rows of ``instanc
 fixed test is a brute-force enumeration over the rules' truth tables, and relations are the
 expressions of ``relations.yaml`` evaluated over every pair of rows.
 
+A relative clause in a category term is restrictive: it keeps the rows that have the CAN feature,
+or that are related to at least one row of the other category. The oracle finds those rows with
+plain loops over the pairs.
+
 ``truth`` returns True or False, or None for a logical form that cannot be judged: a vacuous
 one (an empty subject set), or a quantifier that its predicate does not take.
 """
@@ -100,6 +104,21 @@ class Oracle:
                 keep &= self.pole(name, below)
             else:
                 keep &= self.column[name] == int(positive)
+        for clause in term.get("clauses", ()):
+            if clause["kind"] == "can":
+                keep &= self.column[clause["feature"]] == 1
+                continue
+            holds = self.matrix(clause["verb"])
+            as_agent = "patient" in clause
+            others = np.flatnonzero(self.subject_set(clause["patient" if as_agent else "agent"]))
+            for row in np.flatnonzero(keep):
+                related = any(
+                    holds[row, other] if as_agent else holds[other, row]
+                    for other in others
+                    if other != row
+                )
+                if not related:
+                    keep[row] = False
         return keep
 
     def ancestors(self, category: str) -> list[str]:
@@ -236,7 +255,8 @@ class Oracle:
         of ``all`` (1) and ``no`` (0) under the configured grounding."""
         predicate = form["predicate"]
         count, total = self._counts(form)
-        if predicate["kind"] in ("is", "has", "can") and self.all_grounding == "fixed":
+        by_law = self.all_grounding == "fixed" and not form["subject"].get("clauses")
+        if predicate["kind"] in ("is", "has", "can") and by_law:
             return self.fixed(form["subject"], predicate["feature"]) == value
         return count == (total if value else 0)
 
@@ -263,6 +283,8 @@ class Oracle:
         members = self.subject_set(subject)
         if not members.any():
             return None
+        if subject.get("clauses") and quantifier in ("all", "no") and self.all_grounding == "fixed":
+            return None  # a subject with a relative clause takes all and no only when observed
         category = subject["category"]
         if kind == "scalar":
             if quantifier != "generic" or category == THING:
