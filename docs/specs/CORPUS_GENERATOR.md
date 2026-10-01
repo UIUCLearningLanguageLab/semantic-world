@@ -27,7 +27,7 @@ Out of scope for now:
 
 ## Inputs
 
-- **A taxonomy result** (required): a `TaxonomyResult`, or a taxonomy output folder. Verbs and scalar dimensions are used when the result has them. Without verbs, there are no transitive sentences and no thematic scene sampling.
+- **A taxonomy** (required): a taxonomy configuration file with a taxonomy seed, or a taxonomy output folder. In Python, a `TaxonomyResult` works too. A configuration file is generated in memory, so nothing needs to be saved on disk. An output folder is regenerated in memory from its `config.yaml`, and the run stops with an error when the regenerated result differs from the folder's files. Verbs and scalar dimensions are used when the result has them. Without verbs, there are no transitive sentences and no thematic scene sampling.
 - **A word-form run** (optional): a word-form pipeline run (`WORDFORM_PIPELINE.md`) made from the corpus's own request. The corpus is generated first, without word forms, and the word forms are attached afterwards (see "Word forms for the corpus"). Without a word-form run, the corpus has every rendering except the spelled one (see "Renderings").
 
 ## Labels
@@ -63,7 +63,11 @@ Labels follow the project convention: formal labels, indices starting at 1, and 
 
 Each concept has a concept label, used by the conceptual and propositional renderings. Categories, features, verbs, and projections keep their taxonomy labels (`C1.3.2`, `IS.12`, `HAS.4`, `CAN.3`, `V1.2`, `CANBE.V1.1`). A scalar pole is its dimension's label with `HIGH` or `LOW` (`SC.1.HIGH`). The generic head noun is `THING`, and a function word's concept label is its gloss in capitals (`THE`).
 
-For each concept type, a parameter gives the proportion of concepts that get a word (default 1.0). A concept without a word cannot be expressed, and the discourse planner skips any proposition that needs one.
+For each concept type, a parameter gives the proportion of concepts that get a word (default 1.0). The number of named concepts of a type is the proportion times the number of concepts, rounded, and the named concepts are drawn at random. The two poles of a scalar dimension are named together. A concept without a word cannot be expressed, and the discourse planner skips any proposition that needs one.
+
+A verb or verb category whose relation holds for every pair of distinct instances, or for no pair, never gets a word. Such a relation says nothing. `stats.yaml` lists these verbs.
+
+Lexeme labels are numbered in this order: the first lexeme of every named content concept, in the order of the table above; then the second lexemes of concepts with synonyms; then the function words. Content lexemes therefore keep their labels when the grammar settings change the set of function words.
 
 ### Function words
 
@@ -76,7 +80,7 @@ The default is one lexeme per concept and one concept per lexeme. Two parameters
 - `synonym_rate`: the probability that a content concept gets a second lexeme. When a concept has several lexemes, each mention picks one at random.
 - `homonym_rate`: the probability that a content lexeme shares its word form with another concept's lexeme. The pair is chosen within the same part of speech with probability `homonym_same_pos`, and across parts of speech otherwise.
 
-The lexicon records which concept or concepts each lexeme and word form expresses.
+Every lexeme has exactly one concept. A homonym is two lexemes, with different concepts, that share one word form. The lexicon records each lexeme's concept, and the lexeme whose word form a homonym shares (`same_form_as`).
 
 ### Word forms
 
@@ -94,7 +98,7 @@ A class-level proposition says something about a category: "all penguins can swi
 - **Predicate:** one of IS feature, HAS feature, CAN feature, scalar pole ("are big"), membership in a category above the subject ("are birds"), or a verb with a patient category ("chase fish").
 - **Quantifier:** `all`, `most`, `some`, `no`, or `generic` (a bare plural with no quantifier word: "penguins swim").
 
-**Truth grounding.** For one-place predicates:
+**Truth grounding.** A class-level proposition needs at least one instance in its subject set: the instances below the subject category that satisfy the restriction. A proposition with an empty subject set is vacuous, and is never generated, in documents or in test sets. For one-place predicates:
 
 - `all` is true when the predicate is fixed at 1 for the category, given its defining features, any fixed-by-rule features, and the restriction. The test uses the cone enumeration of the fixed-by-rule test, with the restriction's literals added as fixed. With `quantifiers.all_grounding: observed`, `all` is true instead when every instance in the subject set satisfies the predicate.
 - `no` is true when the predicate is fixed at 0, by the same test.
@@ -102,13 +106,13 @@ A class-level proposition says something about a category: "all penguins can swi
 - `some` is true when that proportion is above 0. With `quantifiers.some.exclude_all` on (the default), `some` is used only when `all` is false, following the usual implicature.
 - `generic` means whatever `quantifiers.generic.means` says: `all`, `most`, or `some`. "Penguins swim" can therefore mean all, most, or some penguins swim, set by a parameter.
 
-For verbs, the proportion is the category proportion from `relation_proportions.csv`, and `all` means a proportion of 1 over the existing pairs.
+For verbs, the proportion is the proportion of pairs of distinct instances, an agent from the subject set and a patient from the patient category, for which the relation holds. The proportion is computed from the relation matrices (`result.relations.matrix`), for any pair of categories, at the same level or not, and for any verb or verb category. A verb category's relation is its base relation. The proportions are not limited to the rows of `relation_proportions.csv`. `all` means a proportion of 1 over the existing pairs.
 
 For membership ("penguins are birds"), the predicate is true exactly when the predicate category is an ancestor of the subject category. Membership sentences take `all` or `generic` only.
 
-For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances.
+For scalar poles, the comparison class is the subject category's parent: "elephants are big" means the category's mean value lies at least `scalar_adjectives.z` standard deviations above the mean of the parent category's instances. A top-level category has no parent, and is compared with all instances in the world. A class-level scalar pole takes the generic only, never a quantifier word.
 
-**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it.
+**Rule statements.** A class-level proposition can state a rule of the world. For a determined feature, each term of the minimal DNF of its rule is a sufficient condition. The proposition takes the generic noun "thing" as its head, the term's literals as its restriction, and the determined feature as its predicate: "things with wings and with feathers can fly". A rule statement is true with `all` by construction. The truth test above confirms it. A positive IS literal of the term is an adjective, and a HAS literal is a with-phrase or a without-phrase. A negated IS literal is realized as a subject relative clause: "things with wings that are not red can fly". The same holds for a negated IS literal in any restriction. A term is skipped when it would need more than one relative clause, or when it reads a scalar threshold, which no pole adjective states. `stats.yaml` reports how many terms were skipped, and why.
 
 ### Instance level
 
@@ -200,6 +204,7 @@ Encyclopedic documents follow a loose template: membership first, then defining 
 - **Noun level.** A category or instance is named with the noun of a category drawn from its own level and the levels above it. `mention.level_weights` give the weights, with the leaf level heaviest by default. The logical form records which category the noun names.
 - **First and later mentions.** In narratives, an instance is introduced with the indefinite determiner ("a penguin") and mentioned later with the definite determiner ("the penguin") or a pronoun.
 - **Pronouns.** A later mention becomes "it" at `mention.pronoun_rate`, when the referent was mentioned in the previous sentence and was either the only referent mentioned there or its subject. Coreference chains are recorded, including for ambiguous pronouns.
+- **Relative clauses and limits.** The planner decides everything that changes what a sentence says. So the planner, and not the grammar, decides which noun phrases take relative clauses (`mention.relative_clauses`), and applies the limits on adjectives, with-phrases, and sentence length (`mention.max_adjectives`, `mention.max_with_phrases`, `mention.max_content_words`). The grammar section describes how they are realized.
 - **Distinguishing modifiers.** When a scene has two or more participants that the chosen noun fits, a definite mention adds adjectives or with-phrases until it picks out one referent, following the incremental algorithm of Dale and Reiter (1995), with the preference order fixed per language. In situational documents, adjectives therefore do referential work. Elsewhere, modifiers are added at `mention.modifier_rate`, chosen from features true of the referent.
 
 ## Layer 4: grammar
@@ -225,15 +230,15 @@ VP   → is a N | is not a N                 (membership)
 
 Quantifiers occupy the determiner slot: "all penguins", "no fish". The negative class-level quantifier "no" replaces sentence negation: "no fish have fur".
 
-**Relative clauses.** A noun phrase takes a relative clause at `relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `relative_clauses.max_depth`. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction.
+**Relative clauses.** A noun phrase takes a relative clause at `mention.relative_clauses.rate`. The clause is an object relative ("the mouse that the owl eats") with probability `mention.relative_clauses.object_share`, and a subject relative ("the owl that eats mice") otherwise. A relative clause's own noun phrases can take relative clauses up to `mention.relative_clauses.max_depth`. The planner makes these choices, and the grammar realizes them. Depth 2 or more produces center embedding in subject position, and with it controllable long-distance dependencies. A relative clause expresses a true proposition of the same level as its sentence, about the same referent, and the logical form records it as a restriction.
 
 **Adjective order.** When a noun takes several adjectives, they appear in a fixed order: a random ordering of adjective concepts drawn once per language. `adjective_order.fixed: false` makes the order random for each phrase.
 
-**Limits.** `max_adjectives` (default 3), `max_with_phrases` (default 2), and `max_sentence_tokens` (default 30). A proposition whose realization would pass a limit is realized with fewer optional modifiers.
+**Limits.** `mention.max_adjectives` (default 3), `mention.max_with_phrases` (default 2), and `mention.max_content_words` (default 20). The planner applies the limits: a proposition that would pass a limit gets fewer optional modifiers. The sentence limit counts content words only (nouns, adjectives, and verbs), because the number of function words depends on the morphology settings, and a grammar setting must never change what a sentence says.
 
 ### Word order
 
-Each setting has an English default.
+Each setting has an English default. The word-order and morphology settings never change a logical form. They change only how a logical form is realized.
 
 | Setting | Values | Default |
 | --- | --- | --- |
@@ -267,19 +272,19 @@ Each scalar dimension has two adjectives, one for each pole. An instance counts 
 
 Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 
-- **Formal:** lexeme labels with glosses, for example `the/L.1 penguin/L.57 swim/L.203`. The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`).
-- **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering differs from the formal one only when synonyms or homonyms are on: synonyms share a concept label, and a homonym's two meanings get different concept labels.
+- **Formal:** lexeme labels with glosses, for example `the/L.176 C1.3/L.5 CAN.2/L.138` for "the penguin swim". The gloss of a content lexeme is its concept's label (`C1.3`, `CAN.2`), and the gloss of a function word is its English gloss (`the`).
+- **Conceptual:** the sentence's words in order, each replaced by its concept label: `THE IS.12 C1.3.2 CAN V1.2 THE C1.4.1` for "the furry dog can chase the cat". An inflected word is its concept label joined to the affix's gloss: `C1.3.2-PLURAL`. The conceptual rendering carries different information from the formal rendering only when synonyms are on, because synonyms share a concept label. Homonyms are two lexemes, so both renderings tell a homonym's two meanings apart.
 - **Propositional:** the sentence's logical form, written out as atomic propositions joined by `AND`. Every modifier, with-phrase, relative clause, and noun becomes its own proposition, so one sentence is usually several propositions. Determiners and pronouns disappear, and referents are named by label. Its format is below.
 - **Spelled:** the word forms' readable spellings, after word forms are attached.
 
-**The propositional format.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, `CAN.3(R.1)`, `SC.1.HIGH(R.1)`, and `V1.2(R.1, R.2)` (the relation holds, so the agent can do it to the patient). `NOT` before an atom negates it. An event-level proposition is prefixed with its event label: `SN.8.5: V1.2(R.1, R.2)`. A class-level proposition is a quantifier with a restrictor and a scope over the variables `x` and `y`: `MOST(C1.3(x) AND IS.4(x), CAN.3(x))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). Examples:
+**The propositional format.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, `CAN.3(R.1)`, `SC.1.HIGH(R.1)`, and `V1.2(R.1, R.2)` (the relation holds, so the agent can do it to the patient). `NOT` before an atom negates it. An event-level proposition is prefixed with its event label: `SN.8.5: V1.2(R.1, R.2)`. A class-level proposition is a quantifier with a restrictor and a scope over variables: `MOST(C1.3(X.1) AND IS.4(X.1), CAN.3(X.1))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). Variables are labeled `X.1`, `X.2`, and so on, numbered within each sentence in order of first mention, like referents. So a relative clause at any depth can introduce a new variable. Examples:
 
 | Sentence | Propositional rendering |
 | --- | --- |
 | the furry dog has legs | `C1.3.2(R.1) AND IS.12(R.1) AND HAS.4(R.1)` |
 | the dog that chased the cat ran | `C1.3.2(R.1) AND C1.4.1(R.2) AND SN.3.2: V1.2(R.1, R.2) AND SN.3.4: CAN.7(R.1)` |
-| things with wings and with feathers can fly | `ALL(HAS.2(x) AND HAS.5(x), CAN.1(x))` |
-| owls eat mice | `GEN(C1.2(x) AND C1.5(y), V2.1(x, y))` |
+| things with wings and with feathers can fly | `ALL(HAS.2(X.1) AND HAS.5(X.1), CAN.1(X.1))` |
+| owls eat mice | `GEN(C1.2(X.1) AND C1.5(X.2), V2.1(X.1, X.2))` |
 
 Referents are numbered within each document in order of first mention (`R.1`, `R.2`), so a referent keeps its label across sentences and the propositional rendering shows coreference directly. With `renderings.propositional.referents: instance`, referents are named by their taxonomy instance labels instead. The document's `referents` field records each referent's instance either way.
 
@@ -290,7 +295,7 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The resolved configuration, all seeds, the taxonomy run's identity (its configuration hash and seed), the word-form run's identity when used, the git commit hash, and package versions. |
-| `lexicon.csv` | One row per lexeme: label, part of speech, concept or concepts, word form label, spelling, gloss. |
+| `lexicon.csv` | One row per lexeme: label, part of speech, concept, word form label, spelling, gloss, and, for a homonym, the lexeme whose word form it shares (`same_form_as`). |
 | `documents.jsonl` | One JSON object per document (schema below). |
 | `corpus.txt` | Every document in the spelled rendering (or the formal rendering without word forms): one sentence per line, a blank line between documents. |
 | `corpus_formal.txt` | The same in the formal rendering. |
@@ -299,7 +304,7 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
 | `scenes.jsonl` | One JSON object per scene: participants, and events by time step. |
 | `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. |
-| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; and the co-occurrence check below. |
+| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; and the co-occurrence check below. |
 
 Each document object holds its label, type, topic, scenes, and sentences. Each sentence holds:
 
@@ -340,12 +345,14 @@ The corpus comes first, and the word forms are made for it. The run has three st
 - `function_words`: the glosses of the function words the corpus uses, most frequent first, by their counts in the generated corpus;
 - `affixes`: the glosses and positions of the affixes the corpus uses;
 - `inflect`: the lexemes that appear inflected, with the affixes each one takes;
-- `meanings`: the taxonomy run's `categories_generative.csv`, for assigning category lexemes.
+- `meanings`: the taxonomy run's `categories_generative.csv`, for assigning category lexemes. When the request gives meanings, the pipeline's `assignment.meanings` must be null. Giving both is an error.
 
 **The word-form pipeline's part.** The pipeline already makes function words, affixes, and inflected forms from a request (stage 4a of `WORDFORM_PIPELINE.md`), and assigns words to categories (stage 7). Corpus stage 7 extends it:
 
 - the request becomes a top-level `request` setting that replaces `closed_class.request`, and gains `lexemes` and `meanings`;
-- lexemes are assigned to content words. Category lexemes are assigned by the configured assignment mode (arbitrary, target correlation, branch markers, or acoustic mapping). All other lexemes get words at random, from the words left over. A homonym gets its partner's word. The assignment is written to `assignment/lexicon.csv` with a `lexeme` column, and `words.csv` gains the part of speech of each assigned word (`pos`);
+- lexemes are assigned to content words. Category lexemes are assigned by the configured assignment mode (arbitrary, target correlation, branch markers, or acoustic mapping). A category without a lexeme is left out of the assignment. A category's synonym lexemes are assigned by the mode too, each with the category's meaning vector, so the synonyms of one category share its sound–meaning structure, including its branch marker. All other lexemes get words at random, from the words left over. A homonym gets its partner's word. The assignment is written to `assignment/lexicon.csv` with a `lexeme` column, and `words.csv` gains the part of speech of each assigned word (`pos`);
+- a lexeme that must be inflected gets only a word that can take its affixes. Every assignment mode respects that rule, as branch markers already do for their markers. So no inflected form that the corpus needs is ever skipped;
+- the pipeline runs in two passes. The words are assigned first. The inflected forms are then made, synthesized, and embedded. The audio cache keeps the second pass cheap, and with the edit distance as the sound distance, no audio is needed before the assignment;
 - `inflect` entries can name lexemes, and the pipeline inflects whatever form the lexeme's concept got, including a marked form of branch-marker mode (`W.12.M.2.AF.1`);
 - a run whose content words are fewer than the lexemes that need distinct forms is an error. Content words that no lexeme gets are kept; they can serve as novel words in tests.
 
@@ -360,7 +367,8 @@ Spoken sentences, with coarticulation across word boundaries and reduced functio
 ```yaml
 name: default
 seed: 1
-taxonomy: runs/taxonomy/relations_seed1      # a taxonomy output folder
+taxonomy: {config: data/taxonomy/relations.yaml, seed: 1}   # a taxonomy configuration file and a taxonomy seed (null: the file's seed)
+# taxonomy: {run: runs/taxonomy/relations_seed1}            # or a taxonomy output folder, regenerated in memory and checked against its files
 
 lexicon:
   named_proportion: {category: 1.0, is: 1.0, has: 1.0, can: 1.0, verb: 1.0, verb_category: 1.0, patient_projection: 1.0, scalar: 1.0}
@@ -402,13 +410,13 @@ mention:
   level_weights: {schedule: linear, start: 1, end: 4}         # heaviest at the leaf level
   pronoun_rate: 0.5
   modifier_rate: 0.3
-
-grammar:
   max_adjectives: 3
   max_with_phrases: 2
-  max_sentence_tokens: 30
-  adjective_order: {fixed: true}
+  max_content_words: 20                       # nouns, adjectives, and verbs in one sentence
   relative_clauses: {rate: 0.1, max_depth: 1, object_share: 0.3}
+
+grammar:
+  adjective_order: {fixed: true}
   word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
   morphology:
     number: {on: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
@@ -425,20 +433,20 @@ test_sets:
   changes: [predicate, subject, quantifier, role]
 ```
 
-Validation follows the base conventions: unknown keys are errors, and every error names the file and the field.
+Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. YAML reads a bare `on` as the boolean true, so the loader accepts either reading of the `on` key in the morphology settings.
 
 ## Determinism
 
 Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `corpus:lexicon`, `corpus:scenes`, `corpus:documents`, `corpus:propositions`, `corpus:mentions`, `corpus:grammar`, and `corpus:tests`. The corpus seed is its own master seed, independent of the taxonomy's seed. Properties, each tested:
 
 - the same taxonomy run, word-form run, configuration, and seed give byte-identical output folders;
-- changing the grammar settings never changes the propositions or their order, only their realization;
+- changing the grammar settings (word order, adjective order, and morphology) never changes any logical form or the order of the sentences, only their realization;
 - rendering with a word-form run changes only the word labels, the spelled rendering (and with it `corpus.txt`), and the word-form columns of `lexicon.csv`; the rest of the output folder is byte-identical;
 - changing the test-set settings never changes the documents.
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `lexicon.py`, `propositions.py` (logical forms and truth tests), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `scenes.py`, `planner.py` (document types, ordering, and mentions), `grammar.py` (phrase structure, word order, and morphology), `realize.py`, `interpret.py` (tree to logical form, for tests), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -457,7 +465,7 @@ Work on one branch per stage (`corpus-stage-1`, and so on). Branch stage 1 from 
 4. **Grammar and realization.** Phrase structure, word order, morphology and agreement, adjective order, relative clauses, scalar adjectives, and the conceptual rendering. *Accept:* every tree's leaves equal its tokens; with agreement on, every verb and auxiliary agrees with its subject, including across relative clauses; `interpret(tree)` recovers the logical form exactly for every sentence; all six clause orders and all two-way settings produce correct trees on a fixed set of propositions; relative-clause depth never exceeds the limit.
 5. **Documents.** The four document types, ordering, noun levels, first and later mentions, pronouns, distinguishing modifiers, referent labels, and the propositional rendering. *Accept:* the propositional rendering of every sentence parses back to its logical form; every distinguishing definite mention picks out exactly one participant of its scene; every pronoun's chain matches the referent recorded in its logical form; with shuffle 0, encyclopedic documents follow the template order exactly.
 6. **Outputs, test sets, statistics, and the `generate` command.** *Accept:* `documents.jsonl` round-trips through a JSON parser with the documented schema; each corpus text file matches its rendering in `documents.jsonl`; the determinism properties hold; on the default configuration, situational documents' co-occurrence correlates more with thematic relatedness than encyclopedic documents' does, and less with taxonomic similarity.
-7. **Word forms.** The request, the word-form pipeline changes in "Word forms for the corpus" (with their tests in the word-form pipeline's suite, and its spec and guide updated), and the `render` command. *Accept:* on the tiny configuration, generate, make word forms, and render run end to end; every lexeme gets a word form, distinct lexemes get distinct forms unless they are homonyms, and category lexemes follow the assignment mode; function words are ordered by their corpus counts; only the inflections the corpus uses are synthesized; `corpus.txt` matches the spelled renderings; rendering leaves the rest of the output folder byte-identical; with branch markers and plural affixes, marked forms are inflected.
+7. **Word forms.** The request, the word-form pipeline changes in "Word forms for the corpus" (with their tests in the word-form pipeline's suite, and its spec and guide updated), and the `render` command. *Accept:* on the tiny configuration, with a new word-form configuration made for the tiny corpus (`data/wordforms/tiny.yaml` makes too few words, and stays unchanged), generate, make word forms, and render run end to end; every lexeme gets a word form, distinct lexemes get distinct forms unless they are homonyms, and category lexemes follow the assignment mode; function words are ordered by their corpus counts; only the inflections the corpus uses are synthesized; `corpus.txt` matches the spelled renderings; rendering leaves the rest of the output folder byte-identical; with branch markers and plural affixes, marked forms are inflected.
 
 ## Decisions to confirm
 
@@ -478,6 +486,19 @@ Jon decided the following on October 1, 2026:
 10. Category lexemes get words by the word-form pipeline's assignment mode. All other lexemes get words at random. Sound differences between parts of speech are a future addition.
 11. Subject–verb agreement is a parameter, on by default when number is on. Number, tense, and aspect can each be realized as affixes or as separate words.
 12. In branch-marker mode, marked forms can take affixes.
+
+Jon decided the following on October 1, 2026, before stage 1 (`docs/proposals/2026-10-01-corpus-decisions-before-stage-1.md`):
+
+13. A homonym is two lexemes that share one word form. Every lexeme has exactly one concept.
+14. The taxonomy is given as a configuration file with a seed, or as an output folder. An output folder is regenerated in memory and checked against its files.
+15. A verb or verb category whose relation holds for every pair, or for no pair, gets no lexeme.
+16. The word-form pipeline assigns first, and then makes, synthesizes, and embeds the inflected forms. A lexeme that must be inflected gets only a word that can take its affixes. Categories without a lexeme are left out of the assignment, and a category's synonyms are assigned by the mode. The request's `meanings` and `assignment.meanings` cannot both be given.
+17. Word-order and morphology settings never change a logical form. Relative clauses and the limits on modifiers belong to the planner (`mention`). The sentence limit counts content words.
+18. Variables in the propositional rendering are labeled `X.1`, `X.2`, and so on.
+19. A class-level proposition needs at least one instance in its subject set.
+20. In a rule statement, a negated IS literal is a subject relative clause. A term that needs more than one relative clause, or that reads a scalar threshold, is skipped and counted.
+21. Class-level verb proportions come from the relation matrices, for any category pair and any verb or verb category.
+22. Class-level scalar poles take the generic only. A top-level category is compared with all instances in the world.
 
 ## Future additions
 

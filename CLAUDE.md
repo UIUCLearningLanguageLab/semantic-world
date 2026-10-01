@@ -60,6 +60,7 @@ python -m semantic_world.wordforms check-ipa                      # compare the 
 python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml   # transcribe real words synthesized from phonemes
 python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/wordforms/voices   # fetch the Piper voice once
 pytest tests/wordforms                                           # the word-form pipeline's tests alone
+pytest tests/corpus                                              # the corpus generator's tests alone
 ```
 
 The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).
