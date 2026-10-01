@@ -170,7 +170,7 @@ Each recipe applies its transformations in the order manipulation (Praat's "Chan
 
 With augmentation on, the evaluation gives every measure for clean tokens, augmented tokens, both, and each recipe (the `tokens` column), plus a robustness measure: how well a token retrieves its own word's clean embedding (`robustness_ap`, with `robustness_top1` for the share of tokens whose nearest word is their own).
 
-The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`, `measure_formants`, `measure_formant_shift`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
+The Praat tools in `semantic_world.wordforms.praat` (`measure_pitch`, `change_pitch`, `change_duration`, `manipulate`, `measure_pitch_shift`, `measure_formants`, `measure_formant_shift`) work on any clip, whole or within a time range, for later work on connected speech. `praat-parselmouth` is GPL-3.0 and is imported only inside that module.
 
 ## What the evaluation shows
 

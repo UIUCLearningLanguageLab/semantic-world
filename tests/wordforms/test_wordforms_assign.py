@@ -471,6 +471,24 @@ def test_the_formant_shift_measure_does_not_use_the_target():
     assert np.isnan(praat.measure_formant_shift(np.zeros(8000), np.zeros(8000), 16000))
 
 
+@needs_audio
+@needs_parselmouth
+def test_the_pitch_shift_measure():
+    from semantic_world.wordforms import praat
+
+    clip = voice_clip()
+    assert praat.measure_pitch_shift(clip, clip, 16000) == 0.0
+    for semitones in (-3.0, 2.0):
+        shifted = praat.change_pitch(clip, 16000, factor=2.0 ** (semitones / 12.0))
+        assert praat.measure_pitch_shift(clip, shifted, 16000) == pytest.approx(semitones, abs=0.05)
+    # a copy with another duration is matched by relative time, and a span can be measured
+    longer = praat.change_duration(shifted, 16000, 1.3)
+    assert praat.measure_pitch_shift(clip, longer, 16000) == pytest.approx(2.0, abs=0.1)
+    span = praat.measure_pitch_shift(clip, shifted, 16000, time_range=(0.2, 0.4))
+    assert span == pytest.approx(2.0, abs=0.05)
+    assert np.isnan(praat.measure_pitch_shift(np.zeros(8000), np.zeros(8000), 16000))
+
+
 MAPPINGS = [
     {"feature": "ISA.C1", "property": "pitch", "amount": 3.0},
     {"feature": "ISA.C2", "property": "duration", "amount": 1.25},
@@ -532,7 +550,7 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
     assert report["skipped"] == []
     by = {m["property"]: m for m in report["mappings"]}
     assert by["pitch"]["quantity"] == "pitch_semitones"
-    assert by["pitch"]["achieved_mean"] == pytest.approx(3.0, rel=0.05)
+    assert by["pitch"]["achieved_mean"] == pytest.approx(3.0, rel=0.02)
     assert by["duration"]["achieved_mean"] == pytest.approx(1.25, rel=0.01)
     assert by["tilt"]["achieved_mean"] == pytest.approx(-4.0, rel=0.02)
     assert by["formants"]["achieved_mean"] == pytest.approx(1.15, rel=0.05)
@@ -595,10 +613,10 @@ def test_all_with_acoustic_mapping_on_the_tiny_configuration(tmp_path, capsys):
     assert by["tilt"]["achieved_mean"] == pytest.approx(3.0, rel=0.02)
     assert by["formants"]["achieved_mean"] == pytest.approx(1.1, rel=0.02)
     assert by["formants"]["over_10_percent"] == 0 and by["formants"]["feature_correlation"] > 0.95
-    # real clips: the measured pitch shift is close to the amount on average, and the misses
-    # are counted
-    assert by["pitch"]["achieved_mean"] == pytest.approx(2.0, rel=0.15)
-    assert by["pitch"]["over_10_percent"] <= by["pitch"]["over_5_percent"] <= by["pitch"]["tokens"]
+    # real clips: the measured pitch shift is the amount, and the misses are counted
+    assert by["pitch"]["achieved_mean"] == pytest.approx(2.0, rel=0.03)
+    assert by["pitch"]["over_10_percent"] <= by["pitch"]["over_5_percent"] <= 2
+    assert by["pitch"]["feature_correlation"] > 0.99
     tokens = pl.read_csv(out / "tokens.csv")
     mapped = tokens.filter(pl.col("label").str.ends_with(".M"))
     assert mapped.height == summary["acoustic_mapping"]["mapped_tokens"] == 72

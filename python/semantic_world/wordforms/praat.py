@@ -11,7 +11,8 @@ word, a vowel, or a syllable inside an utterance:
 - :func:`manipulate`: Praat's "Change gender" command (formant shift ratio, new pitch median,
   pitch range factor, duration factor), applied to a span and spliced back.
 - :func:`measure_formants` and :func:`measure_formant_shift`: the mean formants of a clip or a
-  span, and the ratio between the formants of a clip and of a changed copy of it.
+  span, and the ratio between the formants of a clip and of a changed copy of it;
+- :func:`measure_pitch_shift`: the shift in pitch between a clip and a changed copy of it.
 
 ``praat-parselmouth`` is GPL-3.0, so this module imports it only inside the functions that use
 it, and nothing else in the package imports it (``docs/specs/WORDFORM_PIPELINE.md``, "Licenses").
@@ -127,6 +128,38 @@ def measure_pitch(
         int(voiced.size),
         int(hz.size),
     )
+
+
+def measure_pitch_shift(
+    before: np.ndarray,
+    after: np.ndarray,
+    rate: int,
+    time_range: tuple[float, float] | None = None,
+    floor: float = PITCH_FLOOR,
+    ceiling: float = PITCH_CEILING,
+) -> float:
+    """The shift in pitch, in semitones, from ``before`` to ``after``, where ``after`` is a
+    changed copy of ``before`` (its duration may differ: the frames are matched by their
+    relative time). ``time_range`` is a span of ``before``, in seconds.
+
+    The shift is the median, over the frames that are voiced in both clips, of the frame's pitch
+    after over its pitch before. A change of pitch can change which frames Praat finds voiced,
+    which moves a clip's median pitch by itself, so the difference between the two clips' median
+    pitches is a much noisier measure of the same shift. NaN without a frame that is voiced in
+    both clips."""
+    times, hz = pitch_track(before, rate, floor, ceiling)
+    if time_range is not None:
+        keep = (times >= time_range[0]) & (times < time_range[1])
+        times, hz = times[keep], hz[keep]
+    changed_times, changed = pitch_track(after, rate, floor, ceiling)
+    if not len(hz) or not len(changed):
+        return float("nan")
+    matched = times * (len(after) / len(before))
+    changed = changed[np.clip(np.searchsorted(changed_times, matched), 0, len(changed) - 1)]
+    both = (hz > 0) & (changed > 0)
+    if not both.any():
+        return float("nan")
+    return float(np.median(12.0 * np.log2(changed[both] / hz[both])))
 
 
 def _manipulation(clip: np.ndarray, rate: int, floor: float, ceiling: float):

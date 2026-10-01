@@ -35,7 +35,7 @@ from semantic_world.wordforms.config import AcousticMappingConfig, Config
 from semantic_world.wordforms.synth import CACHE_VERSION, Synthesis, Token
 from semantic_world.wordforms.synth import audio as audio_tools
 
-MAPPING_VERSION = 1
+MAPPING_VERSION = 2
 """Part of every mapped clip's cache key. Raise it when the manipulations change."""
 RECIPE = "acoustic_mapping"
 ACHIEVED_KEYS = {
@@ -60,10 +60,9 @@ def apply_mappings(
     for mapping in mappings:
         key = ACHIEVED_KEYS[mapping.property]
         if mapping.property == "pitch":
-            before = praat.measure_pitch(out, rate).median_hz
+            before = out
             out = praat.change_pitch(out, rate, factor=2.0 ** (mapping.amount / 12.0))
-            after = praat.measure_pitch(out, rate).median_hz
-            measured = 12.0 * np.log2(after / before)
+            measured = praat.measure_pitch_shift(before, out, rate)
         elif mapping.property == "formants":
             before = out
             out = praat.manipulate(out, rate, formant_shift_ratio=mapping.amount)
