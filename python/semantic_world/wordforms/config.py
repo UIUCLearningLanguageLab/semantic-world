@@ -471,6 +471,9 @@ class AssignmentConfig:
     """``edit`` (phoneme edit distance) or the name of an embedding (cosine distance between
     word embeddings)."""
     meaning_distance: str = "hamming"
+    strict: bool = False
+    """Whether an assignment that ends further from its target than the tolerance is an error.
+    When false, the closest value reached is reported with a warning."""
     target: float = 0.3
     """The sound-meaning correlation that the target-correlation mode aims at."""
     tolerance: float = 0.01
@@ -492,6 +495,7 @@ class AssignmentConfig:
             "sound_distance": self.sound_distance,
             "meaning_distance": self.meaning_distance,
             "null_samples": self.null_samples,
+            "strict": self.strict,
             "target_correlation": {
                 "target": self.target,
                 "tolerance": self.tolerance,
@@ -1268,6 +1272,7 @@ def _read_assignment(node: _Node, embeddings: tuple[EmbeddingConfig, ...]) -> As
         non_binary=node.choice("non_binary", "drop", NON_BINARY_COLUMNS),
         sound_distance=sound,
         meaning_distance=node.choice("meaning_distance", "hamming", MEANING_DISTANCES),
+        strict=node.bool("strict", False),
         target=float(target_node.number("target", 0.3, min=-1, max=1)),
         tolerance=float(target_node.number("tolerance", 0.01, min=0, exclusive_min=True)),
         max_swaps=target_node.int("max_swaps", 20000, min=1),

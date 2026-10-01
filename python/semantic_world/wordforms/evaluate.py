@@ -51,7 +51,9 @@ without normalization.
 A run with augmented tokens reports every measure separately for the clean (synthesized) tokens,
 the augmented tokens, and both together (``tokens``: ``clean``, ``augmented``, ``all``), each
 with its own sample, and once more for each recipe (``recipe:<name>``) on the widest kind. A run
-without augmentation has the ``clean`` rows alone.
+without augmentation has the ``clean`` rows alone. A run with acoustic mapping counts a mapped
+word's mapped tokens as its clean tokens, and adds two token sets on the widest kind: ``mapped``,
+the mapped tokens, and ``control``, their unmapped originals, which are in no other set.
 
 - **Robustness**: how well a token retrieves its own word's clean embedding. Pairs of a sampled
   token and a word embedding (the mean of the word's clean training tokens) are ranked by cosine
@@ -96,6 +98,8 @@ KINDS = ("content", "function", "inflected", "marked")
 DERIVED_KINDS = ("inflected", "marked")
 """The kinds of form that have a stem: inflected forms, and forms with a branch marker."""
 ALL_KINDS = "all"
+MAPPING_SETS = ("mapped", "control")
+"""The token sets that compare acoustically mapped tokens with their unmapped originals."""
 EVAL_COLUMNS = (
     "embedding",
     "encoder",
@@ -341,29 +345,38 @@ def evaluate_embeddings(
     did not store its layers; ``sweep=False`` leaves the sweep out."""
     token_words, token_speakers, train = token_layout(words, synthesis)
     word_kinds = np.array([word.kind for word in words])
-    clean = np.array([not t.augmentation for t in synthesis.tokens], dtype=bool)
+    augmented = np.array([bool(t.augmentation) for t in synthesis.tokens], dtype=bool)
+    control = np.array([t.control for t in synthesis.tokens], dtype=bool)
+    mapped = np.array([bool(t.mapping) for t in synthesis.tokens], dtype=bool) & ~augmented
+    clean = ~augmented & ~control
     recipe_of = np.array(
         [json.loads(t.augmentation)["recipe"] if t.augmentation else "" for t in synthesis.tokens]
     )
     # The kinds of words that get rows: each kind, and all forms together when the run has
     # closed-class forms. The token sets: the clean tokens, and with augmentation also the
-    # augmented tokens, all tokens, and each recipe's tokens (on the widest kind). Each group,
-    # a kind with a token set, has its own sample of tokens, the clean content words' first.
+    # augmented tokens, all tokens, and each recipe's tokens (on the widest kind). With acoustic
+    # mapping, a mapped word's clean tokens are its mapped tokens, and two more sets on the
+    # widest kind compare the mapped tokens with their unmapped originals, the control tokens,
+    # which are in no other set. Each group, a kind with a token set, has its own sample of
+    # tokens, the clean content words' first.
     kinds = {kind: word_kinds == kind for kind in KINDS if (word_kinds == kind).any()}
     if set(kinds) != {"content"}:
         kinds[ALL_KINDS] = np.ones(len(words), dtype=bool)
     widest = ALL_KINDS if ALL_KINDS in kinds else "content"
     token_sets: dict[str, np.ndarray] = {"clean": clean}
-    if not clean.all():
-        token_sets["augmented"] = ~clean
-        token_sets["all"] = np.ones(len(clean), dtype=bool)
-        for name in dict.fromkeys(recipe_of[~clean]):
+    if augmented.any():
+        token_sets["augmented"] = augmented
+        token_sets["all"] = ~control
+        for name in dict.fromkeys(recipe_of[augmented]):
             token_sets[f"recipe:{name}"] = recipe_of == name
+    if control.any() and mapped.any():
+        token_sets["mapped"] = mapped
+        token_sets["control"] = control
     groups: list[tuple[str, str]] = [
         (kind, tokens)
         for kind in kinds
         for tokens in token_sets
-        if not tokens.startswith("recipe:") or kind == widest
+        if kind == widest or not (tokens.startswith("recipe:") or tokens in MAPPING_SETS)
     ]
     samples: dict[tuple[str, str], np.ndarray] = {}
     for kind, tokens in groups:
@@ -477,7 +490,7 @@ def evaluate_embeddings(
 
     everything = np.ones(len(words), dtype=bool)
     use_all = config is not None and config.word_embeddings.tokens == "all"
-    word_tokens = train if use_all else train & clean
+    word_tokens = train & ~control if use_all else train & clean
     basis = normalization_basis(words, synthesis, token_words)
     for store in stores.values():
         pretrained = bool(store.meta["pretrained"])

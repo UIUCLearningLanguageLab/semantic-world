@@ -126,17 +126,18 @@ def run_synthesis(run: Run, progress=None) -> Run:
     run.synthesis = synthesize_lexicon(
         run.config, run.streams, run.lexicon.words, progress=progress
     )
+    if run.assignment is not None and run.config.assignment.mode == "acoustic_mapping":
+        from semantic_world.wordforms.mapping import map_tokens
+
+        # The meaning of a word shifts the sound of its tokens. The mapped tokens are the
+        # word's tokens from here on, so the mapping comes before the augmentation.
+        run.assignment.summary["acoustic_mapping"] = map_tokens(
+            run.config, run.synthesis, run.assignment, progress=progress
+        )
     if run.config.augmentation is not None:
         from semantic_world.wordforms.augment import augment_synthesis
 
         augment_synthesis(run.config, run.streams, run.synthesis, progress=progress)
-    if run.assignment is not None and run.config.assignment.mode == "acoustic_mapping":
-        from semantic_world.wordforms.mapping import map_tokens
-
-        # the meaning of a word shifts the sound of its tokens
-        run.assignment.summary["acoustic_mapping"] = map_tokens(
-            run.config, run.synthesis, run.assignment, progress=progress
-        )
     return run
 
 

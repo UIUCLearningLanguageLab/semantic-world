@@ -20,7 +20,9 @@ from wordforms_support import (
     needs_espeak,
     needs_parselmouth,
     needs_piper,
+    needs_torch,
     needs_wordfreq,
+    plain_rows,
 )
 
 from semantic_world.wordforms import Run, run_assignment, run_forms
@@ -93,6 +95,7 @@ def test_assignment_configuration(tmp_path):
     assert default.mode == "arbitrary" and default.meanings is None and default.categories == "all"
     assert default.sound_distance == "edit" and default.meaning_distance == "hamming"
     assert default.target == 0.3 and default.marker_depth == 1 and default.acoustic == ()
+    assert default.strict is False
     config = parse_config(
         {
             "embeddings": [{"name": "e", "encoder": "fixed", "frontend": "logmel"}],
@@ -102,6 +105,7 @@ def test_assignment_configuration(tmp_path):
                 "categories": "leaves",
                 "sound_distance": "e",
                 "meaning_distance": "jaccard",
+                "strict": True,
                 "target_correlation": {"target": -0.2, "tolerance": 0.05, "max_swaps": 100},
                 "branch_markers": {"depth": 2, "position": "final", "shape": "VC"},
                 "acoustic_mapping": [{"feature": "IS.1", "property": "pitch", "amount": 2}],
@@ -111,12 +115,13 @@ def test_assignment_configuration(tmp_path):
     )
     a = config.assignment
     assert a.categories == "leaves" and a.sound_distance == "e" and a.meaning_distance == "jaccard"
-    assert (a.target, a.tolerance, a.max_swaps) == (-0.2, 0.05, 100)
+    assert (a.target, a.tolerance, a.max_swaps) == (-0.2, 0.05, 100) and a.strict is True
     assert (a.marker_depth, a.marker_position, a.marker_shape) == (2, "final", "VC")
     assert a.acoustic[0].feature == "IS.1" and a.acoustic[0].amount == 2.0
     assert parse_config(config.resolved(), "x") == config
     for section, field in (
         ({"mode": "systematic"}, "assignment.mode"),
+        ({"strict": "yes"}, "assignment.strict"),
         ({"categories": "some"}, "assignment.categories"),
         ({"sound_distance": "hubert"}, "assignment.sound_distance"),
         ({"meaning_distance": "euclid"}, "assignment.meaning_distance"),
@@ -217,6 +222,23 @@ def test_target_correlation_reaches_its_target_or_reports_the_closest_value(tmp_
     report = result.summary["target_correlation"]
     assert report["reached"] is False and report["proposals"] == 3000
     assert report["start"] < result.summary["correlation"] < 0.99
+    # the miss is a reported result, with a warning in the summary
+    assert report["gap"] == pytest.approx(0.99 - result.summary["correlation"], abs=2e-6)
+    assert report["gap"] > report["tolerance"]
+    assert report["warning"].startswith("the target correlation 0.99 was not reached")
+    assert str(result.summary["correlation"]) in report["warning"]
+    # with strict, the same miss is an error
+    with pytest.raises(AssignmentError, match=r"0\.99 was not reached.*assignment\.strict"):
+        assign_target_correlation(
+            words, ids, features, np.random.default_rng(1), 0.99, 0.01, 3000, 50, strict=True
+        )
+    # a target that is reached has no warning, strict or not
+    reached = assign_target_correlation(
+        words, ids, features, np.random.default_rng(1), 0.3, 0.01, 20000, 50, strict=True
+    )
+    assert reached.summary["target_correlation"]["reached"] is True
+    assert "warning" not in reached.summary["target_correlation"]
+    assert reached.summary["target_correlation"]["gap"] <= 0.01
     assert result.summary["null"]["p_value"] < 0.05  # far outside the random assignments
     # every accepted exchange moved toward the target, so more proposals never end further away
     short = assign_target_correlation(
@@ -233,6 +255,41 @@ def test_target_correlation_reaches_its_target_or_reports_the_closest_value(tmp_
     assert [w.label for w in again.words] == [w.label for w in first.words]
     with pytest.raises(AssignmentError, match="only 5 words"):
         assign_target_correlation(words[:5], ids, features, np.random.default_rng(0), 0.3)
+
+
+def test_an_unreached_target_warns_on_the_command_line_or_stops_when_strict(tmp_path, capsys):
+    data = assign_config(
+        tmp_path, mode="target_correlation", null_samples=20,
+        target_correlation={"target": 0.99, "max_swaps": 300},
+    ).resolved()  # fmt: skip
+    path = tmp_path / "assign.yaml"
+    path.write_text(yaml.safe_dump(data))
+    out = tmp_path / "run"
+    assert main(["assign", str(path), "--out", str(out)]) == 0
+    captured = capsys.readouterr()
+    assert (
+        "target 0.99 (not reached: the closest value is given) after 300 proposals" in captured.out
+    )
+    assert (
+        "warning: the target correlation 0.99 was not reached: the closest value is" in captured.err
+    )
+    report = yaml.safe_load((out / "assignment" / "summary.yaml").read_text())["target_correlation"]
+    assert report["reached"] is False and report["gap"] > 0.01 and "warning" in report
+    assert (out / "assignment" / "lexicon.csv").exists()
+    # strict: the run stops, and nothing is written
+    data["assignment"]["strict"] = True
+    path.write_text(yaml.safe_dump(data))
+    assert main(["assign", str(path), "--out", str(tmp_path / "strict")]) == 1
+    captured = capsys.readouterr()
+    assert "error: the target correlation 0.99 was not reached" in captured.err
+    assert "assignment.strict" in captured.err
+    assert not (tmp_path / "strict").exists()
+    # strict with a target that is reached: no warning and no error
+    data["assignment"]["target_correlation"] = {"target": 0.2, "max_swaps": 20000}
+    path.write_text(yaml.safe_dump(data))
+    assert main(["assign", str(path), "--out", str(tmp_path / "reached")]) == 0
+    captured = capsys.readouterr()
+    assert "target 0.2 (reached)" in captured.out and "warning" not in captured.err
 
 
 @needs_audio
@@ -497,16 +554,22 @@ MAPPINGS = [
 ]
 
 
-def mapped_run(tmp_path, mappings=MAPPINGS) -> Run:
+def mapped_run(tmp_path, mappings=MAPPINGS, **sections) -> Run:
+    """A run with acoustic mapping on the stand-in voice, through the synthesis, the mapping,
+    and the augmentation (in the order of ``run_synthesis``)."""
+    from semantic_world.wordforms.augment import augment_synthesis
+    from semantic_world.wordforms.mapping import map_tokens
+
     config = assign_config(tmp_path, count=30, mode="acoustic_mapping", acoustic_mapping=mappings)
+    config = parse_config({**config.resolved(), **sections}, "assign_test")
     run = run_forms(config)
     run_assignment(run)
     run.synthesis = synthesize_lexicon(
         config, run.streams, run.lexicon.words, engines={"espeak": VoiceEngine()}, check=False
     )
-    from semantic_world.wordforms.mapping import map_tokens
-
     run.assignment.summary["acoustic_mapping"] = map_tokens(config, run.synthesis, run.assignment)
+    if config.augmentation is not None:
+        augment_synthesis(config, run.streams, run.synthesis)
     return run
 
 
@@ -517,16 +580,23 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
     assignment, synthesis = run.assignment, run.synthesis
     table = assignment.features
     meaning_of = {w.label: i for i, w in enumerate(assignment.words)}
-    originals = {t.label: t for t in synthesis.tokens if not t.augmentation}
-    mapped = [t for t in synthesis.tokens if t.augmentation]
+    originals = {t.label: t for t in synthesis.tokens if not t.mapping}
+    mapped = [t for t in synthesis.tokens if t.mapping]
     assert len(originals) == 30 * 3
     for token in mapped:
-        record = json.loads(token.augmentation)
+        record = json.loads(token.mapping)
         achieved = json.loads(token.achieved)
         source = originals[record["source"]]
-        assert record["recipe"] == "acoustic_mapping" and token.label == f"{source.label}.M"
+        assert token.label == f"{source.label}.M" and set(record) == {
+            "source",
+            "meaning",
+            "mappings",
+        }
         assert token.word == source.word and token.speaker == source.speaker
         assert token.cache_path.startswith("v2/mapping/")
+        # the mapped token is the word's token, and its unmapped original is a control token
+        assert token.clean and not token.control and not token.augmentation
+        assert source.control and not source.clean and not source.mapping
         row = meaning_of[token.word]
         assert record["meaning"] == assignment.meanings[row]
         # exactly the mappings whose feature the word's meaning has
@@ -544,9 +614,13 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
         if t.word in meaning_of
     )
     assert len(mapped) == expected > 0
+    # a token of a word without a meaning is neither mapped nor a control token
+    assert sum(t.control for t in originals.values()) == len(mapped)
+    assert all(t.clean for t in originals.values() if t.word not in meaning_of)
     # the analysis uses the achieved values: the measured shifts are the configured ones
     report = assignment.summary["acoustic_mapping"]
-    assert report["tokens_of_assigned_words"] == 12 * 3 and report["mapped_tokens"] == len(mapped)
+    assert report["tokens_of_assigned_words"] == 12 * 3
+    assert report["mapped_tokens"] == report["control_tokens"] == len(mapped)
     assert report["skipped"] == []
     by = {m["property"]: m for m in report["mappings"]}
     assert by["pitch"]["quantity"] == "pitch_semitones"
@@ -568,7 +642,148 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
     # a second run reads the mapped clips and their achieved values from the cache
     again = mapped_run(tmp_path)
     assert again.assignment.summary["acoustic_mapping"]["computed"] == 0
-    assert [t.achieved for t in again.synthesis.tokens] == [t.achieved for t in synthesis.tokens]
+    assert again.synthesis.tokens == synthesis.tokens
+
+
+@needs_audio
+@needs_parselmouth
+def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(tmp_path):
+    from semantic_world.wordforms.embeddings import (
+        SoundEmbeddings,
+        compute_embeddings,
+        token_layout,
+        word_embedding_tokens,
+        word_means,
+    )
+    from semantic_world.wordforms.evaluate import evaluate_embeddings
+    from semantic_world.wordforms.frontends import compute_frontends
+
+    run = mapped_run(
+        tmp_path,
+        augmentation={
+            "recipes": [{"name": "noisy", "noise": {"kinds": ["white"], "snr_db": [10, 20]}}]
+        },
+        training={"held_out_word_proportion": 0},
+    )
+    config, synthesis, tokens = run.config, run.synthesis, run.synthesis.tokens
+    assigned = {w.label for w in run.assignment.words}
+    control = np.array([t.control for t in tokens])
+    augmented = np.array([bool(t.augmentation) for t in tokens])
+    mapped = np.array([bool(t.mapping) for t in tokens]) & ~augmented
+    clean = np.array([t.clean for t in tokens])
+    assert control.sum() == mapped.sum() == 36 and np.array_equal(clean, ~control & ~augmented)
+    for token in tokens:
+        if token.control:
+            assert token.word in assigned and not token.mapping and not token.augmentation
+        else:  # every other token of a mapped word is mapped, or is made from a mapped token
+            assert bool(token.mapping) == (token.word in assigned)
+    # augmentation is applied to the words' own tokens: to mapped tokens, never to a control
+    by_label = {t.label: t for t in tokens}
+    sources = [by_label[json.loads(t.augmentation)["source"]] for t in tokens if t.augmentation]
+    assert len(sources) == 90 and all(source.clean for source in sources)
+    assert sum(source.label.endswith(".M") for source in sources) == 36
+    assert sum(t.label.endswith(".M.A.1") for t in tokens) == 36
+
+    # word embeddings: the mapped tokens make a mapped word's embedding
+    run.frontends = compute_frontends(config, synthesis, tmp_path / "run")
+    run.embeddings = compute_embeddings(
+        config, run.lexicon.words, synthesis, run.frontends, tmp_path / "run"
+    )
+    store = run.embeddings["logmel_fixed"]
+    token_words, _, train = token_layout(run.lexicon.words, synthesis)
+    assert np.array_equal(word_embedding_tokens(config, synthesis, train), train & clean)
+    assert np.allclose(
+        store.types, word_means(store.tokens, token_words, train & clean, 30), atol=1e-6
+    )
+    assert store.meta["projection"]["fitted_tokens"] == int((train & clean).sum()) == 60
+    labels = [w.label for w in run.lexicon.words]
+    for word in run.assignment.words:
+        row = labels.index(word.label)
+        own = train & mapped & (token_words == row)
+        assert own.sum() == 2 and np.allclose(
+            store.types[row], store.tokens[own].mean(axis=0), atol=1e-5
+        )
+    # the control tokens sound different, and are in no word embedding
+    row = labels.index(run.assignment.words[0].label)
+    held = train & control & (token_words == row)
+    assert not np.allclose(store.types[row], store.tokens[held].mean(axis=0), atol=1e-3)
+    every = parse_config({**config.resolved(), "word_embeddings": {"tokens": "all"}}, "assign_test")
+    assert np.array_equal(word_embedding_tokens(every, synthesis, train), train & ~control)
+
+    # the evaluation: control tokens are in their own set alone, beside the mapped tokens
+    run.evaluation = evaluate_embeddings(
+        run.embeddings, run.lexicon.words, synthesis, run.streams.eval, config=config
+    )
+    rows = plain_rows(run.evaluation).filter(pl.col("word_set") == "all")
+    counts = dict(zip(rows["tokens"].to_list(), rows["tokens_evaluated"].to_list(), strict=True))
+    assert counts == {
+        "clean": 90,
+        "augmented": 90,
+        "all": 180,
+        "recipe:noisy": 90,
+        "mapped": 36,
+        "control": 36,
+    }
+
+    # the interface gives a learner the mapped tokens, and holds the control tokens apart
+    folder = run.write(tmp_path / "run")
+    sounds = SoundEmbeddings.load(folder, "logmel_fixed")
+    assert len(sounds.tokens) == len(sounds.token_words) == len(sounds.token_table) == 180
+    assert sounds.token_mapped.sum() == 72 and sounds.token_augmented.sum() == 90
+    assert np.allclose(sounds.tokens, store.tokens[~control]) and np.allclose(
+        sounds.types, store.types
+    )
+    assert sounds.control["tokens"].shape == (36, 8)
+    assert np.allclose(sounds.control["tokens"], store.tokens[control])
+    assert sounds.control["token_table"]["label"].to_list() == [
+        t.label for t in tokens if t.control
+    ]
+    assert len(sounds.control["token_words"]) == len(sounds.control["token_held_out"]) == 36
+    assert not set(sounds.control["token_table"]["label"]) & set(sounds.token_table["label"])
+    # embed gives a mapped word's mapped tokens
+    sounds.engines = {}
+    speakers = sounds.speakers["label"].to_list()
+    word = run.assignment.words[0]
+    embedded = sounds.embed([word.arpabet], speakers)
+    for j, speaker in enumerate(speakers):
+        stored = sounds._stored[(word.label, speaker, 1)]
+        assert sounds.token_table["label"][stored] == f"{word.label}.{speaker}.1.M"
+        assert np.allclose(embedded[0, j], sounds.tokens[stored], atol=1e-5)
+    # the run folder labels both sets
+    table = pl.read_csv(folder / "tokens.csv")
+    assert (
+        table["control"].sum() == 36
+        and table.filter(pl.col("mapping").fill_null("") != "").height == 72
+    )
+    assert table.filter(pl.col("control"))["label"].str.ends_with(".M").sum() == 0
+    summary = yaml.safe_load((folder / "summary.yaml").read_text())["synthesis"]
+    assert summary["mapped_tokens"] == summary["control_tokens"] == 36
+
+
+@needs_audio
+@needs_parselmouth
+@needs_torch
+def test_trained_encoders_never_see_a_control_token(tmp_path):
+    from semantic_world.wordforms.embeddings import compute_embeddings
+    from semantic_world.wordforms.frontends import compute_frontends
+
+    learned = {"encoder": "learned", "kind": "contrastive", "frontend": "logmel", "dims": 8, "hidden": 16, "epochs": 1, "batch_size": 16}  # fmt: skip
+    run = mapped_run(
+        tmp_path,
+        embeddings=[{"name": "clean", **learned}, {"name": "every", **learned, "train_on": "all"}],
+        augmentation={"recipes": [{"name": "noisy", "noise": {"kinds": ["white"], "snr_db": 15}}]},
+        training={"held_out_word_proportion": 0},
+        device="cpu",
+    )
+    config, synthesis = run.config, run.synthesis
+    frontends = compute_frontends(config, synthesis, tmp_path / "run")
+    stores = compute_embeddings(config, run.lexicon.words, synthesis, frontends, tmp_path / "run")
+    held_out = {s.label for s in synthesis.speakers if s.held_out}
+    train = [t for t in synthesis.tokens if t.speaker not in held_out]
+    assert sum(t.control for t in train) == 24
+    # 2 training speakers by 30 words: the mapped tokens stand in for the 24 control tokens
+    assert stores["clean"].meta["training"]["tokens"] == sum(t.clean for t in train) == 60
+    assert stores["every"].meta["training"]["tokens"] == sum(not t.control for t in train) == 120
 
 
 def test_an_unknown_feature_is_an_error_before_any_audio(tmp_path):
@@ -617,10 +832,12 @@ def test_all_with_acoustic_mapping_on_the_tiny_configuration(tmp_path, capsys):
     assert by["pitch"]["achieved_mean"] == pytest.approx(2.0, rel=0.03)
     assert by["pitch"]["over_10_percent"] <= by["pitch"]["over_5_percent"] <= 2
     assert by["pitch"]["feature_correlation"] > 0.99
+    assert "72 mapped tokens are their words' tokens; their 72 unmapped originals" in text
     tokens = pl.read_csv(out / "tokens.csv")
     mapped = tokens.filter(pl.col("label").str.ends_with(".M"))
     assert mapped.height == summary["acoustic_mapping"]["mapped_tokens"] == 72
-    assert json.loads(mapped["achieved"][0])
-    # the mapped tokens are evaluated as their own token set
+    assert json.loads(mapped["achieved"][0]) and json.loads(mapped["mapping"][0])["source"]
+    assert not mapped["control"].any() and tokens["control"].sum() == 72
+    # the mapped tokens and the control tokens are evaluated as two token sets
     table = pl.read_csv(out / "eval" / "embeddings.csv")
-    assert "recipe:acoustic_mapping" in table["tokens"].to_list()
+    assert set(table["tokens"].unique()) == {"clean", "mapped", "control"}

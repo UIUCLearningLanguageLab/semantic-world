@@ -67,6 +67,7 @@ assignment:
   sound_distance: edit           # edit (phoneme edit distance) or the name of an embedding
   meaning_distance: hamming      # hamming, cosine, or jaccard
   null_samples: 1000
+  strict: false                  # true: a target correlation that is not reached within the tolerance is an error
   target_correlation: {target: 0.3, tolerance: 0.01, max_swaps: 20000}
   branch_markers: {depth: 1, position: initial, shape: CV}   # position: initial or final; shape: CV, VC, or CVC
   acoustic_mapping: []           # for example [{feature: IS.3, property: pitch, amount: 2.0}]

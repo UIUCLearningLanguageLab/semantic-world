@@ -335,12 +335,15 @@ def assign_target_correlation(
     sound: np.ndarray | None = None,
     sound_name: str = "edit",
     meaning_distance: str = "hamming",
+    strict: bool = False,
 ) -> Assignment:
     """An assignment whose sound-meaning correlation approaches ``target``. It starts random.
     Each step proposes to exchange one meaning's word with another word (another meaning's, or
     an unassigned one), and keeps the exchange when the correlation moves toward the target.
     It stops within ``tolerance`` of the target, or after ``max_swaps`` proposals, and the
-    summary gives the correlation reached and whether the target was reached."""
+    summary gives the correlation reached and whether the target was reached. A target that is
+    not reached gives a warning in the summary, or an :class:`AssignmentError` when ``strict``.
+    """
     _check_counts(words, meanings)
     if sound is None:
         sound = edit_distances(words)
@@ -370,6 +373,20 @@ def assign_target_correlation(
             accepted += 1
         else:
             order[a], order[b] = order[b], order[a]
+    gap = abs(current - target)
+    reached = bool(gap <= tolerance)
+    warning = None
+    if not reached:
+        warning = (
+            f"the target correlation {target} was not reached: the closest value is "
+            f"{_rounded(current)} after {proposals} proposals, {_rounded(gap)} from the target "
+            f"(the tolerance is {tolerance})"
+        )
+        if strict:
+            raise AssignmentError(
+                f"{warning}; change the target, raise target_correlation.max_swaps or "
+                "wordforms.count, or set assignment.strict to false to keep the closest value"
+            )
     chosen = order[:n]
     assigned = [words[int(i)] for i in chosen]
     summary = _summary(
@@ -386,12 +403,15 @@ def assign_target_correlation(
     summary["target_correlation"] = {
         "target": target,
         "tolerance": tolerance,
-        "reached": bool(abs(current - target) <= tolerance),
+        "reached": reached,
+        "gap": _rounded(gap),
         "start": _rounded(start),
         "proposals": proposals,
         "accepted": accepted,
         "max_swaps": max_swaps,
     }
+    if warning is not None:
+        summary["target_correlation"]["warning"] = warning
     return Assignment("target_correlation", list(meanings), assigned, summary)
 
 
@@ -644,6 +664,7 @@ def assign(
             settings.tolerance,
             settings.max_swaps,
             settings.null_samples,
+            strict=settings.strict,
             **common,
         )
     elif settings.mode == "branch_markers":

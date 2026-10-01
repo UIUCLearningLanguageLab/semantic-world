@@ -9,9 +9,15 @@ frequency-code and bouba/kiki kinds.
 
 The changes use the manipulation tools of stage 5 (:mod:`semantic_world.wordforms.praat`, and
 the spectral tilt in :mod:`semantic_world.wordforms.synth.audio`). A mapped token is a new token,
-labeled ``<source token>.M``, with the same word and speaker, and it records each mapping's
-target beside the value measured right after the change (``achieved`` in ``tokens.csv``), like
-an augmented token. Its recipe is ``acoustic_mapping``.
+labeled ``<source token>.M``, with the same word and speaker. It records its source, its
+meaning, and its mappings (``mapping`` in ``tokens.csv``), and each mapping's amount beside the
+shift measured right after the change (``achieved``).
+
+The mapped tokens are the mapped word's tokens: they make its word embedding, they are what a
+trained encoder and every other learner gets, and they are what augmentation is applied to. The
+unmapped originals stay in the run as a control set (``control`` in ``tokens.csv``), so that the
+two can be compared, and are used for nothing else. The mapping therefore comes before the
+augmentation.
 
 The analysis uses the achieved values, never the targets: for each mapping, the mean and spread
 of the measured shifts, how many tokens miss the amount by more than 5% and 10%, and the
@@ -32,12 +38,11 @@ import numpy as np
 
 from semantic_world.wordforms.augment import MISS_LEVELS, _achieved
 from semantic_world.wordforms.config import AcousticMappingConfig, Config
-from semantic_world.wordforms.synth import CACHE_VERSION, Synthesis, Token
+from semantic_world.wordforms.synth import CACHE_VERSION, MAPPED_SUFFIX, Synthesis, Token
 from semantic_world.wordforms.synth import audio as audio_tools
 
 MAPPING_VERSION = 2
 """Part of every mapped clip's cache key. Raise it when the manipulations change."""
-RECIPE = "acoustic_mapping"
 ACHIEVED_KEYS = {
     "pitch": "pitch_semitones",
     "formants": "formant_ratio",
@@ -97,8 +102,8 @@ def map_tokens(
     progress: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Apply the configuration's acoustic mappings to the synthesized tokens of the assigned
-    words, append the mapped tokens to the synthesis, and return the report. Clips already in
-    the cache are read back."""
+    words, append the mapped tokens to the synthesis, mark their unmapped originals as control
+    tokens, and return the report. Clips already in the cache are read back."""
     table = assignment.features
     mappings = list(config.assignment.acoustic)
     feature_of = {m.feature: table.feature(m.feature) for m in mappings}
@@ -106,7 +111,8 @@ def map_tokens(
     level = config.synthesis.level
     cache_dir = Path(config.synthesis.cache_dir)
     rate = config.synthesis.sample_rate
-    originals = [t for t in synthesis.tokens if not t.augmentation and t.word in meaning_of]
+    position = {t.label: i for i, t in enumerate(synthesis.tokens)}
+    originals = [t for t in synthesis.tokens if t.clean and not t.mapping and t.word in meaning_of]
     mapped: list[Token] = []
     skipped: list[dict[str, str]] = []
     computed = cached = 0
@@ -119,7 +125,6 @@ def map_tokens(
         achieved: dict[str, Any] = {}
         if active:
             drawn = {
-                "recipe": RECIPE,
                 "source": token.label,
                 "meaning": assignment.meanings[row],
                 "mappings": [m.resolved() for m in active],
@@ -146,17 +151,20 @@ def map_tokens(
                 mapped.append(
                     replace(
                         token,
-                        label=f"{token.label}.M",
+                        label=f"{token.label}{MAPPED_SUFFIX}",
                         duration=round(len(clip) / rate, 6),
                         cache_path=relative.as_posix(),
                         sha256=audio_tools.sha256_file(path),
                         tries=1,
                         peak=round(audio_tools.peak(clip), 6),
                         rms_db=round(audio_tools.rms_db(clip), 4),
-                        augmentation=json.dumps(drawn, sort_keys=True),
+                        mapping=json.dumps(drawn, sort_keys=True),
                         achieved=json.dumps(achieved, sort_keys=True),
                     )
                 )
+            # The original is a control token from here on, also when its mapping failed: an
+            # unmapped token is never one of a mapped word's own recordings.
+            synthesis.tokens[position[token.label]] = replace(token, control=True)
         # every token of an assigned word enters the analysis with its achieved shift: the
         # measured value where a mapping applied, and the neutral value where none did
         for m in mappings:
@@ -170,6 +178,7 @@ def map_tokens(
     report: dict[str, Any] = {
         "tokens_of_assigned_words": len(originals),
         "mapped_tokens": len(mapped),
+        "control_tokens": sum(t.control for t in synthesis.tokens),
         "computed": computed,
         "read_from_cache": cached,
         "skipped": skipped,

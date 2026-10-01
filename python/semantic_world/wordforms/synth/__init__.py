@@ -52,6 +52,10 @@ class Engine(Protocol):
     def provenance(self) -> dict[str, Any]: ...
 
 
+MAPPED_SUFFIX = ".M"
+"""The end of the label of a token changed by acoustic mapping (``W.12.S.3.2.M``)."""
+
+
 @dataclass(frozen=True)
 class Token:
     """One recording: token ``k`` of a word by a speaker."""
@@ -77,8 +81,20 @@ class Token:
     """For an augmented token, the recipe and every drawn value, as JSON, with the source
     token's label; empty for a synthesized token."""
     achieved: str = ""
-    """For an augmented token, each transformation's target and the value measured after it,
-    as JSON; empty for a synthesized token."""
+    """For an augmented or a mapped token, each transformation's target and the value measured
+    after it, as JSON; empty for a synthesized token."""
+    mapping: str = ""
+    """For a token changed by acoustic mapping, the source token's label, the meaning, and the
+    mappings that were applied, as JSON. An augmented copy of a mapped token keeps the record."""
+    control: bool = False
+    """True for the unmapped original of a mapped word's token. A control token stays in the run
+    for comparison, and is no part of word embeddings, training, or augmentation."""
+
+    @property
+    def clean(self) -> bool:
+        """Whether the token is one of its word's own recordings for a learner: not augmented,
+        and not a control token."""
+        return not self.augmentation and not self.control
 
     def record(self) -> dict[str, Any]:
         return {
@@ -92,6 +108,8 @@ class Token:
             "pitch_semitones": self.pitch_semitones,
             "augmentation": self.augmentation,
             "achieved": self.achieved,
+            "mapping": self.mapping,
+            "control": self.control,
             "duration": self.duration,
             "tries": self.tries,
             "peak": self.peak,
@@ -165,6 +183,10 @@ class Synthesis:
         if self.augmentation is not None:
             summary["augmented_tokens"] = self.augmentation["tokens"]
             summary["augmentation"] = self.augmentation
+        if any(t.control for t in self.tokens):
+            # acoustic mapping: the mapped tokens, and the unmapped originals kept as controls
+            summary["mapped_tokens"] = sum(bool(t.mapping) and t.clean for t in self.tokens)
+            summary["control_tokens"] = sum(t.control for t in self.tokens)
         return summary
 
 

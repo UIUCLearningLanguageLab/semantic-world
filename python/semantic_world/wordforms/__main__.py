@@ -198,12 +198,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"  target {target['target']} ({state}) after {target['proposals']} proposals, "
                 f"{target['accepted']} accepted, from {target['start']}"
             )
+            if "warning" in target:
+                print(f"warning: {target['warning']}", file=sys.stderr)
         if "branch_markers" in assignment:
             markers = assignment["branch_markers"]
             print(
                 f"  {markers['branches']} branch markers at depth {markers['depth']} "
                 f"({markers['position']}), {markers['marked_words']} marked words; unmarked "
                 f"correlation {markers['unmarked_correlation']}"
+            )
+        if "acoustic_mapping" in assignment:
+            report = assignment["acoustic_mapping"]
+            print(
+                f"  {report['mapped_tokens']} mapped tokens are their words' tokens; their "
+                f"{report['control_tokens']} unmapped originals are kept as control tokens"
             )
         for mapping in assignment.get("acoustic_mapping", {}).get("mappings", []):
             print(
