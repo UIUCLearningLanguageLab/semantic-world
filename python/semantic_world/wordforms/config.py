@@ -23,7 +23,14 @@ SOURCES = ("pseudowords", "english", "mixed")
 ENGINES = ("piper", "espeak")
 ENCODERS = ("fixed", "pretrained", "learned")
 POOLINGS = ("mean",)
-ASSIGNMENT_MODES = ("arbitrary",)
+ASSIGNMENT_MODES = ("arbitrary", "target_correlation", "branch_markers", "acoustic_mapping")
+MEANING_DISTANCES = ("hamming", "cosine", "jaccard")
+MARKER_POSITIONS = ("initial", "final")
+MARKER_SHAPES = ("CV", "VC", "CVC")
+ACOUSTIC_PROPERTIES = ("pitch", "formants", "duration", "tilt")
+"""What a semantic feature can shift: the median pitch (semitones), the formants (a ratio), the
+duration (a factor), or the spectral tilt (decibels per octave)."""
+NON_BINARY_COLUMNS = ("drop", "error")
 FUNCTION_SHAPES = ("CV", "CVC", "VC", "V")
 """The shapes of a function word: one syllable with at most one consonant on each side."""
 AFFIX_SHAPES = ("C", "VC", "V")
@@ -44,9 +51,6 @@ DEFAULT_PRETRAINED_LAYER = 8
 across speakers in the stage 4 layer sweep."""
 DEVICES = ("auto", "cpu", "cuda", "mps")
 
-LATER_STAGES = {
-    "assignment.modes": "stage 7",
-}
 LEARNED_KINDS = ("contrastive", "cpc")
 TRAINING_TOKENS = ("clean", "all")
 CPC_EMBEDDINGS = ("context", "latents")
@@ -441,12 +445,65 @@ class TrainingConfig:
 
 
 @dataclass(frozen=True)
+class AcousticMappingConfig:
+    """One acoustic mapping: every token of a word whose meaning has ``feature`` gets its
+    ``property`` shifted by ``amount``."""
+
+    feature: str
+    property: str
+    amount: float
+
+    def resolved(self) -> dict[str, Any]:
+        return {"feature": self.feature, "property": self.property, "amount": self.amount}
+
+
+@dataclass(frozen=True)
 class AssignmentConfig:
     mode: str
     meanings: str | None
+    """The meanings table: a CSV file of IDs with binary feature columns. None: no assignment."""
+    categories: str | tuple[str, ...] = "all"
+    """Which meanings receive words: ``all``, ``leaves``, or a list of IDs."""
+    non_binary: str = "drop"
+    """What to do with a column that holds other values than 0 and 1 (a scalar dimension):
+    ``drop`` it and report it, or stop with an ``error``."""
+    sound_distance: str = "edit"
+    """``edit`` (phoneme edit distance) or the name of an embedding (cosine distance between
+    word embeddings)."""
+    meaning_distance: str = "hamming"
+    target: float = 0.3
+    """The sound-meaning correlation that the target-correlation mode aims at."""
+    tolerance: float = 0.01
+    max_swaps: int = 20000
+    marker_depth: int = 1
+    """The depth of the branches that share a marker: 1 is the top of the taxonomy."""
+    marker_position: str = "initial"
+    marker_shape: str = "CV"
+    acoustic: tuple[AcousticMappingConfig, ...] = ()
+    null_samples: int = 1000
 
     def resolved(self) -> dict[str, Any]:
-        return {"mode": self.mode, "meanings": self.meanings}
+        categories = self.categories if isinstance(self.categories, str) else list(self.categories)
+        return {
+            "mode": self.mode,
+            "meanings": self.meanings,
+            "categories": categories,
+            "non_binary": self.non_binary,
+            "sound_distance": self.sound_distance,
+            "meaning_distance": self.meaning_distance,
+            "null_samples": self.null_samples,
+            "target_correlation": {
+                "target": self.target,
+                "tolerance": self.tolerance,
+                "max_swaps": self.max_swaps,
+            },
+            "branch_markers": {
+                "depth": self.marker_depth,
+                "position": self.marker_position,
+                "shape": self.marker_shape,
+            },
+            "acoustic_mapping": [m.resolved() for m in self.acoustic],
+        }
 
 
 @dataclass(frozen=True)
@@ -1165,14 +1222,63 @@ def _read_embeddings(root: _Node, frontends: FrontendsConfig) -> tuple[Embedding
     return tuple(result)
 
 
-def _read_assignment(node: _Node) -> AssignmentConfig:
-    mode = node.get("mode", "arbitrary")
-    if isinstance(mode, str) and mode in ("target_correlation", "branch_markers", "acoustic"):
-        raise node.error("mode", f"is not available until {LATER_STAGES['assignment.modes']}")
+def _read_assignment(node: _Node, embeddings: tuple[EmbeddingConfig, ...]) -> AssignmentConfig:
+    mode = node.choice("mode", "arbitrary", ASSIGNMENT_MODES)
+    categories = node.get("categories", "all")
+    if isinstance(categories, list):
+        if not categories or not all(isinstance(c, str) and c for c in categories):
+            raise node.error("categories", "expected all, leaves, or a non-empty list of IDs")
+        categories = tuple(categories)
+    elif categories not in ("all", "leaves"):
+        raise node.error(
+            "categories", f"expected all, leaves, or a list of IDs, found {_describe(categories)}"
+        )
+    sound = node.string("sound_distance", "edit")
+    if sound != "edit" and sound not in {e.name for e in embeddings}:
+        raise node.error(
+            "sound_distance", f"expected edit or the name of an embedding, found {sound!r}"
+        )
+    if sound != "edit" and mode in ("branch_markers", "acoustic_mapping"):
+        # these modes come before the synthesis, which the embeddings need
+        raise node.error("sound_distance", f"the {mode} mode needs the sound distance edit")
+    target_node = node.mapping("target_correlation")
+    marker_node = node.mapping("branch_markers")
+    value = node.get("acoustic_mapping", [])
+    if not isinstance(value, list):
+        raise node.error("acoustic_mapping", f"expected a list, found {_describe(value)}")
+    acoustic = []
+    for i, item in enumerate(value):
+        entry = _Node(node.source, node.field(f"acoustic_mapping[{i}]"), item)
+        acoustic.append(
+            AcousticMappingConfig(
+                feature=entry.string("feature", _MISSING),
+                property=entry.choice("property", _MISSING, ACOUSTIC_PROPERTIES),
+                amount=float(entry.number("amount", _MISSING)),
+            )
+        )
+        entry.finish()
+        if acoustic[-1].property in ("formants", "duration") and acoustic[-1].amount <= 0:
+            raise entry.error("amount", "a ratio or a factor must be more than 0")
+    if mode == "acoustic_mapping" and not acoustic:
+        raise node.error("acoustic_mapping", "the acoustic_mapping mode needs at least one mapping")
     config = AssignmentConfig(
-        mode=node.choice("mode", "arbitrary", ASSIGNMENT_MODES),
+        mode=mode,
         meanings=node.string("meanings", None, nullable=True),
+        categories=categories,
+        non_binary=node.choice("non_binary", "drop", NON_BINARY_COLUMNS),
+        sound_distance=sound,
+        meaning_distance=node.choice("meaning_distance", "hamming", MEANING_DISTANCES),
+        target=float(target_node.number("target", 0.3, min=-1, max=1)),
+        tolerance=float(target_node.number("tolerance", 0.01, min=0, exclusive_min=True)),
+        max_swaps=target_node.int("max_swaps", 20000, min=1),
+        marker_depth=marker_node.int("depth", 1, min=1),
+        marker_position=marker_node.choice("position", "initial", MARKER_POSITIONS),
+        marker_shape=marker_node.choice("shape", "CV", MARKER_SHAPES),
+        acoustic=tuple(acoustic),
+        null_samples=node.int("null_samples", 1000, min=1),
     )
+    target_node.finish()
+    marker_node.finish()
     node.finish()
     return config
 
@@ -1484,7 +1590,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         held_out_word_proportion=training_node.probability("held_out_word_proportion", 0.2)
     )
     training_node.finish()
-    assignment = _read_assignment(root.mapping("assignment"))
+    assignment = _read_assignment(root.mapping("assignment"), embeddings)
     device = root.choice("device", "auto", DEVICES)
     root.get("provenance", None, nullable=True)  # written by a run; ignored when read back
     root.finish()

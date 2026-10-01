@@ -276,7 +276,7 @@ def test_unknown_keys_name_the_file_and_the_field(data, field, tmp_path):
             "required",
         ),
         ({"augmentation": {"noise": {}}}, "augmentation.recipes", "required"),
-        ({"assignment": {"mode": "branch_markers"}}, "assignment.mode", "stage 7"),
+        ({"assignment": {"mode": "systematic"}}, "assignment.mode", "expected one of"),
         ({"device": "tpu"}, "device", "expected one of"),
         ({"wordforms": 3}, "wordforms", "expected a mapping"),
     ],

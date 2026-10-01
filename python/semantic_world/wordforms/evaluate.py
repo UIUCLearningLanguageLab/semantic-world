@@ -92,7 +92,9 @@ HARD_FAR_DISTANCE = 2
 """The harder neighbor AUC compares words at edit distance 1 with words at distance 2."""
 CONDITIONS = ("within_speaker", "across_train", "held_out")
 WORD_SETS = ("all", "without_long_synthesis")
-KINDS = ("content", "function", "inflected")
+KINDS = ("content", "function", "inflected", "marked")
+DERIVED_KINDS = ("inflected", "marked")
+"""The kinds of form that have a stem: inflected forms, and forms with a branch marker."""
 ALL_KINDS = "all"
 EVAL_COLUMNS = (
     "embedding",
@@ -402,10 +404,11 @@ def evaluate_embeddings(
     def stem_measure(kind, name, keep, types, present, stem_types, stem_present):
         """The stem AUC of a kind's inflected forms. A form counts when the form and its stem
         both have a word embedding, and neither is left out of the word set."""
-        if kind not in ("inflected", ALL_KINDS):
+        if kind not in (*DERIVED_KINDS, ALL_KINDS):
             return float("nan"), 0
         stem_kept = stem_present & ~flagged if name == "without_long_synthesis" else stem_present
-        forms = np.flatnonzero((word_kinds == "inflected") & keep & present & (stem_of >= 0))
+        derived = np.isin(word_kinds, DERIVED_KINDS if kind == ALL_KINDS else (kind,))
+        forms = np.flatnonzero(derived & keep & present & (stem_of >= 0))
         forms = forms[stem_kept[stem_of[forms]]]
         stems, own = np.unique(stem_of[forms], return_inverse=True)
         return stem_auc(types[forms], stem_types[stems], own)
@@ -436,7 +439,7 @@ def evaluate_embeddings(
             auc, auc_words = neighbor_auc(types[chosen], distances)
             hard, hard_words = neighbor_auc(types[chosen], distances, HARD_FAR_DISTANCE, True)
             stem, stem_forms = stem_measure(kind, name, keep, types, present, *stems)
-            inflected = kind in ("inflected", ALL_KINDS)
+            inflected = kind in (*DERIVED_KINDS, ALL_KINDS)
             mask = in_sample[group][k]
             robust_ap, robust_top1, robust_chance = robustness(
                 sampled[mask], token_words[samples[group]][mask], reference[0], keep & reference[1]
@@ -529,7 +532,8 @@ def evaluate_embeddings(
                 sampled, types, present = means[group]
                 # an inflected form's stem is a content word, from the content words' sample;
                 # the robustness reference is the kind's clean sample
-                stems = means["content", tokens][1:] if kind == "inflected" else (types, present)
+                derived = kind in DERIVED_KINDS
+                stems = means["content", tokens][1:] if derived else (types, present)
                 reference = means[kind, "clean"][1:]
                 configured = layer == store.meta["layer"]
                 add_rows(

@@ -28,7 +28,7 @@ from semantic_world.wordforms import (
     run_frontends,
     run_synthesis,
 )
-from semantic_world.wordforms.assign import AssignmentError
+from semantic_world.wordforms.assign import AssignmentError, needs_embeddings
 from semantic_world.wordforms.config import ConfigError
 from semantic_world.wordforms.generate import GenerationError
 from semantic_world.wordforms.phonemes import IPA_TABLE, PhonemeTable, espeak_path, ipa_agreement
@@ -103,6 +103,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         config = load_config(args.config, seed=args.seed)
         run = run_forms(config)
+        assigning = args.command in ("assign", "all")
+        # The assignment comes before the synthesis, because branch markers add word forms and
+        # acoustic mappings change tokens. It waits for the embeddings only when its sound
+        # distance is an embedding's.
+        if assigning and not needs_embeddings(config):
+            run_assignment(run)
         if args.command in ("synth", "frontends", "embed", "eval", "all"):
             run_synthesis(run, progress=_progress)
         if args.command in ("frontends", "embed", "eval", "all"):
@@ -111,8 +117,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_embeddings(run, args.out, progress=_frontend_progress)
         if args.command in ("eval", "all"):
             run_evaluation(run, args.out, progress=_sweep_progress)
-        if args.command in ("assign", "all"):
-            run_assignment(run)
+        if assigning:
+            run_assignment(run, args.out)
         folder = run.write(args.out)
     except (ConfigError, GenerationError, AssignmentError, RuntimeError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -185,6 +191,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"sound-meaning correlation {assignment['correlation']} "
             f"(null mean {assignment['null']['mean']}, p = {assignment['null']['p_value']})"
         )
+        if "target_correlation" in assignment:
+            target = assignment["target_correlation"]
+            state = "reached" if target["reached"] else "not reached: the closest value is given"
+            print(
+                f"  target {target['target']} ({state}) after {target['proposals']} proposals, "
+                f"{target['accepted']} accepted, from {target['start']}"
+            )
+        if "branch_markers" in assignment:
+            markers = assignment["branch_markers"]
+            print(
+                f"  {markers['branches']} branch markers at depth {markers['depth']} "
+                f"({markers['position']}), {markers['marked_words']} marked words; unmarked "
+                f"correlation {markers['unmarked_correlation']}"
+            )
+        for mapping in assignment.get("acoustic_mapping", {}).get("mappings", []):
+            print(
+                f"  {mapping['feature']} -> {mapping['property']} {mapping['amount']}: "
+                f"{mapping['tokens']} tokens, achieved mean {mapping['achieved_mean']}, "
+                f"{mapping['over_5_percent']} miss by more than 5%, "
+                f"{mapping['over_10_percent']} by more than 10%; feature correlation "
+                f"{mapping['feature_correlation']}"
+            )
     return 0
 
 

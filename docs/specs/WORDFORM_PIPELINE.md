@@ -37,6 +37,8 @@ Labels follow the taxonomy generator's convention: formal labels, indices starti
 | Function word | `F.<n>`, with a gloss | `F.2`, gloss `the` |
 | Affix | `AF.<n>`, with a gloss | `AF.1`, gloss `PLURAL` |
 | Inflected form | `W.<n>.AF.<m>` | `W.12.AF.1` is word 12 with affix 1 |
+| Branch marker | `M.<k>` | `M.2` is the marker of the second branch |
+| Marked form | `W.<n>.M.<k>` | `W.12.M.2` is word 12 with marker 2 |
 
 Tokens of function words and inflected forms extend their labels the same way: `F.2.S.3.1`, `W.12.AF.1.S.3.2`.
 
@@ -268,6 +270,16 @@ The assignment modes are:
 - **Branch markers.** Word forms for the members of a taxonomic branch share a marker syllable, at a configured depth and position (initial or final). Markers make the systematicity morphological.
 - **Acoustic mapping.** Configured semantic features shift configured acoustic properties of every token of a word, by a configured amount: median pitch, formant scaling, duration, or spectral tilt. Acoustic mapping models sound symbolism of the frequency-code and bouba/kiki kinds. Acoustic mapping is applied with the manipulation tools of stage 5.
 
+The assignment section of the configuration names the meanings table (`meanings`), which meanings receive words (`categories`: `all`, `leaves`, or a list of IDs), and the two distances (`sound_distance`: `edit` or the name of an embedding; `meaning_distance`: `hamming`, `cosine`, or `jaccard`). A leaf is an ID that no other ID extends with a period. A column of the meanings table that holds other values than 0 and 1, such as a scalar dimension, is dropped and listed in the summary (`non_binary: drop`), or stops the run (`non_binary: error`). The draws come from the `wordforms:assign` stream. Only content words are assigned.
+
+**Target correlation.** Each step proposes to exchange one meaning's word with another word, either another meaning's word or a word without a meaning, and keeps the exchange when the correlation moves toward the target. The search stops within `tolerance` of the target, or after `max_swaps` proposals. The summary gives the correlation reached, whether the target was reached (`reached`), the starting correlation, and the numbers of proposals and accepted exchanges. A target that the words cannot give is not an error: the closest value reached is reported. With an embedding's distance as the sound distance, the embeddings are computed before the assignment.
+
+**Branch markers.** A branch is the first `depth` parts of a meaning's ID (`C1.2.3` is in the branch `C1` at depth 1 and in `C1.2` at depth 2). A meaning above the depth has no branch, and its word is unmarked. Each branch draws one marker: an unstressed syllable of the configured shape (`CV`, `VC`, or `CVC`), sampled from the unstressed syllables at the beginnings (`initial`) or the ends (`final`) of the pattern words. Markers are labeled `M.<k>`. A marker joins a word as an affix does, before the word or after the word, with the same glide and schwa repairs. The marked form must pass the phonotactic check, and must not be a common English word or another form of the run. A marker is never a function word or an affix of the run, with or without the joining schwa, and no two markers differ only by that schwa. Not every word can take every marker, so a branch's meanings get words that can take the branch's marker, drawn in a seeded random order, and the assignment is otherwise random. A marker that too few free words can take is drawn again. A marked form is a new word form of kind `marked`, labeled `W.<n>.M.<k>`, with its base word as its stem and with the base word's training or held-out split. Marked forms are synthesized, embedded, and evaluated like inflected forms, so the assignment comes before the synthesis. The correlation is reported for the marked forms, beside the correlation of the unmarked base words (`unmarked_correlation`). Branch markers and acoustic mapping come before the synthesis, so their sound distance is the phoneme edit distance.
+
+**Acoustic mapping.** The words are assigned at random. Each entry of `acoustic_mapping` names a feature column of the meanings table, a property, and an amount: `pitch` (semitones added to the median pitch), `formants` (a ratio, above 1 for a shorter vocal tract), `duration` (a factor), or `tilt` (decibels per octave added to the spectral slope, around 1 kHz). Every clean token of a word whose meaning has the feature is changed, with each of the meaning's mappings applied in the listed order. The changed token is a new token labeled `<source token>.M`, with the same word and speaker and the recipe `acoustic_mapping`. The source token stays in the run, so the two can be compared. Pitch, formants, and duration use the Praat tools of stage 5, and the tilt is a gain that rises or falls with the logarithm of frequency. Each change is measured right after it is made, and the `achieved` column of `tokens.csv` holds the amount beside the measured shift, as for augmented tokens. The analysis uses the measured shifts, never the amounts: for each mapping, the summary gives the mean and standard deviation of the measured shifts, the numbers of tokens that miss the amount by more than 5% and by more than 10%, and the correlation between the feature and the measured shift over every clean token of the assigned words (`feature_correlation`; a token of a word without the feature has no shift). The evaluation reports the mapped tokens as the token set `recipe:acoustic_mapping`.
+
+The formant shift is measured frame by frame, over the frames that are voiced in both clips, as the median ratio of the first three formants (`measure_formant_shift` in `praat.py`). A shifted voice needs a shifted analysis ceiling, so the analysis of the changed clip is repeated over a range of ceiling scales, and the scale that the frames' ratios agree with most closely is used. The measure does not use the amount that the manipulation aimed at.
+
 Every assignment reports the sound–meaning correlation, with a null distribution from random reassignments. Monaghan, Christiansen, and Fitneva (2011) argued that arbitrary vocabularies help learners individuate words, while systematic vocabularies help learners learn categories. These assignment modes let us test that claim across model types.
 
 ## Augmentation and acoustic manipulation
@@ -362,7 +374,17 @@ augmentation: null               # off; a recipe list turns it on, for example:
 #    - {name: voice, manipulation: {pitch_median_hz: [100, 250], pitch_range_factor: [0.5, 2], formant_shift_ratio: [0.85, 1.2], duration_factor: [0.8, 1.25]}}
 #  proportion: 1.0                # the share of the eligible tokens each recipe is applied to
 #  speakers: all                  # all, train, or held_out
-assignment: {mode: arbitrary, meanings: null}
+assignment:
+  mode: arbitrary                # arbitrary, target_correlation, branch_markers, or acoustic_mapping
+  meanings: null                 # a CSV file of IDs with 0 and 1 feature columns; null: no assignment
+  categories: all                # which meanings get words: all, leaves, or a list of IDs
+  non_binary: drop               # a column with other values than 0 and 1: drop (and report) or error
+  sound_distance: edit           # edit (phoneme edit distance) or the name of an embedding
+  meaning_distance: hamming      # hamming, cosine, or jaccard
+  null_samples: 1000
+  target_correlation: {target: 0.3, tolerance: 0.01, max_swaps: 20000}
+  branch_markers: {depth: 1, position: initial, shape: CV}   # position: initial or final; shape: CV, VC, or CVC
+  acoustic_mapping: []           # for example [{feature: IS.3, property: pitch, amount: 2.0}]
 device: auto                     # cpu, cuda, mps, or auto
 ```
 
@@ -379,14 +401,14 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word (with `split`, `train` or `held_out`, for the trained encoders): label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, or `inflected`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
+| `words.csv` | One row per word (with `split`, `train` or `held_out`, for the trained encoders): label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, `inflected`, or, with branch markers, `marked`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
 | `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. An English affix lists its allomorphs. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation (the recipe and drawn values of an augmented token), achieved (each transformation's target and measured value), duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
 | `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. A learned encoder writes its frozen model, `model.pt`, and its training report in `meta.yaml`. |
 | `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`), by kind of form (`kind`) and, with augmentation, by set of tokens (`tokens`). |
-| `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. |
+| `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. With branch markers, `lexicon.csv` adds each meaning's base word, branch, and marker, and `assignment/markers.csv` lists the markers. With acoustic mapping, the summary holds the measured shifts of each mapping. |
 
 ## Python package
 
@@ -407,6 +429,7 @@ python/semantic_world/wordforms/
   encoders/          # fixed.py, pretrained.py, learned.py
   evaluate.py
   assign.py
+  mapping.py         # acoustic mapping of the tokens of assigned words
   io.py
 data/wordforms/      # default.yaml, tiny.yaml, arpabet_ipa.yaml, arpabet_espeak.yaml, spelling.yaml
 examples/            # wordforms_lm_inputs.py, wordforms_contrastive.py
