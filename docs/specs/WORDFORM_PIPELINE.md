@@ -39,6 +39,7 @@ Labels follow the taxonomy generator's convention: formal labels, indices starti
 | Inflected form | `W.<n>.AF.<m>` | `W.12.AF.1` is word 12 with affix 1 |
 | Branch marker | `M.<k>` | `M.2` is the marker of the second branch |
 | Marked form | `W.<n>.M.<k>` | `W.12.M.2` is word 12 with marker 2 |
+| Inflected marked form | `W.<n>.M.<k>.AF.<m>` | `W.12.M.2.AF.1` is that marked form with affix 1 |
 
 Tokens of function words and inflected forms extend their labels the same way: `F.2.S.3.1`, `W.12.AF.1.S.3.2`.
 
@@ -156,7 +157,7 @@ Each embedding configuration names an encoder, and the encoder's output is one v
   - a contrastive acoustic word encoder, trained so that tokens of the same word from different speakers lie close together (in the manner of Kamper et al., 2016). The contrastive encoder uses word identity as supervision;
   - a self-supervised encoder trained by prediction alone, in the manner of contrastive predictive coding (van den Oord et al., 2018), with no word labels. Its frame outputs are mean-pooled like a pretrained model's.
 
-  Learned encoders train on training speakers only, and are frozen afterwards.
+  Learned encoders train on training speakers only, and are frozen afterwards. They never train on inflected forms, so the inflected forms that a run asks for never change the embedding of a content word or of a function word (decided October 1, 2026). For the same reason, the tokens of inflected forms are encoded in batches of their own.
 
   Both encoders read a front end's frames (`frontend`, log-mel by default), standardized by channel with statistics from the training tokens, through a stack of one-dimensional convolutions (`layers`, `hidden`, `kernel`). The contrastive encoder pools the convolutions over time (mean and maximum) and projects to `dims`; its loss is a supervised contrastive loss with a `temperature`, over batches of `batch_size` tokens drawn as pairs of tokens of the same word (from different speakers when the word has them). The CPC encoder projects the convolutions to latent frames of `dims`, summarizes them with a GRU of `hidden` units, and predicts the latents 1 to `steps_ahead` frames ahead against `negatives` other frames, drawn from the whole batch (`negatives_from: batch`, the default) or from the same clip (`clip`); its embedding is the mean of the context frames, of `hidden` numbers (`embedding_from: context`, the default), or of the latent frames (`latents`). A time-boxed comparison on the default run (September 30, 2026) set these defaults: the context beat the latents, batch negatives beat clip negatives, and 30 epochs were no better than 10. No CPC setting gave word embeddings near the fixed baselines across speakers, so the CPC encoder stands as a self-supervised baseline, not as a recommended embedding. CPC is trained on isolated words here, which leave little to predict; revisit it with continuous speech once `docs/specs/CONNECTED_SPEECH.md` is built. `train_on` chooses the training tokens: the clean tokens of training speakers (`clean`, the default) or all of them (`all`), in both cases without the held-out words. Training runs for `epochs` epochs with AdamW at `learning_rate`, seeded from the `wordforms:train` stream by the embedding's name, with PyTorch's deterministic algorithms, on the configured device; on the CPU, the same seed gives the same weights and embeddings. The stored embedding holds the frozen model (`model.pt`), the frame statistics, and a training report (epochs, steps, seconds, device, the loss of each epoch). The default configuration trains one of each on the log-mel front end (decided September 30, 2026).
 
@@ -194,7 +195,7 @@ The corpus generator (`docs/specs/CORPUS_GENERATOR.md`) needs three kinds of for
 
 ### The request
 
-The closed-class forms a run needs are listed in a closed-class request, given in the configuration or in a separate YAML file named there. The corpus generator will write such a file. The request lists glosses, which are names for human readers, and says which words to inflect:
+The closed-class forms a run needs are listed in a request, given in the configuration (`closed_class`) or in a separate YAML file named by the top-level `request` setting. The corpus generator writes such a file (`wordform_request.yaml`). The request lists glosses, which are names for human readers, and says which words to inflect:
 
 ```yaml
 function_words: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
@@ -206,7 +207,9 @@ inflect:
   - {words: all, affixes: [PLURAL]}
 ```
 
-`words` in an `inflect` entry is `all`, `none`, or a list of word labels. With `closed_class: null`, a run has content words only, as before.
+`words` in an `inflect` entry is `all`, `none`, or a list of word labels. With `closed_class: null`, a run has content words only, as before. A request file's `function_words`, `affixes`, and `inflect` take the place of `closed_class.function_words.glosses`, `closed_class.affixes.items`, and `closed_class.inflect`, which must then be left out. The shapes and the other settings stay in the configuration. The key was `closed_class.request` before October 1, 2026: a configuration that still gives a file there gets an error that names `request`.
+
+A request can also list lexemes, which the pipeline assigns to content words. See "Requests with lexemes" under "Sound–meaning assignment".
 
 ### Function words
 
@@ -282,7 +285,42 @@ The mapped tokens are the mapped word's tokens. The mapped tokens make the word'
 
 The pitch shift and the formant shift are measured frame by frame, over the frames that are voiced in both clips, with the frames matched by their relative time. The pitch shift is the median over those frames of the pitch after over the pitch before, in semitones (`measure_pitch_shift` in `praat.py`). A change of pitch can change which frames Praat finds voiced, so the difference between the two clips' median pitches is a much noisier measure of the same shift. The formant shift is the median ratio of the first three formants (`measure_formant_shift`). A shifted voice needs a shifted analysis ceiling, so the analysis of the changed clip is repeated over a range of ceiling scales, and the scale that the frames' ratios agree with most closely is used. The measure does not use the amount that the manipulation aimed at.
 
-Every assignment reports the sound–meaning correlation, with a null distribution from random reassignments. Monaghan, Christiansen, and Fitneva (2011) argued that arbitrary vocabularies help learners individuate words, while systematic vocabularies help learners learn categories. These assignment modes let us test that claim across model types.
+### Requests with lexemes
+
+The corpus generator (`docs/specs/CORPUS_GENERATOR.md`, "Word forms for the corpus") is generated before its word forms, and asks for them with a request file. Beside the function words, the affixes, and the inflect entries, the request lists:
+
+```yaml
+lexemes:
+  - {label: L.1, concept: C1, pos: noun}
+  - {label: L.7, concept: IS.1, pos: adjective}
+  - {label: L.23, concept: CAN.1, pos: intransitive_verb}
+  - {label: L.40, concept: IS.9, pos: adjective, same_form_as: L.1}   # a homonym
+takes:
+  noun: [PLURAL]
+  intransitive_verb: [PLURAL, PAST]
+inflect:
+  - {lexemes: [L.1, L.23], affixes: [PLURAL]}
+meanings: wordform_meanings.csv   # relative to the request file
+```
+
+- `lexemes`: the content words of the corpus's language. Each has a label, the label of its concept, a part of speech, and, for a homonym, the lexeme whose form it shares.
+- `takes`: for each part of speech, the affixes that its lexemes' words must be able to take.
+- `inflect` entries can name `lexemes` in place of `words`.
+- `meanings`: a meanings table for the lexemes whose concepts are categories. With `meanings` in the request, `assignment.meanings` must be null, and giving both is an error.
+
+**Every lexeme gets a form.** A lexeme whose concept is in the meanings table is assigned by the configured mode: arbitrary, target correlation, branch markers, or acoustic mapping. `assignment.categories` chooses among them, as before. The synonyms of one category are assigned one by one, each with the category's meaning vector, so they share its sound–meaning structure, including its branch marker. Every other lexeme gets a word at random, from the words that are left, drawn from the part `wordforms:assign:lexemes` of the assignment stream. A homonym gets the form of the lexeme it names, and is left out of the mode. A run whose content words are fewer than the lexemes that need forms of their own is an error. The words that no lexeme gets are kept, and can serve as novel words.
+
+**Affixes.** A lexeme gets only a word that can take every affix that `takes` lists for its part of speech, and a word that homonyms share takes the affixes of both. A word can take an affix when the joined form passes the phonotactic check, with the glide and the schwa repairs, is not a common English word, and is no other form that the run has or could make. Every mode respects the rule. An arbitrary assignment draws the words in a seeded random order, and the lexemes that few words suit choose first. The target-correlation search exchanges only words that suit both lexemes. A branch's marked forms take every affix that a lexeme of the branch requires. So no inflected form that a request asks for is ever skipped. The requirement comes from `takes` alone, never from `inflect`: the corpus generator fills `takes` from its grammar settings, and `inflect` from the inflected forms that its documents and test items happen to use. An inflect entry that gives a lexeme an affix that `takes` does not list for its part of speech is an error.
+
+**Two passes.** The assignment comes first. The inflected forms are then made from whatever form each lexeme got, a marked form included (`W.12.M.2.AF.1`), and are synthesized and embedded with the rest. With the edit distance as the sound distance, no audio is needed before the assignment. With an embedding's distance, the first pass synthesizes and embeds the content words, the lexemes are assigned, and the layers are made again with every form. The audio cache keeps the second pass cheap. The lexemes are assigned in every subcommand, `forms` included, because the run's forms depend on the assignment.
+
+**What the inflected forms cannot change.** The set of inflected forms that a request asks for never changes a content word's form, its assignment, or its embedding. Two requests that differ only in their inflect lists give byte-identical content words, assignments, tokens, and embeddings (on the CPU). A test checks it.
+
+**Function words.** A request lists its function words in order of frequency in the corpus, and the forms of function words depend on that order. In a run with lexemes, the function words are therefore made after the assignment, and avoid its forms: a function word is no marked form, no marker, and no form that a word could have with an affix. So the words of the lexemes depend on the request's lexemes, `takes`, affixes, and meanings, and on nothing that the documents of a corpus change.
+
+**Outputs.** `assignment/lexicon.csv` has one row for each lexeme: `lexeme`, `meaning` (its concept), `pos`, `word`, `spelling`, `arpabet`, and `assigned` (the mode, `random`, or `same_form`), with `base_word`, `branch`, and `marker` under branch markers. `words.csv` gains the column `pos`: the part of speech of the lexeme that a form was assigned to, with both parts of speech for a form that homonyms share. An inflected form has the part of speech and the training split of its stem. The summary's `lexemes` block counts the lexemes by how they were assigned, and gives, for each affix, how many lexemes require it and how many words can take it. A run without lexemes writes the files it wrote before, byte for byte.
+
+Every assignment reports the sound–meaning correlation, with a null distribution from random reassignments. In a run with lexemes, the correlation is over the lexemes that the mode assigned. Monaghan, Christiansen, and Fitneva (2011) argued that arbitrary vocabularies help learners individuate words, while systematic vocabularies help learners learn categories. These assignment modes let us test that claim across model types.
 
 ## Augmentation and acoustic manipulation
 
@@ -350,8 +388,9 @@ embeddings:
   - {name: contrastive_logmel, encoder: learned, kind: contrastive, frontend: logmel, dims: 128, hidden: 128, layers: 3, kernel: 5, epochs: 20, batch_size: 64, learning_rate: 0.001, temperature: 0.1, train_on: clean}
   - {name: cpc_logmel, encoder: learned, kind: cpc, frontend: logmel, dims: 64, hidden: 128, layers: 3, kernel: 5, epochs: 10, batch_size: 32, learning_rate: 0.001, steps_ahead: 8, negatives: 32, negatives_from: batch, embedding_from: context, train_on: clean}
 
+request: null                    # a request file, such as the corpus generator's wordform_request.yaml (see "The request" and "Requests with lexemes")
+
 closed_class:                    # null: content words only
-  request: null                  # a request file (see "Closed-class forms"); the keys below give the request inline
   function_words:
     glosses: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
     source: pseudo               # english: each gloss's English pronunciation
@@ -364,7 +403,7 @@ closed_class:                    # null: content words only
     epenthesis: true
     glide: Y                     # the glide between two vowels at a join when neither vowel decides
     max_skipped: 0.1             # reject an affix that more than this share of the words cannot take
-  inflect: []                    # for example [{words: all, affixes: [PLURAL]}]
+  inflect: []                    # for example [{words: all, affixes: [PLURAL]}]; an entry of a request with lexemes can name lexemes
 
 word_embeddings: {tokens: clean} # clean: training-speaker tokens without augmentation; all: with
 training: {held_out_word_proportion: 0.2}   # content words that no trained encoder sees
@@ -391,7 +430,9 @@ assignment:
 device: auto                     # cpu, cuda, mps, or auto
 ```
 
-Also add `data/wordforms/tiny.yaml` (20 words, 3 speakers per engine, 1 token per speaker, fixed embeddings only) for fast tests.
+Also add `data/wordforms/tiny.yaml` (20 words, 3 speakers per engine, 1 token per speaker, fixed embeddings only) for fast tests. `data/wordforms/corpus_tiny.yaml` makes the word forms of the tiny corpus (`data/corpus/tiny.yaml`) from its request: 60 words, the same speakers and embeddings.
+
+In a resolved configuration (`config.yaml`), a request file's function words, affixes, and inflect entries are written inline under `closed_class`, and its lexemes, `takes`, and meanings under `request`. So a run's `config.yaml` gives the same run again without the request file.
 
 ## Determinism
 
@@ -404,14 +445,14 @@ A run writes one folder, by default `runs/wordforms/<name>_seed<seed>/`, with au
 | File | Contents |
 | --- | --- |
 | `config.yaml` | The fully resolved configuration, all seeds, the git commit hash (with a flag for uncommitted changes), and package versions, including every model's name and revision. |
-| `words.csv` | One row per word (with `split`, `train` or `held_out`, for the trained encoders): label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, `inflected`, or, with branch markers, `marked`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
+| `words.csv` | One row per word (with `split`, `train` or `held_out`, for the trained encoders, and, in a run that assigns the lexemes of a request, `pos`): label, ARPAbet, IPA, espeak-ng string, spelling, syllables, stress, phonotactic log probability, English neighbors, nearest English word, lexicon neighbors, whether the word is a real English word, whether the word's Piper synthesis is unusually long (`long_synthesis`). With closed-class forms, function words and inflected forms also get rows, and the table gains `kind` (`content`, `function`, `inflected`, or, with branch markers, `marked`), `gloss` (function words), `stem`, `affix`, and `join` (inflected forms: `none`, `schwa`, or `glide`), and `weak_forms` (the other dictionary pronunciations of an English function word). |
 | `affixes.csv` | One row per affix: label, gloss, position, ARPAbet, IPA. An English affix lists its allomorphs. Written when the run has closed-class forms. |
 | `speakers.csv` | One row per speaker: label, engine, voice, speaker ID or variant, pitch and rate settings, training or held out. |
 | `tokens.csv` | One row per token: label, word, speaker, synthesis settings, perturbations, augmentation (the recipe and drawn values of an augmented token), achieved (each transformation's target and measured value), mapping (the source, meaning, and mappings of a token changed by acoustic mapping), control (true for the unmapped original of a mapped token), duration, number of tries, peak and RMS level, cache path, SHA-256 hash. |
 | `frontends/<name>/frames.npy`, `index.csv`, `meta.yaml` | Front-end frames, the frame index, and settings. |
 | `embeddings/<name>/tokens.npy`, `types.npy`, `meta.yaml` | Token and word embeddings, and settings. A fixed encoder with a projection also writes `projection.npz`. A pretrained encoder with `store_layers: true` also writes `layers.npy`. A learned encoder writes its frozen model, `model.pt`, and its training report in `meta.yaml`. |
 | `eval/embeddings.csv` | Evaluation results for every stored embedding (`basis` is `stored`), and for every layer of each pretrained model (`basis` is `sweep`), for all words and without the `long_synthesis` words (`word_set`), by kind of form (`kind`) and, with augmentation or acoustic mapping, by set of tokens (`tokens`). |
-| `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. With branch markers, `lexicon.csv` adds each meaning's base word, branch, and marker, and `assignment/markers.csv` lists the markers. With acoustic mapping, the summary holds the measured shifts of each mapping. |
+| `assignment/lexicon.csv`, `assignment/summary.yaml` | Word-to-meaning assignment, and the sound–meaning correlation with its null distribution. In a run with the lexemes of a request, `lexicon.csv` has one row for each lexeme, with a `lexeme` column. With branch markers, `lexicon.csv` adds each meaning's base word, branch, and marker, and `assignment/markers.csv` lists the markers. With acoustic mapping, the summary holds the measured shifts of each mapping. |
 
 ## Python package
 
@@ -432,6 +473,7 @@ python/semantic_world/wordforms/
   encoders/          # fixed.py, pretrained.py, learned.py
   evaluate.py
   assign.py
+  lexemes.py         # assigning the lexemes of a request, and inflecting their forms
   mapping.py         # acoustic mapping of the tokens of assigned words
   io.py
 data/wordforms/      # default.yaml, tiny.yaml, arpabet_ipa.yaml, arpabet_espeak.yaml, spelling.yaml
@@ -475,6 +517,8 @@ These choices were made while writing this specification. Each one is the workin
 8. Function words have one syllable of a simple shape and differ from each other by at least two phonemes. Affixes join with an inserted schwa where the plain join would be illegal. The default configuration makes function words and affixes but inflects nothing.
 9. Decided September 30, 2026, after stage 4a (`docs/proposals/2026-09-30-wordforms-closed-class-shapes-and-joins.md`): the sound patterns come from uninflected words; function words are rejected against the common words only, with the default weights CV 0.3, CVC 0.4, VC 0.3, and the most frequent half get two phonemes; an affix that more than 10% of the words cannot take is rejected; a vowel meeting a vowel at a join is repaired with a glide before the schwa is tried; a stem and affix pair whose form is a common English word is skipped; and `source: english` gives English function words (with weak forms) and English affixes (with allomorphy).
 10. Decided October 1, 2026, after stage 7: under acoustic mapping, the mapped tokens are the mapped word's tokens for word embeddings and every learner-facing output, and the unmapped originals are kept as a labeled control set; a target correlation that is not reached is a reported result with a warning, and an error with `assignment.strict: true`; and the augmentation's formant ratio and pitch shift are measured frame by frame, like the shifts of acoustic mapping.
+
+11. Decided October 1, 2026, with stage 7 of the corpus generator (`docs/specs/CORPUS_GENERATOR.md`, decisions 9, 10, 12, 16, and 56, and `docs/proposals/2026-10-01-corpus-stage-7-decisions.md`): the request is the top-level setting `request`, and can list lexemes and meanings; the lexemes are assigned to content words, categories by the assignment mode and all others at random, with homonyms sharing a form; the assignment comes first, and the inflected forms are then made from the lexemes' forms, marked forms included; a lexeme gets only a word that can take the affixes of its part of speech, which the request's `takes` lists; the inflected forms that a request asks for never change a content word's form, assignment, or embedding, so the trained encoders never train on inflected forms; and a run with too few content words for its lexemes is an error.
 
 ## References
 

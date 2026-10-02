@@ -62,7 +62,9 @@ python -m semantic_world.wordforms check-ipa                      # compare the 
 python -m semantic_world.wordforms check-whisper data/wordforms/default.yaml   # transcribe real words synthesized from phonemes
 python -m piper.download_voices en_US-libritts_r-medium --download-dir runs/wordforms/voices   # fetch the Piper voice once
 pytest tests/wordforms                                           # the word-form pipeline's tests alone
-python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]   # generate a corpus: documents, test sets, and statistics
+python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]   # generate a corpus: documents, test sets, statistics, and the word-form request
+python -m semantic_world.wordforms all data/wordforms/corpus_tiny.yaml                     # the word forms of the tiny corpus, from its request (after generate data/corpus/tiny.yaml)
+python -m semantic_world.corpus render runs/corpus/tiny_seed1 --wordforms runs/wordforms/corpus_tiny_seed1   # attach the word forms: word labels and the spelled rendering
 pytest tests/corpus                                              # the corpus generator's tests alone
 ```
 

@@ -25,6 +25,7 @@ documents:
   shuffle: 0.3                   # 0: encyclopedic documents follow the template order; 1: a random order
   instance_description_rate: 0.2 # the probability that an event sentence of a narrative is followed by a description
   sibling_contrast_rate: 0.2     # the probability that a fact in a category document is followed by the matching fact about a sibling
+  relation_fact_share: null      # the share of a category document's sentences that draw a relation fact; null: one kind of content among the others, each with the same chance; 0: none
 
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}

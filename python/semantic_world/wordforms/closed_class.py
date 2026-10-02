@@ -256,11 +256,13 @@ def generate_function_words(
     rng: np.random.Generator,
     english: English,
     content: list[WordForm],
+    avoid: set[tuple[str, ...]] | None = None,
 ) -> tuple[list[WordForm], dict[str, Any]]:
     """One function word for each gloss, without statistics, and a report of the draws. The
     glosses are in order of frequency, and the first ``SHORT_SHARE`` of them (rounded up) take
-    two-phoneme shapes when a two-phoneme shape has weight."""
-    content_forms = {w.stripped for w in content}
+    two-phoneme shapes when a two-phoneme shape has weight. ``avoid`` holds more forms, without
+    stress, that a function word must not be."""
+    content_forms = {w.stripped for w in content} | (avoid or set())
     pools: dict[str, list[tuple[Syllable, float]]] = {}
     candidates: dict[str, dict[str, int]] = {}
     for shape in settings.function_shapes:
@@ -536,7 +538,7 @@ def inflection_pairs(
     affix order."""
     by_gloss = {affix.gloss: affix for affix in affixes}
     wanted: set[tuple[str, str]] = set()
-    for entry in settings.inflect:
+    for entry in settings.word_inflect:
         if entry.words == "none":
             continue
         labels = [w.label for w in content] if entry.words == "all" else entry.words
@@ -623,15 +625,15 @@ def add_closed_class(
     content_forms = [w.stripped for w in content]
     spellings = {w.spelling for w in content}
 
-    if settings.function_source == "english":
-        function_words, function_report = english_function_words(settings, english)
+    if config.assigns_lexemes:
+        # With the lexemes of a request, the function words are made after the assignment
+        # (add_function_words), so that the assignment never depends on them: their forms
+        # depend on their order of frequency in the corpus.
+        function_words, function_report = [], {"count": 0}
     else:
-        function_words, function_report = generate_function_words(
-            settings, streams.substream("closed_class", "function_words"), english, content
+        function_words, function_report = _function_words(
+            config, streams, english, content, tables, speller, spellings
         )
-    for word in function_words:
-        spelling = word.english_word or speller.spell_avoiding(word.phones, english.pattern_words)
-        _add_statistics(word, spelling, english, tables, content_forms, spellings)
 
     if settings.affix_source == "english":
         affixes, affix_report = english_affixes(settings, tables[0])
@@ -639,6 +641,7 @@ def add_closed_class(
         affixes, affix_report = generate_affixes(
             settings, streams.substream("closed_class", "affixes"), english, tables[0], content
         )
+    # The entries that name lexemes wait for the assignment (add_inflected).
     pairs = inflection_pairs(settings, content, affixes)
     inflected, skipped = inflect(settings, english, speller, pairs)
     for form, spelling in inflected:
@@ -670,3 +673,114 @@ def add_closed_class(
         },
     }
     return lexicon
+
+
+def _function_words(
+    config: Config,
+    streams: Streams,
+    english: English,
+    content: list[WordForm],
+    tables: tuple[PhonemeTable, PhonemeTable],
+    speller: Speller,
+    spellings: set[str],
+    avoid: set[tuple[str, ...]] | None = None,
+) -> tuple[list[WordForm], dict[str, Any]]:
+    """The function words of a configuration, with their statistics, and the report."""
+    settings = config.closed_class
+    if settings.function_source == "english":
+        function_words, report = english_function_words(settings, english)
+    else:
+        function_words, report = generate_function_words(
+            settings, streams.substream("closed_class", "function_words"), english, content, avoid
+        )
+    content_forms = [w.stripped for w in content]
+    for word in function_words:
+        spelling = word.english_word or speller.spell_avoiding(word.phones, english.pattern_words)
+        _add_statistics(word, spelling, english, tables, content_forms, spellings)
+    return function_words, report
+
+
+def add_function_words(
+    config: Config,
+    streams: Streams,
+    lexicon: Lexicon,
+    avoid: set[tuple[str, ...]],
+    english: English | None = None,
+) -> list[WordForm]:
+    """Add the function words to a lexicon whose lexemes are assigned: the step that a run with
+    the lexemes of a request takes after the assignment. A function word is none of the forms in
+    ``avoid`` (the marked forms, the markers, and every form that a word could have with an
+    affix), beside the content words. The function words stand right after the content words,
+    as in every run."""
+    english = english or load_english(
+        config.wordforms.english_min_zipf, config.wordforms.exclude_inflections
+    )
+    content = lexicon.content
+    function_words, report = _function_words(
+        config,
+        streams,
+        english,
+        content,
+        load_tables(),
+        Speller.load(),
+        {w.spelling for w in lexicon.words},
+        avoid,
+    )
+    rest = [w for w in lexicon.words if w.kind != "content"]
+    lexicon.words = content + function_words + rest
+    lexicon.closed_class["function_words"] = report
+    for word in function_words:
+        if not word.real_word and english.is_pronunciation(word.phones):
+            lexicon.closed_class["english_words"][word.label] = english.words_with_pronunciation(
+                word.phones
+            )[0]
+    return function_words
+
+
+def add_inflected(
+    config: Config,
+    lexicon: Lexicon,
+    pairs: list[tuple[WordForm, Affix]],
+    english: English | None = None,
+) -> list[WordForm]:
+    """Add the inflected forms of more stem and affix pairs to a lexicon that has its
+    closed-class forms: the second pass of a run that assigns the lexemes of a request, whose
+    stems (content words and marked forms) are known only after the assignment. Every pair must
+    give a form: the assignment gave each lexeme a word that can take its affixes."""
+    settings = config.closed_class
+    english = english or load_english(
+        config.wordforms.english_min_zipf, config.wordforms.exclude_inflections
+    )
+    tables = load_tables()
+    speller = Speller.load()
+    content_forms = [w.stripped for w in lexicon.content]
+    spellings = {w.spelling for w in lexicon.words}
+    inflected, skipped = inflect(settings, english, speller, pairs)
+    if skipped:
+        first = skipped[0]
+        raise GenerationError(
+            f"the inflected form of {first['stem']} with {first['affix']} cannot be made "
+            f"({first['reason']}), and {len(skipped) - 1} more: the request's takes must list "
+            f"every affix that an inflect entry gives a lexeme"
+        )
+    for form, spelling in inflected:
+        _add_statistics(form, spelling, english, tables, content_forms, spellings)
+    made = [form for form, _ in inflected]
+    lexicon.words = lexicon.words + made
+    report = lexicon.closed_class["inflected"]
+    report["requested"] += len(pairs)
+    report["made"] += len(made)
+    for name in JOINS:
+        report["joins"][name] += sum(form.join == name for form in made)
+    by_form: dict[tuple[str, ...], list[str]] = {}
+    for word in lexicon.words:
+        by_form.setdefault(word.stripped, []).append(word.label)
+    lexicon.closed_class["identical_forms"] = [
+        labels for labels in by_form.values() if len(labels) > 1
+    ]
+    for word in made:
+        if english.is_pronunciation(word.phones):
+            lexicon.closed_class["english_words"][word.label] = english.words_with_pronunciation(
+                word.phones
+            )[0]
+    return made

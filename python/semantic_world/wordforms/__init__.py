@@ -89,7 +89,7 @@ class Run:
                     "pretrained": True,
                 }
         io.write_config(self.config, self.streams, folder / "config.yaml", models)
-        io.write_words(self.lexicon, folder / "words.csv")
+        io.write_words(self.lexicon, folder / "words.csv", pos=self.config.assigns_lexemes)
         if self.config.closed_class is not None:
             io.write_affixes(self.lexicon, folder / "affixes.csv")
         if self.synthesis is not None:
@@ -107,14 +107,21 @@ class Run:
 
 def run_forms(config: Config) -> Run:
     """Generate the word forms of a configuration: the content words, and the closed-class forms
-    when the configuration has them."""
+    when the configuration has them. With the lexemes of a request, the lexemes are assigned to
+    the content words, and the inflected forms that the request asks for are made from the forms
+    the lexemes got. When the assignment's sound distance is an embedding's, the assignment
+    waits for the embeddings (:func:`run_assignment`)."""
+    from semantic_world.wordforms.assign import needs_embeddings
     from semantic_world.wordforms.closed_class import add_closed_class
 
     streams = Streams(config.seed)
     lexicon = generate_lexicon(config, streams.generate)
     add_closed_class(config, streams, lexicon)
     assign_word_splits(config, streams, lexicon)
-    return Run(config, streams, lexicon)
+    run = Run(config, streams, lexicon)
+    if config.assigns_lexemes and not needs_embeddings(config):
+        run_assignment(run)
+    return run
 
 
 def run_synthesis(run: Run, progress=None) -> Run:
@@ -198,11 +205,16 @@ def run_assignment(run: Run, out: str | Path | None = None) -> Run:
     """Assign the content words to the meanings of ``assignment.meanings``, in the configured
     mode. Without a meanings table, nothing is assigned. With branch markers, the marked forms
     join the run's word forms, so the assignment must come before the synthesis. With an
-    embedding's distance as the sound distance, the embeddings are computed first."""
+    embedding's distance as the sound distance, the embeddings are computed first.
+
+    With the lexemes of a request, every lexeme gets a form, and the run has two passes: the
+    assignment, and then the inflected forms of the lexemes' forms, which are synthesized and
+    embedded with the rest. When the assignment needed the embeddings, the layers of the first
+    pass are dropped, and the audio cache keeps the second pass cheap."""
     from semantic_world.wordforms.assign import assign, needs_embeddings
 
     config = run.config
-    if config.assignment.meanings is None or run.assignment is not None:
+    if run.assignment is not None or not (config.assigns_lexemes or config.meanings is not None):
         return run
     content = run.lexicon.content
     types = None
@@ -211,6 +223,23 @@ def run_assignment(run: Run, out: str | Path | None = None) -> Run:
             run_embeddings(run, out)
         rows = [i for i, word in enumerate(run.lexicon.words) if word.kind == "content"]
         types = run.embeddings[config.assignment.sound_distance].types[rows]
+    if config.assigns_lexemes:
+        from semantic_world.wordforms.closed_class import add_function_words
+        from semantic_world.wordforms.lexemes import assign_lexemes, forms_to_avoid, inflect_lexemes
+
+        run.assignment = assign_lexemes(config, run.lexicon, run.streams, types=types)
+        if run.assignment.marked:
+            run.lexicon.words = run.lexicon.words + run.assignment.marked
+        if config.closed_class is not None:
+            # The function words come after the assignment, so that no lexeme's word depends
+            # on them, and before the inflected forms, in the run's usual order of forms.
+            add_function_words(
+                config, run.streams, run.lexicon, forms_to_avoid(run.lexicon, run.assignment)
+            )
+        inflect_lexemes(config, run.lexicon, run.assignment)
+        # the layers of the first pass do not hold the forms that the assignment added
+        run.synthesis = run.frontends = run.embeddings = run.evaluation = None
+        return run
     run.assignment = assign(
         config,
         content,

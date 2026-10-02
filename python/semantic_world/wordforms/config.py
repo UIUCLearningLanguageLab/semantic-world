@@ -519,16 +519,84 @@ class AffixItem:
 
 @dataclass(frozen=True)
 class InflectEntry:
-    """Which words take which affixes."""
+    """Which words, or which lexemes of a request, take which affixes."""
 
     words: str | tuple[str, ...]
-    """``all``, ``none``, or the labels of content words."""
+    """``all``, ``none``, or the labels of content words. ``none`` in an entry that names
+    lexemes."""
     affixes: tuple[str, ...]
     """The glosses of the affixes."""
+    lexemes: tuple[str, ...] | None = None
+    """The labels of the request's lexemes whose forms are inflected, in place of ``words``. The
+    form of a lexeme is known only after the assignment."""
 
     def resolved(self) -> dict[str, Any]:
+        if self.lexemes is not None:
+            return {"lexemes": list(self.lexemes), "affixes": list(self.affixes)}
         words = self.words if isinstance(self.words, str) else list(self.words)
         return {"words": words, "affixes": list(self.affixes)}
+
+
+@dataclass(frozen=True)
+class RequestLexeme:
+    """One content lexeme of a request: a word of the corpus's language that needs a form."""
+
+    label: str
+    concept: str
+    """The label of the lexeme's concept. A lexeme whose concept is in the meanings table is
+    assigned by the assignment mode."""
+    pos: str
+    """The lexeme's part of speech, as the corpus generator names it."""
+    same_form_as: str | None = None
+    """For a homonym: the lexeme whose word form this one shares."""
+
+    def resolved(self) -> dict[str, Any]:
+        record = {"label": self.label, "concept": self.concept, "pos": self.pos}
+        if self.same_form_as is not None:
+            record["same_form_as"] = self.same_form_as
+        return record
+
+
+@dataclass(frozen=True)
+class RequestConfig:
+    """The lexemes of a request (``docs/specs/CORPUS_GENERATOR.md``, "Word forms for the
+    corpus"). The request's function words, affixes, and inflect entries are held by
+    :class:`ClosedClassConfig`."""
+
+    lexemes: tuple[RequestLexeme, ...]
+    takes: dict[str, tuple[str, ...]]
+    """For each part of speech, the glosses of the affixes that its lexemes' words must be able
+    to take. The requirement decides which words a lexeme can get. It does not decide which
+    inflected forms are made: the inflect entries do."""
+    meanings: str | None
+    """The meanings table for the lexemes of categories, read from the folder the command runs
+    in. In a request file, the path is given relative to the file."""
+    file: str | None = field(default=None, compare=False)
+    """The request file that the request was read from. The resolved configuration holds the
+    request inline, so this field takes no part in comparisons."""
+
+    @property
+    def leaders(self) -> tuple[RequestLexeme, ...]:
+        """The lexemes that need a form of their own: every lexeme that is not the later half of
+        a homonym pair."""
+        return tuple(x for x in self.lexemes if x.same_form_as is None)
+
+    def requirements(self) -> dict[str, tuple[str, ...]]:
+        """For each lexeme that needs a form of its own, the glosses of the affixes that its
+        word must be able to take: those of its part of speech, and those of the lexemes that
+        share its form."""
+        wanted: dict[str, list[str]] = {x.label: [] for x in self.leaders}
+        for lexeme in self.lexemes:
+            owner = wanted[lexeme.same_form_as or lexeme.label]
+            owner.extend(g for g in self.takes.get(lexeme.pos, ()) if g not in owner)
+        return {label: tuple(glosses) for label, glosses in wanted.items()}
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "lexemes": [x.resolved() for x in self.lexemes],
+            "takes": {pos: list(glosses) for pos, glosses in self.takes.items()},
+            "meanings": self.meanings,
+        }
 
 
 @dataclass(frozen=True)
@@ -559,9 +627,18 @@ class ClosedClassConfig:
     """The request file that the request was read from. The resolved configuration holds the
     request inline, so this field takes no part in comparisons."""
 
+    @property
+    def word_inflect(self) -> tuple[InflectEntry, ...]:
+        """The inflect entries that name words."""
+        return tuple(entry for entry in self.inflect if entry.lexemes is None)
+
+    @property
+    def lexeme_inflect(self) -> tuple[InflectEntry, ...]:
+        """The inflect entries that name lexemes. Their forms are made after the assignment."""
+        return tuple(entry for entry in self.inflect if entry.lexemes is not None)
+
     def resolved(self) -> dict[str, Any]:
         return {
-            "request": None,
             "function_words": {
                 "glosses": list(self.glosses),
                 "source": self.function_source,
@@ -696,6 +773,8 @@ class Config:
     synthesis: SynthesisConfig
     frontends: FrontendsConfig
     embeddings: tuple[EmbeddingConfig, ...]
+    request: RequestConfig | None
+    """The lexemes of a request, or None for a run without lexemes."""
     closed_class: ClosedClassConfig | None
     """None: the run has content words only."""
     augmentation: AugmentationConfig | None
@@ -714,6 +793,7 @@ class Config:
             "synthesis": self.synthesis.resolved(),
             "frontends": self.frontends.resolved(),
             "embeddings": [e.resolved() for e in self.embeddings],
+            "request": None if self.request is None else self.request.resolved(),
             "closed_class": None if self.closed_class is None else self.closed_class.resolved(),
             "augmentation": None if self.augmentation is None else self.augmentation.resolved(),
             "word_embeddings": self.word_embeddings.resolved(),
@@ -721,6 +801,18 @@ class Config:
             "assignment": self.assignment.resolved(),
             "device": self.device,
         }
+
+    @property
+    def meanings(self) -> str | None:
+        """The meanings table of the assignment: ``assignment.meanings``, or the request's."""
+        if self.assignment.meanings is not None:
+            return self.assignment.meanings
+        return None if self.request is None else self.request.meanings
+
+    @property
+    def assigns_lexemes(self) -> bool:
+        """Whether the run assigns the lexemes of a request to its content words."""
+        return self.request is not None and bool(self.request.lexemes)
 
     def with_seed(self, seed: int) -> Config:
         return Config(**{**self.__dict__, "seed": seed})
@@ -1345,21 +1437,38 @@ def _read_affix_items(source: str, field_name: str, value: Any) -> tuple[AffixIt
 
 
 def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntry, ...]:
+    """The inflect entries. An entry names words (``words``: all, none, or word labels) or the
+    lexemes of a request (``lexemes``: lexeme labels), never both."""
     if not isinstance(value, list):
         raise ConfigError(source, field_name, f"expected a list, found {_describe(value)}")
     entries = []
     for i, item in enumerate(value):
         node = _Node(source, f"{field_name}[{i}]", item)
-        words = node.get("words")
-        if isinstance(words, list):
-            for word in words:
-                if not isinstance(word, str):
-                    raise node.error("words", f"expected word labels, found {_describe(word)}")
-            words = tuple(words)
-        elif words not in ("all", "none"):
-            raise node.error(
-                "words", f"expected all, none, or a list of word labels, found {_describe(words)}"
-            )
+        lexemes = None
+        if "lexemes" in node.data:
+            if "words" in node.data:
+                raise node.error("lexemes", "an entry names words or lexemes, not both")
+            lexemes = node.get("lexemes")
+            if not isinstance(lexemes, list) or not all(isinstance(x, str) and x for x in lexemes):
+                raise node.error(
+                    "lexemes", f"expected a list of lexeme labels, found {_describe(lexemes)}"
+                )
+            if len(set(lexemes)) != len(lexemes):
+                raise node.error("lexemes", "the lexeme labels must be distinct")
+            lexemes = tuple(lexemes)
+            words: Any = "none"
+        else:
+            words = node.get("words")
+            if isinstance(words, list):
+                for word in words:
+                    if not isinstance(word, str):
+                        raise node.error("words", f"expected word labels, found {_describe(word)}")
+                words = tuple(words)
+            elif words not in ("all", "none"):
+                raise node.error(
+                    "words",
+                    f"expected all, none, or a list of word labels, found {_describe(words)}",
+                )
         affixes = node.get("affixes")
         if not isinstance(affixes, list) or not affixes:
             raise node.error(
@@ -1368,20 +1477,89 @@ def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntr
         glosses = tuple(
             _gloss(source, f"{node.field('affixes')}[{k}]", a) for k, a in enumerate(affixes)
         )
-        entries.append(InflectEntry(words, glosses))
+        entries.append(InflectEntry(words, glosses, lexemes))
         node.finish()
     return tuple(entries)
 
 
-def _read_request(path: str, config_source: str):
-    """The closed-class request of a request file: the glosses of the function words, the affix
-    items, and the inflect entries."""
+@dataclass(frozen=True)
+class _RequestFile:
+    """A request file, read: its closed-class part, and its lexemes."""
+
+    path: str
+    glosses: tuple[str, ...]
+    items: tuple[AffixItem, ...]
+    inflect: tuple[InflectEntry, ...]
+    lexemes: RequestConfig | None
+
+
+def _read_lexemes(node: _Node, base: Path | None) -> RequestConfig | None:
+    """The lexeme part of a request: ``lexemes``, ``takes``, and ``meanings``. ``base`` is the
+    folder of a request file, which its meanings path is relative to. None when the request
+    names no lexeme and no meanings."""
+    value = node.get("lexemes", [])
+    if not isinstance(value, list):
+        raise node.error("lexemes", f"expected a list, found {_describe(value)}")
+    lexemes = []
+    for i, item in enumerate(value):
+        entry = _Node(node.source, node.field(f"lexemes[{i}]"), item)
+        lexemes.append(
+            RequestLexeme(
+                label=entry.string("label", _MISSING),
+                concept=entry.string("concept", _MISSING),
+                pos=entry.string("pos", _MISSING),
+                same_form_as=entry.string("same_form_as", None, nullable=True),
+            )
+        )
+        entry.finish()
+    by_label = {x.label: x for x in lexemes}
+    if len(by_label) != len(lexemes):
+        raise node.error("lexemes", "the lexeme labels must be distinct")
+    for i, lexeme in enumerate(lexemes):
+        if lexeme.same_form_as is None:
+            continue
+        other = by_label.get(lexeme.same_form_as)
+        problem = None
+        if other is None:
+            problem = f"{lexeme.same_form_as!r} is not the label of a lexeme"
+        elif other is lexeme:
+            problem = "a lexeme cannot share its own form"
+        elif other.same_form_as is not None:
+            problem = f"{other.label} shares the form of {other.same_form_as} itself"
+        if problem is not None:
+            raise node.error(f"lexemes[{i}].same_form_as", problem)
+    takes_node = node.mapping("takes")
+    takes: dict[str, tuple[str, ...]] = {}
+    for pos, glosses in takes_node.data.items():
+        takes_node.seen.add(pos)
+        if not isinstance(pos, str) or not isinstance(glosses, list) or not glosses:
+            raise takes_node.error(
+                pos, f"expected a part of speech with a list of glosses, found {_describe(glosses)}"
+            )
+        takes[pos] = tuple(
+            _gloss(node.source, f"{takes_node.field(pos)}[{k}]", g) for k, g in enumerate(glosses)
+        )
+        if len(set(takes[pos])) != len(takes[pos]):
+            raise takes_node.error(pos, "the glosses must be distinct")
+    meanings = node.string("meanings", None, nullable=True)
+    if meanings is not None and base is not None:
+        meanings = str(base / meanings)
+    if not lexemes and not takes and meanings is None:
+        return None
+    if not lexemes:
+        raise node.error("lexemes", "a request with takes or meanings needs lexemes")
+    return RequestConfig(tuple(lexemes), takes, meanings)
+
+
+def _read_request_file(path: str, config_source: str) -> _RequestFile:
+    """A request file: the glosses of the function words, the affix items, the inflect entries,
+    and the lexemes with their requirements and their meanings."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError as error:
         raise ConfigError(
             config_source,
-            "closed_class.request",
+            "request",
             f"cannot read the request file {path}: {error.strerror}",
         ) from error
     try:
@@ -1392,26 +1570,58 @@ def _read_request(path: str, config_source: str):
     glosses = _read_glosses(path, "function_words", node.get("function_words", []))
     items = _read_affix_items(path, "affixes", node.get("affixes", []))
     inflect = _read_inflect(path, "inflect", node.get("inflect", []))
+    lexemes = _read_lexemes(node, Path(path).parent)
     node.finish()
-    return glosses, items, inflect
+    if lexemes is not None:
+        lexemes = RequestConfig(lexemes.lexemes, lexemes.takes, lexemes.meanings, file=path)
+    return _RequestFile(path, glosses, items, inflect, lexemes)
 
 
-def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None:
+def _read_request(root: _Node) -> tuple[_RequestFile | None, RequestConfig | None]:
+    """The top-level ``request``: null, the path of a request file, or the lexeme part of a
+    request inline (as a resolved configuration holds it). Returns the request file, when there
+    is one, and the lexemes."""
+    value = root.get("request", None, nullable=True)
+    if value is None:
+        return None, None
+    if isinstance(value, str) and value:
+        file = _read_request_file(value, root.source)
+        return file, file.lexemes
+    if isinstance(value, dict):
+        node = _Node(root.source, "request", value)
+        lexemes = _read_lexemes(node, None)
+        node.finish()
+        return None, lexemes
+    raise root.error(
+        "request",
+        f"expected null, the path of a request file, or a mapping, found {_describe(value)}",
+    )
+
+
+def _read_closed_class(
+    root: _Node, word_count: int, request: _RequestFile | None
+) -> ClosedClassConfig | None:
     node = root.mapping("closed_class", nullable=True)
     if node is None:
+        if request is not None:
+            raise root.error(
+                "closed_class",
+                "must not be null with a request file, which asks for function words and affixes",
+            )
         return None
-    request = node.string("request", None, nullable=True)
+    # The request was closed_class.request before the lexemes. A run folder of that time holds
+    # the key as null, and still loads.
+    if node.get("request", None, nullable=True) is not None:
+        raise node.error("request", "is now the top-level key request")
     function_node = node.mapping("function_words")
     affix_node = node.mapping("affixes")
     default_items = [{"gloss": g, "position": p} for g, p in DEFAULT_AFFIXES]
     if request is not None:
         for owner, key in ((function_node, "glosses"), (affix_node, "items"), (node, "inflect")):
             if key in owner.data:
-                raise owner.error(
-                    key, "must not be given together with closed_class.request, which replaces it"
-                )
-        owner_source = request
-        glosses, items, inflect = _read_request(request, root.source)
+                raise owner.error(key, "must not be given together with request, which replaces it")
+        owner_source = request.path
+        glosses, items, inflect = request.glosses, request.items, request.inflect
         inflect_field = "inflect"
     else:
         owner_source = root.source
@@ -1465,12 +1675,73 @@ def _read_closed_class(root: _Node, word_count: int) -> ClosedClassConfig | None
         glide=affix_node.choice("glide", "Y", GLIDES),
         max_skipped=affix_node.probability("max_skipped", 0.1),
         inflect=inflect,
-        request=request,
+        request=None if request is None else request.path,
     )
     function_node.finish()
     affix_node.finish()
     node.finish()
     return config
+
+
+def _check_request(
+    root: _Node,
+    request: RequestConfig | None,
+    closed_class: ClosedClassConfig | None,
+    wordforms: WordformsConfig,
+    assignment: AssignmentConfig,
+) -> None:
+    """The checks that tie a request's lexemes to the rest of the configuration. An error in a
+    request file names the file."""
+    entries = () if closed_class is None else closed_class.lexeme_inflect
+    file = None if closed_class is None else closed_class.request
+    source = (request.file if request is not None else None) or file or root.source
+    inline = source == root.source
+    inflect_field = "closed_class.inflect" if inline else "inflect"
+    prefix = "request." if inline else ""
+    if request is None:
+        if entries:
+            raise ConfigError(
+                source, inflect_field, "an entry names lexemes, and the request has no lexemes"
+            )
+        return
+    affixes = set() if closed_class is None else {item.gloss for item in closed_class.affixes}
+    for pos, glosses in request.takes.items():
+        for gloss in glosses:
+            if gloss not in affixes:
+                raise ConfigError(
+                    source, f"{prefix}takes.{pos}", f"{gloss!r} is not the gloss of an affix"
+                )
+    by_label = {x.label: x for x in request.lexemes}
+    all_entries = () if closed_class is None else closed_class.inflect
+    for i, entry in enumerate(all_entries):
+        for label in entry.lexemes or ():
+            lexeme = by_label.get(label)
+            if lexeme is None:
+                raise ConfigError(
+                    source, f"{inflect_field}[{i}].lexemes", f"{label!r} is not a lexeme"
+                )
+            for gloss in entry.affixes:
+                if gloss not in request.takes.get(lexeme.pos, ()):
+                    raise ConfigError(
+                        source,
+                        f"{inflect_field}[{i}].lexemes",
+                        f"{label} is inflected with {gloss}, which takes does not list for its "
+                        f"part of speech ({lexeme.pos}): its word may not be able to take the "
+                        f"affix",
+                    )
+    if request.meanings is not None and assignment.meanings is not None:
+        raise root.error(
+            "assignment.meanings",
+            "must be null when the request gives meanings: the request's table is the one the "
+            "lexemes are assigned by",
+        )
+    needed = len(request.leaders)
+    if needed > wordforms.count:
+        raise root.error(
+            "wordforms.count",
+            f"the request has {needed} lexemes that need distinct forms, and the run makes "
+            f"only {wordforms.count} content words",
+        )
 
 
 def _optional_range(node: _Node, key: str, *, min: float | None = None, exclusive_min=False):
@@ -1583,7 +1854,8 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     synthesis = _read_synthesis(root.mapping("synthesis"))
     frontends = _read_frontends(root.mapping("frontends"), synthesis.sample_rate)
     embeddings = _read_embeddings(root, frontends)
-    closed_class = _read_closed_class(root, wordforms.count)
+    request_file, request = _read_request(root)
+    closed_class = _read_closed_class(root, wordforms.count, request_file)
     augmentation = _read_augmentation(root)
     word_node = root.mapping("word_embeddings")
     word_embeddings = WordEmbeddingsConfig(
@@ -1599,6 +1871,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
     device = root.choice("device", "auto", DEVICES)
     root.get("provenance", None, nullable=True)  # written by a run; ignored when read back
     root.finish()
+    _check_request(root, request, closed_class, wordforms, assignment)
     return Config(
         source=source,
         name=name,
@@ -1607,6 +1880,7 @@ def parse_config(data: Any, source: str, *, seed: int | None = None) -> Config:
         synthesis=synthesis,
         frontends=frontends,
         embeddings=embeddings,
+        request=request,
         closed_class=closed_class,
         augmentation=augmentation,
         word_embeddings=word_embeddings,

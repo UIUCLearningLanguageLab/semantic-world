@@ -5,8 +5,10 @@ There are four document types (``documents.mix``):
 
 - **encyclopedic, about a category.** The topic is a category. Each sentence draws a kind of
   content, each kind with the same chance: a membership fact, a fact about the topic, a fact
-  about one of its subcategories, or a relation fact with the topic as agent or as patient. A
-  fact about the topic can be followed by the matching fact about a sibling category, at
+  about one of its subcategories, or a relation fact with the topic as agent or as patient.
+  With ``documents.relation_fact_share``, a sentence draws a relation fact with that
+  probability instead, and the other kinds share the rest. A fact about the topic can be
+  followed by the matching fact about a sibling category, at
   ``documents.sibling_contrast_rate``, when the sibling differs;
 - **encyclopedic, about a feature.** The topic is an IS, HAS, or CAN feature, or a verb. A
   sentence states a rule, at ``propositions.rule_statement_rate``, or says which categories have
@@ -628,12 +630,20 @@ class Planner:
         if self.facts.verbs:
             kinds.append(RELATION)
         rate = self.config.documents.sibling_contrast_rate
+        share = self.config.documents.relation_fact_share
+        others = [k for k in kinds if k != RELATION]
         items: list[_Item] = []
         stated: set = set()
         for _ in range(4 * length + 20):
             if len(items) >= length:
                 break
-            content = kinds[int(facts_rng.integers(len(kinds)))]
+            if share is None:
+                content = kinds[int(facts_rng.integers(len(kinds)))]
+            elif RELATION in kinds and facts_rng.random() < share:
+                content = RELATION
+            else:
+                # the other kinds share the rest, each with the same chance
+                content = others[int(facts_rng.integers(len(others)))]
             negative = self._negative(facts_rng)
             if content == MEMBERSHIP:
                 fact = self._membership_fact(facts_rng, topic, negative, stated)

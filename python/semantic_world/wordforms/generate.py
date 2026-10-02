@@ -63,7 +63,7 @@ class WordForm:
     """Whether the word's Piper tokens are unusually long for its syllable count. None until the
     word has been synthesized by Piper."""
     kind: str = "content"
-    """``content``, ``function``, or ``inflected``."""
+    """``content``, ``function``, ``inflected``, or ``marked`` (a word with a branch marker)."""
     gloss: str | None = None
     """The gloss of a function word."""
     stem: str | None = None
@@ -77,6 +77,9 @@ class WordForm:
     weak_forms: tuple[str, ...] = ()
     """The other dictionary pronunciations of an English function word (ARPAbet), for connected
     speech later."""
+    pos: str | None = None
+    """The part of speech of the lexeme that the form was assigned to, when the run assigns the
+    lexemes of a request. A form that homonyms of two parts of speech share lists both."""
 
     @property
     def phones(self) -> tuple[str, ...]:
@@ -121,6 +124,7 @@ class WordForm:
             "join": self.join,
             "weak_forms": "; ".join(self.weak_forms) if self.weak_forms else None,
             "split": "held_out" if self.held_out else "train",
+            "pos": self.pos,
         }
 
 

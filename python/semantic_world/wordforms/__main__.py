@@ -109,6 +109,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # distance is an embedding's.
         if assigning and not needs_embeddings(config):
             run_assignment(run)
+        if config.assigns_lexemes:
+            # The lexemes of a request are assigned in every command, because the run's forms
+            # depend on the assignment: run_forms did it, unless the sound distance is an
+            # embedding's. Then the first pass embeds the words, and the layers are made again
+            # with the inflected forms.
+            run_assignment(run, args.out)
         if args.command in ("synth", "frontends", "embed", "eval", "all"):
             run_synthesis(run, progress=_progress)
         if args.command in ("frontends", "embed", "eval", "all"):
@@ -186,6 +192,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_evaluation_text(run.evaluation))
     if "assignment" in summary:
         assignment = summary["assignment"]
+        if "lexemes" in assignment:
+            lexemes = assignment["lexemes"]
+            print(
+                f"lexemes: {lexemes['count']} lexemes have forms: "
+                f"{lexemes['assigned_by_the_mode']} by the mode, "
+                f"{lexemes['assigned_at_random']} at random, {lexemes['sharing_a_form']} "
+                f"sharing a form; {lexemes['words_without_a_lexeme']} words have no lexeme"
+            )
         print(
             f"assignment ({assignment['mode']}): {assignment['meanings']} meanings, "
             f"sound-meaning correlation {assignment['correlation']} "

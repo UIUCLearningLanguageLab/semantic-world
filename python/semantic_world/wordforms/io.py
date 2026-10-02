@@ -144,7 +144,9 @@ def write_config(
     path.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
-def words_frame(lexicon: Lexicon) -> pl.DataFrame:
+def words_frame(lexicon: Lexicon, pos: bool = False) -> pl.DataFrame:
+    """The word table. ``pos`` adds the part of speech of each assigned word, in a run that
+    assigns the lexemes of a request."""
     records = [w.record() for w in lexicon.words]
     frame = pl.DataFrame(
         records,
@@ -156,13 +158,14 @@ def words_frame(lexicon: Lexicon) -> pl.DataFrame:
             "affix": pl.String,
             "join": pl.String,
             "weak_forms": pl.String,
+            "pos": pl.String,
         },
     )
-    return frame.select(WORD_COLUMNS)
+    return frame.select(WORD_COLUMNS + (("pos",) if pos else ()))
 
 
-def write_words(lexicon: Lexicon, path: Path) -> None:
-    words_frame(lexicon).write_csv(path, float_precision=6)
+def write_words(lexicon: Lexicon, path: Path, pos: bool = False) -> None:
+    words_frame(lexicon, pos).write_csv(path, float_precision=6)
 
 
 def write_affixes(lexicon: Lexicon, path: Path) -> None:

@@ -4,7 +4,7 @@ The word-form pipeline makes the spoken words of Semantic World's language. It g
 
 This guide covers setup, running the pipeline, the ideas behind each layer, the output files, the evaluation table, and the Python interface. The design is specified in `docs/specs/WORDFORM_PIPELINE.md`.
 
-**Status.** Stages 1 to 7 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, encoders trained on the world's own audio, and sound–meaning assignment (arbitrary, target correlation, branch markers, and acoustic mapping).
+**Status.** Stages 1 to 7 are complete: word forms, synthesis, auditory front ends, sound embeddings with their evaluation, closed-class forms (function words, affixes, and inflected forms), augmentation with Praat manipulation and the modulation front end, encoders trained on the world's own audio, and sound–meaning assignment (arbitrary, target correlation, branch markers, and acoustic mapping). The pipeline also makes the word forms of a corpus from the corpus generator's request (see "Word forms for a corpus").
 
 ## Setup
 
@@ -131,7 +131,7 @@ Each embedding gives one vector per token (recording). A word's embedding is the
 | `contrastive_logmel` | a small convolutional encoder trained on the run's own clips so that tokens of the same word lie together (supervised by word identity) | 128 |
 | `cpc_logmel` | a small self-supervised encoder trained by predicting its own future frames (contrastive predictive coding), with no word labels; a weak baseline: it tells words apart across speakers far worse than the others | 128 |
 
-The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (29,880 training tokens: 415 training words, content and function, from 36 training speakers, twice each) the contrastive encoder trains in about 1 minute and the CPC encoder in about 10 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
+The fixed embeddings involve no learning. HuBERT was trained on human speech, so its embeddings stand for an adult English listener. Every output labels HuBERT as pretrained. The two learned encoders train on the training speakers' clean tokens only, never on inflected forms, are seeded from the run's seed, and are frozen afterwards; `meta.yaml` holds their training report, and `embed` runs them on new forms. On the default run (29,880 training tokens: 415 training words, content and function, from 36 training speakers, twice each) the contrastive encoder trains in about 1 minute and the CPC encoder in about 10 minutes on a laptop's Apple GPU; the GRU makes the CPC encoder the slow one.
 
 **Held-out words.** One word in five (`training.held_out_word_proportion`) is held out from everything that is trained: the two learned encoders and the fixed encoders' projection. Held-out words still get audio and embeddings, and `words.csv` marks them (`split`). The evaluation gives every measure for all words, the training words, and the held-out words (`word_split`); the held-out rows say how an encoder does on words it has never seen.
 
@@ -145,7 +145,7 @@ Content words are an open class. A corpus also needs function words and affixes,
 - **Affixes** are bound forms of shape C, VC, or V with an unstressed vowel, such as `-AH0` or `-L`. They are never synthesized alone. An affix that more than 10% of the words cannot take is drawn again. The default makes three suffixes, glossed `PLURAL`, `PAST`, and `PROGRESSIVE`; `position: prefix` makes a prefix. Their labels are `AF.<n>`. With `source: english`, the three glosses are the English suffixes *-s*, *-ed*, and *-ing*, with English allomorphy (*cats*, *dogs*, *buses*).
 - **Inflected forms** join a stem to an affix, labeled `W.<n>.AF.<m>`. When the plain join fails the phonotactic check, a glide goes between a vowel and a vowel (*acoo* + `AH0` becomes *acoowa*), and otherwise a schwa goes between stem and affix (*rosk* + `L` becomes *roskal*); `words.csv` records the repair (`join`: `none`, `schwa`, or `glide`). A pair that fails even with the schwa, or whose form is a common English word, is skipped and listed in `summary.yaml`. Inflecting 500 words with 3 affixes quadruples the audio, so the default inflects nothing (`inflect: []`), and the tiny configuration inflects every word with every affix.
 
-The request can come from a separate YAML file instead (`closed_class.request`), which the corpus generator will write. It lists `function_words` (glosses), `affixes` (glosses and positions), and `inflect` entries; the shapes and the other settings stay in the configuration.
+The request can come from a separate YAML file instead, named by the top-level `request` setting. The corpus generator writes such a file. It lists `function_words` (glosses), `affixes` (glosses and positions), and `inflect` entries; the shapes and the other settings stay in the configuration. A request can also list the lexemes of a corpus (see "Word forms for a corpus"). The setting was `closed_class.request` in earlier versions, and a configuration that still names a file there gets an error that says so.
 
 Closed-class forms never change a content word. They come from their own random stream, their audio is synthesized after the content words, the projection of a fixed embedding is fitted on content words only, and the content words' evaluation rows are the same with and without them. `words.csv` gains the columns `kind` (`content`, `function`, or `inflected`), `gloss`, `stem`, `affix`, and `epenthesis`, and a run with closed-class forms also writes `affixes.csv`.
 
@@ -217,7 +217,7 @@ Every result appears twice, with and without the `long_synthesis` words. Leaving
 | `frontends/<name>/` | `frames.npy` (all tokens' frames, one after another), `index.csv` (each token's first frame and frame count), and `meta.yaml`. |
 | `embeddings/<name>/` | `tokens.npy` (one row per token, in `tokens.csv` order), `types.npy` (one row per word, in `words.csv` order), and `meta.yaml`. |
 | `eval/embeddings.csv` | The evaluation table. |
-| `assignment/` | `lexicon.csv` (each meaning's word), `summary.yaml` (the sound–meaning correlation and its null distribution), and, with branch markers, `markers.csv`. Written when the run assigns words to meanings. |
+| `assignment/` | `lexicon.csv` (each meaning's word, or, with a corpus's request, each lexeme's word), `summary.yaml` (the sound–meaning correlation and its null distribution), and, with branch markers, `markers.csv`. Written when the run assigns words to meanings. |
 
 Labels follow the project convention: words `W.12`, speakers `S.3`, and tokens `W.12.S.3.2` (token 2 of word 12 by speaker 3). Function words are `F.2`, affixes `AF.1`, and inflected forms `W.12.AF.1`; their tokens extend the labels the same way.
 
@@ -290,6 +290,43 @@ Every clean token of a word whose meaning has the feature gets a changed copy, l
 
 The sound distance is the phoneme edit distance, or, for the first two modes, the cosine distance of an embedding (`sound_distance: hubert_base`). The meaning distance is `hamming`, `cosine`, or `jaccard`. The assignment is written to `assignment/lexicon.csv` and `assignment/summary.yaml`, with `assignment/markers.csv` for branch markers. `assign` runs the word forms and the assignment alone, and `all` runs every layer with the assignment in place, so marked forms and mapped tokens are synthesized, embedded, and evaluated.
 
+## Word forms for a corpus
+
+The corpus generator (`docs/specs/CORPUS_GENERATOR.md`) writes its documents first, without word forms, and asks the pipeline for them. The chain has three steps:
+
+```
+python -m semantic_world.corpus generate data/corpus/tiny.yaml
+python -m semantic_world.wordforms all data/wordforms/corpus_tiny.yaml
+python -m semantic_world.corpus render runs/corpus/tiny_seed1 --wordforms runs/wordforms/corpus_tiny_seed1
+```
+
+`generate` writes `wordform_request.yaml` in the corpus's folder, with `wordform_meanings.csv` beside it. The word-form configuration names the request:
+
+```yaml
+request: runs/corpus/tiny_seed1/wordform_request.yaml
+wordforms: {count: 60}
+assignment: {mode: arbitrary}
+```
+
+`data/wordforms/corpus_tiny.yaml` is the example. On a laptop, the three steps take under 20 seconds for the tiny corpus. `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
+
+The request lists:
+
+- `lexemes`: the content words of the corpus's language, each with its concept and its part of speech. A homonym names the lexeme whose form it shares (`same_form_as`);
+- `takes`: for each part of speech, the affixes that its lexemes' words must be able to take;
+- `function_words`, `affixes`, and `inflect`, as in any request. The function words come in order of their frequency in the corpus, and an `inflect` entry names lexemes;
+- `meanings`: the meaning vectors of the categories, in a file beside the request.
+
+**Every lexeme gets a form.** The lexemes of categories get their words by the assignment mode, from the request's meanings: `arbitrary`, `target_correlation`, `branch_markers`, or `acoustic_mapping`. `assignment.meanings` must then be null. The synonyms of a category are assigned one by one, and share its branch marker. Every other lexeme (features, verbs, and so on) gets a word at random from the words that are left. A homonym shares its partner's form. The words that no lexeme gets stay in the run, and can serve as novel words.
+
+**Affixes.** A lexeme gets only a word that can take the affixes of its part of speech (`takes`): the joined form must pass the sound-pattern check, must not be a common English word, and must not sound like another form of the run. So every inflected form that the corpus needs exists. The inflected forms are made after the assignment, from whatever form each lexeme got. With branch markers, the plural of a category's word is the inflected form of its marked form (`W.12.M.2.AF.1`). Only the inflected forms that the corpus uses are made.
+
+**What cannot change a lexeme's word.** The inflected forms that a corpus uses, and the order of its function words, depend on its documents and its test items. The words of the lexemes do not: the affix requirement comes from `takes`, which the corpus's grammar settings fix, and the function words are made after the assignment. Two requests that differ only in their `inflect` lists give byte-identical content words, assignments, and content-word embeddings.
+
+**Outputs.** `assignment/lexicon.csv` has one row for each lexeme: `lexeme`, `meaning` (its concept), `pos`, `word`, `spelling`, `arpabet`, and `assigned` (the mode's name, `random`, or `same_form`), with `base_word`, `branch`, and `marker` under branch markers. `words.csv` gains a `pos` column: the part of speech of each assigned word, and both parts of speech for a form that homonyms share. `summary.yaml` counts the lexemes by how they were assigned.
+
+The lexemes are assigned in every subcommand, `forms` included. With an embedding as the sound distance, the pipeline runs in two passes: the content words are synthesized and embedded, the lexemes are assigned, and the layers are made again with every form. The audio cache keeps the second pass cheap.
+
 ## Configuration
 
 `data/wordforms/default.yaml` lists every parameter with its default, and `data/wordforms/tiny.yaml` shows a small configuration. The most useful settings:
@@ -308,6 +345,7 @@ The sound distance is the phoneme edit distance, or, for the first two modes, th
 | `synthesis.held_out_speaker_proportion` | 0.2 | Share of speakers held out. |
 | `synthesis.cache_dir` | `runs/wordforms/cache` | Where the audio lives. |
 | `embeddings` | five embeddings | A list; each entry names an encoder, a front end or model, and its settings. For HuBERT, `layer` picks the layer, and `store_layers: true` keeps every layer (about 1.8 GB more). |
+| `request` | null | A request file, such as a corpus's `wordform_request.yaml` (see "Word forms for a corpus"). |
 | `closed_class` | 15 function words, 3 suffixes, no inflection | The closed-class request and its settings (see "Closed-class forms"). `null` gives content words only. `inflect: [{words: all, affixes: [PLURAL]}]` inflects every word with one affix. `function_words.source: english` and `affixes.source: english` use the English forms. |
 | `frontends.modulation` | null | The modulation front end: `rates`, `scales`, and `bands`. |
 | `augmentation` | null | Augmentation recipes (see "Augmentation and acoustic manipulation"). |
@@ -324,6 +362,8 @@ To turn an engine off, set it to null, for example `espeak: null` under `synthes
 - **"espeak-ng is not installed".** `brew install espeak-ng`, or set `synthesis.engines.espeak` to null.
 - **Relative paths.** The cache and voice paths are relative to the folder the command runs in. Run from the root of the repository, as the examples do.
 - **Tests skip.** Tests never download anything. They skip with a message when the voice or a model is missing.
+- **"the request has N lexemes that need distinct forms".** The run makes fewer content words than the corpus has lexemes. Raise `wordforms.count`.
+- **"closed_class.request: is now the top-level key request".** Move the request's path to `request:` at the top of the configuration.
 - **A gloss reads as a boolean.** YAML reads a bare `no`, `yes`, `on`, or `off` as a boolean. Write such a gloss in quotes: `"no"`.
 
 ## Reference

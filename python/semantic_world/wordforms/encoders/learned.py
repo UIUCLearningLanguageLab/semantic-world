@@ -364,16 +364,32 @@ def train_encoder(
     return model, report
 
 
-def encode_tokens(model, source: FrameSource, count: int, device: str, batch_size: int = 64):
-    """The embedding of every token, in batches, from the frozen model."""
+def encode_tokens(
+    model, source: FrameSource, count: int, device: str, batch_size: int = 64, groups=None
+):
+    """The embedding of every token, in batches, from the frozen model. ``groups`` lists sets
+    of token indices that are batched apart, each in its own order: a token's embedding can
+    differ in its last bits with the other tokens of its batch, so tokens that must not depend
+    on another group (the content words, on the inflected forms) get batches of their own. The
+    default is one group of every token."""
     torch = _torch()
-    outputs = []
+    if groups is None:
+        groups = [np.arange(count)]
+    outputs: list[np.ndarray] = []
+    rows: list[np.ndarray] = []
     with torch.no_grad():
-        for start in range(0, count, batch_size):
-            indices = range(start, min(count, start + batch_size))
-            frames, mask = source.batch(indices, torch, device)
-            outputs.append(model(frames, mask).float().cpu().numpy())
-    return np.concatenate(outputs) if outputs else np.zeros((0, 0), dtype=np.float32)
+        for group in groups:
+            for start in range(0, len(group), batch_size):
+                indices = [int(i) for i in group[start : start + batch_size]]
+                frames, mask = source.batch(indices, torch, device)
+                outputs.append(model(frames, mask).float().cpu().numpy())
+                rows.append(np.asarray(indices, dtype=np.int64))
+    if not outputs:
+        return np.zeros((0, 0), dtype=np.float32)
+    stacked = np.concatenate(outputs)
+    tokens = np.empty_like(stacked)
+    tokens[np.concatenate(rows)] = stacked
+    return tokens
 
 
 def save_model(path: Path, model, kind: str, settings: dict[str, Any], mean, std) -> None:

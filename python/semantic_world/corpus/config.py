@@ -132,6 +132,10 @@ class DocumentsConfig:
     sibling_contrast_rate: float
     """The probability that a class-level fact in a category-topic document is followed by the
     matching fact about a sibling category."""
+    relation_fact_share: float | None = None
+    """The share of the sentences of a category-topic document that draw a relation fact. None:
+    a relation fact is one kind of content among the others, each with the same chance. 0: a
+    category document states no relation fact."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -142,6 +146,7 @@ class DocumentsConfig:
             "shuffle": self.shuffle,
             "instance_description_rate": self.instance_description_rate,
             "sibling_contrast_rate": self.sibling_contrast_rate,
+            "relation_fact_share": self.relation_fact_share,
         }
 
 
@@ -506,6 +511,9 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
     }
     sentences = {t: sentences_node.range(t, defaults[t], min=1) for t in DOCUMENT_TYPES}
     sentences_node.finish()
+    relation_fact_share = node.get("relation_fact_share", None, nullable=True)
+    if relation_fact_share is not None:
+        relation_fact_share = float(node.probability("relation_fact_share", None))
     config = DocumentsConfig(
         count=node.int("count", 10000, min=0),
         mix={t: float(mix.get(t, 0.0)) for t in DOCUMENT_TYPES},
@@ -516,6 +524,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         shuffle=node.probability("shuffle", 0.3),
         instance_description_rate=node.probability("instance_description_rate", 0.2),
         sibling_contrast_rate=node.probability("sibling_contrast_rate", 0.2),
+        relation_fact_share=relation_fact_share,
     )
     node.finish()
     return config

@@ -212,6 +212,8 @@ The corpus mixes four document types. Their proportions are parameters.
 - relation facts with the topic as agent or as patient;
 - contrasts with sibling categories. At `documents.sibling_contrast_rate` (default 0.2), a fact about the topic is followed by the matching fact about a sibling category: the same predicate, where the sibling differs. A contrast is two adjacent sentences, one about each category ("penguins can not fly", then "gulls can fly"). A fact has a contrast only when it is a strong fact (`all`, `no`, `most`, or a scalar pole) and the sibling's fact of the other polarity is strong too. With no differing sibling, no contrast sentence is added. A contrastive construction ("unlike penguins, gulls can fly") is out of scope.
 
+**The share of relation facts.** By default, a relation fact is one kind of content among the others, each with the same chance. `documents.relation_fact_share` sets the share instead: each sentence draws a relation fact with that probability, and the other kinds share the rest, each with the same chance. A share of 0 leaves relation facts out of category documents. The default is null, which keeps the equal chance. The setting changes category documents only: a feature document about a verb still states relation facts, and the test sets draw their true items as before. Relation facts bring thematic partners into encyclopedic documents, so the share is a second lever on the taxonomic–thematic distinction, beside the document mix. The share is the chance of each draw. The share in the documents runs a few points higher at low settings, because the other kinds of fact run out sooner.
+
 **Encyclopedic, about a feature.** The topic is an IS, HAS, or CAN feature, or a verb. The content pool holds:
 
 - which categories have the feature, at several levels;
@@ -395,17 +397,18 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 
 | File | Contents |
 | --- | --- |
-| `config.yaml` | The resolved configuration, all seeds, the taxonomy run's identity (its configuration hash and seed), the word-form run's identity when used, the git commit hash, and package versions. |
+| `config.yaml` | The resolved configuration, all seeds, the taxonomy run's identity (its configuration hash and seed), the word-form run's identity once `render` has attached one (`provenance.wordforms`: its name, its seed, and its configuration hash), the git commit hash, and package versions. |
 | `lexicon.csv` | One row per lexeme: label, part of speech, concept, word form label, spelling, gloss, and, for a homonym, the lexeme whose word form it shares (`same_form_as`). |
 | `documents.jsonl` | One JSON object per document (schema below). |
 | `corpus.txt` | Every document in the spelled rendering (or the formal rendering without word forms): one sentence per line, a blank line between documents. |
 | `corpus_formal.txt` | The same in the formal rendering. |
 | `corpus_conceptual.txt` | The same in the conceptual rendering. |
 | `corpus_propositional.txt` | The same in the propositional rendering. |
-| `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). Stage 7 adds it. |
+| `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
+| `wordform_meanings.csv` | The categories' meaning vectors, which the request names: the taxonomy's `categories_generative.csv`. |
 | `scenes.jsonl` | One JSON object per scene: its label, its seed instance, its participants (the seed first), and `steps`, a list with one list of events for each time step. An event holds its label, verb, agent, patient (null for an intransitive event), and aspect (`simple` or `progressive`). |
 | `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. The law-like items (`_lawlike`), the possible false events (`_possible`), and the impossible false events (`_impossible`) have test sets of their own. An instance-level or event-level item names its document. The schema is under "Test items" below. |
-| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; each document type's achieved length beside its drawn length; the quantifier mix, as stated and by each fact's strongest true quantifier; lexeme frequencies; sentence lengths; relative-clause depths; how often sentences are ambiguous, by their readings; how many definite mentions could not be told apart; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; the co-occurrence check below; and, for each test set, its number of pairs and the share of its true items that are seen. |
+| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; each document type's achieved length beside its drawn length; the quantifier mix, as stated and by each fact's strongest true quantifier; lexeme frequencies; sentence lengths; relative-clause depths; how often sentences are ambiguous, by their readings; how many definite mentions could not be told apart; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; the co-occurrence check below, with its partial correlations; and, for each test set, its number of pairs and the share of its true items that are seen. |
 
 Each document object holds its label, type, topic, scenes, referents, and sentences. The topic is a category, a feature or a verb, an instance, or, for a situational narrative, its scene. `referents` maps each referent label to its instance, in the order of first mention. Each sentence holds:
 
@@ -500,29 +503,59 @@ The two items of a pair never differ in the format of `input`. They differ in `m
 
 Each correlation is given as Pearson's and as Spearman's. The taxonomic similarity is the one in `thematic.csv`, computed for every pair, and a pair with an undefined similarity is left out. The correlations are reported for each document type, for the two encyclopedic types together, for the two narrative types together, and for all documents. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness than the encyclopedic documents do, and less with taxonomic similarity.
 
+**Separating the two signals.** Thematic relatedness and taxonomic similarity are themselves correlated in a world, so a correlation with one carries some of the other. `stats.yaml` therefore also reports:
+
+- `world`: the correlation between thematic relatedness and taxonomic similarity over the pairs of leaves, in the world itself;
+- `partial`, for each group of documents: the correlation of co-occurrence with thematic relatedness controlling for taxonomic similarity (`thematic_given_taxonomic`), and the reverse (`taxonomic_given_thematic`).
+
+The partial correlations are reported by words and by referents, as Pearson's and as Spearman's. A partial correlation is computed from the three pairwise correlations, over the pairs with a defined taxonomic similarity. Spearman's partial correlation is the same formula on the ranks.
+
 ## Word forms for the corpus
 
 The corpus comes first, and the word forms are made for it. The run has three steps:
 
-1. **Generate.** `python -m semantic_world.corpus generate` writes the corpus in the formal, conceptual, and propositional renderings, and writes `wordform_request.yaml`. Stage 6 builds the command, and stage 7 adds the request.
+1. **Generate.** `python -m semantic_world.corpus generate` writes the corpus in the formal, conceptual, and propositional renderings, and writes `wordform_request.yaml` and `wordform_meanings.csv`.
 2. **Make the word forms.** The word-form pipeline runs with the request (`request:` in its configuration).
-3. **Render.** `python -m semantic_world.corpus render` reads the word-form run and adds the word labels, the spelled rendering (which `corpus.txt` then holds), and the word-form columns of `lexicon.csv`. Rendering changes nothing else in the corpus run.
+3. **Render.** `python -m semantic_world.corpus render` reads the word-form run and adds the word labels, the spelled rendering (which `corpus.txt` then holds), and the word-form columns of `lexicon.csv`. Rendering also records the word-form run's identity in `config.yaml` (`provenance.wordforms`). Rendering changes nothing else in the corpus run. A corpus can be rendered again, with the same word-form run or with another run made from its request.
 
 **The request** lists:
 
 - `lexemes`: every content lexeme, with its concept label and part of speech, and, for a homonym, the lexeme whose word form it shares (`same_form_as`);
-- `function_words`: the glosses of the function words the corpus uses, most frequent first, by their counts in the generated corpus;
-- `affixes`: the glosses and positions of the affixes the corpus uses;
-- `inflect`: the lexemes that appear inflected, with the affixes each one takes;
-- `meanings`: the taxonomy run's `categories_generative.csv`, for assigning category lexemes. When the request gives meanings, the pipeline's `assignment.meanings` must be null. Giving both is an error.
+- `takes`: for each part of speech, the affixes that its lexemes' words must be able to take. The list comes from the grammar settings alone. With number realized as an affix, every noun takes `PLURAL`, and so does every verb when verbs agree. With tense as an affix, every verb takes `PAST`. With aspect as an affix, every verb takes `PROGRESSIVE`. Part nouns and adjectives take no affix;
+- `function_words`: the glosses of the language's function words, most frequent first, by their counts in the documents. A function word that no document uses is listed too, so every lexeme gets a form;
+- `affixes`: the gloss and the position of every inflection that the grammar settings realize as an affix. An inflection that stands after its word is a suffix, and one that stands before its word is a prefix;
+- `inflect`: the lexemes that appear inflected, in a document or in a test item, with the affix each one takes. The list decides only which inflected forms are made, synthesized, and embedded;
+- `meanings`: the file of the categories' meaning vectors, for assigning category lexemes. `generate` writes the file beside the request as `wordform_meanings.csv`, a copy of the taxonomy's `categories_generative.csv`, and the request names the file by a path relative to the request file. So the output folder can be moved, and the same run gives the same bytes wherever the folder is written. When the request gives meanings, the pipeline's `assignment.meanings` must be null. Giving both is an error.
+
+For example, with number and tense as affixes:
+
+```yaml
+lexemes:
+- {label: L.1, concept: C1, pos: noun}
+- {label: L.23, concept: CAN.1, pos: intransitive_verb}
+takes:
+  noun: [PLURAL]
+  intransitive_verb: [PLURAL, PAST]
+  transitive_verb: [PLURAL, PAST]
+function_words: [the, a, is, can, that, PROGRESSIVE, 'no']
+affixes:
+- {gloss: PLURAL, position: suffix}
+- {gloss: PAST, position: suffix}
+inflect:
+- {lexemes: [L.1, L.23], affixes: [PLURAL]}
+- {lexemes: [L.23], affixes: [PAST]}
+meanings: wordform_meanings.csv
+```
 
 **The word-form pipeline's part.** The pipeline already makes function words, affixes, and inflected forms from a request (stage 4a of `WORDFORM_PIPELINE.md`), and assigns words to categories (stage 7). Corpus stage 7 extends it:
 
 - the request becomes a top-level `request` setting that replaces `closed_class.request`, and gains `lexemes` and `meanings`;
 - lexemes are assigned to content words. Category lexemes are assigned by the configured assignment mode (arbitrary, target correlation, branch markers, or acoustic mapping). A category without a lexeme is left out of the assignment. A category's synonym lexemes are assigned by the mode too, each with the category's meaning vector, so the synonyms of one category share its sound–meaning structure, including its branch marker. All other lexemes get words at random, from the words left over. A homonym gets its partner's word. The assignment is written to `assignment/lexicon.csv` with a `lexeme` column, and `words.csv` gains the part of speech of each assigned word (`pos`);
-- a lexeme that must be inflected gets only a word that can take its affixes. Every assignment mode respects that rule, as branch markers already do for their markers. So no inflected form that the corpus needs is ever skipped;
+- a lexeme gets only a word that can take the affixes of its part of speech (`takes`). A word that homonyms share takes the affixes of both. Every assignment mode respects that rule, as branch markers already do for their markers. So no inflected form that the corpus needs is ever skipped. The requirement comes from `takes`, which the grammar settings fix, and never from `inflect`. So the inflected forms that the documents or the test items happen to use never change which word a lexeme gets;
+- the set of inflected forms that a request asks for never changes a content word's form, assignment, or embedding. The trained encoders never train on inflected forms, and the fixed encoders' projection is fitted on content words;
+- the function words are made after the assignment, and avoid its forms. Their forms depend on their order of frequency in the corpus, and the words of the lexemes must not;
 - the pipeline runs in two passes. The words are assigned first. The inflected forms are then made, synthesized, and embedded. The audio cache keeps the second pass cheap, and with the edit distance as the sound distance, no audio is needed before the assignment;
-- `inflect` entries can name lexemes, and the pipeline inflects whatever form the lexeme's concept got, including a marked form of branch-marker mode (`W.12.M.2.AF.1`);
+- `inflect` entries can name lexemes, and the pipeline inflects whatever form the lexeme got, including a marked form of branch-marker mode (`W.12.M.2.AF.1`). An entry that gives a lexeme an affix that `takes` does not list for its part of speech is an error;
 - a run whose content words are fewer than the lexemes that need distinct forms is an error. Content words that no lexeme gets are kept; they can serve as novel words in tests.
 
 The default taxonomy with verbs needs about 180 content lexemes, and the default word-form run makes 500 words.
@@ -553,6 +586,7 @@ documents:
   shuffle: 0.3
   instance_description_rate: 0.2              # the probability that an event sentence of a narrative is followed by a description
   sibling_contrast_rate: 0.2                  # the probability that a fact in a category document is followed by the matching fact about a sibling
+  relation_fact_share: null                   # the share of a category document's sentences that draw a relation fact; null: one kind among the others, each with the same chance
 
 propositions:
   negation_rate: {class: 0.1, instance: 0.1}
@@ -617,12 +651,13 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 - the same taxonomy run, word-form run, configuration, and seed give byte-identical output folders;
 - changing the grammar settings (word order, adjective order, and morphology) never changes any logical form or the order of the sentences, only their realization;
-- rendering with a word-form run changes only the word labels, the spelled rendering (and with it `corpus.txt`), and the word-form columns of `lexicon.csv`; the rest of the output folder is byte-identical;
-- changing the test-set settings never changes the documents.
+- rendering with a word-form run changes only the word labels, the spelled rendering (and with it `corpus.txt`), the word-form columns of `lexicon.csv`, and the key `provenance.wordforms` of `config.yaml`; the rest of the output folder is byte-identical;
+- changing the test-set settings never changes the documents;
+- changing the number of documents or the test-set settings never changes the word that the word-form pipeline gives a lexeme, although both change the request's `inflect` list and the order of its function words.
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `stats.py` (`stats.yaml`, with the co-occurrence check), `generate.py` (a whole run), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `stats.py` (`stats.yaml`, with the co-occurrence check), `generate.py` (a whole run), `request.py` (the word-form request), `render.py` (attaching the word forms), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -668,7 +703,7 @@ Jon decided the following on October 1, 2026, before stage 1 (`docs/proposals/20
 13. A homonym is two lexemes that share one word form. Every lexeme has exactly one concept.
 14. The taxonomy is given as a configuration file with a seed, or as an output folder. An output folder is regenerated in memory and checked against its files.
 15. A verb or verb category whose relation holds for every pair, or for no pair, gets no lexeme.
-16. The word-form pipeline assigns first, and then makes, synthesizes, and embeds the inflected forms. A lexeme that must be inflected gets only a word that can take its affixes. Categories without a lexeme are left out of the assignment, and a category's synonyms are assigned by the mode. The request's `meanings` and `assignment.meanings` cannot both be given.
+16. The word-form pipeline assigns first, and then makes, synthesizes, and embeds the inflected forms. A lexeme gets only a word that can take the affixes of its part of speech, as the grammar settings give them (`takes` in the request; see decision 56). Categories without a lexeme are left out of the assignment, and a category's synonyms are assigned by the mode. The request's `meanings` and `assignment.meanings` cannot both be given.
 17. Word-order and morphology settings never change a logical form. Relative clauses and the limits on modifiers belong to the planner (`mention`). The sentence limit counts content words.
 18. Variables in the propositional rendering are labeled `X.1`, `X.2`, and so on.
 19. A class-level proposition needs at least one instance in its subject set.
@@ -721,6 +756,14 @@ Jon decided the following on October 1, 2026, before stage 6 (`docs/proposals/20
 51. The co-occurrence check counts by words: a leaf occurs in a document when its own noun appears. It reports Pearson's and Spearman's correlations. It also reports the same correlations counted by referents, as a second measure.
 52. The test sets are `class_<change>` and `class_<change>_lawlike`, `instance_<change>`, and `event_<change>_possible` and `event_<change>_impossible`.
 53. Seen and unseen items. The documents stay unchanged, and every test item has a field that says whether its logical form appears in any training document. A false item never does. `stats.yaml` reports the share of true items that are seen, for each test set.
+
+Jon decided the following on October 1, 2026, before stage 7 (`docs/proposals/2026-10-01-corpus-stage-7-decisions.md`):
+
+54. Separating the two signals. `stats.yaml` reports the correlation between thematic relatedness and taxonomic similarity over leaf pairs in the world itself. For each document type, `stats.yaml` also reports two partial correlations: co-occurrence with thematic relatedness controlling for taxonomic similarity, and the reverse. Both are reported by words and by referents, with Pearson's and Spearman's.
+55. A relation-fact share for encyclopedic documents. A setting controls the share of relation facts in category-topic documents: `documents.relation_fact_share`. Its default, null, keeps the earlier behavior.
+56. The affix requirement comes from the grammar settings. Which lexemes must take which affixes is decided by the grammar settings alone, by part of speech: with number on and realized as an affix, every noun lexeme gets a word that can take `PLURAL`, and with agreement on, every verb lexeme does too. The request's `inflect` list, which holds the inflected forms of the documents and the test items, decides only which inflected forms are made, synthesized, and embedded. The set of inflected forms requested never changes a content word's form, assignment, or embedding, so the trained encoders train on content words and function words only. So a test-set setting, or the number of documents, never changes a lexeme's word. This decision refines decision 16.
+57. The request names its meanings by a file. `generate` writes `wordform_meanings.csv` beside the request, and the request names the file by a path relative to the request file.
+58. `render` fills `provenance.wordforms` in `config.yaml`, and the render determinism property exempts that key.
 
 ## Future additions
 
