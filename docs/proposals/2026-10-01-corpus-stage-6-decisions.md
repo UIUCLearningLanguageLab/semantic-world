@@ -178,6 +178,8 @@ Three things stand out.
 
 ## Still open
 
+**Update, October 1, 2026.** Stage 7 added `wordform_request.yaml` to `generate`.
+
 Nothing new. Two notes for stage 7:
 
 - `generate` does not write `wordform_request.yaml` yet (choice 16).

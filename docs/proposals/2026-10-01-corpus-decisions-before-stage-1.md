@@ -62,6 +62,8 @@ Jon left the first choice open. The others are engineering choices made while bu
 
 ## Still open
 
+**Update, October 1, 2026.** These questions have since been answered: class-level patient projections by decision 24, the words of verb categories by decision 23, rule terms and the modifier limits by decision 25, and the stage 6 questions by decisions 29 and 30. Item 6 under "Stage 7" is refined by decision 56, which takes the affix requirement from the grammar settings. The tiny corpus has 35 content lexemes, not 36.
+
 These questions were raised in the orientation and not answered. Each one comes back when its stage starts.
 
 - Stage 2: patient projections are predicates at instance level only. Should "mice are edible" exist at class level?

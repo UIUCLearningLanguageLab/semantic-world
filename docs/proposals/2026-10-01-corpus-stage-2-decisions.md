@@ -47,6 +47,8 @@ These are engineering choices made while building stage 2. Each one is the worki
 
 ## Still open
 
+**Update, October 1, 2026.** These questions have since been answered: the rule statement's quantifier by decision 31, law-like `all` and `no` items by decision 28, and the stage 6 questions by decisions 29 and 30.
+
 - **Stage 5: the rule statement in the rendering examples.** The specification renders "things with wings and with feathers can fly" as `ALL(...)`, but the sentence is a bare generic, which would be `GEN(...)`. Is a rule statement "all things with wings ..." (`ALL`), or the bare generic (`GEN`)? Stage 2 builds both forms.
 - **Stage 6: `all` in the test sets.** Under the law-like reading, "all penguins swim" is false when every penguin in the world swims but nothing fixes it. In the default world, 1,158 of the 2,278 pairs of a category and a feature on which every instance agrees are not fixed, 1,059 of them at the leaf level. A quantifier swap can therefore make a false `all` or `no` item that no instance contradicts. Should the test sets keep such items, leave them out, or mark them?
 - **Stage 6:** what makes an event-level test item false, and which instance does an instance-level test item refer to outside a document? (From the first proposal.)

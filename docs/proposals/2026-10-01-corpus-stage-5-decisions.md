@@ -160,4 +160,6 @@ Three things stand out.
 
 ## Still open
 
+**Update, October 1, 2026.** This question has since been answered by decision 46: every event-level test item names its scene in place of an event label.
+
 - **Stage 6: an event-level test item that names no event.** The notation `EVENT(<event label>, ...)` needs a label, and a false event item has none (decision 29). Options: the scene's label in its place (`EVENT(SN.8, PAST, SIMPLE, ...)`), or a fixed mark for "no such event". Stage 5 gives such a form no rendering, and stops with an error.

@@ -10,7 +10,7 @@ The specifications in `docs/specs/` are a different kind of document. Specificat
 | --- | --- | --- |
 | [`TAXONOMY.md`](TAXONOMY.md) | The taxonomy generator: categories, instances, features, rules, scalar dimensions, and verbs | Complete |
 | [`WORDFORMS.md`](WORDFORMS.md) | The word-form pipeline: spoken word forms, synthesis, auditory front ends, and sound embeddings | Stages 1–7 complete |
-| Corpus | The corpus generator: documents in an artificial language | Stages 1 to 7 are built. `python -m semantic_world.corpus generate data/corpus/default.yaml` writes the documents, the test sets, the statistics, and the request for the word forms. `python -m semantic_world.corpus render` attaches the word forms that the word-form pipeline makes from the request (see "Word forms for a corpus" in [`WORDFORMS.md`](WORDFORMS.md)). No guide yet: `docs/specs/CORPUS_GENERATOR.md` describes the outputs |
+| [`CORPUS.md`](CORPUS.md) | The corpus generator: documents in an artificial language, their renderings, test sets, and spoken word forms | Complete |
 
 ## Setup
 
