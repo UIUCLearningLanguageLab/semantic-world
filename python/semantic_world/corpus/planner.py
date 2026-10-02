@@ -29,6 +29,10 @@ and ``no``), characteristic facts (``most``, and scalar poles), rarer facts (``s
 facts, and rule statements. ``documents.shuffle`` moves from the template (0) to a random order
 (1). A sibling contrast stays right after its fact. A narrative follows time.
 
+**Quantifier weights.** A fact is stated with its strongest true quantifier. With
+``quantifiers.weights``, a document chooses a fact with a probability proportional to the weight
+of that quantifier, so a study can rebalance the mix. Equal weights, the default, change nothing.
+
 **Streams.** Each document draws from its own parts of four streams, named by its label: the
 document's type, topic, length, and order from ``corpus:documents``; its facts from
 ``corpus:propositions``; its mentions from ``corpus:mentions``; and the grammar's choices from
@@ -93,10 +97,17 @@ RELATION = "relation"
 RULE = "rule"
 TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE)
 """The sections of an encyclopedic document, in the order of the template."""
+TOPIC = "topic"
+SUBCATEGORY = "subcategory"
+CONTENT_KINDS = (MEMBERSHIP, TOPIC, SUBCATEGORY, RELATION, RULE)
+"""The kinds of content of a class-level sentence: a membership fact, a fact about the topic, a
+fact about one of its subcategories, a relation fact, and a rule statement."""
 CONTRAST = "contrast"
 """A sibling contrast: it stays right after the fact it matches."""
 EVENT_SECTION = "event"
 DESCRIPTION = "description"
+POLE = "pole"
+"""The strength of a scalar-pole fact, which takes no quantifier word."""
 
 _STRONG = (ALL, NO, MOST)
 _MAX_REDRAWS = 100
@@ -124,6 +135,11 @@ class DocumentSentence:
     distinguished: tuple[bool | None, ...]
     """For each noun phrase, in the same order: for a definite mention with a noun, whether it
     picks out its referent alone among the participants of the document's scenes."""
+    strength: str | None = None
+    """For a class-level sentence: the strongest true quantifier of its fact, which a bare
+    generic can stand for (``all``, ``most``, ``some``, or ``no``), or ``pole`` for a scalar
+    pole, which takes no quantifier word. It is kept for the statistics, and is not written to
+    ``documents.jsonl``."""
 
     @property
     def plan(self) -> SentencePlan:
@@ -164,6 +180,9 @@ class Document:
     referents: dict[str, str]
     """The instance of every referent, by referent label, in the order of first mention."""
     sentences: tuple[DocumentSentence, ...]
+    drawn_length: int = 0
+    """The length that was drawn for the document, in sentences. The document can be shorter. It
+    is kept for the statistics, and is not written to ``documents.jsonl``."""
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -185,6 +204,9 @@ class _Item:
     plan: SentencePlan | None = None
     follows: bool = False
     """Whether the sentence stays right after the one before it (a sibling contrast)."""
+    strength: str | None = None
+    """The strongest true quantifier of a class-level fact, before the bare generic replaces
+    it."""
 
 
 @dataclass
@@ -194,6 +216,8 @@ class _Draft:
     items: list[_Item]
     scenes: tuple[Scene, ...] = ()
     mentions: Mentions | None = None
+    length: int = 0
+    """The drawn length."""
 
 
 def content_words(plan: SentencePlan) -> int:
@@ -349,6 +373,7 @@ class Planner:
                         None if mentions is None else mentions.distinguished(phrase)
                         for phrase in sentence.phrases
                     ),
+                    strength=item.strength,
                 )
             )
         return Document(
@@ -358,6 +383,7 @@ class Planner:
             scenes=draft.scenes,
             referents={r: instance for instance, r in referents.items()},
             sentences=tuple(sentences),
+            drawn_length=draft.length,
         )
 
     def _length(self, kind: str, rng: np.random.Generator) -> int:
@@ -409,6 +435,19 @@ class Planner:
             return self.facts.generic(fact) or fact
         return fact
 
+    def _stated(
+        self,
+        rng: np.random.Generator,
+        fact: Proposition,
+        section: str | None = None,
+        follows: bool = False,
+    ) -> _Item:
+        """The planned sentence of a class-level fact: the fact, or its bare generic."""
+        strength = POLE if fact.predicate.kind == SCALAR else fact.quantifier
+        return _Item(
+            section or self._section(fact), self._as_generic(rng, fact), None, follows, strength
+        )
+
     def _first_fact(
         self,
         rng: np.random.Generator,
@@ -421,12 +460,53 @@ class Planner:
         is kept, so that the share of negative sentences stays at the negation rate: when the
         facts of one polarity run out, the document says something else, or ends."""
         facts = self.facts
-        for index in rng.permutation(len(candidates)):
-            subject, predicate = candidates[int(index)]
+
+        def fact_of(index: int) -> Proposition | None:
+            subject, predicate = candidates[index]
             fact = facts.class_fact(subject, predicate, negative)
             if fact is not None and self._key(fact) not in stated and self._fits(fact):
                 return fact
+            return None
+
+        if not self.config.quantifiers.weighted:
+            for index in rng.permutation(len(candidates)):
+                fact = fact_of(int(index))
+                if fact is not None:
+                    return fact
+            return None
+        # With weights, a fact is chosen with a probability proportional to the weight of its
+        # quantifier: a candidate is drawn uniformly, and kept at its weight over the largest.
+        top = max(self.config.quantifiers.weights.values())
+        left = list(range(len(candidates)))
+        found: dict[int, Proposition | None] = {}
+        while left:
+            position = int(rng.integers(len(left)))
+            index = left[position]
+            if index not in found:
+                found[index] = fact_of(index)
+            fact = found[index]
+            weight = 0.0 if fact is None else self._weight(fact)
+            if weight == 0:
+                left[position] = left[-1]
+                left.pop()
+            elif rng.random() < weight / top:
+                return fact
         return None
+
+    def _weight(self, fact: Proposition) -> float:
+        """The weight of a fact's quantifier (``quantifiers.weights``). A scalar pole takes no
+        quantifier word, and has the weight 1."""
+        return self.config.quantifiers.weights.get(str(fact.quantifier), 1.0)
+
+    def _weight_allows(
+        self, rng: np.random.Generator, fact: Proposition, other: Proposition
+    ) -> bool:
+        """Whether a chosen fact can give way to another one, which says the same of a narrower
+        subject. With quantifier weights, a fact of another quantifier takes its place with a
+        probability of the ratio of the two weights, so the weights still hold."""
+        if not self.config.quantifiers.weighted or fact.quantifier == other.quantifier:
+            return True
+        return bool(rng.random() * self._weight(fact) < self._weight(other))
 
     def _negative(self, rng: np.random.Generator) -> bool:
         return bool(rng.random() < self.config.propositions.negation_rate[CLASS])
@@ -503,7 +583,7 @@ class Planner:
                 other = self.facts.class_fact(
                     subject, dataclasses.replace(predicate, patient=sibling), not fact.negative
                 )
-            if other is None or self._key(other) in stated:
+            if other is None or self._key(other) in stated or self._weight(other) == 0:
                 continue
             if predicate.kind == SCALAR or other.quantifier in _STRONG:
                 return other
@@ -542,9 +622,9 @@ class Planner:
         topic = self._by_level[level][int(rng.integers(len(self._by_level[level])))]
         length = self._length(kind, rng)
         children = self._children[topic]
-        kinds = [MEMBERSHIP, "topic"]
+        kinds = [MEMBERSHIP, TOPIC]
         if children:
-            kinds.append("subcategory")
+            kinds.append(SUBCATEGORY)
         if self.facts.verbs:
             kinds.append(RELATION)
         rate = self.config.documents.sibling_contrast_rate
@@ -562,7 +642,7 @@ class Planner:
                 fact = self._relation_fact(facts_rng, term, negative, stated)
             else:
                 category = topic
-                if content == "subcategory":
+                if content == SUBCATEGORY:
                     category = children[int(facts_rng.integers(len(children)))]
                 term = self._restricted(facts_rng, CategoryTerm(category))
                 candidates = [(term, p) for p in self._feature_predicates(term)]
@@ -570,13 +650,13 @@ class Planner:
             if fact is None:
                 continue
             stated.add(self._key(fact))
-            items.append(_Item(self._section(fact), self._as_generic(facts_rng, fact)))
+            items.append(self._stated(facts_rng, fact))
             if len(items) < length and facts_rng.random() < rate:
                 contrast = self._contrast(facts_rng, topic, fact, stated)
                 if contrast is not None:
                     stated.add(self._key(contrast))
-                    items.append(_Item(CONTRAST, self._as_generic(facts_rng, contrast), None, True))
-        return _Draft(kind, topic, self._order(rng, items))
+                    items.append(self._stated(facts_rng, contrast, CONTRAST, True))
+        return _Draft(kind, topic, self._order(rng, items), length=length)
 
     def _feature_document(self, kind: str, rngs: dict[str, np.random.Generator]) -> _Draft:
         rng, facts_rng = rngs["documents"], rngs["propositions"]
@@ -624,13 +704,61 @@ class Planner:
                             narrowed is not None
                             and self._key(narrowed) not in stated
                             and self._fits(narrowed)
+                            and self._weight_allows(facts_rng, fact, narrowed)
                         ):
                             fact = narrowed
             if fact is None:
                 continue
             stated.add(self._key(fact))
-            items.append(_Item(self._section(fact), self._as_generic(facts_rng, fact)))
-        return _Draft(kind, topic, self._order(rng, items))
+            items.append(self._stated(facts_rng, fact))
+        return _Draft(kind, topic, self._order(rng, items), length=length)
+
+    # Facts for the test sets -----------------------------------------------------------------
+
+    def draw_class_fact(
+        self, rng: np.random.Generator, kinds: Sequence[str] = CONTENT_KINDS
+    ) -> Proposition | None:
+        """One true class-level proposition, drawn the way an encyclopedic document draws a
+        sentence, for the test sets. The topic is a category, drawn by
+        ``documents.topic_level_weights``. The kind of content is drawn among ``kinds``, each
+        with the same chance: a membership fact, a fact about the topic, a fact about a
+        subcategory, a relation fact, or a rule statement. The polarity, the restriction, and
+        the bare generic are drawn at their rates. None when the draw gives no fact."""
+        weights = np.array(
+            [
+                weight if level in self._by_level else 0.0
+                for level, weight in enumerate(self.config.documents.topic_level_weights, start=1)
+            ]
+        )
+        if weights.sum() == 0:
+            return None
+        level = int(rng.choice(len(weights), p=weights / weights.sum())) + 1
+        topic = self._by_level[level][int(rng.integers(len(self._by_level[level])))]
+        content = kinds[int(rng.integers(len(kinds)))]
+        negative = self._negative(rng)
+        stated: set = set()
+        fact: Proposition | None
+        if content == RULE:
+            rules = self.facts.rule_statements()
+            fact = rules[int(rng.integers(len(rules)))] if rules else None
+        elif content == MEMBERSHIP:
+            fact = self._membership_fact(rng, topic, negative, stated)
+        elif content == RELATION:
+            if not self.facts.verbs:
+                return None
+            term = self._restricted(rng, CategoryTerm(topic))
+            fact = self._relation_fact(rng, term, negative, stated)
+        else:
+            category = topic
+            if content == SUBCATEGORY:
+                children = self._children[topic]
+                if not children:
+                    return None
+                category = children[int(rng.integers(len(children)))]
+            term = self._restricted(rng, CategoryTerm(category))
+            candidates = [(term, p) for p in self._feature_predicates(term)]
+            fact = self._first_fact(rng, candidates, negative, stated)
+        return None if fact is None else self._as_generic(rng, fact)
 
     # Narratives ------------------------------------------------------------------------------
 
@@ -673,7 +801,7 @@ class Planner:
                     described = self._description(facts_rng, mention_rng, about, mentions, stated)
                     if described is not None:
                         items.append(described)
-        return _Draft(kind, topic, items, scenes, mentions)
+        return _Draft(kind, topic, items, scenes, mentions, length)
 
     def _within_limit(self, plan: SentencePlan) -> bool:
         return content_words(plan) <= self.config.mention.max_content_words

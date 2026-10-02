@@ -162,6 +162,15 @@ class Scene:
         )
 
 
+def leaf_similarity(result: TaxonomyResult, leaf_rows: np.ndarray) -> np.ndarray:
+    """The taxonomic similarity of every pair of leaves, as in ``thematic.csv``: the configured
+    metric over the leaves' generative vectors. An undefined similarity is NaN."""
+    vectors = result.vectors
+    analysis = result.config.analysis
+    start = 0 if analysis.similarity_features == "all" else vectors.isa_count
+    return similarity_matrix(vectors.generative[leaf_rows][:, start:], analysis.similarity_metric)
+
+
 class SceneGenerator:
     """The scenes of one world, under one corpus configuration."""
 
@@ -175,6 +184,8 @@ class SceneGenerator:
         self.index = self.truth.instance_index
         leaves = result.tree.leaves
         leaf_rows = np.array([result.tree.categories.index(leaf) for leaf in leaves], dtype=np.intp)
+        self.leaf_rows = leaf_rows
+        """The row of every leaf among the categories."""
         leaf_number = {int(row): i for i, row in enumerate(leaf_rows)}
         self.leaf = np.array([leaf_number[int(row)] for row in instances.leaf_index], dtype=np.intp)
         """The leaf of every instance, as an index into the leaves."""
@@ -197,12 +208,7 @@ class SceneGenerator:
         return matrix
 
     def _similarity(self, leaf_rows: np.ndarray) -> np.ndarray:
-        vectors = self.result.vectors
-        analysis = self.result.config.analysis
-        start = 0 if analysis.similarity_features == "all" else vectors.isa_count
-        matrix = similarity_matrix(
-            vectors.generative[leaf_rows][:, start:], analysis.similarity_metric
-        )
+        matrix = leaf_similarity(self.result, leaf_rows)
         # an undefined similarity, or a negative one (phi), adds nothing to a weight
         return np.clip(np.nan_to_num(matrix, nan=0.0), 0.0, None)
 

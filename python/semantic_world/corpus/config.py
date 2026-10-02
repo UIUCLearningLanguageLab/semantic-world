@@ -49,6 +49,9 @@ DOCUMENT_TYPES = ("encyclopedic_category", "encyclopedic_feature", "entity", "si
 NEGATION_LEVELS = ("class", "instance")
 ALL_GROUNDINGS = ("fixed", "observed")
 GENERIC_MEANINGS = ("all", "most", "some")
+QUANTIFIER_WEIGHTS = {"all": "all", "most": "most", "some": "some", "none": "no"}
+"""The keys of ``quantifiers.weights``, and the quantifier that each one weighs. The key for
+``no`` is ``none``, because YAML reads a bare ``no`` as the boolean false."""
 PARTICIPANT_WEIGHTS = ("thematic", "taxonomic", "constant")
 CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
 SIDES = ("before", "after")
@@ -177,6 +180,16 @@ class QuantifiersConfig:
     some_exclude_all: bool
     generic_means: str
     generic_rate: float
+    weights: dict[str, float]
+    """How often a document states the facts of each quantifier: the weight of ``all``, ``most``,
+    ``some``, and ``no``, by quantifier. A fact is still stated with its strongest true
+    quantifier. The weights change only which facts a document chooses. Equal weights change
+    nothing. The configuration writes the key of ``no`` as ``none``."""
+
+    @property
+    def weighted(self) -> bool:
+        """Whether the weights differ, so that the choice of facts is reweighted."""
+        return len(set(self.weights.values())) > 1
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -185,6 +198,7 @@ class QuantifiersConfig:
             "some": {"exclude_all": self.some_exclude_all},
             "generic": {"means": self.generic_means},
             "generic_rate": self.generic_rate,
+            "weights": {key: self.weights[q] for key, q in QUANTIFIER_WEIGHTS.items()},
         }
 
 
@@ -541,12 +555,23 @@ def _read_quantifiers(node: _Node) -> QuantifiersConfig:
     generic = node.mapping("generic")
     means = generic.choice("means", "most", GENERIC_MEANINGS)
     generic.finish()
+    weights_node = node.mapping("weights")
+    if any(key is False or key == "no" for key in weights_node.data):
+        raise weights_node.error("no", "is written none: YAML reads a bare no as the boolean false")
+    weights = {
+        quantifier: float(weights_node.number(key, 1.0, min=0))
+        for key, quantifier in QUANTIFIER_WEIGHTS.items()
+    }
+    weights_node.finish()
+    if not any(weight > 0 for weight in weights.values()):
+        raise node.error("weights", "at least one weight must be positive")
     config = QuantifiersConfig(
         all_grounding=node.choice("all_grounding", "fixed", ALL_GROUNDINGS),
         most_min_proportion=min_proportion,
         some_exclude_all=exclude_all,
         generic_means=means,
         generic_rate=node.probability("generic_rate", 0.5),
+        weights=weights,
     )
     node.finish()
     return config
@@ -770,7 +795,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     quantifiers = _read_quantifiers(root.mapping("quantifiers"))
     scene = _read_scene(root.mapping("scene"))
     entity = root.mapping("entity")
-    entity_scenes = entity.range("scenes", [1, 3], min=1)
+    entity_scenes = entity.range("scenes", [2, 5], min=1)
     entity.finish()
     mention = _read_mention(root.mapping("mention"), depth, taxonomy.verb_depth)
     grammar = _read_grammar(root.mapping("grammar"), propositions.event_tense)

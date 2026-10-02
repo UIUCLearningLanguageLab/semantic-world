@@ -59,6 +59,8 @@ from semantic_world.corpus.propositions import (
     Literal,
     Predicate,
     Proposition,
+    event_of,
+    scene_of,
 )
 
 CLASS_NP = "class"
@@ -123,7 +125,8 @@ class Predication:
     """Verbs only: the patient. None in an object relative, where the head noun is the
     patient."""
     event: str | None = None
-    """Event level only: the label of the event that the verb phrase reports."""
+    """Event level only: the label of the event that the verb phrase reports (``SN.8.5``). In a
+    test item it is the label of the scene (``SN.8``): some event of the scene."""
     tense: str | None = None
     """Event level only: ``past`` or ``present``."""
     aspect: str | None = None
@@ -174,8 +177,8 @@ class SentencePlan:
                 EVENT,
                 self.subject.referent,
                 Predicate(predication.kind, predication.label, patient),
-                scene=predication.event.rsplit(".", 1)[0],
-                event=predication.event,
+                scene=scene_of(predication.event),
+                event=event_of(predication.event),
                 tense=predication.tense,
                 aspect=predication.aspect,
             )

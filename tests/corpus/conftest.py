@@ -7,6 +7,8 @@ current folder, so every test runs from the root of the repository.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from corpus_support import (
     DEFAULT_TAXONOMY,
@@ -63,3 +65,31 @@ def cases(tmp_path_factory: pytest.TempPathFactory):
         return made[name]
 
     return case
+
+
+RUN_COUNTS = {"tiny": 60, "default": 200, "deep": 80, "still": 60}
+"""The number of documents of a corpus run in the tests, by world."""
+RUN_SETTINGS = {"test_sets": {"size": 30}}
+"""Small test sets, so that a run is fast."""
+
+
+@pytest.fixture(scope="session")
+def runs(cases):
+    """Whole corpus runs of a world under given settings, made once: the documents, the test
+    sets, and the statistics (``semantic_world.corpus.generate.Corpus``)."""
+    from semantic_world.corpus.generate import generate
+
+    made: dict = {}
+
+    def run(name: str, count: int | None = None, **sections):
+        key = (name, count, json.dumps(sections, sort_keys=True))
+        if key not in made:
+            settings = {**RUN_SETTINGS, **sections}
+            documents = dict(settings.get("documents", {}))
+            documents["count"] = count or RUN_COUNTS[name]
+            settings["documents"] = documents
+            case = cases(name)
+            made[key] = generate(case.config(**settings), case.result)
+        return made[key]
+
+    return run

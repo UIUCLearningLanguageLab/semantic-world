@@ -138,7 +138,7 @@ An event-level proposition says that something happened in a scene: "the penguin
 
 - **Content:** an event from the scene generator, which records the scene, the time step, the verb, the agent, and the patient if any. The proposition's verb is the event's own verb, or a verb category above it (see "Verb level" under "Mentioning referents").
 - **Tense and aspect:** every event has a tense and an aspect, and both are part of its logical form. The tense is the same for every event: `propositions.events.tense`, past by default. The aspect is simple or progressive. The aspect is drawn once for each event, at `propositions.events.progressive_rate`, so every report of one event has the same aspect. The aspect is drawn for every event, even when the grammar does not mark aspect. The grammar decides only whether and how tense and aspect are marked (see "Morphology").
-- **Truth:** the event occurred. Events are generated only where the world allows them (see "Scenes and events"), so an event never contradicts a capacity. A proposition that names no event (a test item) is true when such an event occurred at any time step of its scene. The grounding also says whether the world allows the event (`possible`): the agent has the CAN feature, or the verb's relation holds for the agent and the patient.
+- **Truth:** the event occurred. Events are generated only where the world allows them (see "Scenes and events"), so an event never contradicts a capacity. A proposition that names no event (a test item) is true when such an event, of the same aspect, occurred at any time step of its scene. The grounding also says whether the world allows the event (`possible`): the agent has the CAN feature, or the verb's relation holds for the agent and the patient.
 
 Event-level propositions are never negated.
 
@@ -159,11 +159,19 @@ Training documents contain true propositions only. False propositions go into se
 
 A predicate swap keeps the predicate's kind, its patient, and its comparison class: a verb is replaced by another verb or verb category, and a category by another category of its level. A quantifier swap keeps the polarity, so a proposition with a negative polarity never becomes a `no` sentence. A false item is never vacuous: its subject set has at least one instance. Every false item is checked false by the same truth tests. Test sets come in matched pairs: each false item sits beside the true item it was made from. There is one test set for each proposition level and change type, with a configured size.
 
-Three more rules shape the test sets. Stage 6 builds them.
+**The sets.** The class-level sets are `class_predicate`, `class_subject`, `class_quantifier`, and `class_role`. Each one has a law-like twin (`class_predicate_lawlike`), except the role swap, because a verb is never judged by the fixed test. The instance-level sets are `instance_predicate`, `instance_subject`, and `instance_role`. The event-level sets are `event_predicate`, `event_subject`, and `event_role`, each split in two (`event_predicate_possible` and `event_predicate_impossible`). `test_sets.changes` chooses the changes. A set holds at most `test_sets.size` pairs. A true item is used once in the sets of one level and change, so a set is smaller when the world runs out of true items.
 
-- **Law-like items.** Under the law-like reading, a false `all` or `no` item can be one that no instance contradicts: every penguin in the world swims, but nothing fixes it. Such an item is marked, and goes into a test set of its own. The ordinary test sets then hold only items that observing the instances could decide.
-- **False events.** A false event-level item is an event that did not happen in the scene. Each item is marked possible (the world allows the event) or impossible (the world rules it out), and the two kinds go into separate test sets.
-- **Context.** Every instance-level and event-level test item names a document. The item is tested as a continuation of that document, so its definite noun phrases refer to that document's referents.
+**True items.** A true class-level item is drawn the way an encyclopedic document draws a sentence. The topic is a category, drawn by `documents.topic_level_weights`. The kind of content is a membership fact, a fact about the topic, a fact about a subcategory, a relation fact, or a rule statement, each with the same chance. The polarity, the restriction, and the bare generic are drawn at their rates. A true instance-level item is a fact about a referent of a narrative document, drawn as a description is.
+
+Seven more rules shape the test sets.
+
+- **Law-like items.** Under the law-like reading, a false `all` or `no` item can be one that no instance contradicts: every penguin in the world swims, but nothing fixes it. Such an item is marked, and goes into a test set of its own. The ordinary test sets then hold only items that observing the instances could decide. Only IS, HAS, and CAN features are judged by the fixed test, so only they give law-like items. Under the observed reading there are none.
+- **True events.** A true event-level item is an event that its document reports, in a main clause or in a relative clause. Its verb is named at a level drawn by `mention.verb_level_weights`, like any report.
+- **False events.** A false event-level item is an event that did not happen. Each item is marked possible (the world allows the event) or impossible (the world rules it out), and the two kinds go into separate test sets. The rule is stricter than the truth test. No event with the item's verb, agent, and patient happened in any scene of the item's document, in either aspect. When the item names its verb with a verb category, no event of any verb below that category matches either. The test sentence names neither its scene nor, in most languages, its aspect. A weaker rule would give false items whose words are true of the document.
+- **Context.** Every instance-level and event-level test item names a narrative document. The item is tested as a continuation of that document, so its noun phrases are definite mentions of referents that the document has already mentioned. A subject swap brings in another referent of the same document. A test item has no pronoun, no relative clause, and no modifier beyond those that tell its referents apart.
+- **Scene form.** Every event-level test item, true or false, names only its scene: `EVENT(SN.8, PAST, SIMPLE, V1.2(R.1, R.2))` means that some event of scene `SN.8` was this one. Documents keep their event labels. Only test items use the scene form, so a true item cannot be recognized by having a label.
+- **One format.** The true and the false items of a test set never differ in format: every model-facing field that a true item has, a false item has too, in the same notation. The model-facing fields are the document, the sentence, its renderings, its tree, and its logical form. The metadata differ by design: the truth label, the grounding, and the marks. An item keeps the two apart (see "Test items" under "Outputs"). A test checks the rule for every test set, and the generator stops when a pair breaks it.
+- **Seen and unseen.** The test-set settings never change the documents, so no item is held out of the corpus. Every item records instead whether its logical form appears in a training document (`seen`). A false item never does. A document states the proposition of every main clause. In a sentence about instances, a document also states the proposition of every relative clause, and what every noun phrase says of its referent: its noun and its modifiers. `stats.yaml` reports the share of true items that are seen, for each test set.
 
 ## Scenes and events
 
@@ -211,7 +219,7 @@ The corpus mixes four document types. Their proportions are parameters.
 - rule statements whose predicate is the topic feature (sufficient conditions for it);
 - rule statements in which the topic feature appears in the restriction (what the topic feature makes possible).
 
-**Entity narrative.** The topic is one instance. The generator builds `entity.scenes` scenes seeded at the instance. The document interleaves:
+**Entity narrative.** The topic is one instance. The generator builds `entity.scenes` scenes seeded at the instance: 2 to 5 by default. The document interleaves:
 
 - instance-level facts about the instance;
 - the events of its scenes that involve the instance, in time order, scene by scene.
@@ -221,6 +229,14 @@ The corpus mixes four document types. Their proportions are parameters.
 In both narratives, an event sentence is followed by a description at `documents.instance_description_rate`. In an entity narrative, the description is about the topic instance. In a situational narrative, the description is about a participant of the event, and a participant that the sentence introduced comes first. The patient of a verb in a description is another participant of the document's scenes.
 
 Each document's length is drawn from a configured range for its type. A document can be shorter than its drawn length: a narrative ends when its events run out, and an encyclopedic document ends when it has nothing more to say. A document with no sentence is drawn again. A document states a proposition once. The polarity of each class-level fact is drawn at the negation rate and kept, so the share of negative sentences does not rise when the positive facts run out.
+
+**Quantifier weights.** A fact is always stated with its strongest true quantifier. `quantifiers.weights` gives a weight to `all`, `most`, `some`, and `none` (the quantifier `no`). A document chooses a fact with a probability proportional to the weight of the fact's strongest true quantifier. So a study can rebalance the mix: a low weight for `some` gives fewer `some` sentences. Equal weights, the default, change nothing. Five details:
+
+- the polarity of a fact is still drawn first, at the negation rate, so the weight of `none` moves the mix among the negative facts;
+- a scalar pole takes no quantifier word, and has the weight 1;
+- rule statements are not reweighted, because `propositions.rule_statement_rate` sets how often they appear;
+- a weight of 0 leaves the quantifier's facts out, sibling contrasts included;
+- the key is `none`, because YAML reads a bare `no` as the boolean false.
 
 ### Ordering
 
@@ -347,7 +363,7 @@ Every sentence is written in up to four renderings. The first three need no word
 - **Atoms.** An atomic proposition is a concept label with its arguments: `C1.3.2(R.1)` (membership), `IS.12(R.1)`, `HAS.4(R.1)`, and `CANBE.V1.1(R.1)`. `NOT` before an atom negates it.
 - **Scalar poles.** A scalar pole names its comparison class as a second argument, at both levels. At the instance level, the comparison class is the category that the noun names: `SC.1.HIGH(R.1, C1.5)`. A class-level pole names the comparison class of decision 22: the subject category's parent, as in `SC.1.HIGH(X.1, C1)`, or `THING` for a top-level category. A pole in a restriction ("big penguins") names the subject's own category: `SC.1.HIGH(X.1, C1.3)`.
 - **Capacities.** A capacity is wrapped in `ABLE`: `ABLE(CAN.3(R.1))` and `ABLE(V1.2(R.1, R.2))`, with the agent first. `ABLE` wraps only CAN features and verbs. A negative capacity is `NOT ABLE(...)`.
-- **Events.** An event is `EVENT(<event label>, <tense>, <aspect>, <atom>)`. Tense is `PAST` or `PRESENT`, and aspect is `SIMPLE` or `PROGRESSIVE`: `EVENT(SN.8.5, PAST, PROGRESSIVE, V1.2(R.1, R.2))` and `EVENT(SN.8.5, PAST, SIMPLE, CAN.7(R.1))`. The tense and the aspect are always written, even when the surface does not mark them.
+- **Events.** An event is `EVENT(<event label>, <tense>, <aspect>, <atom>)`. Tense is `PAST` or `PRESENT`, and aspect is `SIMPLE` or `PROGRESSIVE`: `EVENT(SN.8.5, PAST, PROGRESSIVE, V1.2(R.1, R.2))` and `EVENT(SN.8.5, PAST, SIMPLE, CAN.7(R.1))`. The tense and the aspect are always written, even when the surface does not mark them. A test item writes the label of its scene in place of the event label: `EVENT(SN.8, PAST, SIMPLE, V1.2(R.1, R.2))` says that some event of scene `SN.8` was this one.
 - **Number.** `R.n` is always one individual, and `X.n` is a variable bound by a quantifier. If a construction ever gives a plural individual referent, we write it `R.n:PL`. None exist yet.
 - **Quantifiers.** A class-level proposition is a quantifier with a restrictor and a scope over variables: `MOST(C1.3(X.1) AND IS.4(X.1), ABLE(CAN.3(X.1)))` for "most red penguins can swim", with `ALL`, `MOST`, `SOME`, `NO`, and `GEN` (generic). A verb's patient category stands in the restrictor with a variable of its own, so the quantifier ranges over pairs. Inside a quantifier, a capacity is wrapped in `ABLE` too: `GEN(C1.3(X.1), ABLE(CAN.3(X.1)))`.
 - **"At least one".** A relative clause about another category is `EXISTS(X.n, ...)` inside the restrictor: `EXISTS(X.2, C1.5(X.2) AND ABLE(V2.1(X.1, X.2)))` for "that eat mice". A CAN-feature clause is `ABLE(CAN.3(X.1))` in the restrictor.
@@ -386,10 +402,10 @@ A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 | `corpus_formal.txt` | The same in the formal rendering. |
 | `corpus_conceptual.txt` | The same in the conceptual rendering. |
 | `corpus_propositional.txt` | The same in the propositional rendering. |
-| `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). |
+| `wordform_request.yaml` | The request for the word-form pipeline (see "Word forms for the corpus"). Stage 7 adds it. |
 | `scenes.jsonl` | One JSON object per scene: its label, its seed instance, its participants (the seed first), and `steps`, a list with one list of events for each time step. An event holds its label, verb, agent, patient (null for an intransitive event), and aspect (`simple` or `progressive`). |
-| `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. The law-like items, the possible false events, and the impossible false events have test sets of their own. An instance-level or event-level item names its document. |
-| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; lexeme frequencies; sentence lengths; relative-clause depths; how often sentences are ambiguous, by their readings; how many definite mentions could not be told apart; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; and the co-occurrence check below. |
+| `tests/<level>_<change>.jsonl` | Test sets: matched true and false items with their logical forms and sentences. The law-like items (`_lawlike`), the possible false events (`_possible`), and the impossible false events (`_impossible`) have test sets of their own. An instance-level or event-level item names its document. The schema is under "Test items" below. |
+| `stats.yaml` | Counts by document type, proposition level, quantifier, and part of speech; each document type's achieved length beside its drawn length; the quantifier mix, as stated and by each fact's strongest true quantifier; lexeme frequencies; sentence lengths; relative-clause depths; how often sentences are ambiguous, by their readings; how many definite mentions could not be told apart; the verbs that get no word because their relation holds for every pair or for no pair; the rule terms that were skipped; the co-occurrence check below; and, for each test set, its number of pairs and the share of its true items that are seen. |
 
 Each document object holds its label, type, topic, scenes, referents, and sentences. The topic is a category, a feature or a verb, an instance, or, for a situational narrative, its scene. `referents` maps each referent label to its instance, in the order of first mention. Each sentence holds:
 
@@ -461,13 +477,34 @@ The grounding says how the truth was decided (`test`):
 
 `proportion` is always the share that has the predicate, whatever the polarity. `fixed` says whether the predicate's value is fixed for the subject, for IS, HAS, and CAN features.
 
-**Co-occurrence check.** `stats.yaml` reports, over pairs of leaves, the correlation of within-document co-occurrence with thematic relatedness and with taxonomic similarity, separately for each document type. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness, and encyclopedic documents more with taxonomic similarity.
+**Test items.** Each line of a test set is one item, and each true item is followed by the false item made from it. An item has two parts:
+
+```json
+{"input": {"document": "D.17", "tokens": ["L.175", "L.6", "L.166", "L.175", "L.4"], "words": null, "text": null,
+           "formal": "...", "conceptual": "...", "propositional": "C1.1.4(R.1) AND C1.1.2(R.2) AND EVENT(SN.8, PAST, SIMPLE, V3(R.1, R.2))",
+           "tree": ["S", "..."], "logical_form": {"level": "event", "scene": "SN.8", "event": null, "...": "..."},
+           "referents": ["..."], "events": ["SN.8"], "coreference": ["R.1", "R.2"], "distinguished": [true, true], "readings": ["event"]},
+ "meta": {"set": "event_role_possible", "pair": 12, "truth": true, "level": "event", "change": "role",
+          "seen": false, "possible": true, "grounding": {"scene": "SN.8", "step": 1, "possible": true, "test": "event"}}}
+```
+
+- `input` holds the model-facing fields: the document that the item continues (null at the class level), and the fields of a sentence in `documents.jsonl`, without its label. The logical form has no `id`, no `grounding`, and no `rule`. An event-level form has `"event": null`, and `events` holds the label of the scene.
+- `meta` holds the answer and the bookkeeping: the set, the number of the pair, the truth label (`truth`), the level, the change, `seen`, and the grounding. A class-level item also has `law_like`, and `rule`: the rule that a true rule statement states, or null. An event-level item also has `possible`.
+
+The two items of a pair never differ in the format of `input`. They differ in `meta` by design.
+
+**Co-occurrence check.** `stats.yaml` reports, over the unordered pairs of leaves, the correlation of within-document co-occurrence with thematic relatedness and with taxonomic similarity, separately for each document type. A pair's co-occurrence is the number of documents in which both leaves occur. A leaf occurs in a document in one of two ways, and both are reported:
+
+- `words`: the leaf's own noun appears in the document;
+- `referents`: a noun phrase of the document refers to an instance of the leaf, whatever its noun ("the bird", "it"), or to the leaf category itself.
+
+Each correlation is given as Pearson's and as Spearman's. The taxonomic similarity is the one in `thematic.csv`, computed for every pair, and a pair with an undefined similarity is left out. The correlations are reported for each document type, for the two encyclopedic types together, for the two narrative types together, and for all documents. The check confirms that the document mix works as a lever: situational documents should correlate more with thematic relatedness than the encyclopedic documents do, and less with taxonomic similarity.
 
 ## Word forms for the corpus
 
 The corpus comes first, and the word forms are made for it. The run has three steps:
 
-1. **Generate.** `python -m semantic_world.corpus generate` writes the corpus in the formal, conceptual, and propositional renderings, and writes `wordform_request.yaml`.
+1. **Generate.** `python -m semantic_world.corpus generate` writes the corpus in the formal, conceptual, and propositional renderings, and writes `wordform_request.yaml`. Stage 6 builds the command, and stage 7 adds the request.
 2. **Make the word forms.** The word-form pipeline runs with the request (`request:` in its configuration).
 3. **Render.** `python -m semantic_world.corpus render` reads the word-form run and adds the word labels, the spelled rendering (which `corpus.txt` then holds), and the word-form columns of `lexicon.csv`. Rendering changes nothing else in the corpus run.
 
@@ -530,6 +567,7 @@ quantifiers:
   some: {exclude_all: true}
   generic: {means: most}                      # all, most, or some
   generic_rate: 0.5                           # share of class-level sentences that use a bare generic when it is true
+  weights: {all: 1.0, most: 1.0, some: 1.0, none: 1.0}   # how often a document states the facts of each quantifier (none: the quantifier "no")
 
 scene:
   size: [2, 6]
@@ -540,7 +578,7 @@ scene:
   participant_weights: {thematic: 1.0, taxonomic: 0.5, constant: 0.1}
 
 entity:
-  scenes: [1, 3]
+  scenes: [2, 5]                              # the number of scenes of an entity narrative
 
 mention:
   level_weights: {schedule: linear, start: 1, end: 4}         # noun levels, heaviest at the leaf level
@@ -571,11 +609,11 @@ test_sets:
   changes: [predicate, subject, quantifier, role]
 ```
 
-Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. The morphology switch is `enabled`. It was `on` at first, which YAML reads as the boolean true when written bare. A configuration that still has `grammar.class_can_rate`, `grammar.morphology.tense.event_tense`, or `grammar.morphology.aspect.progressive_rate` gets an error that names the new key.
+Validation follows the base conventions: unknown keys are errors, and every error names the file and the field. `taxonomy` takes exactly one of `config` and `run`, and `seed` goes with `config` only. Relative paths are read from the folder the command runs in, as in the word-form pipeline. The morphology switch is `enabled`. It was `on` at first, which YAML reads as the boolean true when written bare. A configuration that still has `grammar.class_can_rate`, `grammar.morphology.tense.event_tense`, or `grammar.morphology.aspect.progressive_rate` gets an error that names the new key. So does `quantifiers.weights.no`, which YAML reads as the boolean false: the key is `none`.
 
 ## Determinism
 
-Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `corpus:lexicon`, `corpus:scenes`, `corpus:documents`, `corpus:propositions`, `corpus:mentions`, `corpus:grammar`, and `corpus:tests`. The corpus seed is its own master seed, independent of the taxonomy's seed. Each document draws from its own parts of four streams, named by its label (`corpus:documents:D.17`): its type, topic, length, and order from `corpus:documents`, its facts from `corpus:propositions`, its mentions from `corpus:mentions`, and the grammar's choices from `corpus:grammar`. Properties, each tested:
+Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `corpus:lexicon`, `corpus:scenes`, `corpus:documents`, `corpus:propositions`, `corpus:mentions`, `corpus:grammar`, and `corpus:tests`. The corpus seed is its own master seed, independent of the taxonomy's seed. Each document draws from its own parts of four streams, named by its label (`corpus:documents:D.17`): its type, topic, length, and order from `corpus:documents`, its facts from `corpus:propositions`, its mentions from `corpus:mentions`, and the grammar's choices from `corpus:grammar`. The test sets choose their items from `corpus:tests`, each level and change from its own part. The mentions and the grammar's choices of a test item come from parts of `corpus:mentions` and `corpus:grammar` named by its set and its pair. So a grammar setting never changes what a test item says. Properties, each tested:
 
 - the same taxonomy run, word-form run, configuration, and seed give byte-identical output folders;
 - changing the grammar settings (word order, adjective order, and morphology) never changes any logical form or the order of the sentences, only their realization;
@@ -584,7 +622,7 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
-Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
+Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `stats.py` (`stats.yaml`, with the co-occurrence check), `generate.py` (a whole run), `request.py` (the word-form request), `io.py`, and `__main__.py`. The command line is:
 
 ```
 python -m semantic_world.corpus generate data/corpus/default.yaml [--seed N] [--out DIR]
@@ -672,6 +710,17 @@ Jon decided the following on October 1, 2026, before stage 5 (`docs/proposals/20
 43. When modifiers cannot tell a referent apart, the mention falls back to the noun of the leaf. A mention that still fits another participant is kept, marked as not distinguished, and counted.
 44. A scalar pole writes its comparison class in the propositional rendering, at both levels: `SC.1.HIGH(R.1, C1.5)` for an instance, and the comparison class of decision 22 for a category, as in `SC.1.HIGH(X.1, C1)`.
 45. The JSON logical form holds relative clauses as a `clauses` list on the subject and the patient, and `tense` and `aspect` on event-level forms. The propositional rendering is generated from the JSON logical form, and a test checks that the two always agree.
+
+Jon decided the following on October 1, 2026, before stage 6 (`docs/proposals/2026-10-01-corpus-stage-6-decisions.md`):
+
+46. Event test items name only the scene. Every event-level test item, true or false, uses the same form: `EVENT(SN.8, PAST, SIMPLE, V1.2(R.1, R.2))`, meaning that some event in scene `SN.8` was this one. Documents keep their event labels. More generally, the true and the false items of a test set never differ in format: every field that a true item has, a false item has too, in the same notation. The rule covers the model-facing fields: the sentence, its renderings, and its logical form. Metadata such as the truth label, the grounding, and the `seen` field differ by design. An item keeps its model-facing fields (`input`) apart from its metadata (`meta`). A test checks the rule for every test set.
+47. Entity narratives are longer. The default `entity.scenes` is `[2, 5]`, and was `[1, 3]`.
+48. Quantifier weights. `quantifiers.weights` weights the choice of class-level facts by quantifier, so a study can rebalance the mix. The default keeps the earlier behavior: the strongest true quantifier, with no reweighting. The setting is `{all: 1.0, most: 1.0, some: 1.0, none: 1.0}`, and a fact is chosen with a probability proportional to the weight of its strongest true quantifier.
+49. A true event-level test item can be any event that its document reports, in a main clause or in a relative clause.
+50. A false event-level test item follows a stricter rule than the truth test. No event with its verb, agent, and patient happened in any scene of its document, in either aspect. When the item names its verb with a verb category, no event of any verb below that category matches either.
+51. The co-occurrence check counts by words: a leaf occurs in a document when its own noun appears. It reports Pearson's and Spearman's correlations. It also reports the same correlations counted by referents, as a second measure.
+52. The test sets are `class_<change>` and `class_<change>_lawlike`, `instance_<change>`, and `event_<change>_possible` and `event_<change>_impossible`.
+53. Seen and unseen items. The documents stay unchanged, and every test item has a field that says whether its logical form appears in any training document. A false item never does. `stats.yaml` reports the share of true items that are seen, for each test set.
 
 ## Future additions
 

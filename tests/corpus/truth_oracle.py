@@ -13,6 +13,10 @@ plain loops over the pairs.
 
 ``truth`` returns True or False, or None for a logical form that cannot be judged: a vacuous
 one (an empty subject set), or a quantifier that its predicate does not take.
+
+Events are judged against scenes as ``scenes.jsonl`` holds them (``event``, ``happened``), and
+``allows`` says whether the world allows an event. A verb category names the verbs below it, by
+``verb_tree.csv``.
 """
 
 from __future__ import annotations
@@ -78,6 +82,12 @@ class Oracle:
             records = yaml.safe_load((folder / "relations.yaml").read_text(encoding="utf-8"))
             self.relations = {record["label"]: record["expression"] for record in records}
         self._matrices: dict[str, np.ndarray] = {}
+        self.verb_parent: dict[str, str | None] = {}
+        if (folder / "verb_tree.csv").exists():
+            verbs = pl.read_csv(folder / "verb_tree.csv", infer_schema_length=None)
+            self.verb_parent = dict(
+                zip(verbs["label"].to_list(), verbs["parent"].to_list(), strict=True)
+            )
 
     # Sets of rows ----------------------------------------------------------------------------
 
@@ -242,6 +252,50 @@ class Oracle:
             np.fill_diagonal(holds, False)
             self._matrices[verb] = holds
         return self._matrices[verb]
+
+    # Events ----------------------------------------------------------------------------------
+
+    def names(self, verb: str) -> list[str]:
+        """The labels that name an event of a verb: the verb, and the verb categories above."""
+        found = [verb]
+        while self.verb_parent.get(found[-1]) is not None:
+            found.append(self.verb_parent[found[-1]])
+        return found
+
+    def allows(self, label: str, agent: str, patient: str | None) -> bool:
+        """Whether the world allows an event: the agent has the CAN feature, or the relation
+        holds for the agent and the patient."""
+        if patient is None:
+            return bool(self.column[label][self.row[agent]] == 1)
+        return bool(self.matrix(label)[self.row[agent], self.row[patient]])
+
+    def matching(self, form: dict[str, Any], scene: dict[str, Any], aspect: bool) -> list[dict]:
+        """The events of a scene, as ``scenes.jsonl`` holds it, that an event-level form could
+        report: the same agent and patient, and a verb that the form's label names. With
+        ``aspect``, the same aspect too."""
+        predicate = form["predicate"]
+        label = predicate["verb"] if predicate["kind"] == "verb" else predicate["feature"]
+        patient = predicate["patient"]["instance"] if "patient" in predicate else None
+        return [
+            event
+            for step in scene["steps"]
+            for event in step
+            if event["agent"] == form["subject"]["instance"]
+            and event["patient"] == patient
+            and label in self.names(event["verb"])
+            and (not aspect or event["aspect"] == form["aspect"])
+        ]
+
+    def event(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
+        """Whether an event-level form that names no event is true of its scene: such an event,
+        of the form's aspect, is among the scene's events."""
+        assert form["scene"] == scene["label"]
+        return bool(self.matching(form, scene, aspect=True))
+
+    def happened(self, form: dict[str, Any], scenes: list[dict[str, Any]]) -> bool:
+        """Whether some event of the scenes has the form's verb, agent, and patient, in either
+        aspect."""
+        return any(self.matching(form, scene, aspect=False) for scene in scenes)
 
     # Truth -----------------------------------------------------------------------------------
 

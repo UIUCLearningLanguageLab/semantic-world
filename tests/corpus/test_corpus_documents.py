@@ -338,8 +338,9 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
                     assert bool(phrase.restriction) == (len(bare) > 1) or not flag
                 needed += len(bare) > 1
     assert flags[True] > 100 and needed > 30
-    # nearly every definite mention can be told apart
-    assert flags[False] <= 0.05 * flags[True]
+    # nearly every definite mention can be told apart. An entity narrative has 2 to 5 scenes,
+    # so its cast is large, and the smallest worlds have few features to tell instances apart
+    assert flags[False] <= 0.1 * flags[True]
 
 
 def test_first_mentions_in_situational_documents_take_no_modifier(corpora) -> None:
@@ -1079,6 +1080,87 @@ def test_documents_are_deterministic(cases) -> None:
     config = corpus_config(case.taxonomy)
     assert [d.to_json() for d in Planner(config).generate(5)] == base[:5]
     assert load_taxonomy(config).instances.labels == case.result.instances.labels
+
+
+def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
+    case = cases("default")
+
+    def made(**weights):
+        sections = {"quantifiers": {"weights": weights}} if weights else {}
+        planner = Planner(case.config(**sections), case.result)
+        documents = planner.generate(150)
+        strengths = Counter(
+            s.strength for _, s in sentences_of(documents, *ENCYCLOPEDIC) if s.section != RULE
+        )
+        return planner, documents, strengths
+
+    def share(strengths: Counter, quantifier: str) -> float:
+        return strengths[quantifier] / sum(strengths.values())
+
+    planner, base, strengths = made()
+    assert set(strengths) == {ALL, MOST, SOME, NO, "pole"}
+    for _, sentence in sentences_of(base):
+        proposition = sentence.proposition
+        if proposition.level != CLASS:
+            assert sentence.strength is None
+        elif proposition.predicate.kind == SCALAR:
+            assert sentence.strength == "pole"
+        else:
+            # a fact is stated with its strongest true quantifier, or as the bare generic
+            fact = planner.facts.class_fact(
+                proposition.subject, proposition.predicate, proposition.negative
+            )
+            assert fact.quantifier == sentence.strength
+            assert proposition.quantifier in (fact.quantifier, "generic")
+    # equal weights, of any size, change nothing
+    _, same, _ = made(all=3, most=3, some=3, none=3)
+    assert [d.to_json() for d in same] == [d.to_json() for d in base]
+    # a lighter weight makes the documents state fewer facts of that quantifier
+    planner, lighter, fewer = made(some=0.2)
+    assert share(fewer, SOME) < share(strengths, SOME) - 0.15
+    assert share(fewer, ALL) > share(strengths, ALL) and share(fewer, MOST) > share(strengths, MOST)
+    for _, sentence in sentences_of(lighter):
+        assert planner.truth.is_true(sentence.proposition)
+        proposition = sentence.proposition
+        if proposition.level == CLASS and proposition.predicate.kind != SCALAR:
+            fact = planner.facts.class_fact(
+                proposition.subject, proposition.predicate, proposition.negative
+            )
+            assert fact.quantifier == sentence.strength  # still the strongest true quantifier
+    # the weights change the facts of encyclopedic documents only: every narrative says the
+    # same, apart from the labels of its propositions, which are numbered across the corpus
+    assert [d.type for d in lighter] == [d.type for d in base]
+    for a, b in zip(lighter, base, strict=True):
+        if a.type in NARRATIVES:
+            assert (a.topic, a.scenes, a.referents) == (b.topic, b.scenes, b.referents)
+            assert [(s.propositional, s.sentence.tokens) for s in a.sentences] == [
+                (s.propositional, s.sentence.tokens) for s in b.sentences
+            ]
+    # a weight of 0 leaves the quantifier out, and a heavier one states it more often
+    _, _, without = made(some=0)
+    assert without[SOME] == 0 and without[ALL] > strengths[ALL]
+    # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
+    # the mix among the negative facts: "no" against "most ... not" and "some ... not"
+    _, _, heavier = made(none=4)
+    assert share(heavier, NO) > 1.5 * share(strengths, NO)
+    with pytest.raises(ConfigError, match="quantifiers.weights.no"):
+        case.config(quantifiers={"weights": {"no": 4}})
+
+
+def test_an_entity_narrative_has_two_to_five_scenes(cases) -> None:
+    case = cases("default")
+    planner = Planner(case.config(documents={"mix": {"entity": 1}}), case.result)
+    documents = planner.generate(80)
+    counts = Counter(len(d.scenes) for d in documents)
+    assert set(counts) == {2, 3, 4, 5}
+    for document in documents:
+        assert all(scene.seed == document.topic for scene in document.scenes)
+        assert len(document.sentences) <= document.drawn_length
+    one = Planner(case.config(entity={"scenes": 1}, documents={"mix": {"entity": 1}}), case.result)
+    shorter = one.generate(80)
+    assert {len(d.scenes) for d in shorter} == {1}
+    # more scenes give a narrative more events to report, so it comes closer to its drawn length
+    assert sum(len(d.sentences) for d in documents) > 1.3 * sum(len(d.sentences) for d in shorter)
 
 
 def test_a_lexicon_with_unnamed_concepts(cases) -> None:

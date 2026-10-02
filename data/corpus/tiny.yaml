@@ -9,3 +9,6 @@ taxonomy: {config: data/taxonomy/tiny_relations.yaml, seed: 1}
 
 documents:
   count: 20
+
+test_sets:
+  size: 20

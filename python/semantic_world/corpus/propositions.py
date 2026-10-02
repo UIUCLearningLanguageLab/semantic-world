@@ -110,6 +110,17 @@ _JSON_KEY = {
 _LITERAL_ORDER = {"IS": 0, "HAS": 1, "SC": 2}
 
 
+def scene_of(label: str) -> str:
+    """The scene that an event label (``SN.8.5``) or a scene label (``SN.8``) names."""
+    return ".".join(label.split(".")[:2])
+
+
+def event_of(label: str) -> str | None:
+    """The event that a label names: the label itself for an event label (``SN.8.5``), and None
+    for a scene label (``SN.8``), which stands for some event of the scene."""
+    return label if label.count(".") == 2 else None
+
+
 def _number(value: float) -> float:
     """A real number as it is written to the output files: 6 decimal places."""
     return round(float(value), 6)
@@ -290,8 +301,9 @@ class Proposition:
     scene: str | None = None
     """Event level only: the scene the event belongs to."""
     event: str | None = None
-    """Event level only: the event that the proposition reports (``SN.8.5``). A false test item
-    reports no event, and has None."""
+    """Event level only: the event that the proposition reports (``SN.8.5``). A test item, true
+    or false, names only its scene, and has None: it says that some event of the scene was this
+    one."""
     tense: str | None = None
     """Event level only: ``past`` or ``present``."""
     aspect: str | None = None
