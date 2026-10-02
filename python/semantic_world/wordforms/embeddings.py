@@ -235,7 +235,10 @@ def compute_embedding(
         clean = np.array([t.clean for t in synthesis.tokens], dtype=bool)
         control = np.array([t.control for t in synthesis.tokens], dtype=bool)
         trainable = train & ~control if embedding.train_on == "all" else train & clean
-        train_indices = np.flatnonzero(trainable & training_words)
+        # Inflected forms never train an encoder, so the inflected forms that a run asks for
+        # never change the embedding of a content word or of a function word.
+        uninflected = np.array([word.kind != "inflected" for word in words], dtype=bool)
+        train_indices = np.flatnonzero(trainable & training_words & uninflected[token_words])
         mean, std = learned_encoders.frame_statistics(frames_of, train_indices)
         frame_source = learned_encoders.FrameSource(frames_of, mean, std)
         device = resolve_device(config.device)
@@ -252,7 +255,11 @@ def compute_embedding(
         learned_encoders.save_model(
             folder / "model.pt", model, embedding.kind, embedding.settings(), mean, std
         )
-        tokens = learned_encoders.encode_tokens(model, frame_source, count, device)
+        # The tokens of inflected forms are encoded in batches of their own, for the same
+        # reason: a batch pads its clips to the longest one.
+        of_inflected = ~uninflected[token_words]
+        groups = [np.flatnonzero(~of_inflected), np.flatnonzero(of_inflected)]
+        tokens = learned_encoders.encode_tokens(model, frame_source, count, device, groups=groups)
         meta["frontend"] = embedding.frontend
         meta["learned"] = True
         meta["training"] = report.as_dict()

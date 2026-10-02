@@ -33,6 +33,18 @@ leaf occurs in a document in one of two ways, and both are reported:
 The correlations are Pearson's and Spearman's. The check confirms that the document mix works as
 a lever: situational documents should correlate more with thematic relatedness than encyclopedic
 documents do, and less with taxonomic similarity.
+
+**Separating the two signals.** Thematic relatedness and taxonomic similarity are themselves
+correlated in a world, so a correlation with one carries some of the other. The check therefore
+also reports:
+
+- ``world``: the correlation between thematic relatedness and taxonomic similarity over the
+  pairs of leaves, in the world itself;
+- ``partial``, for each group of documents and each measure: the correlation of co-occurrence
+  with thematic relatedness controlling for taxonomic similarity, and the reverse.
+
+A partial correlation is computed from the three pairwise correlations, over the pairs with a
+defined taxonomic similarity. Spearman's partial correlation is the same formula on the ranks.
 """
 
 from __future__ import annotations
@@ -115,6 +127,26 @@ def correlation(x: np.ndarray, y: np.ndarray) -> dict[str, float | None]:
     return {"pearson": pearson(x, y), "spearman": pearson(ranks(x), ranks(y))}
 
 
+def partial_correlation(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> dict[str, float | None]:
+    """Pearson's and Spearman's partial correlations of ``x`` and ``y`` controlling for ``z``:
+    ``(r_xy - r_xz r_yz) / sqrt((1 - r_xz^2) (1 - r_yz^2))``, on the values and on their ranks.
+    Null when a variable does not vary, or when ``z`` determines ``x`` or ``y``."""
+
+    def ranks(a: np.ndarray) -> np.ndarray:
+        return pl.Series(a).rank("average").to_numpy()
+
+    def partial(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float | None:
+        if len(a) < 3 or a.std() == 0 or b.std() == 0 or c.std() == 0:
+            return None
+        r = np.corrcoef(np.stack([a, b, c]))
+        rest = (1 - r[0, 2] ** 2) * (1 - r[1, 2] ** 2)
+        if rest <= 1e-12:
+            return None
+        return _number((r[0, 1] - r[0, 2] * r[1, 2]) / np.sqrt(rest))
+
+    return {"pearson": partial(x, y, z), "spearman": partial(ranks(x), ranks(y), ranks(z))}
+
+
 def occurrences(planner: Planner, documents: Sequence[Document]) -> dict[str, np.ndarray]:
     """For each measure, which leaves occur in which documents: a matrix with one row for each
     document and one column for each leaf."""
@@ -160,6 +192,14 @@ def cooccurrence(planner: Planner, documents: Sequence[Document]) -> dict[str, A
             record[measure] = {
                 "thematic": correlation(counts, thematic),
                 "taxonomic": correlation(counts[defined], taxonomic[defined]),
+                "partial": {
+                    "thematic_given_taxonomic": partial_correlation(
+                        counts[defined], thematic[defined], taxonomic[defined]
+                    ),
+                    "taxonomic_given_thematic": partial_correlation(
+                        counts[defined], taxonomic[defined], thematic[defined]
+                    ),
+                },
             }
         groups[group] = record
 
@@ -188,6 +228,7 @@ def cooccurrence(planner: Planner, documents: Sequence[Document]) -> dict[str, A
         "leaves": leaves,
         "pairs": len(thematic),
         "pairs_with_taxonomic_similarity": int(defined.sum()),
+        "world": {"thematic_taxonomic": correlation(thematic[defined], taxonomic[defined])},
         "by_document_type": groups,
         "check": check,
     }

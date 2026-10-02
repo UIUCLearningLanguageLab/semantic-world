@@ -1,0 +1,31 @@
+# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 36 content
+# lexemes, 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
+# corpus first, so that its request exists:
+#
+#   python -m semantic_world.corpus generate data/corpus/tiny.yaml
+#   python -m semantic_world.wordforms all data/wordforms/corpus_tiny.yaml
+#   python -m semantic_world.corpus render runs/corpus/tiny_seed1 --wordforms runs/wordforms/corpus_tiny_seed1
+name: corpus_tiny
+seed: 1
+
+# The corpus's request: its lexemes, function words, affixes, inflected forms, and meanings.
+request: runs/corpus/tiny_seed1/wordform_request.yaml
+
+wordforms:
+  count: 60
+
+synthesis:
+  tokens_per_speaker: 1
+  held_out_speaker_proportion: 0.34
+  engines:
+    piper: {speakers: 3}
+    espeak: {variants: [m1, m3, f2]}
+
+embeddings:
+  - {name: cochleagram_fixed, encoder: fixed, frontend: cochleagram, time_bins: 10, pca_dims: 16}
+  - {name: logmel_fixed, encoder: fixed, frontend: logmel, time_bins: 10, pca_dims: 16}
+
+# The lexemes of categories get their words by this mode, from the request's meanings. Every
+# other lexeme gets a word at random.
+assignment:
+  mode: arbitrary

@@ -41,8 +41,12 @@ embeddings:
   - {name: contrastive_logmel, encoder: learned, kind: contrastive, frontend: logmel, dims: 128, hidden: 128, layers: 3, kernel: 5, epochs: 20, batch_size: 64, learning_rate: 0.001, temperature: 0.1, train_on: clean}
   - {name: cpc_logmel, encoder: learned, kind: cpc, frontend: logmel, dims: 64, hidden: 128, layers: 3, kernel: 5, epochs: 10, batch_size: 32, learning_rate: 0.001, steps_ahead: 8, negatives: 32, negatives_from: batch, embedding_from: context, train_on: clean}
 
+# A request file, such as the corpus generator's wordform_request.yaml: its function words,
+# affixes, and inflect entries take the place of glosses, items, and inflect below, and its
+# lexemes are assigned to the content words. null: no request.
+request: null
+
 closed_class:                    # null: content words only
-  request: null                  # a request file, in place of glosses, items, and inflect
   function_words:
     glosses: [the, and, a, is, that, it, with, not, all, can, has, "no", some, most, without]   # most frequent first
     source: pseudo               # english: each gloss's English pronunciation

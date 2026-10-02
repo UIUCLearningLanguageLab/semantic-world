@@ -742,6 +742,57 @@ def test_the_description_rate(corpora) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
+# The share of relation facts in category documents
+# ---------------------------------------------------------------------------------------------
+
+
+def test_the_relation_fact_share(corpora) -> None:
+    """``documents.relation_fact_share`` sets how often a sentence of a category document draws
+    a relation fact. The default, null, keeps the equal chance among the kinds of content. The
+    setting changes the category documents alone."""
+
+    def made(**documents):
+        planner, found = corpora("default", 300, documents=documents)
+        drawn = [
+            s.section
+            for d in found
+            if d.type == "encyclopedic_category"
+            for s in d.sentences
+            if s.section != CONTRAST
+        ]
+        others = [
+            [s.sentence.tokens for s in d.sentences]
+            for d in found
+            if d.type != "encyclopedic_category"
+        ]
+        return sum(section == RELATION for section in drawn) / len(drawn), others, found
+
+    default, others, documents = made()
+    # one kind among four for a topic with subcategories, and among three for a leaf; a little
+    # more in the documents, because the membership facts of a topic run out first
+    assert 0.25 < default < 0.40
+    explicit = made(relation_fact_share=None)[2]
+    assert [d.to_json() for d in explicit] == [d.to_json() for d in documents]
+    # 0 turns relation facts off in category documents, and only there
+    none, same_others, without = made(relation_fact_share=0.0)
+    assert none == 0.0 and same_others == others
+    feature = [s.section for d in without if d.type == "encyclopedic_feature" for s in d.sentences]
+    assert feature.count(RELATION) > 50
+    assert [(d.label, d.type, d.topic) for d in without] == [
+        (d.label, d.type, d.topic) for d in documents
+    ]
+    # a share is the probability that a sentence draws a relation fact
+    assert 0.52 < made(relation_fact_share=0.6)[0] < 0.68
+    assert made(relation_fact_share=1.0)[0] == 1.0
+    assert made(relation_fact_share=0.6)[1] == others
+    # without verbs, a category document has no relation fact to draw
+    planner = Planner(corpus_config(PLAIN_TAXONOMY, documents={"relation_fact_share": 0.9}))
+    plain = planner.generate(40)
+    assert all(s.section != RELATION for d in plain for s in d.sentences)
+    assert sum(d.type == "encyclopedic_category" for d in plain) > 5
+
+
+# ---------------------------------------------------------------------------------------------
 # Sibling contrasts, restrictions, and class-level relative clauses
 # ---------------------------------------------------------------------------------------------
 

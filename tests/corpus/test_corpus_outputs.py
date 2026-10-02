@@ -29,8 +29,13 @@ from semantic_world.corpus.io import OUTPUT_FILES, default_output_dir
 from semantic_world.corpus.lexicon import LEXICON_COLUMNS
 from semantic_world.corpus.planner import Planner
 from semantic_world.corpus.realize import leaves, preorder
-from semantic_world.corpus.scenes import Scene
-from semantic_world.corpus.stats import cooccurrence, corpus_stats, correlation
+from semantic_world.corpus.scenes import Scene, leaf_similarity
+from semantic_world.corpus.stats import (
+    cooccurrence,
+    corpus_stats,
+    correlation,
+    partial_correlation,
+)
 from semantic_world.corpus.testsets import set_names
 
 DOCUMENT_FIELDS = ["label", "type", "topic", "scenes", "referents", "sentences"]
@@ -111,7 +116,7 @@ def test_the_output_folder(cases, runs, tmp_path, name) -> None:
     sets = [set_name for set_name, *_ in set_names(corpus.config.test_sets.changes)]
     expected = set(OUTPUT_FILES) | {f"tests/{set_name}.jsonl" for set_name in sets}
     assert set(files_of(folder)) == expected
-    assert "wordform_request.yaml" not in expected  # the request comes with stage 7
+    assert {"wordform_request.yaml", "wordform_meanings.csv"} <= expected
 
     # config.yaml: the resolved configuration loads back, and the provenance names the world
     data = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8"))
@@ -511,6 +516,15 @@ def test_the_cooccurrence_check_by_brute_force(runs) -> None:
                     found.add(leaf_of.get(entry["referent"], entry["referent"]))
         return found & set(leaves_)
 
+    # every pair of leaves has a taxonomic similarity in the default world
+    similarity = leaf_similarity(result, planner.scene_generator.leaf_rows)
+    similar = np.array([similarity[a, b] for a, b in pairs])
+    assert block["pairs_with_taxonomic_similarity"] == len(pairs) and not np.isnan(similar).any()
+
+    def residuals(y: np.ndarray, x: np.ndarray) -> np.ndarray:
+        slope, intercept = np.polyfit(x, y, 1)
+        return y - (slope * x + intercept)
+
     groups = {
         "encyclopedic_category": ("encyclopedic_category",),
         "encyclopedic_feature": ("encyclopedic_feature",),
@@ -537,11 +551,29 @@ def test_the_cooccurrence_check_by_brute_force(runs) -> None:
             assert record[measure]["thematic"]["pearson"] == pytest.approx(expected, abs=1e-6)
             assert -1 <= record[measure]["thematic"]["spearman"] <= 1
             assert -1 <= record[measure]["taxonomic"]["pearson"] <= 1
+            # the partial correlations: the correlation of the residuals of two regressions
+            partial = record[measure]["partial"]
+            assert list(partial) == ["thematic_given_taxonomic", "taxonomic_given_thematic"]
+            for key, x, z in (
+                ("thematic_given_taxonomic", related, similar),
+                ("taxonomic_given_thematic", similar, related),
+            ):
+                assert partial[key]["pearson"] == pytest.approx(
+                    np.corrcoef(residuals(counts, z), residuals(x, z))[0, 1], abs=1e-6
+                )
+                assert -1 <= partial[key]["spearman"] <= 1
     # in a narrative, "the bird" and "it" count for the penguin's leaf by referents, and not by
     # words: the two measures differ there
     narrative = block["by_document_type"]["narrative"]
     assert narrative["words"] != narrative["referents"]
     assert set(block["check"]) == {"words", "referents"}
+    # the world itself: thematic relatedness against taxonomic similarity, over the leaf pairs
+    all_related = np.array(
+        [thematic.get(frozenset((leaves_[a], leaves_[b])), 0.0) for a, b in pairs]
+    )
+    world = block["world"]["thematic_taxonomic"]
+    assert world["pearson"] == pytest.approx(np.corrcoef(all_related, similar)[0, 1], abs=1e-6)
+    assert world == correlation(all_related, similar)
 
 
 def test_correlations() -> None:
@@ -552,6 +584,30 @@ def test_correlations() -> None:
     tied = correlation(np.array([1.0, 1.0, 2.0, 3.0]), np.array([1.0, 2.0, 2.0, 5.0]))
     assert tied["spearman"] == pytest.approx(0.833333, abs=1e-6)
     assert correlation(x, np.ones(5)) == {"pearson": None, "spearman": None}
+
+
+def test_partial_correlations() -> None:
+    rng = np.random.default_rng(0)
+    z = rng.normal(size=2000)
+    x, y = z + rng.normal(size=2000), z + rng.normal(size=2000)
+    # x and y are related only through z: the correlation is high, and the partial one is not
+    assert correlation(x, y)["pearson"] > 0.4
+    partial = partial_correlation(x, y, z)
+    assert abs(partial["pearson"]) < 0.06 and abs(partial["spearman"]) < 0.06
+    # controlling for an unrelated variable changes little
+    w = rng.normal(size=2000)
+    assert partial_correlation(x, y, w)["pearson"] == pytest.approx(
+        correlation(x, y)["pearson"], abs=0.01
+    )
+    # y has a part that z does not explain, and x follows it
+    direct = partial_correlation(y + 3 * w, w, z)
+    assert direct["pearson"] > 0.9 and direct["spearman"] > 0.9
+    # null when a variable does not vary, or when z determines one of the two
+    none = {"pearson": None, "spearman": None}
+    assert partial_correlation(x, y, np.ones(2000)) == none
+    assert partial_correlation(np.ones(2000), y, z) == none
+    assert partial_correlation(2 * z + 1, y, z) == none
+    assert partial_correlation(x[:2], y[:2], z[:2]) == none
 
 
 def test_cooccurrence_on_the_default_configuration() -> None:
@@ -588,6 +644,9 @@ def test_statistics_without_test_sets_and_without_documents(cases) -> None:
         "pearson": None,
         "spearman": None,
     }
+    partial = empty.stats["cooccurrence"]["by_document_type"]["all"]["words"]["partial"]
+    assert partial["thematic_given_taxonomic"] == {"pearson": None, "spearman": None}
+    assert empty.stats["cooccurrence"]["world"]["thematic_taxonomic"]["pearson"] is not None
 
 
 # ---------------------------------------------------------------------------------------------

@@ -221,8 +221,26 @@ class Assignment:
     marked: list[WordForm] = field(default_factory=list)
     """With branch markers: the marked word forms, which join the run's lexicon."""
     features: Meanings | None = None
+    lexemes: list[dict[str, Any]] | None = None
+    """In a run that assigns the lexemes of a request: one record for each lexeme, with its form
+    (:mod:`semantic_world.wordforms.lexemes`). ``meanings`` and ``words`` then hold the lexemes
+    that the mode assigned, the lexemes of categories."""
+    forms: dict[str, WordForm] = field(default_factory=dict)
+    """With lexemes: the form of every lexeme, by lexeme label."""
+    reserved: set[tuple[str, ...]] = field(default_factory=set)
+    """With lexemes: the forms, without stress, that the assignment made or could still make
+    (the marked forms, and every form that a word could have with an affix). The function words
+    avoid them."""
 
     def frame(self) -> pl.DataFrame:
+        if self.lexemes is not None:
+            columns = ["lexeme", "meaning", "pos", "word", "spelling", "arpabet", "assigned"]
+            if self.base_words is not None:
+                columns += ["base_word", "branch", "marker"]
+            return pl.DataFrame(
+                {c: [record.get(c) for record in self.lexemes] for c in columns},
+                schema={c: pl.String for c in columns},
+            )
         data: dict[str, Any] = {
             "meaning": self.meanings,
             "word": [w.label for w in self.words],
@@ -461,6 +479,9 @@ def assign_branch_markers(
     null_samples: int = NULL_SAMPLES,
     others: list[WordForm] | None = None,
     affixes: list[Any] | None = None,
+    requires: list[tuple[Any, ...]] | None = None,
+    fits=None,
+    taken_forms: set[tuple[str, ...]] | None = None,
 ) -> Assignment:
     """A random assignment in which the words of one branch share a marker syllable. Each branch
     at ``branch_markers.depth`` draws a marker, and its meanings get words that can take the
@@ -472,7 +493,15 @@ def assign_branch_markers(
 
     ``others`` are the run's other forms (function words and inflected forms) and ``affixes``
     its affixes: a marked form is none of the other forms, and a marker is neither a function
-    word nor an affix, with or without the joining schwa."""
+    word nor an affix, with or without the joining schwa.
+
+    The rows of ``table`` can repeat an ID: the synonyms of one category are assigned one by
+    one, and share its marker. ``requires`` gives, for each row, the affixes
+    (``closed_class.Affix``) that the row's form must be able to take: a branch's marked forms
+    then take every affix that a row of the branch requires, with the closed-class joining
+    settings. ``fits(row, word)`` says whether an unmarked word can serve a row above the
+    markers' depth. ``taken_forms`` are forms that no marked form, and no inflected marked
+    form, may repeat; the forms that the assignment makes or reserves are added to it."""
     from semantic_world.wordforms.closed_class import (
         SCHWA,
         Affix,
@@ -496,7 +525,9 @@ def assign_branch_markers(
     joining = _Joining(epenthesis=True, glide="Y")
     pool = [words[int(i)] for i in rng.permutation(len(words))]  # the words, in a random order
     others = others or []
-    taken = {w.stripped for w in words} | {w.stripped for w in others}
+    taken = taken_forms if taken_forms is not None else set()
+    taken |= {w.stripped for w in words} | {w.stripped for w in others}
+    closed = config.closed_class
     # a marker must not sound like a function word or like an affix
     reserved = [w.stripped for w in others if w.kind == "function"]
     reserved += [strip_stress(form) for affix in affixes or [] for form in affix.forms]
@@ -507,13 +538,28 @@ def assign_branch_markers(
         return a == schwa + b or b == schwa + a or a == b + schwa or b == a + schwa
 
     free = {w.label for w in pool}
-    base_of: dict[str, WordForm] = {}
-    marked_of: dict[str, WordForm] = {}
+    base_of: dict[int, WordForm] = {}
+    marked_of: dict[int, WordForm] = {}
     markers: list[Affix] = []
     marker_branches: dict[str, str] = {}
     used: list[tuple[str, ...]] = []
+
+    def inflections(phones: tuple[str, ...], wanted: list[Any]) -> list[tuple[str, ...]] | None:
+        """The forms of a marked form with each affix it must take, or None when it cannot take
+        one of them."""
+        made = []
+        for affix in wanted:
+            joined = repair_join(english, phones, affix, closed.epenthesis, closed.glide)
+            if joined is None or english.is_common_pronunciation(joined[0]):
+                return None
+            made.append(strip_stress(joined[0]))
+        return made
+
     for number, branch in enumerate(sorted({b for b in branches if b is not None}), start=1):
-        members = [m for m, b in zip(table.ids, branches, strict=True) if b == branch]
+        members = [i for i, b in enumerate(branches) if b == branch]
+        wanted: list[Any] = []
+        for row in members:
+            wanted += [a for a in (requires[row] if requires else ()) if a not in wanted]
         tries = min(MARKER_TRIES, int((weights > 0).sum()))
         for index in rng.choice(len(candidates), size=tries, replace=False, p=weights):
             phones = candidates[int(index)][0]
@@ -525,6 +571,7 @@ def assign_branch_markers(
             ipa = "".join(tables[0].phone(p) for p in phones)
             marker = Affix(f"M.{number}", branch, position, phones, ipa)
             fitting = []
+            reserved_now: set[tuple[str, ...]] = set()
             for word in pool:
                 if word.label not in free:
                     continue
@@ -533,6 +580,16 @@ def assign_branch_markers(
                     continue
                 if strip_stress(joined[0]) in taken:
                     continue
+                if wanted:
+                    # the marked form takes every affix that a lexeme of the branch requires,
+                    # and neither it nor its inflected forms repeat another form
+                    made = inflections(joined[0], wanted)
+                    forms = None if made is None else [strip_stress(joined[0]), *made]
+                    if forms is None or len(set(forms)) != len(forms):
+                        continue
+                    if any(form in taken or form in reserved_now for form in forms):
+                        continue
+                    reserved_now.update(forms)
                 fitting.append(word)
                 if len(fitting) == len(members):
                     break
@@ -548,21 +605,30 @@ def assign_branch_markers(
         marker_branches[marker.label] = branch
         forms, skipped = inflect(joining, english, speller, [(w, marker) for w in fitting])
         assert not skipped, skipped
-        for meaning, word, (form, spelling) in zip(members, fitting, forms, strict=True):
+        taken |= reserved_now
+        for row, word, (form, spelling) in zip(members, fitting, forms, strict=True):
             form.kind = "marked"
             form.held_out = word.held_out
             _add_statistics(form, spelling, english, tables, [w.stripped for w in words], spellings)
             taken.add(form.stripped)
             free.discard(word.label)
-            base_of[meaning] = word
-            marked_of[meaning] = form
-    for meaning, branch in zip(table.ids, branches, strict=True):
+            base_of[row] = word
+            marked_of[row] = form
+    for row, branch in enumerate(branches):
         if branch is None:  # above the markers' depth: the next free word, unmarked
-            word = next(w for w in pool if w.label in free)
+            word = next(
+                (w for w in pool if w.label in free and (fits is None or fits(row, w))), None
+            )
+            if word is None:
+                raise AssignmentError(
+                    f"no word is left for {table.ids[row]} that can take its affixes; raise "
+                    f"wordforms.count"
+                )
             free.discard(word.label)
-            base_of[meaning] = word
-    base_words = [base_of[m] for m in table.ids]
-    final = [marked_of.get(m, base_of[m]) for m in table.ids]
+            base_of[row] = word
+    every_row = range(len(table.ids))
+    base_words = [base_of[row] for row in every_row]
+    final = [marked_of.get(row, base_of[row]) for row in every_row]
     meaning = meaning_distances(table.features, settings.meaning_distance)
     rows, columns = np.triu_indices(len(final), 1)
     unmarked = correlation(edit_distances(base_words)[rows, columns], meaning)
@@ -600,7 +666,7 @@ def assign_branch_markers(
         branches=branches,
         markers=markers,
         marker_branches=marker_branches,
-        marked=[marked_of[m] for m in table.ids if m in marked_of],
+        marked=[marked_of[row] for row in every_row if row in marked_of],
     )
 
 
@@ -619,7 +685,7 @@ class _Joining:
 
 def needs_embeddings(config) -> bool:
     """Whether the assignment needs the run's embeddings: its sound distance is an embedding's."""
-    return config.assignment.meanings is not None and config.assignment.sound_distance != "edit"
+    return config.meanings is not None and config.assignment.sound_distance != "edit"
 
 
 def assign(

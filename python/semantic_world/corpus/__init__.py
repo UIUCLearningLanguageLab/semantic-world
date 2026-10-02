@@ -13,7 +13,8 @@ realization as words and trees, the reading of a tree back into its plan, and re
 Stage 5 builds the documents: the planner of the four document types, the mentions of referents,
 the readings of a sentence, the JSON logical form, and the propositional rendering. Stage 6
 builds a whole run: the test sets, the statistics, the output folder, and the ``generate``
-command.
+command. Stage 7 builds the request for the word-form pipeline and the ``render`` command, which
+attaches the word forms.
 The generator is pure Python and does not use the Rust engine.
 """
 
@@ -44,12 +45,14 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import Realizer, Sentence
+from semantic_world.corpus.render import render
 from semantic_world.corpus.renderings import (
     formal,
     parse_propositional,
     proposition_of,
     propositional,
 )
+from semantic_world.corpus.request import wordform_request
 from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
 from semantic_world.corpus.stats import corpus_stats
 from semantic_world.corpus.streams import STREAM_NAMES, Streams
@@ -108,5 +111,7 @@ __all__ = [
     "proposition_of",
     "propositional",
     "readings",
+    "render",
     "taxonomy_identity",
+    "wordform_request",
 ]

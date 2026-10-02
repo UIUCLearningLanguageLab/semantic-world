@@ -197,9 +197,9 @@ def test_request_file_replaces_the_inline_request(tmp_path):
             }
         )
     )
-    config = config_with({"request": str(request), "function_words": {"min_distance": 3}})
+    config = config_with({"function_words": {"min_distance": 3}}, request=str(request))
     closed = config.closed_class
-    assert closed.request == str(request)
+    assert closed.request == str(request) and config.request is None  # no lexemes
     assert closed.glosses == ("the", "no", "of") and closed.min_distance == 3
     assert [(a.gloss, a.position) for a in closed.affixes] == [
         ("PLURAL", "suffix"),
@@ -207,20 +207,26 @@ def test_request_file_replaces_the_inline_request(tmp_path):
     ]
     assert closed.inflect[0].words == ("W.2",) and closed.inflect[0].affixes == ("PLURAL", "AGENT")
     # the resolved configuration holds the request inline, and reloads equal
-    resolved = config.resolved()["closed_class"]
-    assert resolved["request"] is None and resolved["function_words"]["glosses"] == [
-        "the",
-        "no",
-        "of",
-    ]
+    resolved = config.resolved()
+    assert resolved["request"] is None and "request" not in resolved["closed_class"]
+    assert resolved["closed_class"]["function_words"]["glosses"] == ["the", "no", "of"]
     assert parse_config(config.resolved(), "again").closed_class == config.closed_class
     # errors name the request file and the field, and the inline request must not be given too
     with pytest.raises(ConfigError) as info:
-        config_with({"request": str(request), "inflect": []})
+        config_with({"inflect": []}, request=str(request))
     assert info.value.field == "closed_class.inflect" and "request" in info.value.message
     with pytest.raises(ConfigError) as info:
-        config_with({"request": str(tmp_path / "missing.yaml")})
-    assert info.value.field == "closed_class.request" and "cannot read" in info.value.message
+        config_with({}, request=str(tmp_path / "missing.yaml"))
+    assert info.value.field == "request" and "cannot read" in info.value.message
+    # the request was closed_class.request before: the old key names the new one, and a run
+    # folder of that time, which holds the key as null, still loads
+    with pytest.raises(ConfigError) as info:
+        config_with({"request": str(request)})
+    assert info.value.field == "closed_class.request" and "top-level" in info.value.message
+    assert config_with({"request": None}) == config_with({})
+    with pytest.raises(ConfigError) as info:
+        config_with(None, request=str(request))
+    assert info.value.field == "closed_class" and "request" in info.value.message
     request.write_text(
         yaml.safe_dump(
             {
@@ -231,11 +237,11 @@ def test_request_file_replaces_the_inline_request(tmp_path):
         )
     )
     with pytest.raises(ConfigError) as info:
-        config_with({"request": str(request)})
+        config_with({}, request=str(request))
     assert info.value.source == str(request) and info.value.field == "inflect[0].affixes"
     request.write_text("function_words: [the]\nbad: 1\n")
     with pytest.raises(ConfigError) as info:
-        config_with({"request": str(request)})
+        config_with({}, request=str(request))
     assert info.value.source == str(request) and info.value.field == "bad"
 
 

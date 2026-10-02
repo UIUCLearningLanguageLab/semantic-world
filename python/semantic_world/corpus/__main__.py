@@ -1,8 +1,12 @@
-"""The command line: ``python -m semantic_world.corpus generate CONFIG [--seed N] [--out DIR]``.
+"""The command line of the corpus generator.
 
-``generate`` writes the corpus in the formal, the conceptual, and the propositional renderings,
-with its test sets and its statistics. The ``render`` command, which attaches word forms, comes
-with stage 7.
+``python -m semantic_world.corpus generate CONFIG [--seed N] [--out DIR]`` writes the corpus in
+the formal, the conceptual, and the propositional renderings, with its test sets, its
+statistics, and the request for the word-form pipeline.
+
+``python -m semantic_world.corpus render RUN_FOLDER --wordforms WORDFORM_RUN_FOLDER`` attaches
+the word forms of a word-form run made from that request: the word labels, the spelled
+rendering, and the word-form columns of ``lexicon.csv``.
 """
 
 from __future__ import annotations
@@ -31,7 +35,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     command.add_argument(
         "--out", default=None, help="the output folder (default: runs/corpus/<name>_seed<seed>)"
     )
+    attach = commands.add_parser("render", help="attach the word forms of a word-form run")
+    attach.add_argument("run", help="the corpus run folder")
+    attach.add_argument(
+        "--wordforms", required=True, help="the word-form run folder, made from the request"
+    )
     args = parser.parse_args(argv)
+    if args.command == "render":
+        from semantic_world.corpus.render import render
+
+        try:
+            report = render(args.run, args.wordforms)
+        except CorpusError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        print(
+            f"rendered {args.run}: {report['sentences']} sentences of {report['documents']} "
+            f"documents and {report['test_items']} test items, with the word forms of "
+            f"{report['wordforms']['name']} (seed {report['wordforms']['seed']})"
+        )
+        return 0
     try:
         config = load_config(args.config, seed=args.seed)
         corpus = generate(config)

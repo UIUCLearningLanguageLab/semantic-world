@@ -109,6 +109,7 @@ def test_default_values() -> None:
     assert config.propositions.progressive_rate == 0.3
     assert config.propositions.restriction_rate == 0.1
     assert config.documents.sibling_contrast_rate == 0.2
+    assert config.documents.relation_fact_share is None
     assert config.scalar_z == 1.0
     assert config.propositional_referents == "local"
     assert config.test_sets.size == 500
@@ -410,6 +411,8 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
     ({"grammar": {"class_can_rate": 0.5}}, "grammar.class_can_rate", "grammar.can_rate.class"),
     ({"propositions": {"restriction_rate": 2}}, "propositions.restriction_rate", "at most 1"),
     ({"documents": {"sibling_contrast_rate": 2}}, "documents.sibling_contrast_rate", "at most 1"),
+    ({"documents": {"relation_fact_share": 2}}, "documents.relation_fact_share", "at most 1"),
+    ({"documents": {"relation_fact_share": "x"}}, "documents.relation_fact_share", "a number"),
     ({"grammar": {"word_order": {"clause": "SVV"}}}, "grammar.word_order.clause", "SVO, SOV"),
     ({"grammar": {"word_order": {"adjective": "left"}}}, "grammar.word_order.adjective", "before"),
     (
