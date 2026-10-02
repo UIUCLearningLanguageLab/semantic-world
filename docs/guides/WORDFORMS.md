@@ -272,7 +272,7 @@ There are four modes:
 
 - `arbitrary`: a random assignment. Sound says nothing about meaning, and the correlation is near 0.
 - `target_correlation`: the assignment starts random, and words are exchanged while each exchange moves the correlation toward `target_correlation.target`. The summary says whether the target was reached within the tolerance. A target that the words cannot give is not an error: the closest value is reported, with `reached: false` and a warning in the summary and on the command line. `assignment.strict: true` makes a miss larger than the tolerance an error. With 500 words and 56 meanings, targets up to about 0.75 are reached.
-- `branch_markers`: the words of each branch of the taxonomy share a marker syllable, at the start (`position: initial`) or the end (`final`) of the word. `depth: 1` marks the top branches (`C1`, `C2`, and so on), and `depth: 2` the branches below them. A marker is joined like an affix, with the same glide and schwa repairs. The marked forms are new words of kind `marked` (`W.12.M.2` is word 12 with marker 2). They are synthesized and embedded like any word, and their stem AUC is reported.
+- `branch_markers`: the words of each branch of the taxonomy share a marker syllable, at the start (`position: initial`) or the end (`final`) of the word. `depth: 1` marks the top branches (`C1`, `C2`, and so on), and `depth: 2` the branches below them. A marker is joined like an affix, with the same glide and schwa repairs. The marked forms are new words of kind `marked` (`W.12.M.2` is word 12 with marker 2). They are synthesized and embedded like any word, and their stem AUC is reported. Two markers differ by at least two phonemes (`branch_markers.min_distance: 2`), so that two branches never sound alike: markers such as *ri-* and *rih-* are not drawn together. When the markers cannot be drawn that far apart, the run stops with an error that names the setting.
 - `acoustic_mapping`: the assignment is random, and semantic features then change the sound of a word's recordings. Each mapping names a feature column, a property, and an amount:
 
 ```yaml
@@ -308,7 +308,7 @@ wordforms: {count: 60}
 assignment: {mode: arbitrary}
 ```
 
-`data/wordforms/corpus_tiny.yaml` is the example. On a laptop, the three steps take under 20 seconds for the tiny corpus. `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
+`data/wordforms/corpus_tiny.yaml` is the example. `data/wordforms/corpus_default.yaml` does the same for the default corpus (`runs/corpus/default_seed1`), with the default word-form settings: 500 words, 45 speakers, and all five embeddings. On a laptop, the three steps take under 20 seconds for the tiny corpus. `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
 
 The request lists:
 

@@ -669,7 +669,7 @@ def test_narratives(cases, corpora) -> None:
     planner, documents = corpora("default", **RICH)
     config = planner.config
     scene_numbers = []
-    described = 0
+    described = recurring = with_clauses = 0
     for document in documents:
         if document.type in ENCYCLOPEDIC:
             assert document.scenes == ()
@@ -701,9 +701,16 @@ def test_narratives(cases, corpora) -> None:
                 # the verb is the event's own, or a verb category above it
                 assert proposition.predicate.label in planner.truth.verb_names(event.verb)
                 # a relative clause reports an earlier event of the same scene
-                for said in clause_propositions(sentence.plan):
+                clauses = clause_propositions(sentence.plan)
+                for said in clauses:
                     assert said.scene == proposition.scene
                     assert int(said.event.split(".")[2]) < int(proposition.event.split(".")[2])
+                # and never an event with the verb, the agent, and the patient of the sentence's
+                # own event or of another clause's: "the dog chased the cat that the dog chased"
+                happened = [event.key] + [events[said.event].key for said in clauses]
+                assert len(set(happened)) == len(happened), sentence.label
+                recurring += sum(e.key == event.key and e is not event for e in events.values())
+                with_clauses += bool(clauses)
             else:
                 assert sentence.section == DESCRIPTION and proposition.level == INSTANCE
                 # a description follows an event sentence, and is about one of its participants
@@ -722,6 +729,8 @@ def test_narratives(cases, corpora) -> None:
     assert scene_numbers == list(range(1, len(scene_numbers) + 1))
     assert [scene.label for scene in planner.scenes] == [f"SN.{n}" for n in scene_numbers]
     assert described > 50
+    # the rule about repeated events has work to do: events recur, and sentences have clauses
+    assert recurring > 20 and with_clauses > 20
     # events are named at every level of the verb tree
     names = Counter(
         len(s.proposition.predicate.label.split("."))

@@ -491,6 +491,11 @@ def assign_branch_markers(
     word in a branch carries the branch's marker. A meaning above the depth has no branch, and
     its word is unmarked.
 
+    Two markers differ by at least ``branch_markers.min_distance`` phonemes (2 by default), as
+    two function words do: markers that differ in one unstressed vowel alone would be nearly
+    impossible to tell apart when spoken. When no marker of the shape is that far from the
+    markers drawn so far, the assignment stops with an error that says so.
+
     ``others`` are the run's other forms (function words and inflected forms) and ``affixes``
     its affixes: a marked form is none of the other forms, and a marker is neither a function
     word nor an affix, with or without the joining schwa.
@@ -509,7 +514,7 @@ def assign_branch_markers(
         inflect,
         repair_join,
     )
-    from semantic_world.wordforms.english import strip_stress
+    from semantic_world.wordforms.english import edit_distance, strip_stress
     from semantic_world.wordforms.phonemes import load_tables
     from semantic_world.wordforms.spelling import Speller
 
@@ -555,16 +560,32 @@ def assign_branch_markers(
             made.append(strip_stress(joined[0]))
         return made
 
+    minimum = settings.marker_min_distance
+
+    def far_enough(plain: tuple[str, ...]) -> bool:
+        """Whether a marker differs from every marker so far by at least the minimum distance,
+        so that two branches' markers can be told apart when spoken."""
+        return all(edit_distance(plain, strip_stress(u)) >= minimum for u in used)
+
     for number, branch in enumerate(sorted({b for b in branches if b is not None}), start=1):
         members = [i for i, b in enumerate(branches) if b == branch]
         wanted: list[Any] = []
         for row in members:
             wanted += [a for a in (requires[row] if requires else ()) if a not in wanted]
+        if not any(w > 0 and far_enough(strip_stress(c)) for c, w in candidates):
+            raise AssignmentError(
+                f"no marker of shape {settings.marker_shape} is left for the branch {branch}: "
+                f"every one lies closer than {minimum} phonemes to the marker of another branch "
+                f"({len(used)} so far); lower assignment.branch_markers.min_distance, or try "
+                f"another shape or depth"
+            )
         tries = min(MARKER_TRIES, int((weights > 0).sum()))
         for index in rng.choice(len(candidates), size=tries, replace=False, p=weights):
             phones = candidates[int(index)][0]
             plain = strip_stress(phones)
             if phones in used or any(same_after_schwa(plain, strip_stress(u)) for u in used):
+                continue
+            if not far_enough(plain):
                 continue
             if any(plain == r or same_after_schwa(plain, r) for r in reserved):
                 continue
@@ -598,7 +619,8 @@ def assign_branch_markers(
         else:
             raise AssignmentError(
                 f"no marker of shape {settings.marker_shape} has enough words that can take it "
-                f"for the branch {branch}; try another shape, position, or depth, or more words"
+                f"for the branch {branch}; try another shape, position, or depth, more words, "
+                f"or a lower assignment.branch_markers.min_distance (now {minimum})"
             )
         used.append(phones)
         markers.append(marker)
@@ -647,6 +669,7 @@ def assign_branch_markers(
         "depth": settings.marker_depth,
         "position": settings.marker_position,
         "shape": settings.marker_shape,
+        "min_distance": minimum,
         "branches": len(markers),
         "marked_words": len(marked_of),
         "unmarked_meanings": sum(b is None for b in branches),

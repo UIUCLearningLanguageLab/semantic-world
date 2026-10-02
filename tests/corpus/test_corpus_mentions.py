@@ -211,6 +211,14 @@ def test_event_clauses_report_events_of_the_same_scene(cases) -> None:
     for plan in plans:
         scene = plan.predication.event.rsplit(".", 1)[0]
         events = {e.label: e for e in facts.truth.scenes[scene].events}
+        # no clause reports an event with the verb, the agent, and the patient of the sentence's
+        # own event, or of another clause's, even one that happened at another step
+        reported = [events[plan.predication.event].key] + [
+            events[phrase.clause.predications[0].event].key
+            for phrase in plan.noun_phrases()
+            if phrase.clause is not None
+        ]
+        assert len(set(reported)) == len(reported)
         for phrase in plan.noun_phrases():
             if phrase.clause is None:
                 continue

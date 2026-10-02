@@ -108,6 +108,7 @@ Spec: `docs/specs/WORDFORM_PIPELINE.md`.
 | WF.30 | 2026-10-01 | The assignment comes first, and the inflected forms are then made, synthesized, and embedded. A category's synonyms are assigned by the mode. The request's meanings and `assignment.meanings` cannot both be given. (CG.16.) | Claude Code | Jon | Decided | Corpus spec, decision 16; spec, decision 11 |
 | WF.31 | 2026-10-01 | `inflect` entries can name lexemes, and marked forms can take affixes (`W.12.M.2.AF.1`). (CG.12.) | Claude (chat) | Jon | Decided | Corpus spec, decision 12; spec, decision 11 |
 | WF.32 | 2026-10-01 | A lexeme gets only a word that can take the affixes of its part of speech, which the request's `takes` lists from the corpus's grammar settings. The inflected forms that a request asks for never change a content word's form, assignment, or embedding, and the trained encoders never train on inflected forms. (CG.56.) | Claude (chat) | Jon | Decided | Corpus spec, decision 56; spec, decision 11 |
+| WF.33 | 2026-10-01 | Every pair of branch markers differs by at least two phonemes, as function words do. The minimum is a setting, `assignment.branch_markers.min_distance` (default 2), and a run whose markers cannot be drawn at that distance stops with an error. | Claude (chat) | Jon | Decided | Spec, decision 12 |
 
 ## Connected speech (planned, not built)
 
@@ -315,6 +316,8 @@ Claude Code makes these while building, and records them in each stage's proposa
 | CG.E118 | 2026-10-01 | `assignment/lexicon.csv` has one row for each lexeme: `lexeme`, `meaning`, `pos`, `word`, `spelling`, `arpabet`, and `assigned` (the mode, `random`, or `same_form`), with `base_word`, `branch`, and `marker` under branch markers. `words.csv` gains `pos` only in a run with lexemes; a form that homonyms share lists both parts of speech; an inflected form takes its stem's part of speech and split. | Claude Code | Claude Code | Working design | Stage 7 proposal, choice 18 |
 | CG.E119 | 2026-10-01 | `assignment.categories` chooses the lexemes of categories that the mode assigns, and the others get words at random. A request without meanings gives every lexeme a word at random. | Claude Code | Claude Code | Working design | Stage 7 proposal, choice 19 |
 | CG.E120 | 2026-10-01 | `data/wordforms/corpus_tiny.yaml` makes 60 content words for the tiny corpus's 35 content lexemes, in the arbitrary mode, with the speakers and embeddings of `tiny.yaml`. | Claude Code | Claude Code | Working design | Stage 7 proposal, choice 20 |
+| CG.E121 | 2026-10-01 | A drawn relative clause never reports an event with the same verb, agent, and patient as its sentence's own event. The same holds between two clauses of one sentence. (The same event can occur again at a later step, CG.E32.) | Claude (chat) | Jon | Decided | Spec, "Relative clauses" |
+| CG.E122 | 2026-10-01 | `data/wordforms/corpus_default.yaml` makes the word forms of the default corpus from its request, with the default word-form settings: 500 content words for 173 content lexemes, 45 speakers, and all five embeddings, in the arbitrary mode. | Claude (chat) | Jon | Decided | Corpus spec, "Word forms for the corpus" |
 
 ## Milestone 1 engine
 

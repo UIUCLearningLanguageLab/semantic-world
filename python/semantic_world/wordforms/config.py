@@ -482,6 +482,9 @@ class AssignmentConfig:
     """The depth of the branches that share a marker: 1 is the top of the taxonomy."""
     marker_position: str = "initial"
     marker_shape: str = "CV"
+    marker_min_distance: int = 2
+    """The smallest phoneme edit distance between two branch markers. With 2, no two markers
+    differ by one phoneme alone, as no two function words do."""
     acoustic: tuple[AcousticMappingConfig, ...] = ()
     null_samples: int = 1000
 
@@ -505,6 +508,7 @@ class AssignmentConfig:
                 "depth": self.marker_depth,
                 "position": self.marker_position,
                 "shape": self.marker_shape,
+                "min_distance": self.marker_min_distance,
             },
             "acoustic_mapping": [m.resolved() for m in self.acoustic],
         }
@@ -1371,6 +1375,7 @@ def _read_assignment(node: _Node, embeddings: tuple[EmbeddingConfig, ...]) -> As
         marker_depth=marker_node.int("depth", 1, min=1),
         marker_position=marker_node.choice("position", "initial", MARKER_POSITIONS),
         marker_shape=marker_node.choice("shape", "CV", MARKER_SHAPES),
+        marker_min_distance=marker_node.int("min_distance", 2, min=1),
         acoustic=tuple(acoustic),
         null_samples=node.int("null_samples", 1000, min=1),
     )

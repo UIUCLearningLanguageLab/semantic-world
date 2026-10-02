@@ -61,6 +61,7 @@ from semantic_world.corpus.mentions import (
     MentionRules,
     Mentions,
     RelativeClauses,
+    happened,
     plan_for,
 )
 from semantic_world.corpus.propositions import (
@@ -834,7 +835,7 @@ class Planner:
                 EVENT,
                 events=earlier,
                 mention=lambda instance: mentions.noun_phrase(rng, instance, pronoun=False),
-                used={("event", event.label)},
+                used={("event", event.label), happened(event)},
             )
             subject = mentions.noun_phrase(rng, event.agent)
             if with_clauses:

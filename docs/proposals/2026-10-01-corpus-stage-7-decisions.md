@@ -184,6 +184,8 @@ Four things stand out.
 - **Branch markers can sound alike.** In the tiny run with branch markers, the two markers are `R IY0` and `R IH0` ("ri-" and "rih-"). The marker rule asks only that two markers differ, and that they do not differ by the joining schwa alone. A minimum distance between markers would be a change to the word-form pipeline's stage 7 design.
 - **The word-form guide lists `epenthesis` as a column of `words.csv`** in its section on closed-class forms. The column is `join`. The sentence is older than stage 7, and was left as it is.
 
+**Update, October 1, 2026 (stage 7b).** The note on branch markers is answered: two markers now differ by at least `assignment.branch_markers.min_distance` phonemes, 2 by default (WF.33). Jon corrected the word-form guide's `epenthesis` column and annotated the older proposal himself. Stage 7b also added `data/wordforms/corpus_default.yaml` for the default corpus, whose 173 content lexemes fit in the default 500 words, and one fix to the documents: a relative clause never reports an event with the same verb, agent, and patient as its own sentence (CG.E121). The fix changes some narrative sentences, so the default corpus now has 455,011 tokens (456,307 before), and the narrative rows of the tables above move in the third decimal: by words, the entity narratives' thematic correlation is 0.800 (0.796 before), and the situational narratives' is 0.725 (0.728 before).
+
 ## Still open
 
 Nothing new.
