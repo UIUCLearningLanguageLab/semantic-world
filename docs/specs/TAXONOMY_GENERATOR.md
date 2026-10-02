@@ -1,6 +1,6 @@
 # Taxonomy feature generator
 
-Draft, September 29, 2026. This document is the build specification for a Python program that generates an artificial dataset of objects in a taxonomic hierarchy, with their features. The specification is written for handoff to Claude Code, or to any developer, and should be complete without access to any other planning material.
+Draft, September 29, 2026. Built in stages 1 to 6; the user guide is `docs/guides/TAXONOMY.md`. This document is the build specification for a Python program that generates an artificial dataset of objects in a taxonomic hierarchy, with their features. The specification is written for handoff to Claude Code, or to any developer, and should be complete without access to any other planning material.
 
 ## Goal
 

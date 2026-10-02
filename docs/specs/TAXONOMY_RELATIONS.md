@@ -1,6 +1,6 @@
 # Taxonomy relations: scalar dimensions and transitive verbs
 
-Draft, September 29, 2026. This document is the build specification for two extensions to the taxonomy generator: scalar dimensions, and two-argument relations (transitive verbs) with a verb taxonomy. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`.
+Draft, September 29, 2026. Built in stages 7 to 12 and 12a of the taxonomy generator; the user guide is `docs/guides/TAXONOMY.md`. This document is the build specification for two extensions to the taxonomy generator: scalar dimensions, and two-argument relations (transitive verbs) with a verb taxonomy. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`.
 
 ## How this specification relates to the base specification
 

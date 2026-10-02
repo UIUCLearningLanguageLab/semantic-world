@@ -15,8 +15,11 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 5. `docs/specs/TAXONOMY_RELATIONS.md` — the extension of the generator with scalar dimensions, transitive verbs, and a verb taxonomy. The decided proposals in `docs/proposals/` are part of both taxonomy specifications.
 6. `docs/specs/WORDFORM_PIPELINE.md` — the word-form pipeline: a Python program in `python/semantic_world/wordforms/` that makes spoken word forms, synthesizes them, and builds sound embeddings.
 7. `docs/specs/CORPUS_GENERATOR.md` — the corpus generator: a Python program in `python/semantic_world/corpus/` that writes documents about the taxonomy's world in an artificial language, with a parse tree and a logical form for every sentence. Its numbered decisions, and the proposals they point to, are part of the specification.
-8. `docs/guides/` — user guides, starting with `docs/guides/TAXONOMY.md`, for running the taxonomy generator and reading its outputs.
-9. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
+8. `docs/specs/CONNECTED_SPEECH.md` — the plan for spoken sentences: whole utterances, alignment, pauses, speakers, and register. Planned, not built.
+9. `docs/DECISIONS.md` — the log of every design decision of the taxonomy, word-form, and corpus programs. Append new decisions to it.
+10. `docs/LANGUAGE_TODO.md` — what remains for the world-content and language programs, including their integration with the simulation.
+11. `docs/guides/` — user guides for the taxonomy generator (`TAXONOMY.md`), the word-form pipeline (`WORDFORMS.md`), and the corpus generator (`CORPUS.md`).
+12. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
 
 The project's planning documents (decisions, to-do lists, research goals, and the first study) live in a private folder that is not available in this repository. Everything needed to build is in `docs/`. If something seems missing, ask rather than guess.
 

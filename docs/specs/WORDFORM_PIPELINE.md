@@ -1,6 +1,6 @@
 # Word-form pipeline
 
-Draft, September 29, 2026. This document is the build specification for a Python pipeline that generates the spoken word forms of Semantic World's language, and turns them into audio, auditory representations, and distributed sound embeddings. The specification is written for handoff to Claude Code, or to any developer, and should be complete without access to any other planning material.
+Draft, September 29, 2026. Stages 1 to 7 are built, with the changes of corpus stages 7 and 7b; stage 8 still needs its own specification. The user guide is `docs/guides/WORDFORMS.md`. This document is the build specification for a Python pipeline that generates the spoken word forms of Semantic World's language, and turns them into audio, auditory representations, and distributed sound embeddings. The specification is written for handoff to Claude Code, or to any developer, and should be complete without access to any other planning material.
 
 ## Goal
 

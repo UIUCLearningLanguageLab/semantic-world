@@ -1,6 +1,6 @@
 # Corpus generator: propositions, documents, and grammar
 
-Draft, September 29, 2026. Reconciled with the built word-form pipeline on October 1, 2026. This document is the build specification for a Python program that turns the taxonomy generator's world into a corpus of documents written in an artificial language. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`, `docs/specs/TAXONOMY_RELATIONS.md`, and `docs/specs/WORDFORM_PIPELINE.md`.
+Draft, September 29, 2026. Reconciled with the built word-form pipeline on October 1, 2026. Built in stages 1 to 7 and 7b, October 1 and 2, 2026; the user guide is `docs/guides/CORPUS.md`. This document is the build specification for a Python program that turns the taxonomy generator's world into a corpus of documents written in an artificial language. The specification is written for handoff to Claude Code, or to any developer, and should be complete together with `docs/specs/TAXONOMY_GENERATOR.md`, `docs/specs/TAXONOMY_RELATIONS.md`, and `docs/specs/WORDFORM_PIPELINE.md`.
 
 ## Goal
 

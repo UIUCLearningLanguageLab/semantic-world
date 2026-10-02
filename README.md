@@ -2,7 +2,7 @@
 
 An artificial world for comparing cognitive models.
 
-**Status:** early build. The design documents are in `docs/`, and the code is being built in stages against `docs/specs/MILESTONE_1.md`. The git log names the stages done so far.
+**Status:** early build. The simulation engine is being built in stages against `docs/specs/MILESTONE_1.md`: stages 1 to 5 (the workspace, the schema, the core world, the rules, and the sensors with the Python API) are built. The world-content and language programs are complete: the taxonomy generator, the word-form pipeline, and the corpus generator, each with a user guide in `docs/guides/`. The git log names the stages done so far.
 
 ## Purpose
 
@@ -58,6 +58,10 @@ The reasoning behind these choices is in `docs/ENVIRONMENT_SURVEY.md`.
 - `docs/ENVIRONMENT_SURVEY.md` — a survey of existing environments, engines, and benchmarks, with a browsable version in `docs/environment_survey.html`.
 - `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and nervous systems are defined.
 - `docs/specs/` — draft specifications for later work: developing organisms for the generative world, and a full wave simulation of sound.
+- `docs/specs/TAXONOMY_GENERATOR.md`, `TAXONOMY_RELATIONS.md`, `WORDFORM_PIPELINE.md`, and `CORPUS_GENERATOR.md` — the specifications of the world-content and language programs: categories, features, and relations; spoken word forms and sound embeddings; and documents in an artificial language. `CONNECTED_SPEECH.md` plans spoken sentences, and is not built yet.
+- `docs/guides/` — user guides for the taxonomy generator, the word-form pipeline, and the corpus generator.
+- `docs/DECISIONS.md` — every design decision of the world-content and language programs, with who proposed it and who decided it.
+- `docs/LANGUAGE_TODO.md` — what remains for the world-content and language programs, including their integration with the simulation.
 
 ## License
 

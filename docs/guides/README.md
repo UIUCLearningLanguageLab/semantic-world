@@ -31,6 +31,16 @@ The simulation engine in `crates/` is written in Rust and is separate. The gener
 
 A conda or virtual environment keeps these packages apart from other projects. Any environment works.
 
+The corpus generator needs the same three packages. The word-form pipeline needs more: its setup is in `WORDFORMS.md`.
+
+The repository also has its own virtual environment, `.venv`, which the full check list and Claude Code use. It holds every package, the speech packages included, and the project is installed in it, so `PYTHONPATH=python` is not needed there. We activate it in each new terminal, from the root of the repository:
+
+```
+source .venv/bin/activate
+```
+
+The prompt then starts with `(.venv)`. A run that fails with `No module named 'polars'` is usually a run in another environment.
+
 ## Where outputs go
 
 Every run writes one folder, by default under `runs/`. The `runs/` folder is ignored by git, so outputs never enter the repository. Every output folder contains a `config.yaml` that records the complete configuration and the random seeds, so any run can be reproduced exactly.
