@@ -11,11 +11,11 @@ Every entity is assembled from up to four components:
 | **Body** | What the entity is physically: 3D model, size, mass, parts, physiology, needs. | Every entity: animals, humans, plants, and nonliving objects. |
 | **Sensors** | What information reaches the entity: sight, hearing, smell, taste, touch, temperature, pressure, pain, internal state, and optionally propositions. | Animals and humans only. |
 | **Actuators** | What the entity can do: walk, run, climb, fly, swim, slither, grasp, eat, drink, vocalize. | Animals and humans only. |
-| **Nervous system** | The cognitive model that maps sensor input to actuator output, and learns. | Animals and humans only. |
+| **Mind** | The cognitive model that maps sensor input to actuator output, and learns. | Animals and humans only. |
 
 Plants and nonliving entities have a body only.
 
-The four components are independent modules. A species is a named combination of one body, a set of sensors, a set of actuators, and a nervous system. For example, the same human body could be run with different nervous systems (a symbolic planner, a neural network, a Bayesian model) without changing anything else. The same nervous system could, in principle, be placed in a human body or a giraffe body.
+The four components are independent modules. A species is a named combination of one body, a set of sensors, a set of actuators, and a mind. For example, the same human body could be run with different minds (a symbolic planner, a neural network, a Bayesian model) without changing anything else. The same mind could, in principle, be placed in a human body or a giraffe body.
 
 ## Traits: fixed now, genetic later
 
@@ -122,11 +122,11 @@ Each actuator is a module attached to one or more body parts. Actuators are rigi
 
 **Movement through media.** Each body has a speed and an energy cost for each medium: land, water, air, and trees. The table is what distinguishes a fish, a crocodile, a snake, and a giraffe without any real physics. A fish is fast in water and cannot leave the water. A crocodile moves well on land and very well in water. A snake slithers on land and can swim. This idea comes from Dynamica, where movement and resting costs were meant to vary by terrain and species, and where an animal could drown if its energy ran out in water.
 
-## Nervous system
+## Mind
 
-The nervous system is defined as broadly as possible. The nervous system is whatever cognitive model the agent uses: a hard-coded symbolic model, a planner, a neural network, a Bayesian model, a hybrid, or a scripted policy.
+The mind is defined as broadly as possible. The mind is whatever cognitive model the agent uses: a hard-coded symbolic model, a planner, a neural network, a Bayesian model, a hybrid, or a scripted policy.
 
-Every nervous system meets the same small interface:
+Every mind meets the same small interface:
 
 - **Receive input.** The input vector from the agent's sensors (and, for models that want the input in structured form, the same input as named blocks).
 - **Return output.** An action choice with its arguments, such as a direction, a speed, or a target.
@@ -134,9 +134,9 @@ Every nervous system meets the same small interface:
 - **Report internals** (optional). Values, prediction errors, policy probabilities, and predictions, for logging and the viewer.
 - **Save and load** (optional). For checkpoints at points in a lifetime.
 
-The world does not hand out reward. If a nervous system learns from reward, the nervous system defines its own reward from the agent's internal state. Dynamica already worked this way: each animal's reinforcement came from the distance between its drive levels and genetically set target levels, so animals were not prewired to know that energy was good.
+The world does not hand out reward. If a mind learns from reward, the mind defines its own reward from the agent's internal state. Dynamica already worked this way: each animal's reinforcement came from the distance between its drive levels and genetically set target levels, so animals were not prewired to know that energy was good.
 
-Nervous-system parameters (network size, learning rates, action biases, need set points) can also be traits, so they can evolve later.
+Mind parameters (network size, learning rates, action biases, need set points) can also be traits, so they can evolve later.
 
 ## Examples
 

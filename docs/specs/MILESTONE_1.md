@@ -273,7 +273,7 @@ The sensor manifest (contract 3) lists every block, with labels. The action mani
 
 ## Agents
 
-Both agents live in Python and implement the nervous-system interface as an abstract base class, `semantic_world.agents.NervousSystem`: `act(observation) -> action`, with optional `learn`, `report_internals`, `save`, and `load`. Later agents follow the same shape.
+Both agents live in Python and implement the mind interface as an abstract base class, `semantic_world.agents.NervousSystem`: `act(observation) -> action`, with optional `learn`, `report_internals`, `save`, and `load`. Later agents follow the same shape.
 
 - **Random agent.** Chooses uniformly among action types, then draws uniform arguments. With masking on, chooses only among unmasked action types. Uses a random generator seeded from `world.agent_seed(agent_id)`. The random agent is the floor.
 - **Scripted-optimal agent.** A hand-coded policy with full knowledge. The scripted-optimal agent may read the full world state through a privileged call, `world.debug_state()`, which must be clearly marked as privileged and must never be used by any learning agent. The policy: if health is falling, serve the need that is at max; otherwise serve the highest need above 0.3; at night, go to the nearest shelter and sleep there; walk to the nearest object that serves the chosen need, turn to face the object, and act until the need is below 0.1. Ties are broken by entity ID. The scripted-optimal agent is the ceiling. It does not need to be truly optimal, only competent enough that a good learner could approach it.

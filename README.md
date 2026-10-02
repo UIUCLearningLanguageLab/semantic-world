@@ -38,7 +38,7 @@ A few more principles run through the design:
 
 ## Entities
 
-Humans and animals are defined by four modular components: a body, sensors, actuators, and a nervous system. The nervous system is the cognitive model. Plants and nonliving entities have a body only. Entity types are built from parameters, and every parameter leaves room for genetics and evolution later. See `docs/ENTITY_DEFINITIONS.md`.
+Humans and animals are defined by four modular components: a body, sensors, actuators, and a mind. The mind is the cognitive model. Plants and nonliving entities have a body only. Entity types are built from parameters, and every parameter leaves room for genetics and evolution later. See `docs/ENTITY_DEFINITIONS.md`.
 
 ## Planned architecture
 
@@ -56,12 +56,11 @@ The reasoning behind these choices is in `docs/ENVIRONMENT_SURVEY.md`.
 - `docs/CONTRACTS.md` — the contracts between the engine, the world, the agents, and the viewer: interfaces and file formats.
 - `CONTRIBUTING.md` — how to set up and make a change. `CLAUDE.md` holds the same rules for Claude Code sessions.
 - `docs/ENVIRONMENT_SURVEY.md` — a survey of existing environments, engines, and benchmarks, with a browsable version in `docs/environment_survey.html`.
-- `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and nervous systems are defined.
+- `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and minds are defined.
 - `docs/specs/` — draft specifications for later work: developing organisms for the generative world, and a full wave simulation of sound.
 - `docs/specs/TAXONOMY_GENERATOR.md`, `TAXONOMY_RELATIONS.md`, `WORDFORM_PIPELINE.md`, and `CORPUS_GENERATOR.md` — the specifications of the world-content and language programs: categories, features, and relations; spoken word forms and sound embeddings; and documents in an artificial language. `CONNECTED_SPEECH.md` plans spoken sentences, and is not built yet.
 - `docs/guides/` — user guides for the taxonomy generator, the word-form pipeline, and the corpus generator.
 - `docs/DECISIONS.md` — every design decision of the world-content and language programs, with who proposed it and who decided it.
-- `docs/LANGUAGE_TODO.md` — what remains for the world-content and language programs, including their integration with the simulation.
 
 ## License
 

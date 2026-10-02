@@ -28,7 +28,7 @@ At the end, the document tests the contracts on paper against two toy worlds: a 
 - **No reward from the world.** The world reports need levels. Reward, if any, is computed on the agent's side. (**Decided**, 2026-09-26.)
 - **Everything reproducible.** Every run is fully determined by its experiment configuration, its seeds, and the versions of the code and the contracts.
 - **Versioned.** Each contract carries a version number. A change that breaks old files or old agents raises the major version. Every log records the contract versions used to produce the log. (**Proposed**.)
-- **Swappable parts are registered by name.** Sensors, actuators, nervous systems, rule modules, reward functions, and view generators are registered under names. Data files refer to the names. Adding a new part never requires changing a data file format. (**Proposed**. The design follows Melting Pot, where every game object is a list of named components with parameters.)
+- **Swappable parts are registered by name.** Sensors, actuators, minds, rule modules, reward functions, and view generators are registered under names. Data files refer to the names. Adding a new part never requires changing a data file format. (**Proposed**. The design follows Melting Pot, where every game object is a list of named components with parameters.)
 
 ## 1. Parameter schema
 
@@ -54,7 +54,7 @@ A trait written as a bare value is shorthand for a trait with that default, no v
 
 ### Entity types
 
-An entity type file names up to four components: body, sensors, actuators, and nervous system (**Decided**, 2026-09-26). Each component is a registered module name plus trait values for that module's parameters.
+An entity type file names up to four components: body, sensors, actuators, and mind (**Decided**, 2026-09-26). Each component is a registered module name plus trait values for that module's parameters.
 
 ```yaml
 type: human
@@ -218,7 +218,7 @@ Agents act at decision points, not necessarily every tick (contract 6). `world.a
 - The world's only job is to report need levels, through the interoception block. Interoception can be exact or noisy, as a trait.
 - Reward functions live in an agent-side library, `semantic_world.reward`, registered by name. A reward function receives the agent's previous and current interoception blocks, plus the agent's set points, and returns a number.
 - The default reward function is homeostatic drive reduction, following Keramati and Gutkin (2014): drive is a distance from the set points, `D(h) = (Σ_i |h*_i − h_i|^n)^(1/m)`, and reward is the drop in drive, `r_t = D(h_t) − D(h_{t+1})`. The exponents `n` and `m` control how strongly large deficits dominate. The exact curve is still open in `FIRST_STUDY.md`.
-- Set points are traits of the nervous system, so set points can later evolve, as in Dynamica.
+- Set points are traits of the mind, so set points can later evolve, as in Dynamica.
 - **Decided** (2026-09-27): the agent-side reward library includes intrinsic rewards, such as curiosity or prediction error, alongside homeostatic reward. Intrinsic rewards give agents a reason to act in worlds without needs.
 - **Decided** (2026-09-27): an optional **instruction channel** delivers goals to an agent, as a proposition, as symbols, or as speech from a teacher agent. A reward function may use the instruction, for example by rewarding the agent for satisfying the goal. The world still gives no reward.
 - The reward an agent computed is logged with the agent's internals, so reward can be analyzed even though the world never produced reward.
@@ -280,7 +280,7 @@ runs/<run_id>/
 
 - **Tables in Apache Parquet.** (**Decided**, 2026-09-27.) Parquet files load directly into Python (pandas, polars) and R, which the analysis needs. Rust writes Parquet through Apache Arrow.
 - **Images stored separately.** Rendered observations are large, so storing images is a setting: off, every `k`-th frame, or all frames. Images can always be re-rendered from state snapshots, because rendering is a view.
-- **Agent internals.** A nervous system reports internals as named arrays with a manifest, in the same way sensors report blocks. Internals are logged at a rate set in the experiment configuration. (**Decided**, 2026-09-26: agent internals are loggable and viewable.)
+- **Agent internals.** A mind reports internals as named arrays with a manifest, in the same way sensors report blocks. Internals are logged at a rate set in the experiment configuration. (**Decided**, 2026-09-26: agent internals are loggable and viewable.)
 - **Replay.** State snapshots plus the event log are enough to replay a run in a viewer. Exact re-simulation from a checkpoint and seed is also possible, because the engine is deterministic.
 - **Large logs** stay out of the repository. They live on the cluster, in cloud storage, or in Box.
 
@@ -295,7 +295,7 @@ runs/<run_id>/
 | `init` | On connect | World size, terrain, the asset manifest entries in use, and every entity's type, model, and trait values that affect appearance. |
 | `frame` | Every `k` ticks | Tick number, simulated time, and every changed entity's position, rotation, animation state, and visible trait changes. |
 | `events` | With each frame | Events since the last frame: sounds, speech, actions, births, deaths. |
-| `internals` | On request, for selected agents | Need levels, current action, and the internals the nervous system reports. |
+| `internals` | On request, for selected agents | Need levels, current action, and the internals the mind reports. |
 
 - Messages are encoded in MessagePack, which is compact and supported in Rust, Python, and JavaScript. JSON is available as a fallback for debugging. (**Decided**, 2026-09-27.)
 - A live run and a replay of a log send the same messages, so one viewer handles both.
@@ -439,7 +439,7 @@ Each key under `conditions` is a dotted path into the configuration, and each va
 **Walkthrough.**
 
 - *Parameter schema.* Human, wolf, berry bush, and pond are each expressible as a type file. Berries are an amount on the bush, not separate entities, as in Crafter. **Works.**
-- *World rules.* `eat`, `drink`, and `regrow` are data rules. Wolf wandering and chasing need a rule module (a scripted nervous system). The wolf's bite is an action whose effect is an injury. **Works**, but the test showed that an injury needs a home in the body: **gap 1**, see below.
+- *World rules.* `eat`, `drink`, and `regrow` are data rules. Wolf wandering and chasing need a rule module (a scripted mind). The wolf's bite is an action whose effect is an injury. **Works**, but the test showed that an injury needs a home in the body: **gap 1**, see below.
 - *Agent interface.* Observations: eyes, interoception, touch, and pain. Actions: move (continuous direction and speed), turn, eat (target), drink (target). **Works.**
 - *Internal state and reward.* Hunger and thirst come through interoception. The homeostatic reward function computes reward on the agent side. **Works.**
 - *Propositional format.* `(near human_0 bush_3)`, `(berries bush_3 2)`, `(hunger human_0 0.4)`, `(near human_0 wolf_1)`. The generated PDDL domain covers `eat` and `drink`. Regrowth and the wolf are not in the domain, so the planner must replan. **Works, with the known PDDL limit.**
