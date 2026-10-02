@@ -74,6 +74,8 @@ from semantic_world.corpus.propositions import (
     Literal,
     Predicate,
     Proposition,
+    event_of,
+    scene_of,
 )
 from semantic_world.corpus.streams import Streams
 
@@ -188,7 +190,7 @@ class RelativeClauses:
         of the sentence's own scene."""
         if plan.level == EVENT and events is None:
             assert plan.predication.event is not None
-            events = self.facts.truth.scenes[plan.predication.event.rsplit(".", 1)[0]].events
+            events = self.facts.truth.scenes[scene_of(plan.predication.event)].events
         used = {self._key(plan.predication, plan.subject.referent)}
         return ClauseContext(plan.level, others, events or (), mention, used)
 
@@ -316,8 +318,8 @@ def clause_propositions(plan: SentencePlan) -> list[Proposition]:
                 EVENT,
                 subject,
                 predicate,
-                scene=predication.event.rsplit(".", 1)[0],
-                event=predication.event,
+                scene=scene_of(predication.event),
+                event=event_of(predication.event),
                 tense=predication.tense,
                 aspect=predication.aspect,
             )

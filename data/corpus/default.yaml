@@ -39,6 +39,7 @@ quantifiers:
   some: {exclude_all: true}
   generic: {means: most}         # all, most, or some
   generic_rate: 0.5              # share of class-level sentences that use a bare generic when it is true
+  weights: {all: 1.0, most: 1.0, some: 1.0, none: 1.0}   # how often a document states the facts of each quantifier (none: the quantifier "no"); equal weights change nothing
 
 scene:
   size: [2, 6]
@@ -49,7 +50,7 @@ scene:
   participant_weights: {thematic: 1.0, taxonomic: 0.5, constant: 0.1}
 
 entity:
-  scenes: [1, 3]
+  scenes: [2, 5]                 # the number of scenes of an entity narrative
 
 # How referents are mentioned. These settings can change what a sentence says.
 mention:

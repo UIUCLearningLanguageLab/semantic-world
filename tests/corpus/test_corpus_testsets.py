@@ -139,15 +139,41 @@ def test_changes_that_can_apply(cases) -> None:
     assert candidates(facts, instance, QUANTIFIER) == [] and candidates(facts, feature, ROLE) == []
 
 
-def test_false_events_wait_for_the_test_sets(cases) -> None:
-    # A false event is an event that did not happen in its scene: stage 6 builds those items.
-    case = cases("tiny")
-    scene = case.scenes().scene(Streams(1), 1, "I1.1.1")
-    report = scene.events[0].proposition()
+def test_false_events_did_not_happen_in_their_scene(cases) -> None:
+    # A false event is an event that did not happen in its scene. It names no event.
+    case = cases("default")
+    facts = case.facts()
+    generator = case.scenes()
+    made = dict.fromkeys(CHANGES, 0)
     rng = np.random.default_rng(0)
-    for change in CHANGES:
-        assert candidates(case.facts(), report, change) == []
-        assert falsify(case.facts(), report, change, rng) is None
+    for number, seed in enumerate(case.result.instances.labels[:40], start=1):
+        scene = generator.scene(Streams(1), number, seed)
+        for event in scene.events[:4]:
+            report = event.proposition()
+            assert facts.truth.is_true(report)
+            assert changes_for(report) == (
+                (PREDICATE, SUBJECT, ROLE) if event.transitive else (PREDICATE, SUBJECT)
+            )
+            assert falsify(facts, report, QUANTIFIER, rng) is None
+            for change in changes_for(report):
+                false = falsify(facts, report, change, rng)
+                if false is None:
+                    continue
+                made[change] += 1
+                assert false.event is None and false.scene == scene.label
+                assert (false.tense, false.aspect) == (report.tense, report.aspect)
+                evaluation = facts.truth.evaluate(false)
+                assert evaluation.valid and not evaluation.true
+                assert false.grounding == evaluation.grounding and "possible" in false.grounding
+                # no event of the scene has its verb, its agent, its patient, and its aspect
+                assert not any(
+                    e.agent == false.subject
+                    and e.patient == false.predicate.patient
+                    and false.predicate.label in facts.truth.verb_names(e.verb)
+                    and e.aspect == false.aspect
+                    for e in scene.events
+                )
+    assert all(made[change] > 20 for change in (PREDICATE, SUBJECT, ROLE)), made
 
 
 def test_quantifier_swaps(cases) -> None:

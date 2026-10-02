@@ -18,7 +18,9 @@ parses back (:func:`parse_propositional`, :func:`proposition_of`). The notation:
   agent first. ``ABLE`` wraps only CAN features and verbs. A negative capacity is ``NOT
   ABLE(...)``;
 - an event is ``EVENT(<event label>, <tense>, <aspect>, <atom>)``: ``EVENT(SN.8.5, PAST,
-  PROGRESSIVE, V1.2(R.1, R.2))``. The tense and the aspect are always written;
+  PROGRESSIVE, V1.2(R.1, R.2))``. The tense and the aspect are always written. A test item names
+  only the scene, ``EVENT(SN.8, PAST, SIMPLE, V1.2(R.1, R.2))``: some event of the scene was
+  this one;
 - ``R.n`` is one individual, a referent of the document, and ``X.n`` is a variable bound by a
   quantifier;
 - a class-level form is a quantifier with a restrictor and a scope: ``MOST(C1.3(X.1) AND
@@ -65,6 +67,8 @@ from semantic_world.corpus.propositions import (
     Literal,
     Predicate,
     Proposition,
+    event_of,
+    scene_of,
 )
 
 REFERENT_MODES = ("local", "instance")
@@ -118,7 +122,8 @@ class Able:
 
 @dataclass(frozen=True)
 class Report:
-    """An event: its label, its tense, its aspect, and what happened."""
+    """An event: its label, its tense, its aspect, and what happened. The label is the scene's
+    in a test item, which names no event."""
 
     event: str
     tense: str
@@ -244,8 +249,6 @@ def _predication(
         atom = Atom(label, (subject,))
     body: Any = atom
     if report is not None:
-        if report[0] is None:
-            raise RenderingError("a report that names no event has no rendering yet")
         body = Report(report[0], report[1], report[2], atom)
     elif kind in (CAN, VERB):
         body = Able(atom)
@@ -305,7 +308,8 @@ def formula(form: dict[str, Any], referents: str = "local") -> Formula:
         patient = name(predicate["patient"])
     report = None
     if form["level"] == EVENT:
-        report = (form["event"], form["tense"], form["aspect"])
+        # a test item names no event: it is written with the label of its scene
+        report = (form["event"] or form["scene"], form["tense"], form["aspect"])
     main = _predication(predicate, name(form["subject"]), patient, form["polarity"], report)
     # a noun phrase said twice gives the same proposition twice: it is written once
     return tuple(dict.fromkeys(part for part in parts if part != main)) + (main,)
@@ -501,8 +505,8 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
             EVENT,
             subject,
             predicate,
-            scene=body.event.rsplit(".", 1)[0],
-            event=body.event,
+            scene=scene_of(body.event),
+            event=event_of(body.event),
             tense=body.tense,
             aspect=body.aspect,
         )

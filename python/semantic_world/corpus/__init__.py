@@ -11,13 +11,16 @@ the facts and rule statements of a world, and the false items of the test sets. 
 scenes, events, and event-level propositions. Stage 4 builds the grammar: sentence plans, their
 realization as words and trees, the reading of a tree back into its plan, and relative clauses.
 Stage 5 builds the documents: the planner of the four document types, the mentions of referents,
-the readings of a sentence, the JSON logical form, and the propositional rendering.
+the readings of a sentence, the JSON logical form, and the propositional rendering. Stage 6
+builds a whole run: the test sets, the statistics, the output folder, and the ``generate``
+command.
 The generator is pure Python and does not use the Rust engine.
 """
 
 from semantic_world.corpus.config import Config, ConfigError, config_from_mapping, load_config
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.facts import Facts
+from semantic_world.corpus.generate import Corpus, generate
 from semantic_world.corpus.grammar import (
     GrammarError,
     NounPhrase,
@@ -48,8 +51,9 @@ from semantic_world.corpus.renderings import (
     propositional,
 )
 from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
+from semantic_world.corpus.stats import corpus_stats
 from semantic_world.corpus.streams import STREAM_NAMES, Streams
-from semantic_world.corpus.testsets import falsify
+from semantic_world.corpus.testsets import Item, ItemSet, build_test_sets, falsify
 from semantic_world.corpus.world import load_taxonomy, taxonomy_identity
 
 __all__ = [
@@ -59,6 +63,7 @@ __all__ = [
     "Concept",
     "Config",
     "ConfigError",
+    "Corpus",
     "CorpusError",
     "Document",
     "DocumentSentence",
@@ -66,6 +71,8 @@ __all__ = [
     "Event",
     "Facts",
     "GrammarError",
+    "Item",
+    "ItemSet",
     "Lexeme",
     "Lexicon",
     "Literal",
@@ -86,9 +93,12 @@ __all__ = [
     "Streams",
     "Truth",
     "build_lexicon",
+    "build_test_sets",
     "config_from_mapping",
+    "corpus_stats",
     "falsify",
     "formal",
+    "generate",
     "interpret",
     "load_config",
     "load_taxonomy",

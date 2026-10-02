@@ -71,12 +71,14 @@ def test_default_values() -> None:
     assert quantifiers.most_min_proportion == 0.7
     assert quantifiers.some_exclude_all is True
     assert (quantifiers.generic_means, quantifiers.generic_rate) == ("most", 0.5)
+    assert quantifiers.weights == {"all": 1.0, "most": 1.0, "some": 1.0, "no": 1.0}
+    assert quantifiers.weighted is False
     scene = config.scene
     assert (scene.size, scene.steps) == (Range(2, 6), Range(3, 8))
     assert (scene.events_per_step, scene.transitive_share) == (1.5, 0.5)
     assert scene.verb_weights is None
     assert scene.participant_weights == {"thematic": 1.0, "taxonomic": 0.5, "constant": 0.1}
-    assert config.entity_scenes == Range(1, 3)
+    assert config.entity_scenes == Range(2, 5)
     mention = config.mention
     assert mention.level_weights == (1.0, 2.5, 4.0)
     assert mention.verb_level_weights == (1.0, 4.0)  # the default verb tree has two levels
@@ -355,6 +357,16 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
     ({"quantifiers": {"some": {"exclude_all": "yes"}}}, "quantifiers.some.exclude_all", "true or"),
     ({"quantifiers": {"generic": {"means": "few"}}}, "quantifiers.generic.means", "all, most"),
     ({"quantifiers": {"generic_rate": -1}}, "quantifiers.generic_rate", "at least 0"),
+    ({"quantifiers": {"weights": {"some": -1}}}, "quantifiers.weights.some", "at least 0"),
+    ({"quantifiers": {"weights": {"few": 1}}}, "quantifiers.weights.few", "unknown key"),
+    (
+        {"quantifiers": {"weights": {"all": 0, "most": 0, "some": 0, "none": 0}}},
+        "quantifiers.weights",
+        "at least one weight must be positive",
+    ),
+    # YAML reads a bare no as the boolean false, so the key of the quantifier "no" is none
+    ({"quantifiers": {"weights": {False: 2}}}, "quantifiers.weights.no", "is written none"),
+    ({"quantifiers": {"weights": {"no": 2}}}, "quantifiers.weights.no", "is written none"),
     ({"scene": {"size": [6, 2]}}, "scene.size", "exceeds the maximum"),
     ({"scene": {"steps": 0}}, "scene.steps", "at least 1"),
     ({"scene": {"events_per_step": -1}}, "scene.events_per_step", "at least 0"),

@@ -3,6 +3,7 @@ propositional rendering of a logical form, in the notation of decision 33 (stage
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -28,6 +29,8 @@ from semantic_world.corpus.propositions import (
     VERB,
     Literal,
     Proposition,
+    event_of,
+    scene_of,
 )
 from semantic_world.corpus.renderings import (
     Able,
@@ -418,12 +421,29 @@ def test_renderings_that_cannot_be_read() -> None:
             parse_propositional(text)
     with pytest.raises(RenderingError, match="unknown kind of concept"):
         proposition_of(parse_propositional("L.5(R.1)"))
-    # a pole without its comparison class, and a report without its event, have no rendering
+    # a pole without its comparison class has no rendering
     plan, _ = SENTENCES["owls that eat mice"]
     with pytest.raises(RenderingError, match="no comparison class"):
         propositional(plan.proposition().to_json())
-    plan, _ = SENTENCES["chased"]
+
+
+def test_a_test_item_names_only_its_scene() -> None:
+    # a report that names no event is written with the label of its scene: some event of the
+    # scene was this one. Documents keep their event labels.
+    plan, rendering = SENTENCES["chased"]
     form = logical_form(plan, plan.proposition(), REFERENTS)
+    label = form["event"]
+    assert f"EVENT({label}, " in rendering and propositional(form) == rendering
+    scene = label.rsplit(".", 1)[0]
     form["event"] = None
-    with pytest.raises(RenderingError, match="names no event"):
-        propositional(form)
+    unnamed = propositional(form)
+    assert unnamed == rendering.replace(f"EVENT({label}, ", f"EVENT({scene}, ")
+    proposition = proposition_of(parse_propositional(unnamed), {v: k for k, v in REFERENTS.items()})
+    assert proposition.level == "event" and proposition.event is None
+    assert proposition.scene == scene
+    assert proposition == dataclasses.replace(plan.proposition(), event=None)
+    # the plan of a test item holds the scene's label where a document's holds the event's
+    said = dataclasses.replace(plan.predication, event=scene)
+    assert SentencePlan(plan.subject, said).proposition() == proposition
+    assert (scene_of(label), event_of(label)) == (scene, label)
+    assert (scene_of(scene), event_of(scene)) == (scene, None)
