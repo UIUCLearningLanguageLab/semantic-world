@@ -19,7 +19,7 @@ PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/tiny.yaml
 The program prints one line:
 
 ```
-wrote runs/corpus/tiny_seed1: 20 documents, 152 sentences, 875 tokens, 16 scenes, 16 test sets with 258 pairs
+wrote runs/corpus/tiny_seed1: 20 documents, 152 sentences, 870 tokens, 16 scenes, 16 test sets with 258 pairs
 ```
 
 The tiny corpus is about the tiny relations world of the taxonomy generator: 6 categories, 12 instances, 1 scalar dimension, and a few verbs. It is small enough to read every file by eye. The generator makes the taxonomy in memory from `data/taxonomy/tiny_relations.yaml`, so no taxonomy run needs to exist first.
@@ -30,7 +30,7 @@ The default corpus is 10,000 documents about the default world with verbs:
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints `10000 documents, 92464 sentences, 456307 tokens, 10062 scenes, 16 test sets with 7368 pairs`, and takes under a minute on a laptop.
+It prints `10000 documents, 92464 sentences, 455011 tokens, 10062 scenes, 16 test sets with 7368 pairs`, and takes under a minute on a laptop.
 
 Two options change a run without editing the configuration:
 
@@ -167,9 +167,9 @@ Sentences from a situational narrative:
 ```
 A C2.1 V1.1 A C2.2
 A C1.1 CAN.4
-THE C1.1 CAN.4
-THE C2.1 CAN.4
-IT CAN.3
+THE C2 WITH HAS.6 V1.1 THE C2 WITHOUT HAS.6
+THE C1 WITHOUT HAS.6 CAN.4
+THE C2 WITH HAS.6 CAN.4
 ```
 
 In narratives, an instance is introduced with "a" and mentioned later with "the" or "it". A mention can name an instance by a higher category ("the bird" for a penguin). When a scene has two things that the noun fits, a definite mention adds adjectives or with-phrases until it picks out one: "the C2 with HAS.6" against "the C2 without HAS.6".
@@ -179,7 +179,7 @@ In narratives, an instance is introduced with "a" and mentioned later with "the"
 | Documents | Co-occurrence with thematic relatedness | Co-occurrence with taxonomic similarity |
 | --- | --- | --- |
 | Entity narratives | 0.80 | 0.18 |
-| Situational narratives | 0.73 | 0.15 |
+| Situational narratives | 0.72 | 0.15 |
 | Category documents | 0.29 | 0.48 |
 | Category documents, `relation_fact_share: 0` | 0.09 | 0.56 |
 | Feature documents | 0.33 | 0.13 |
@@ -287,7 +287,7 @@ PYTHONPATH=python python -m semantic_world.corpus render runs/corpus/tiny_seed1 
 
 `generate` writes `wordform_request.yaml`: the lexemes with their parts of speech, the function words in order of their frequency in the corpus, the affixes the grammar needs, and the categories' meaning vectors. The word-form pipeline reads the request, makes pseudowords, assigns them to lexemes, and synthesizes them. `render` fills the spelled rendering, `corpus.txt`, the word columns of `lexicon.csv`, and the word-form run's identity in `config.yaml`. It changes nothing else in the corpus run.
 
-For the tiny corpus, the three steps take under 20 seconds. Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs.
+For the tiny corpus, the three steps take under 20 seconds. Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs. For the default corpus, `data/wordforms/corpus_default.yaml` is the matching word-form configuration: it reads the request in `runs/corpus/default_seed1`, and writes `runs/wordforms/corpus_default_seed1`.
 
 The word-form pipeline decides how sound relates to meaning: arbitrary, correlated at a target, marked by branch, or shaped by features. Its guide, `WORDFORMS.md`, covers this under "Assigning words to meanings" and "Word forms for a corpus". The words a lexeme gets never depend on the number of documents or the test sets, so a corpus can grow without its words changing.
 

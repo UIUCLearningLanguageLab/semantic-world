@@ -293,7 +293,7 @@ A drawn relative clause expresses one of these propositions (`mentions.py`, and 
 - in an instance-level sentence, a capacity of the referent: a CAN feature it has, or a verb's relation with another referent of the document, as agent ("the owl that can eat the mouse") or as patient ("the mouse that the owl can eat");
 - in a class-level sentence, a restriction of the category: a CAN feature ("penguins that can swim"), a verb with a patient category ("owls that eat mice"), or a verb with an agent category ("mice that owls eat"). The clause narrows the subject set, so it is drawn with the proposition (see "Restricted subjects"). A subject relative holds a CAN feature or a verb, each with the same chance.
 
-When the drawn kind of clause has no true proposition, the other kind is used. A relative clause never repeats what its sentence already says. In a document, an event-level clause reports an earlier event of the same scene.
+When the drawn kind of clause has no true proposition, the other kind is used. A relative clause never repeats what its sentence already says. In a document, an event-level clause reports an earlier event of the same scene. The same event can occur again at a later step, so an event-level clause also never reports an event with the same verb, agent, and patient as its sentence's own event, or as the event of another clause of the sentence: "the dog chased the cat that the dog chased" is not a sentence.
 
 **Adjective order.** When a noun takes several adjectives, they appear in a fixed order: a random ordering of adjective concepts drawn once per language. `adjective_order.fixed: false` makes the order random for each phrase.
 
@@ -558,7 +558,7 @@ meanings: wordform_meanings.csv
 - `inflect` entries can name lexemes, and the pipeline inflects whatever form the lexeme got, including a marked form of branch-marker mode (`W.12.M.2.AF.1`). An entry that gives a lexeme an affix that `takes` does not list for its part of speech is an error;
 - a run whose content words are fewer than the lexemes that need distinct forms is an error. Content words that no lexeme gets are kept; they can serve as novel words in tests.
 
-The default taxonomy with verbs needs about 180 content lexemes, and the default word-form run makes 500 words.
+The default corpus has 173 content lexemes, and the default word-form run makes 500 words. `data/wordforms/corpus_default.yaml` is the word-form configuration for the default corpus, and `data/wordforms/corpus_tiny.yaml` the one for the tiny corpus.
 
 **English options.** The word-form pipeline can give the real English function words, and the English suffixes with English allomorphy (a Jabberwocky condition). The corpus needs nothing extra for them, apart from the restrictions in "Morphology".
 

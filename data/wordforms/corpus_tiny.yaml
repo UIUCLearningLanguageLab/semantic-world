@@ -1,4 +1,4 @@
-# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 36 content
+# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 35 content
 # lexemes, 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
 # corpus first, so that its request exists:
 #

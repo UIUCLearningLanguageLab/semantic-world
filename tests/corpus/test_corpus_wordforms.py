@@ -357,6 +357,10 @@ def test_marked_forms_are_inflected(chains) -> None:
     categories = {c.label for c in corpus.planner.result.tree.categories}
     markers = pl.read_csv(forms / "assignment" / "markers.csv")
     assert markers.height == 2  # one for each top-level branch
+    # the two markers differ in both phonemes, so the branches can be told apart when spoken
+    first, second = (arpabet.split() for arpabet in markers["arpabet"].to_list())
+    assert len(first) == len(second) == 2
+    assert all(a.rstrip("012") != b.rstrip("012") for a, b in zip(first, second, strict=True))
     marker_of = dict(zip(markers["branch"].to_list(), markers["label"].to_list(), strict=True))
     for row in lexicon.values():
         form = words[row["word"]]
@@ -447,7 +451,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     printed = capsys.readouterr().out
     assert "rendered" in printed and "the word forms of corpus_tiny (seed 1)" in printed
     text = (out / "corpus.txt").read_text(encoding="utf-8")
-    assert "/L." not in text and len(text.split()) == 875
+    assert "/L." not in text and len(text.split()) == 870
     spellings = set(pl.read_csv(forms / "words.csv")["spelling"].to_list())
     assert set(text.split()) <= spellings
     # the word forms of tiny.yaml are too few for the tiny corpus, as the specification says
@@ -455,6 +459,28 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     config.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert wordforms_main(["forms", str(config), "--out", str(forms)]) == 1
     assert "need distinct forms" in capsys.readouterr().err
+
+
+def test_the_word_form_configuration_for_the_default_corpus() -> None:
+    """``data/wordforms/corpus_default.yaml`` has the default word-form settings, and its 500
+    words are enough for the default corpus's lexemes."""
+    from semantic_world.corpus import Streams, build_lexicon, load_config, load_taxonomy
+
+    data = yaml.safe_load(Path("data/wordforms/corpus_default.yaml").read_text(encoding="utf-8"))
+    assert data["request"] == "runs/corpus/default_seed1/wordform_request.yaml"
+    assert set(data) == {"name", "seed", "request", "wordforms", "assignment"}
+    config = parse_config({**data, "request": None}, "corpus_default")
+    defaults = parse_config({}, "defaults")
+    assert config.wordforms == defaults.wordforms and config.wordforms.count == 500
+    assert config.synthesis == defaults.synthesis and config.embeddings == defaults.embeddings
+    assert len(config.embeddings) == 5 and config.assignment == defaults.assignment
+    corpus = load_config("data/corpus/default.yaml")
+    assert (corpus.name, corpus.seed) == ("default", 1)  # the run folder that the request is in
+    lexicon = build_lexicon(corpus, load_taxonomy(corpus), Streams(corpus.seed))
+    content = lexicon.content_lexemes
+    assert len(content) == 173 <= config.wordforms.count
+    assert sum(x.same_form_as is None for x in content) == 173
+    assert len(lexicon.function_lexemes) == 15
 
 
 def test_render_errors_leave_the_folder_unchanged(cases, chains, tmp_path, capsys) -> None:

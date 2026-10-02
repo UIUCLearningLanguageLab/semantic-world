@@ -47,6 +47,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -162,7 +163,16 @@ class ClauseContext:
     mention: Callable[[str], NounPhrase] | None = None
     """The noun phrase of an instance that a clause brings in."""
     used: set = field(default_factory=set)
-    """What the sentence already says, so that no clause says it again."""
+    """What the sentence already says, so that no clause says it again. An event is held twice:
+    by its label, and by what happened (:func:`happened`), because the same event can occur
+    again at a later step."""
+
+
+def happened(event: Any) -> tuple:
+    """What an event reports, apart from when: its verb, its agent, and its patient. A clause
+    never reports an event with the same three as its sentence's own event, or as the event of
+    another clause of the sentence: "the dog chased the cat that the dog chased"."""
+    return ("happened", *event.key)
 
 
 class RelativeClauses:
@@ -192,6 +202,8 @@ class RelativeClauses:
             assert plan.predication.event is not None
             events = self.facts.truth.scenes[scene_of(plan.predication.event)].events
         used = {self._key(plan.predication, plan.subject.referent)}
+        own = plan.predication.event
+        used |= {happened(event) for event in events or () if event.label == own}
         return ClauseContext(plan.level, others, events or (), mention, used)
 
     def attach(
@@ -249,6 +261,7 @@ class RelativeClauses:
                 continue
             predication, other = options[int(rng.integers(len(options)))]
             used.add(self._key(predication, other or referent, referent if other else None))
+            used |= {happened(e) for e in context.events if e.label == predication.event}
             if object_relative:
                 assert other is not None
                 agent = self.extend(rng, mention_of(other), context, depth + 1)
@@ -271,7 +284,7 @@ class RelativeClauses:
         options: list[tuple[Predication, str | None]] = []
         if context.level == EVENT:
             for event in context.events:
-                if ("event", event.label) in used:
+                if ("event", event.label) in used or happened(event) in used:
                     continue
                 names = facts.event_names(event)
                 if not names:

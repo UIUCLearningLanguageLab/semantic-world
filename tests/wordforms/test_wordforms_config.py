@@ -303,4 +303,14 @@ def test_example_configs_load():
     for path in sorted(DATA.glob("*.yaml")):
         if path.name.startswith("arpabet") or path.name == "spelling.yaml":
             continue
-        load_config(path)
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if data.get("request") is None:
+            load_config(path)
+            continue
+        # A configuration for a corpus names the corpus's request, which exists only once the
+        # corpus is generated (in runs/, which git ignores). So the test never reads the
+        # request: the rest of the file must load, and the path must be a corpus run's.
+        assert path.name.startswith("corpus_"), path.name
+        assert data["request"].startswith("runs/corpus/"), path.name
+        assert data["request"].endswith("/wordform_request.yaml"), path.name
+        parse_config({**data, "request": None}, str(path))

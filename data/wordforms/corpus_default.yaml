@@ -1,0 +1,24 @@
+# The word forms of the default corpus (data/corpus/default.yaml), with the default word-form
+# settings: 500 content words for its 173 content lexemes, 45 speakers (40 Piper voices and 5
+# espeak-ng variants, 2 tokens each), and all five embeddings. Parameters not listed keep their
+# defaults (see default.yaml and docs/specs/WORDFORM_PIPELINE.md). Generate the corpus first, so
+# that its request exists:
+#
+#   python -m semantic_world.corpus generate data/corpus/default.yaml
+#   python -m semantic_world.wordforms all data/wordforms/corpus_default.yaml
+#   python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms runs/wordforms/corpus_default_seed1
+#
+# "forms" in place of "all" makes the word forms without audio, which is all that render needs.
+name: corpus_default
+seed: 1
+
+# The corpus's request: its lexemes, function words, affixes, inflected forms, and meanings.
+request: runs/corpus/default_seed1/wordform_request.yaml
+
+wordforms:
+  count: 500
+
+# The lexemes of categories get their words by this mode, from the request's meanings. Every
+# other lexeme gets a word at random.
+assignment:
+  mode: arbitrary

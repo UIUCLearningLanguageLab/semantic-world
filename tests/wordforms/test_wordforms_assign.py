@@ -39,7 +39,7 @@ from semantic_world.wordforms.assign import (
     meaning_distances,
 )
 from semantic_world.wordforms.config import ConfigError, parse_config
-from semantic_world.wordforms.english import is_vowel, strip_stress
+from semantic_world.wordforms.english import edit_distance, is_vowel, strip_stress
 from semantic_world.wordforms.synth import synthesize_lexicon
 
 pytestmark = [needs_cmudict, needs_wordfreq]
@@ -336,6 +336,55 @@ def test_marker_candidates(common_english):
                 assert all(p.endswith("0") for p in phones if is_vowel(p))  # unstressed
 
 
+def marker_distances(assignment) -> list[int]:
+    """The phoneme edit distance between every two markers of an assignment."""
+    plain = [strip_stress(m.phones) for m in assignment.markers]
+    return [edit_distance(a, b) for i, a in enumerate(plain) for b in plain[i + 1 :]]
+
+
+def test_branch_markers_differ_by_at_least_the_minimum_distance(tmp_path):
+    """``assignment.branch_markers.min_distance`` (default 2): markers that differ in one
+    phoneme alone, such as ``R IY0`` and ``R IH0``, would be nearly impossible to tell apart."""
+    config = assign_config(tmp_path, mode="branch_markers")
+    assert config.assignment.marker_min_distance == 2
+    assert config.resolved()["assignment"]["branch_markers"]["min_distance"] == 2
+    assert parse_config(config.resolved(), "assign_test") == config
+    with pytest.raises(ConfigError) as info:
+        assign_config(tmp_path, mode="branch_markers", branch_markers={"min_distance": 0})
+    assert info.value.field == "assignment.branch_markers.min_distance"
+
+    def distances(minimum: int, seed: int) -> list[int]:
+        config = assign_config(
+            tmp_path, count=150, mode="branch_markers", null_samples=5,
+            branch_markers={"depth": 2, "min_distance": minimum},
+        ).with_seed(seed)  # fmt: skip
+        run = run_forms(config)
+        run_assignment(run)
+        assert len(run.assignment.markers) == 9
+        assert run.assignment.summary["branch_markers"]["min_distance"] == minimum
+        return marker_distances(run.assignment)
+
+    seeds = range(1, 7)
+    # with a minimum of 1, markers one phoneme apart are drawn
+    assert any(min(distances(1, seed)) == 1 for seed in seeds)
+    # with the default, never
+    assert all(min(distances(2, seed)) >= 2 for seed in seeds)
+    # a CV marker has two phonemes, so no two are three phonemes apart: the error says so
+    with pytest.raises(AssignmentError) as error:
+        distances(3, 1)
+    message = str(error.value)
+    assert "closer than 3 phonemes" in message and "branch_markers.min_distance" in message
+    assert "C1.2" in message  # the first branch got its marker, and the second could not
+    # a longer shape has room
+    config = assign_config(
+        tmp_path, count=150, mode="branch_markers", null_samples=5,
+        branch_markers={"shape": "CVC", "min_distance": 3},
+    )  # fmt: skip
+    run = run_forms(config)
+    run_assignment(run)
+    assert min(marker_distances(run.assignment)) == 3
+
+
 @pytest.mark.parametrize(
     ("depth", "position", "shape"), [(1, "initial", "CV"), (1, "final", "CVC"), (2, "final", "VC")]
 )
@@ -352,6 +401,9 @@ def test_every_word_in_a_branch_carries_the_branch_marker(
     assignment = run.assignment
     markers = {m.label: m for m in assignment.markers}
     assert len({m.phones for m in markers.values()}) == len(markers)
+    # two markers differ by at least two phonemes, so that they can be told apart when spoken
+    assert min(marker_distances(assignment)) >= 2
+    assert assignment.summary["branch_markers"]["min_distance"] == 2
     frame = assignment.frame()
     branches = {}
     for row, word, base in zip(
