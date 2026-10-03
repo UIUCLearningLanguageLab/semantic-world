@@ -176,7 +176,7 @@ fn validation_conditions_cross_with_seeds() {
     let conditions = &resolved.experiment.conditions;
     assert_eq!(conditions.len(), 2);
     assert_eq!(
-        conditions["population.0.nervous_system.module"],
+        conditions["population.0.mind.module"],
         vec![json!("random"), json!("scripted_optimal")]
     );
     assert_eq!(resolved.experiment.master_seeds().len(), 10);
@@ -219,8 +219,8 @@ fn derived_types_extend_their_base() {
     );
     data.replace(
         "experiments/m1_smoke.yaml",
-        "- {type: human, count: 1, nervous_system: {module: random}}",
-        "- {type: short_human, count: 1, nervous_system: {module: random}, overrides: {body: {insulation: {default: 0.4}}}}",
+        "- {type: human, count: 1, mind: {module: random}}",
+        "- {type: short_human, count: 1, mind: {module: random}, overrides: {body: {insulation: {default: 0.4}}}}",
     );
     let resolved = load_experiment(&data.path("experiments/m1_smoke.yaml")).unwrap();
     let short = &resolved.types["short_human"];

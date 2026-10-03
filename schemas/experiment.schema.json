@@ -405,16 +405,16 @@
           "format": "uint32",
           "minimum": 0
         },
-        "nervous_system": {
+        "mind": {
           "anyOf": [
             {
-              "$ref": "#/$defs/NervousSystem"
+              "$ref": "#/$defs/Mind"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Replaces the type's nervous system for this group."
+          "description": "Replaces the type's mind for this group."
         },
         "overrides": {
           "description": "Trait overrides for this group, in the shape of a type file."
@@ -426,7 +426,7 @@
       ],
       "description": "One group of agents or objects placed in the world."
     },
-    "NervousSystem": {
+    "Mind": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -441,7 +441,7 @@
       "required": [
         "module"
       ],
-      "description": "The nervous system: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
+      "description": "The mind: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
     },
     "Views": {
       "type": "object",

@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from semantic_world.agents import NervousSystem, register
+from semantic_world.agents import Mind, register
 from semantic_world.observation import Observation
 from semantic_world.world import Action
 
 
 @register("random")
-class RandomAgent(NervousSystem):
+class RandomAgent(Mind):
     def __init__(self, manifests: dict, seed: int, **params):
         super().__init__(manifests, seed, **params)
         self.rng = np.random.default_rng(seed)

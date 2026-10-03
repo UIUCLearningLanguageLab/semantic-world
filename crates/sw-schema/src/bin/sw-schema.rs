@@ -51,11 +51,11 @@ fn main() -> ExitCode {
                 for p in &resolved.population {
                     let module = p
                         .entity_type
-                        .nervous_system
+                        .mind
                         .as_ref()
-                        .map_or("-", |ns| ns.module.as_str());
+                        .map_or("-", |mind| mind.module.as_str());
                     println!(
-                        "  population {}: {} × {} (nervous system: {})",
+                        "  population {}: {} × {} (mind: {})",
                         p.index, p.count, p.type_name, module
                     );
                 }

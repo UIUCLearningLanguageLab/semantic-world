@@ -77,7 +77,7 @@ impl World {
         let mut traits_rng = streams::stream(master_seed, streams::TRAITS);
         let mut counts: BTreeMap<String, u32> = BTreeMap::new();
         // Objects come from the type table; agents use their population entry's type, which
-        // carries the entry's overrides and nervous system.
+        // carries the entry's overrides and mind.
         let object_count =
             layout.placements.len() - agents.iter().map(|(_, c)| *c as usize).sum::<usize>();
         let mut population_types = resolved

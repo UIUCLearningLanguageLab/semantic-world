@@ -31,10 +31,10 @@
         "additionalProperties": true
       }
     },
-    "nervous_system": {
+    "mind": {
       "anyOf": [
         {
-          "$ref": "#/$defs/NervousSystem"
+          "$ref": "#/$defs/Mind"
         },
         {
           "type": "null"
@@ -980,7 +980,7 @@
         "range_m"
       ]
     },
-    "NervousSystem": {
+    "Mind": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -995,7 +995,7 @@
       "required": [
         "module"
       ],
-      "description": "The nervous system: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
+      "description": "The mind: a registered module name and its parameters. Modules resolve through\nthe registry in `semantic_world.agents`."
     }
   }
 }

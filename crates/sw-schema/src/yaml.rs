@@ -93,7 +93,7 @@ pub fn deep_merge(base: &mut Value, patch: Value) {
     }
 }
 
-/// Set the value at a dotted path such as `population.0.nervous_system.module`, creating
+/// Set the value at a dotted path such as `population.0.mind.module`, creating
 /// mappings along the way. A numeric segment indexes a list. Returns an error message when a
 /// numeric segment is out of range.
 pub fn set_path(root: &mut Value, path: &str, new_value: Value) -> std::result::Result<(), String> {
@@ -202,14 +202,9 @@ mod tests {
     #[test]
     fn set_path_indexes_lists() {
         let mut root = json!({"population": [{"type": "human"}]});
-        set_path(
-            &mut root,
-            "population.0.nervous_system.module",
-            json!("random"),
-        )
-        .unwrap();
+        set_path(&mut root, "population.0.mind.module", json!("random")).unwrap();
         assert_eq!(
-            get_path(&root, "population.0.nervous_system.module"),
+            get_path(&root, "population.0.mind.module"),
             Some(&json!("random"))
         );
         assert!(set_path(&mut root, "population.3.type", json!("x")).is_err());

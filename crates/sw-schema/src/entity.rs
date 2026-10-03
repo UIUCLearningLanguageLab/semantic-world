@@ -1,6 +1,6 @@
 //! Entity type files (contract 1, with additions A1 and A2).
 //!
-//! An entity type names up to four components: body, sensors, actuators, and nervous system.
+//! An entity type names up to four components: body, sensors, actuators, and mind.
 //! Every numeric or categorical setting is a [`Trait`]. The `extends` mechanism and population
 //! overrides are applied on the generic YAML value before a file is parsed into these types
 //! (see [`crate::resolve`]), so a parsed `EntityType` is always complete.
@@ -59,7 +59,7 @@ pub struct EntityType {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub actuators: IndexMap<String, Params>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nervous_system: Option<NervousSystem>,
+    pub mind: Option<Mind>,
 }
 
 /// The body: what the entity is physically (contract 1, additions A1 and A2).
@@ -491,11 +491,11 @@ pub struct PropositionalSpec {
     pub range_m: Trait<f64>,
 }
 
-/// The nervous system: a registered module name and its parameters. Modules resolve through
+/// The mind: a registered module name and its parameters. Modules resolve through
 /// the registry in `semantic_world.agents`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct NervousSystem {
+pub struct Mind {
     pub module: String,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub params: Params,
@@ -520,8 +520,8 @@ impl EntityType {
                 return Err(actx.not_in_milestone_1(format!("the actuator `{name}`")));
             }
         }
-        if let Some(ns) = &self.nervous_system {
-            ns.validate(&ctx.child("nervous_system"))?;
+        if let Some(mind) = &self.mind {
+            mind.validate(&ctx.child("mind"))?;
         }
         Ok(())
     }
@@ -956,7 +956,7 @@ impl Sensors {
     }
 }
 
-impl NervousSystem {
+impl Mind {
     fn validate(&self, ctx: &Ctx) -> Result<()> {
         check_identifier(&ctx.child("module"), &self.module)
     }

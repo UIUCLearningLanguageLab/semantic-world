@@ -83,7 +83,7 @@ crates/
 python/semantic_world/
   __init__.py                 # make(), World, VecWorld, Observation
   reward.py                   # agent-side reward library (contract 4)
-  agents/__init__.py          # NervousSystem base class and the registry of agents by name
+  agents/__init__.py          # Mind base class and the registry of agents by name
   agents/random_agent.py
   agents/scripted_optimal.py
   adapters/gymnasium_env.py   # single-agent Gymnasium adapter, plus the discrete-action wrapper
@@ -170,7 +170,7 @@ An agent in a voluntary durative action (`eat`, `drink`, `sleep`) stays in `agen
 
 ### A5. Conditions in experiment configurations (clarifies contract 10)
 
-Each key under `conditions` is a dotted path into the configuration, and each value is the list of settings to cross. For example, `population.0.nervous_system.module: [random, scripted_optimal]` and `options.impossible_actions: [masked, attempt_and_fail]`. The batch runner crosses all conditions with all seeds. Nervous-system module names resolve through a registry in `semantic_world.agents`.
+Each key under `conditions` is a dotted path into the configuration, and each value is the list of settings to cross. For example, `population.0.mind.module: [random, scripted_optimal]` and `options.impossible_actions: [masked, attempt_and_fail]`. The batch runner crosses all conditions with all seeds. Mind module names resolve through a registry in `semantic_world.agents`.
 
 ## The tiny survival world
 
@@ -273,7 +273,7 @@ The sensor manifest (contract 3) lists every block, with labels. The action mani
 
 ## Agents
 
-Both agents live in Python and implement the mind interface as an abstract base class, `semantic_world.agents.NervousSystem`: `act(observation) -> action`, with optional `learn`, `report_internals`, `save`, and `load`. Later agents follow the same shape.
+Both agents live in Python and implement the mind interface as an abstract base class, `semantic_world.agents.Mind`: `act(observation) -> action`, with optional `learn`, `report_internals`, `save`, and `load`. Later agents follow the same shape.
 
 - **Random agent.** Chooses uniformly among action types, then draws uniform arguments. With masking on, chooses only among unmasked action types. Uses a random generator seeded from `world.agent_seed(agent_id)`. The random agent is the floor.
 - **Scripted-optimal agent.** A hand-coded policy with full knowledge. The scripted-optimal agent may read the full world state through a privileged call, `world.debug_state()`, which must be clearly marked as privileged and must never be used by any learning agent. The policy: if health is falling, serve the need that is at max; otherwise serve the highest need above 0.3; at night, go to the nearest shelter and sleep there; walk to the nearest object that serves the chosen need, turn to face the object, and act until the need is below 0.1. Ties are broken by entity ID. The scripted-optimal agent is the ceiling. It does not need to be truly optimal, only competent enough that a good learner could approach it.
@@ -346,7 +346,7 @@ Build in this order. Each stage ends with its tests passing locally and a commit
 6. **Eyes.** The `wgpu` offscreen renderer and the placeholder shapes. *Accept:* images render on the software adapter; a test places an agent facing a bush and checks that the center of the image is mostly green; night images are darker than day images; sample images are written to `runs/samples/` for Jon to look at.
 7. **Logs and recordings.** Parquet logs and the `rerun` feature. *Accept:* a run's logs load in polars; re-simulating from `run.yaml` reproduces the logged state hashes at every logged tick; a recording opens in the Rerun viewer.
 8. **Agents, adapters, and the runner.** The reward library, the agent registry, the random and scripted-optimal agents, the Gymnasium and PettingZoo adapters, and the batch runner. *Accept:* Gymnasium's and PettingZoo's API checkers pass; the batch runner expands conditions × seeds and writes one run folder per run.
-9. **Validation run (definition of done).** `data/experiments/m1_validation.yaml`: 1 agent per world; conditions `nervous_system: [random, scripted_optimal]` × `impossible_actions: [masked, attempt_and_fail]`; 10 seeds each; lifetime 30 days; rendering off, except for one scripted-optimal run kept for viewing. `analysis/summary.py` reports, for each condition, the mean and spread of days survived, and the fraction of time with any need above 0.8. *Accept:* in both impossible-action conditions, the scripted-optimal agent survives far longer than the random agent on every seed (the scripted-optimal agent should reach the 30-day limit on most seeds, and the random agent should die within about 2 days); every run reproduces exactly from its `run.yaml`.
+9. **Validation run (definition of done).** `data/experiments/m1_validation.yaml`: 1 agent per world; conditions `mind: [random, scripted_optimal]` × `impossible_actions: [masked, attempt_and_fail]`; 10 seeds each; lifetime 30 days; rendering off, except for one scripted-optimal run kept for viewing. `analysis/summary.py` reports, for each condition, the mean and spread of days survived, and the fraction of time with any need above 0.8. *Accept:* in both impossible-action conditions, the scripted-optimal agent survives far longer than the random agent on every seed (the scripted-optimal agent should reach the 30-day limit on most seeds, and the random agent should die within about 2 days); every run reproduces exactly from its `run.yaml`.
 10. **Speed check and VecWorld.** Add `VecWorld`. Measure, and record in `docs/BENCHMARKS.md`, agent-steps per second, where one agent-step is one agent's decision: headless without eyes, and with eyes, on the developer's laptop. *Targets*, to be revised once measured: at least 100,000 agent-steps per second without eyes, and at least 2,000 with eyes.
 
 ## Questions for Jon
