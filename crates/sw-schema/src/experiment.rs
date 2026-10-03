@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::entity::{NervousSystem, Params, check_identifier};
+use crate::entity::{Mind, Params, check_identifier};
 use crate::error::{Ctx, Result};
 use crate::world::WorldSpec;
 
@@ -72,9 +72,9 @@ pub struct PopulationEntry {
     #[serde(rename = "type")]
     pub type_name: String,
     pub count: u32,
-    /// Replaces the type's nervous system for this group.
+    /// Replaces the type's mind for this group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nervous_system: Option<NervousSystem>,
+    pub mind: Option<Mind>,
     /// Trait overrides for this group, in the shape of a type file.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub overrides: Value,
@@ -310,8 +310,8 @@ impl ExperimentConfig {
             check_identifier(&ectx.child("type"), &entry.type_name)?;
             ectx.child("count")
                 .check(entry.count > 0, "count must be at least 1")?;
-            if let Some(ns) = &entry.nervous_system {
-                check_identifier(&ectx.child("nervous_system").child("module"), &ns.module)?;
+            if let Some(mind) = &entry.mind {
+                check_identifier(&ectx.child("mind").child("module"), &mind.module)?;
             }
             ectx.child("overrides").check(
                 entry.overrides.is_null() || entry.overrides.is_object(),

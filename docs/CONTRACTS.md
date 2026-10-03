@@ -77,7 +77,7 @@ actuators:
   legs: {}
   arms_and_hands: {}
   mouth: {}
-nervous_system: {module: random}
+mind: {module: random}
 ```
 
 The engine builds an entity by starting from the type's defaults, applying any overrides from the experiment configuration, and then sampling each trait that has a `variation`. The sampled values are logged for every individual.
@@ -341,7 +341,7 @@ world:
   schedule:                              # scheduled world changes
     - {at_day: 30, change: {bush_regrow_every_s: 1200}}
 population:
-  - {type: human, count: 1, nervous_system: {module: ppo_lstm, params: {...}}, overrides: {}}
+  - {type: human, count: 1, mind: {module: ppo_lstm, params: {...}}, overrides: {}}
   - {type: wolf, count: 2}
 views: {propositional_sensor: false, speech_as_symbols: false}
 options:
@@ -353,7 +353,7 @@ lifetime: {default_days: 60}
 checkpoints: {every_days: 10}
 logging: {state_every_ticks: 10, images: every_10th, internals: every_decision}
 conditions:                              # the experimental design: one run per cell per seed
-  nervous_system: [random, scripted_optimal, planner_given, planner_learned, ppo_lstm, world_model]
+  mind: [random, scripted_optimal, planner_given, planner_learned, ppo_lstm, world_model]
   observation: [pixels, state_vector, propositions]
 seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 ```
@@ -428,7 +428,7 @@ An agent in a voluntary durative action (`eat`, `drink`, `sleep`) stays in `agen
 
 ### A5. Conditions in experiment configurations (clarifies contract 10)
 
-Each key under `conditions` is a dotted path into the configuration, and each value is the list of settings to cross. For example, `population.0.nervous_system.module: [random, scripted_optimal]` and `options.impossible_actions: [masked, attempt_and_fail]`. The batch runner crosses all conditions with all seeds. Nervous-system module names resolve through a registry in `semantic_world.agents`.
+Each key under `conditions` is a dotted path into the configuration, and each value is the list of settings to cross. For example, `population.0.mind.module: [random, scripted_optimal]` and `options.impossible_actions: [masked, attempt_and_fail]`. The batch runner crosses all conditions with all seeds. Mind module names resolve through a registry in `semantic_world.agents`.
 
 ## Paper tests
 

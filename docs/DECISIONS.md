@@ -326,6 +326,7 @@ Spec: `docs/specs/MILESTONE_1.md`.
 | ID | Date | Decision | Proposed by | Decided by | Status | Source |
 | --- | --- | --- | --- | --- | --- | --- |
 | M1.1 | 2026-09-29 | A need's `rise_when` gains the value `awake`, so fatigue rises while awake and falls while asleep. ⚑ | Claude Code | — | Working design | `proposals/2026-09-29-rise-when-awake.md` |
+| M1.2 | 2026-10-02 | "Mind" replaces "nervous system" everywhere. The data-file key `nervous_system` becomes `mind` in entity types and in the `population` entries of experiments, the Rust type `NervousSystem` becomes `Mind`, and the Python base class becomes `semantic_world.agents.Mind`. The old key is not kept as an alias. | Jon | Jon | Decided | `CONTRACTS.md`, `ENTITY_DEFINITIONS.md`, `specs/MILESTONE_1.md` |
 
 ## Needs Jon's check
 

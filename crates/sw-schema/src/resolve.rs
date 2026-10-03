@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::entity::{EntityType, NervousSystem};
+use crate::entity::{EntityType, Mind};
 use crate::error::{Ctx, Result, SchemaError};
 use crate::experiment::{ExperimentConfig, WorldRef};
 use crate::rules::RulesFile;
@@ -41,7 +41,7 @@ pub struct ResolvedPopulation {
     pub index: usize,
     pub type_name: String,
     pub count: u32,
-    pub nervous_system: Option<NervousSystem>,
+    pub mind: Option<Mind>,
     /// The entry's type after `extends` and `overrides`, validated.
     pub entity_type: EntityType,
 }
@@ -137,9 +137,9 @@ pub fn resolve_experiment_value(value: Value, path: &Path) -> Result<Resolved> {
         if entry.overrides.is_object() {
             yaml::deep_merge(&mut merged, entry.overrides.clone());
         }
-        if let Some(ns) = &entry.nervous_system {
-            let ns_value = serde_json::to_value(ns).expect("a nervous system serializes");
-            yaml::set_path(&mut merged, "nervous_system", ns_value).expect("root is a mapping");
+        if let Some(mind) = &entry.mind {
+            let mind_value = serde_json::to_value(mind).expect("a mind serializes");
+            yaml::set_path(&mut merged, "mind", mind_value).expect("root is a mapping");
         }
         let octx = ectx.child("overrides");
         let entity_type: EntityType =
@@ -148,7 +148,7 @@ pub fn resolve_experiment_value(value: Value, path: &Path) -> Result<Resolved> {
             .validate(&octx)
             .map_err(|e| prefix_field(e, &octx.path))?;
         if experiment.views.propositional_sensor
-            && entity_type.nervous_system.is_some()
+            && entity_type.mind.is_some()
             && entity_type.sensors.propositional.is_none()
         {
             return Err(ctx.child("views").child("propositional_sensor").error(format!(
@@ -160,7 +160,7 @@ pub fn resolve_experiment_value(value: Value, path: &Path) -> Result<Resolved> {
             index: i,
             type_name: entry.type_name.clone(),
             count: entry.count,
-            nervous_system: entry.nervous_system.clone(),
+            mind: entry.mind.clone(),
             entity_type,
         });
     }

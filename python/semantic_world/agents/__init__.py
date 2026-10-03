@@ -1,4 +1,4 @@
-"""Nervous systems: the cognitive models placed in agents, registered by name."""
+"""Minds: the cognitive models placed in agents, registered by name."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from semantic_world.observation import Observation
 from semantic_world.world import Action
 
 
-class NervousSystem(ABC):
+class Mind(ABC):
     """The interface every cognitive model meets.
 
     ``manifests`` holds the agent's sensor and action manifests, as ``World.manifests()``
@@ -46,13 +46,13 @@ class NervousSystem(ABC):
         """Read a checkpoint. Optional."""
 
 
-_REGISTRY: dict[str, type[NervousSystem]] = {}
+_REGISTRY: dict[str, type[Mind]] = {}
 
 
-def register(name: str) -> Callable[[type[NervousSystem]], type[NervousSystem]]:
-    """Register a nervous system under the name experiment configurations use."""
+def register(name: str) -> Callable[[type[Mind]], type[Mind]]:
+    """Register a mind under the name experiment configurations use."""
 
-    def decorator(cls: type[NervousSystem]) -> type[NervousSystem]:
+    def decorator(cls: type[Mind]) -> type[Mind]:
         _REGISTRY[name] = cls
         return cls
 
@@ -63,16 +63,16 @@ def names() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def create(name: str, manifests: dict, seed: int, **params: Any) -> NervousSystem:
-    """Build the nervous system registered under ``name``."""
+def create(name: str, manifests: dict, seed: int, **params: Any) -> Mind:
+    """Build the mind registered under ``name``."""
     try:
         cls = _REGISTRY[name]
     except KeyError:
-        raise KeyError(f"no nervous system named {name!r}; known: {names()}") from None
+        raise KeyError(f"no mind named {name!r}; known: {names()}") from None
     return cls(manifests, seed, **params)
 
 
 from semantic_world.agents import random_agent as _random_agent  # noqa: E402  (registers)
 
-__all__ = ["NervousSystem", "create", "names", "register"]
+__all__ = ["Mind", "create", "names", "register"]
 _ = _random_agent

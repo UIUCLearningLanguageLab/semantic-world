@@ -147,7 +147,7 @@ species: human
 body: {model: human, mass: 70, size: 1.0, parts: [head, torso, arms, hands, legs], insulation: 0.2}
 sensors: [eyes, ears, smell, taste, touch, temperature, pain, interoception, proprioception]
 actuators: [legs, arms_and_hands, mouth, vocal_apparatus]
-nervous_system: {type: symbolic_planner, action_model: given}
+mind: {type: symbolic_planner, action_model: given}
 ```
 
 ```yaml
@@ -155,7 +155,7 @@ species: giraffe
 body: {model: giraffe, mass: 800, size: 1.0, parts: [head, neck, torso, legs, tail], insulation: 0.4}
 sensors: [eyes, ears, smell, taste, touch, temperature, pain, interoception]
 actuators: [legs, mouth]
-nervous_system: {type: scripted_forager}
+mind: {type: scripted_forager}
 ```
 
 ```yaml

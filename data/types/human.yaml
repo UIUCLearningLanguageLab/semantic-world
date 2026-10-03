@@ -49,4 +49,4 @@ actuators:
   legs: {}
   arms_and_hands: {}
   mouth: {}
-nervous_system: {module: random}
+mind: {module: random}

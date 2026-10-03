@@ -80,7 +80,7 @@ pub fn spawn(
             )
         })
         .collect();
-    let is_agent = individual.nervous_system.is_some();
+    let is_agent = individual.mind.is_some();
     let has_needs = body.has_needs();
     let needs = Needs {
         needs: body

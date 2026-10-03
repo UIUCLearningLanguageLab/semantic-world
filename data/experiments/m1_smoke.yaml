@@ -3,7 +3,7 @@ experiment: m1_smoke
 version: 1
 world: ../worlds/meadow.yaml
 population:
-  - {type: human, count: 1, nervous_system: {module: random}}
+  - {type: human, count: 1, mind: {module: random}}
 views: {propositional_sensor: false, speech_as_symbols: false}
 options:
   impossible_actions: masked             # masked | attempt_and_fail
