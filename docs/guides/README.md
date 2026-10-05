@@ -12,6 +12,32 @@ The specifications in `docs/specs/` are a different kind of document. Specificat
 | [`WORDFORMS.md`](WORDFORMS.md) | The word-form pipeline: spoken word forms, synthesis, auditory front ends, and sound embeddings | Stages 1–7 complete |
 | [`CORPUS.md`](CORPUS.md) | The corpus generator: documents in an artificial language, their renderings, test sets, and spoken word forms | Complete |
 
+## The full chain
+
+Together, the three programs make the disembodied simulation: a world, propositions about the world, and language about the world, without the 3D simulation. The chain works now, and its outputs are usable for training and testing models.
+
+1. `generate` builds the world with the taxonomy generator, in memory, and writes the corpus: the documents, the four renderings, the test sets, the statistics, and a request for word forms.
+2. The word-form pipeline reads the request and makes a spoken word for every lexeme.
+3. `render` attaches the spoken words to the corpus.
+
+At default scale, from the root of the repository with `.venv` active (see "Setup" below):
+
+```
+python -m semantic_world.corpus generate data/corpus/default.yaml
+python -m semantic_world.wordforms all data/wordforms/corpus_default.yaml
+python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms runs/wordforms/corpus_default_seed1
+```
+
+| Step | Output folder | What the step writes |
+| --- | --- | --- |
+| `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request |
+| `wordforms all` | `runs/wordforms/corpus_default_seed1/` | Word forms, audio, auditory front ends, sound embeddings, and their evaluation |
+| `render` | `runs/corpus/default_seed1/` | The spelled rendering (`corpus.txt`) and the word columns of `lexicon.csv` |
+
+The default chain ran on October 2, 2026: 10,000 documents with 92,464 sentences, spoken words for 173 content lexemes with five sound embeddings, and 14,736 test items. The tiny configurations (`data/corpus/tiny.yaml` and `data/wordforms/corpus_tiny.yaml`) run the same chain in under 20 seconds. With `forms` in place of `all`, the word-form step skips the audio, which `render` does not need.
+
+The taxonomy generator also runs on its own, when only the world's categories and feature vectors are needed (`TAXONOMY.md`).
+
 ## Setup
 
 The generators are Python programs. They need Python 3.11 or later and three packages:

@@ -136,7 +136,7 @@ Class-level and instance-level propositions can be negative: "penguins can not f
 
 Narratives need things to happen, so the generator makes scenes. A scene starts with a seed instance and adds 2 to 6 other instances. Instances that are thematically related to the seed are more likely to join: a scene with an owl tends to have mice in it. Each scene then runs for 3 to 8 time steps. At each step, events are drawn among the things the participants can do: an intransitive event ("the penguin swam") for a CAN feature, and a transitive event ("the owl chased the mouse") for a verb whose relation holds for the pair.
 
-Events never contradict the world: an event happens only where the world allows it. Events are drawn verb first, so a verb that holds for many pairs is no more frequent than one that holds for few. Events do not change anything, so a scene has no plot. Event schemas with changing states are a future addition.
+Events never contradict the world: an event happens only where the world allows it. Events are drawn verb first, so a verb that holds for many pairs is no more frequent than one that holds for few. Events do not change anything, so a scene has no plot. Event schemas with changing states are a future addition. Across scenes, a verb that is possible in nearly every scene is still drawn more often than others: in the default world, two verbs get 62% of transitive events. `scene.verb_weights` can rebalance the verbs.
 
 ### Documents
 
@@ -148,6 +148,8 @@ The corpus mixes four document types (`documents.mix`):
 | Encyclopedic, feature | 20% | A feature or verb | Which categories have it, which lack it, and the rules it takes part in |
 | Entity narrative | 20% | An instance | The instance's features, and the events it takes part in, across 2 to 5 scenes |
 | Situational narrative | 30% | A scene | The scene's events in time order, with descriptions of the participants |
+
+Narratives often end early. In the default corpus, about 57% of entity narratives and 63% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
 
 Part of an encyclopedic document about category `C1.2`, in the conceptual rendering:
 

@@ -102,6 +102,8 @@ Two text-to-speech engines receive the phonemes directly, so English spelling ne
 
 Every word is spoken by every speaker, twice by default. The two tokens differ by small seeded changes in rate and pitch. A proportion of speakers (20% by default) is **held out**: held-out speakers never contribute to word embeddings, so they test generalization to new voices.
 
+Most voices come from one Piper model, so the voices are more alike than real speakers are. Generalizing across speakers is therefore easier than in real speech. Real recordings, or more synthesis engines, would make the speaker problem harder and more realistic.
+
 Clips are mono, 16 kHz, trimmed of silence, and set to a common loudness. A clip more than 1.8 times longer than its word's median is synthesized again. Piper sometimes stretches a word, and the retry catches most cases. Words that Piper stretches for most speakers are flagged `long_synthesis` in `words.csv`. The default run flags 6.
 
 As a check of intelligibility, a Whisper speech recognizer correctly transcribes about 86% of real English words synthesized by Piper and about 65% of those synthesized by espeak-ng.

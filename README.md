@@ -4,6 +4,18 @@ An artificial world for comparing cognitive models.
 
 **Status:** early build. The simulation engine is being built in stages against `docs/specs/MILESTONE_1.md`: stages 1 to 5 (the workspace, the schema, the core world, the rules, and the sensors with the Python API) are built. The world-content and language programs are complete: the taxonomy generator, the word-form pipeline, and the corpus generator, each with a user guide in `docs/guides/`. The git log names the stages done so far.
 
+## What works now
+
+Semantic World runs worlds in two modes. The 3D simulation runs entities in space and time, and is still being built. The disembodied simulation generates a world's entities and events as propositions, without an active simulation. The disembodied simulation works now, in a first form, and its outputs are usable for training and testing models.
+
+The disembodied simulation is a chain of three Python programs, which need no Rust:
+
+1. **The taxonomy generator** makes the world: categories, instances, and their feature vectors, under rules we control (`docs/guides/TAXONOMY.md`).
+2. **The corpus generator** states propositions about the world's rules and events, and realizes the propositions as documents in an artificial language, with test sets. Sentences can use conceptual labels or spoken words (`docs/guides/CORPUS.md`).
+3. **The word-form pipeline** makes a spoken word for every word of the lexicon, with audio from many voices and sound embeddings (`docs/guides/WORDFORMS.md`).
+
+The commands for the full chain are in `docs/guides/README.md`, under "The full chain". The chain ran at default scale on October 2, 2026: 10,000 documents with 92,464 sentences, spoken words for 173 content lexemes with five sound embeddings, and 14,736 test items. Each guide states what its program does not do yet.
+
 ## Purpose
 
 Semantic World is a simulated world in which different cognitive models can be placed "in the head" of an agent. We want to see what each agent does, and how well each agent does it. The questions are which kinds of models learn which kinds of tasks best, how those models work, and how to design better ones.
