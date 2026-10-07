@@ -15,9 +15,12 @@ import pytest
 import yaml
 
 from semantic_world.taxonomy import TaxonomyResult, config_from_mapping, generate, load_config
-from semantic_world.taxonomy.io import OUTPUT_FILES, RELATION_FILES
+from semantic_world.taxonomy.io import OUTPUT_FILES, RELATION_FILES, WORLD_FILES
 from semantic_world.taxonomy.relation_stats import level_assignment
 from semantic_world.taxonomy.similarity import pair_similarity
+
+WORLD_ENTRIES = {name.split("/")[0] for name in WORLD_FILES}
+"""The top-level entries that stage a1 of the world model added to every run folder."""
 
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
@@ -291,7 +294,7 @@ def test_new_files_load_with_the_expected_columns(
     relations_run: TaxonomyResult, relations_folder: Path
 ) -> None:
     names = sorted(p.name for p in relations_folder.iterdir())
-    assert names == sorted(set(OUTPUT_FILES) | set(RELATION_FILES))
+    assert names == sorted(set(OUTPUT_FILES) | set(RELATION_FILES) | WORLD_ENTRIES)
     for name, columns in EXPECTED_COLUMNS.items():
         frame = pl.read_csv(relations_folder / name)
         assert frame.columns == columns, name
@@ -352,9 +355,13 @@ def test_no_relation_files_without_verbs(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+def _files(folder: Path) -> list[str]:
+    return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file())
+
+
 def _identical(a: Path, b: Path, skip: set[str]) -> None:
-    names = sorted(p.name for p in a.iterdir())
-    assert names == sorted(p.name for p in b.iterdir())
+    names = _files(a)
+    assert names == _files(b)
     for name in names:
         if name in skip:
             continue
@@ -366,7 +373,7 @@ def test_same_configuration_and_seed_give_byte_identical_relation_folders(tmp_pa
     b = generate(load_config(DATA / "tiny_relations.yaml")).write(tmp_path / "b")
     _identical(a, b, skip={"config.yaml"})
     match, mismatch, errors = filecmp.cmpfiles(
-        a, b, [p.name for p in a.iterdir() if p.name != "config.yaml"], shallow=False
+        a, b, [name for name in _files(a) if name != "config.yaml"], shallow=False
     )
     assert not mismatch and not errors
 

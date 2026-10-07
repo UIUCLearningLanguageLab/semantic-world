@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 import yaml
 
+from semantic_world.common.boolean import TruthTable, minimal_dnf
 from semantic_world.corpus import Streams
 from semantic_world.corpus.facts import (
     SKIP_MAX_LITERALS,
@@ -46,7 +47,6 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
 )
-from semantic_world.taxonomy.boolean import TruthTable, minimal_dnf
 
 WORLDS = ("tiny", "default", "deep", "still")
 OBSERVED = {"quantifiers": {"all_grounding": "observed"}}

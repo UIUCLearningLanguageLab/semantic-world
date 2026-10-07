@@ -99,8 +99,9 @@ def test_a_missing_file_in_an_output_folder_is_an_error(tmp_path: Path) -> None:
 
 def test_the_check_covers_every_file_but_the_configuration(tmp_path: Path, tiny_world) -> None:
     folder = run_folder(tmp_path)
-    written = {p.name for p in folder.iterdir()}
+    written = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()}
     assert set(RELATION_FILES) <= written and "instances.csv" in written
+    assert "derived/static_features.csv" in written
     # config.yaml records the git commit, so a change there is not a difference
     config = folder / "config.yaml"
     config.write_text(config.read_text(encoding="utf-8") + "\n# a note\n", encoding="utf-8")

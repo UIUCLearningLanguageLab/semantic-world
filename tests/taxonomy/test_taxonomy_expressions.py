@@ -7,7 +7,7 @@ import itertools
 import numpy as np
 import pytest
 
-from semantic_world.taxonomy.boolean import SHJ_CANONICAL, TruthTable, minimal_dnf
+from semantic_world.common.boolean import SHJ_CANONICAL, TruthTable, minimal_dnf
 from semantic_world.taxonomy.expressions import (
     Const,
     Expr,

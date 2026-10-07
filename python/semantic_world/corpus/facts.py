@@ -34,6 +34,7 @@ from typing import Any
 
 import numpy as np
 
+from semantic_world.common.boolean import minimal_dnf
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import THING, Lexicon, world_concepts
 from semantic_world.corpus.propositions import (
@@ -58,7 +59,6 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
 )
-from semantic_world.taxonomy.boolean import minimal_dnf
 from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.rules import Threshold
 

@@ -18,9 +18,9 @@ from typing import Any
 __all__ = ["Action", "Observation", "World", "__version__", "agents", "make"]
 
 _LAZY_ATTRIBUTES = {
-    "Action": "semantic_world.world",
-    "World": "semantic_world.world",
-    "make": "semantic_world.world",
+    "Action": "semantic_world.engine",
+    "World": "semantic_world.engine",
+    "make": "semantic_world.engine",
     "Observation": "semantic_world.observation",
 }
 _LAZY_MODULES = {"agents": "semantic_world.agents", "_core": "semantic_world._core"}

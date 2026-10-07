@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from semantic_world.taxonomy.config import ConfigError, load_config
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.generate import generate
+from semantic_world.world.errors import WorldError
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -26,7 +27,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config, seed=args.seed)
         result = generate(config)
         folder = result.write(args.out)
-    except (ConfigError, GenerationError) as error:
+    except (ConfigError, GenerationError, WorldError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     summary = result.summary

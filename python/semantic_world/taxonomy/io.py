@@ -6,6 +6,11 @@ means and other real numbers with 6 decimal places. Feature columns are ordered 
 order), then IS, HAS, and CAN (in index order). The same configuration and seed give byte-identical
 folders: nothing here depends on the time or the machine, apart from the git commit hash and the
 package version recorded in ``config.yaml``.
+
+Stage a1 of ``docs/specs/WORLD_AND_LANGUAGE.md`` adds ``rule_matrices.json`` (the rules as
+threshold matrices, with the rule-set identity) and the folder ``derived/`` (derived values, each
+listed in ``derived/manifest.yaml`` with the rule-set identity that produced it). Every file that
+was written before stage a1 is unchanged.
 """
 
 from __future__ import annotations
@@ -22,6 +27,8 @@ import yaml
 from semantic_world.taxonomy.config import Config
 from semantic_world.taxonomy.fixed import FIXED_TEST_NAMES
 from semantic_world.taxonomy.tree import Role
+from semantic_world.world.derived import DERIVED_DIR, MANIFEST_FILE, write_manifest
+from semantic_world.world.identity import write_json
 
 if TYPE_CHECKING:
     from semantic_world.taxonomy.generate import TaxonomyResult
@@ -39,6 +46,14 @@ CSV_FILES = (
 )
 YAML_FILES = ("config.yaml", "rules.yaml", "summary.yaml")
 OUTPUT_FILES = YAML_FILES[:1] + CSV_FILES[:1] + YAML_FILES[1:2] + CSV_FILES[1:] + YAML_FILES[2:]
+
+STATIC_FEATURES_FILE = "static_features.csv"
+WORLD_FILES = (
+    "rule_matrices.json",
+    f"{DERIVED_DIR}/{MANIFEST_FILE}",
+    f"{DERIVED_DIR}/{STATIC_FEATURES_FILE}",
+)
+"""The files stage a1 of the world model added, as paths relative to the run folder."""
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -360,6 +375,17 @@ def thermometer_frame(
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8})
 
 
+def static_features_frame(result: TaxonomyResult) -> pl.DataFrame:
+    """``derived/static_features.csv``: one row per instance, with every derived static feature
+    (the determined IS and HAS features, in matrix order)."""
+    features = result.features
+    derived = [f for f in features.features if not f.free and f.type != "can"]
+    data: dict[str, Any] = {"label": list(result.instances.labels)}
+    for feature in derived:
+        data[feature.label] = result.instances.values[:, feature.position].astype(np.int64).tolist()
+    return pl.DataFrame(data, schema_overrides={"label": pl.Utf8})
+
+
 # ---------------------------------------------------------------------------------------------
 # Writing
 # ---------------------------------------------------------------------------------------------
@@ -387,4 +413,10 @@ def write_result(result: TaxonomyResult, path: str | Path | None = None) -> Path
         )
     for name, frame in result_frames(result).items():
         frame.write_csv(folder / name, float_precision=6, null_value="")
+    if result.matrices is not None:
+        write_json(folder / "rule_matrices.json", result.matrices.record())
+        derived = folder / DERIVED_DIR
+        derived.mkdir(exist_ok=True)
+        static_features_frame(result).write_csv(derived / STATIC_FEATURES_FILE)
+        write_manifest(derived, {STATIC_FEATURES_FILE: result.matrices.rule_set_id})
     return folder

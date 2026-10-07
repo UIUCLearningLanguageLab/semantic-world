@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 
-from semantic_world.taxonomy.boolean import (
+from semantic_world.common.boolean import (
     TruthTable,
     apply_operator,
     dnf_literal_count,

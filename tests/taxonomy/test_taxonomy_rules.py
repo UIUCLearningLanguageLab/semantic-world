@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 
+from semantic_world.common.boolean import dnf_literal_count, minimal_dnf
 from semantic_world.taxonomy import (
     ConfigError,
     GenerationError,
@@ -18,7 +19,6 @@ from semantic_world.taxonomy import (
     generate_rules,
     load_config,
 )
-from semantic_world.taxonomy.boolean import dnf_literal_count, minimal_dnf
 from semantic_world.taxonomy.expressions import from_dnf, parse_expression
 from semantic_world.taxonomy.rule_files import load_rule_file, rule_file_from_mapping
 from semantic_world.taxonomy.rules import RuleSet, canonical_key

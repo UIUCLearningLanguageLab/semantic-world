@@ -237,9 +237,9 @@ def test_with_both_checks_off_the_output_equals_the_stage_12_output(
     folder = generate(config_from_mapping(with_verbs(base, **CHECKS_OFF))).write(tmp_path / name)
     expected = GOLDEN_HASHES[name]
     produced = {
-        p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in folder.iterdir()
-        if p.name != "config.yaml"
+        p.relative_to(folder).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in folder.rglob("*")
+        if p.is_file() and p.name != "config.yaml"
     }
     assert produced == expected
 
@@ -264,9 +264,10 @@ def test_checks_on_change_the_verbs_but_keep_them_distinct() -> None:
 def test_same_seed_gives_the_same_tuned_result(tmp_path: Path) -> None:
     a = generate(load_config(DATA / "tiny_relations.yaml")).write(tmp_path / "a")
     b = generate(load_config(DATA / "tiny_relations.yaml")).write(tmp_path / "b")
-    for file in a.iterdir():
-        if file.name != "config.yaml":
-            assert file.read_bytes() == (b / file.name).read_bytes(), file.name
+    for file in a.rglob("*"):
+        if file.is_file() and file.name != "config.yaml":
+            relative = file.relative_to(a)
+            assert file.read_bytes() == (b / relative).read_bytes(), str(relative)
 
 
 def test_constraint_floor_alone() -> None:

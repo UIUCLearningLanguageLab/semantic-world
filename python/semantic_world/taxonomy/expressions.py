@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from semantic_world.taxonomy.boolean import OPERATORS, Implicant, TruthTable, settings_array
+from semantic_world.common.boolean import OPERATORS, Implicant, TruthTable, settings_array
 
 KEYWORDS = ("NOT", "AND", "OR", "XOR", "TRUE", "FALSE")
 

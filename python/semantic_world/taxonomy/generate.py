@@ -16,6 +16,11 @@ from semantic_world.taxonomy.fixed import NodeVectors, compute_node_vectors
 from semantic_world.taxonomy.instances import Instances, generate_instances
 from semantic_world.taxonomy.projections import Projections, compute_projections
 from semantic_world.taxonomy.relation_stats import RelationStats, compute_relation_stats
+from semantic_world.taxonomy.rule_matrices import (
+    TaxonomyMatrices,
+    build_rule_matrices,
+    check_rule_agreement,
+)
 from semantic_world.taxonomy.rules import RuleSet, generate_rules
 from semantic_world.taxonomy.streams import Streams
 from semantic_world.taxonomy.tree import Tree, generate_tree
@@ -44,6 +49,15 @@ class TaxonomyResult:
     """The agent and patient projections, or None without verbs."""
     relation_stats: RelationStats | None = None
     """Category proportions, sampled pairs, verb statistics, and thematic relatedness."""
+    matrices: TaxonomyMatrices | None = None
+    """The rules in matrix form with the rule-set identity (stage a1 of the world model)."""
+
+    @property
+    def rule_set_id(self) -> str:
+        """The rule-set identity: SHA-256 of the canonical JSON of the rule set (REL.16)."""
+        if self.matrices is None:
+            raise ValueError("this result has no rule matrices")
+        return self.matrices.rule_set_id
 
     @property
     def features(self) -> FeatureSet:
@@ -64,11 +78,15 @@ class TaxonomyResult:
 
 
 def generate(config: Config) -> TaxonomyResult:
-    """Run the generator: rules, tree, instances, node vectors, and statistics."""
+    """Run the generator: rules, tree, instances, node vectors, and statistics. The rules are
+    also built as threshold matrices and checked against their truth tables on every instance;
+    a disagreement raises :class:`semantic_world.world.AgreementError` and fails the run."""
     streams = Streams(config.seed)
     rules = generate_rules(config, streams)
     tree = generate_tree(config, rules, streams)
     instances = generate_instances(config, rules, tree, streams)
+    matrices = build_rule_matrices(rules)
+    check_rule_agreement(matrices, rules, instances)
     vectors = compute_node_vectors(rules, tree, instances, config.scalars)
     similarity = similarity_table(config, tree, instances, vectors, streams.analysis)
     feature_stats = feature_stats_table(config, rules, tree, instances, vectors)
@@ -105,6 +123,7 @@ def generate(config: Config) -> TaxonomyResult:
         relations=relations,
         projections=projections,
         relation_stats=relation_stats,
+        matrices=matrices,
     )
 
 

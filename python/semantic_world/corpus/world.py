@@ -39,14 +39,15 @@ def load_taxonomy(config: Config | TaxonomySource) -> TaxonomyResult:
 def check_run_folder(result: TaxonomyResult, folder: str | Path) -> None:
     """Stop with a :class:`CorpusError` when a taxonomy output folder differs from ``result``:
     every file the result writes, except ``config.yaml``, must be in the folder with the same
-    bytes."""
+    bytes. Files in subfolders (``derived/``) are checked by their relative paths."""
     folder = Path(folder)
     with tempfile.TemporaryDirectory() as scratch:
         written = result.write(scratch)
-        for path in sorted(written.iterdir()):
-            if path.name in UNCHECKED_FILES:
+        for path in sorted(p for p in written.rglob("*") if p.is_file()):
+            name = path.relative_to(written).as_posix()
+            if name in UNCHECKED_FILES:
                 continue
-            saved = folder / path.name
+            saved = folder / name
             if not saved.is_file():
                 problem = "is missing from the folder"
             elif saved.read_bytes() != path.read_bytes():
@@ -55,7 +56,7 @@ def check_run_folder(result: TaxonomyResult, folder: str | Path) -> None:
                 continue
             raise CorpusError(
                 f"the taxonomy output folder {folder} does not match the taxonomy regenerated "
-                f"from its config.yaml: {path.name} {problem}. The folder was made by another "
+                f"from its config.yaml: {name} {problem}. The folder was made by another "
                 f"version of the generator, or was changed afterwards. Generate the folder "
                 f"again, or name the taxonomy configuration file instead (taxonomy.config)."
             )

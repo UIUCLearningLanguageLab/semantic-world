@@ -4,6 +4,11 @@ With scalar dimensions set to 0 and relations turned off, the generator must pro
 output it produced before the relations work began. The folders under ``golden/`` were written by
 the stage 6 generator for every example configuration. Every output file except ``config.yaml``
 must be byte-identical, and ``config.yaml`` may differ only by added keys.
+
+Stage a1 of ``docs/specs/WORLD_AND_LANGUAGE.md`` keeps the rule and extends it: the taxonomy may
+add files (``rule_matrices.json`` and the ``derived/`` folder), and nothing else. The golden
+folders hold the files written before stage a1, so every file in them is still byte-identical,
+and the entries a run adds are exactly the stage a1 files.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import pytest
 import yaml
 
 from semantic_world.taxonomy import generate, load_config
+from semantic_world.taxonomy.io import WORLD_FILES
 
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
@@ -62,7 +68,10 @@ def test_outputs_are_unchanged_with_scalars_off_and_relations_off(
     config = load_config(DATA / f"{name}.yaml")
     folder = generate(config).write(tmp_path / name)
     golden = GOLDEN / name
-    assert sorted(p.name for p in folder.iterdir()) == sorted(p.name for p in golden.iterdir())
+    written = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()}
+    golden_files = {p.name for p in golden.iterdir()}
+    assert golden_files <= written
+    assert written - golden_files == set(WORLD_FILES), "only the stage a1 files may be added"
     for file in sorted(golden.iterdir()):
         current = folder / file.name
         if file.name == "config.yaml":

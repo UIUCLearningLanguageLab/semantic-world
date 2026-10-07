@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from semantic_world.taxonomy.boolean import TruthTable, dnf_literal_count
+from semantic_world.common.boolean import TruthTable, dnf_literal_count
 from semantic_world.taxonomy.config import Config, RuleSampling, ScalarsConfig, VerbsConfig
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import Cmp, Expr, Gt, Op, Var, literal

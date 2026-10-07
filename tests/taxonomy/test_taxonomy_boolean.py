@@ -9,7 +9,7 @@ from math import comb
 import numpy as np
 import pytest
 
-from semantic_world.taxonomy.boolean import (
+from semantic_world.common.boolean import (
     ARITY_2_FUNCTIONS,
     SHJ_CANONICAL,
     SHJ_CLASS_SIZES,
