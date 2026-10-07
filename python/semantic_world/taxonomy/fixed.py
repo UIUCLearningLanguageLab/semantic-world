@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from semantic_world.taxonomy.boolean import settings_array
+from semantic_world.common.boolean import settings_array
 from semantic_world.taxonomy.config import ScalarsConfig
 from semantic_world.taxonomy.instances import Instances
 from semantic_world.taxonomy.rules import (

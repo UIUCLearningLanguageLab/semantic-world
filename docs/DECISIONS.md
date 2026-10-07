@@ -381,6 +381,30 @@ Spec: `docs/specs/WORLD_AND_LANGUAGE.md`.
 | WM.32 | 2026-10-07 | Histories record every numeric change with its cause: an event, or drift. | Claude (chat) | Jon | Decided | Spec, decision 29 |
 | WM.33 | 2026-10-07 | Defaults follow the world: where a choice balances something that the world's constraints would make uneven, the balanced form is an option. Category documents draw kinds of content in proportion to the facts available; event types are resampled only when they hold for no leaf pair or for every leaf pair (REL.15's range stays a setting); feature base rates are heterogeneous by default. | Jon | Jon | Decided | Spec, decision 30 |
 
+### World model: Claude Code's engineering choices
+
+Claude Code makes these while building, and records them in each stage's proposal file (`docs/proposals/<date>-world-stage-<stage>-decisions.md`). Each is the working design unless Jon changes it.
+
+| ID | Date | Decision | Proposed by | Decided by | Status | Source |
+| --- | --- | --- | --- | --- | --- | --- |
+| WM.E1 | 2026-10-07 | The milestone 1 wrapper of the Rust core moves from `semantic_world.world` to `semantic_world.engine`, so that `semantic_world.world` is the world package of WM.3. `semantic_world.World`, `make`, and `Action` are unchanged. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 1 |
+| WM.E2 | 2026-10-07 | `taxonomy/boolean.py` moves to `semantic_world.common.boolean`, a package for code shared by the taxonomy and the world, which breaks the import cycle between them. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 2 |
+| WM.E3 | 2026-10-07 | Stage a1 of the world package has `errors.py`, `identity.py`, `matrices.py`, and `derived.py`; `definition.py` arrives in stage a2. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 3 |
+| WM.E4 | 2026-10-07 | The matrix form is generic (`LiteralSpec`, `RuleSpec`); `taxonomy/rule_matrices.py` adapts the taxonomy's rules to it. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 4 |
+| WM.E5 | 2026-10-07 | Layers in the matrix form are dependency layers computed from the rules, not the taxonomy's layer numbers. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 5 |
+| WM.E6 | 2026-10-07 | The literal table holds every input some rule reads: features by position, then thresholds by scalar and threshold; each entry has `index`, `key`, `kind`, `role` (`null` for the entity itself), and what it reads. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 6 |
+| WM.E7 | 2026-10-07 | Each layer is written as `terms` (`literals`, `complemented`, `threshold`) and `outputs` (`output`, `terms`, `threshold`), with term indices local to the layer and thresholds written out. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 7 |
+| WM.E8 | 2026-10-07 | Symbols are the non-ISA features and the scalars (`label`, `kind`, `derived`, `fluent`, `arity`); ISA features are not symbols; the kind `can` is transitional until stage a5. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 8 |
+| WM.E9 | 2026-10-07 | Rule records are `output`, `inputs` (literal indices), `truth_table`, and `expression`; the taxonomy's identity hashes them with `event_types: []`. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 9 |
+| WM.E10 | 2026-10-07 | `rule_matrices.json` holds `version`, `rule_set_id`, `symbols`, `literals`, `rules`, and `layers`, so the identity can be recomputed from the file. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 10 |
+| WM.E11 | 2026-10-07 | Canonical JSON (sorted keys, no whitespace, floats with 17 significant digits) and the indented file form are written by one serializer in `identity.py`; the file form puts a container of scalars on one line. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 11 |
+| WM.E12 | 2026-10-07 | The agreement test compares the matrices with the instance matrix and checks each rule with at most 12 inputs alone on every setting; `AgreementError` names the rule and the first disagreement; the command line exits with status 1. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 12 |
+| WM.E13 | 2026-10-07 | `derived/static_features.csv` is `label` plus the determined IS and HAS features in matrix order; no `leaf`, no CAN columns. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 13 |
+| WM.E14 | 2026-10-07 | `derived/manifest.yaml` is `version: 1` and `files: {<name>: {rule_set_id}}`; the loader refuses unlisted, missing, and mismatched files, naming the file and both identities. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 14 |
+| WM.E15 | 2026-10-07 | Folder-walking tests and the corpus's run-folder check walk files recursively; the regression test requires the added entries to be exactly the stage a1 files; the golden hash file gains the new files' hashes. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 15 |
+| WM.E16 | 2026-10-07 | `TaxonomyResult.matrices` (default `None`) holds the matrices, and `TaxonomyResult.rule_set_id` the identity. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 16 |
+| WM.E17 | 2026-10-07 | No existing output file records the identity in stages a1 to a4; it appears in `rule_matrices.json` and the manifest only. | Claude Code | Claude Code | Working design | Stage a1 proposal, choice 17 |
+
 ## Needs Jon's check
 
 - Nothing at present.

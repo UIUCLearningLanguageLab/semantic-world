@@ -1,4 +1,8 @@
-"""The core API (contract 3): multi-agent, parallel, keyed by agent ID, no reward."""
+"""The core API (contract 3): multi-agent, parallel, keyed by agent ID, no reward.
+
+This module wraps the Rust engine (``semantic_world._core``). The world model of
+``docs/specs/WORLD_AND_LANGUAGE.md`` lives in the package ``semantic_world.world``.
+"""
 
 from __future__ import annotations
 

@@ -4,7 +4,7 @@ The taxonomy generator builds an artificial world of categories and objects. The
 
 This guide covers running the generator, the ideas behind it, the configuration file, the output files, and the Python interface. The design is specified in `docs/specs/TAXONOMY_GENERATOR.md` and `docs/specs/TAXONOMY_RELATIONS.md`.
 
-**Status.** Complete: the base generator, scalar dimensions, and verbs and relations.
+**Status.** Complete: the base generator, scalar dimensions, and verbs and relations. Stage a1 of the world-and-language refactor (`docs/specs/WORLD_AND_LANGUAGE.md`) adds the rules in matrix form, the rule-set identity, and the first derived-value file; see "`rule_matrices.json`" and "`derived/`" below.
 
 ## Quick start
 
@@ -180,6 +180,50 @@ One row per feature: the proportion of instances with the feature, its entropy, 
 
 `summary.yaml` gives counts, the mean number of true features per instance, constant features, duplicate leaves and instances, and any warnings. `config.yaml` records the complete resolved configuration and every random seed. Running the generator on an output folder's `config.yaml` reproduces the run exactly.
 
+### `rule_matrices.json`
+
+The same rules as `rules.yaml`, in the form the world runtime computes: two-layer threshold matrices (`docs/specs/WORLD_AND_LANGUAGE.md`, "Rules: Boolean form and matrices"). The file has six keys.
+
+- `version`: the definition format's version, 1.
+- `rule_set_id`: the rule-set identity, the SHA-256 hash of the canonical JSON of `symbols`, `literals`, `rules`, and (for a taxonomy, an empty) `event_types`. The same configuration and seed always give the same identity. Changing any one rule, or any threshold, changes it.
+- `symbols`: one entry per IS, HAS, and CAN feature and per scalar: its label, kind, whether it is derived (computed by a rule) or base, whether it is a fluent (never, in a taxonomy), and its arity.
+- `literals`: the literal table: everything the rules read. Each literal has an `index`, its `key` (the variable name in expressions, such as `IS.3` or `SC.2>0.4127`), its `kind` (`feature` or `threshold`), and what it reads.
+- `rules`: every rule's `output`, `inputs` (indices into the literal table), `truth_table`, and `expression`.
+- `layers`: the matrices, written sparsely. Rules are grouped in dependency layers: a rule that reads only free features and threshold literals is in layer 1, a rule that reads a layer-1 output is in layer 2, and so on. Each layer lists its `terms` (the rows of the first matrix: the literal indices of one term of the rule's minimal DNF, whether each is complemented, and the threshold, which is the number of literals) and its `outputs` (the rows of the second matrix: the output and the indices of its terms within the layer, with threshold 1). A rule that is always true has one term with no literals and threshold 0; a rule that is always false has no terms.
+
+```json
+{"literals": [0, 1], "complemented": [false, true], "threshold": 2}
+{"output": "IS.7", "terms": [0, 1, 2, 3], "threshold": 1}
+```
+
+The first line is a term that is true when `IS.1` is true and `IS.2` is false. The second says `IS.7` is true when any of its first four terms is true.
+
+**The agreement test.** At the end of every run, the generator evaluates the matrices on every instance and compares them with the truth tables, and checks every rule with at most 12 inputs on every setting of its inputs. If any rule disagrees anywhere, the run fails: nothing is written, and the command line prints an error that names the rule and the first disagreement and exits with status 1. A failure means a bug in the generator, not in the configuration; report it.
+
+### `derived/`
+
+Derived values: columns computed from the base vector by the rules, written apart from the inputs (REL.16). In stage a1 the folder holds one table.
+
+- `static_features.csv`: one row per instance, with its label and every determined IS and HAS feature. The values equal the same columns of `instances.csv`.
+- `manifest.yaml`: for each file in the folder, the rule-set identity that produced it.
+
+```yaml
+version: 1
+files:
+  static_features.csv:
+    rule_set_id: e99e55a6a1fb7827183b19acb8e2daaa9213aec0368081c454d88b5f9f45963b
+```
+
+A derived file is read through the world package, which refuses a file whose identity differs from the rule set in use, with an error that names the file and both identities:
+
+```python
+from semantic_world.world import load_derived_csv
+
+frame = load_derived_csv("runs/taxonomy/tiny_seed1/derived", "static_features.csv", result.rule_set_id)
+```
+
+Nothing in `derived/` is an input to anything, and nothing there is edited by hand. CAN features stay in `instances.csv` until stage a2, which writes them as capacities.
+
 ## The configuration file
 
 A configuration file is YAML. Any parameter left out takes its default. An unknown key is an error, and every error names the field. `data/taxonomy/default.yaml` lists every base parameter with its default value.
@@ -350,6 +394,7 @@ result.write("runs/taxonomy/tiny_seed7")
 - `result.tree`: the categories, with `result.tree.leaves` and `result.tree.superordinates`;
 - `result.instances`: the instances, with `result.instances.values` (the IS, HAS, and CAN features as a NumPy array, without the ISA columns) and `result.instances.labels`;
 - `result.rules`: the rules, with `result.rules.rule_for("CAN.3")` for one rule;
+- `result.matrices`: the rules in matrix form (`result.matrices.matrices.evaluate(...)`), and `result.rule_set_id`, the rule-set identity;
 - `result.features`: the feature layout;
 - `result.frames()`: every output table as a polars data frame, keyed by file name;
 - `result.summary` and `result.warnings`;
@@ -396,10 +441,12 @@ The ISA columns give category labels at every level. Drop them when a model shou
 - **Leaves cannot be made distinct.** With few features and many leaves, two leaves may be forced to match. Add features, reduce branching, or set `require_distinct_leaves: false`.
 - **The largest arity does not fit.** A rule cannot have more inputs than the features available to it. Lower the largest arity with nonzero weight, or add free features.
 - **A key is unknown.** Check the spelling against `data/taxonomy/default.yaml`.
+- **The agreement test fails.** The error begins "the matrix form of the rule for ... disagrees with its truth table". The matrices and the truth tables are two forms of one rule set, so a disagreement is a bug in the generator, not a problem with the configuration. Keep the configuration and seed and report it.
 
 ## Reference
 
 - `docs/specs/TAXONOMY_GENERATOR.md`: the full design of the base generator.
 - `docs/specs/TAXONOMY_RELATIONS.md`: scalars, verbs, and relations.
+- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model; "Rules: Boolean form and matrices" and "Rule-set identity and derived values" describe `rule_matrices.json` and `derived/`.
 - `docs/proposals/`: decisions made during the build, where the build differs from the first draft of a specification.
 - Shepard, R. N., Hovland, C. I., & Jenkins, H. M. (1961). Learning and memorization of classifications. *Psychological Monographs*, 75(13, Whole No. 517).

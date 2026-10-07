@@ -23,8 +23,17 @@ from semantic_world.taxonomy import (
     load_config,
 )
 from semantic_world.taxonomy.analysis import binary_entropy, mutual_information
-from semantic_world.taxonomy.io import CSV_FILES, OUTPUT_FILES, default_output_dir, git_commit
+from semantic_world.taxonomy.io import (
+    CSV_FILES,
+    OUTPUT_FILES,
+    WORLD_FILES,
+    default_output_dir,
+    git_commit,
+)
 from semantic_world.taxonomy.similarity import cross_similarity, similarity_matrix
+
+WORLD_ENTRIES = {name.split("/")[0] for name in WORLD_FILES}
+"""The top-level entries that stage a1 of the world model added to every run folder."""
 
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
@@ -71,8 +80,12 @@ def test_default_configuration_runs_in_under_a_minute() -> None:
 
 
 def test_output_folder_has_every_file(default_folder: Path) -> None:
-    assert sorted(p.name for p in default_folder.iterdir()) == sorted(OUTPUT_FILES)
+    assert sorted(p.name for p in default_folder.iterdir()) == sorted(
+        set(OUTPUT_FILES) | WORLD_ENTRIES
+    )
     assert len(OUTPUT_FILES) == 12
+    for name in WORLD_FILES:
+        assert (default_folder / name).is_file(), name
 
 
 def test_every_csv_loads_with_the_expected_columns(
@@ -154,8 +167,9 @@ def test_values_are_written_as_specified(default_folder: Path) -> None:
 
 
 def _folders_identical(a: Path, b: Path) -> bool:
-    names = sorted(p.name for p in a.iterdir())
-    assert names == sorted(p.name for p in b.iterdir())
+    """Every file, in subfolders too (``derived/``), is byte-identical."""
+    names = sorted(p.relative_to(a).as_posix() for p in a.rglob("*") if p.is_file())
+    assert names == sorted(p.relative_to(b).as_posix() for p in b.rglob("*") if p.is_file())
     match, mismatch, errors = filecmp.cmpfiles(a, b, names, shallow=False)
     return not mismatch and not errors
 
@@ -480,7 +494,7 @@ def test_command_line(tmp_path: Path) -> None:
     )
     assert run.returncode == 0, run.stderr
     assert run.stdout.startswith(f"wrote {out}: 6 categories, 4 leaves, 12 instances, 8 rules")
-    assert sorted(p.name for p in out.iterdir()) == sorted(OUTPUT_FILES)
+    assert sorted(p.name for p in out.iterdir()) == sorted(set(OUTPUT_FILES) | WORLD_ENTRIES)
     assert yaml.safe_load((out / "config.yaml").read_text())["seed"] == 3
 
 

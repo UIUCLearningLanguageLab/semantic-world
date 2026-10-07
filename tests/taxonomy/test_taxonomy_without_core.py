@@ -46,6 +46,8 @@ def test_taxonomy_imports_and_runs_with_the_core_unavailable(tmp_path: Path) -> 
     assert "instances 12" in run.stdout
     assert "core unavailable" in run.stdout
     assert (tmp_path / "run" / "instances.csv").exists()
+    assert (tmp_path / "run" / "rule_matrices.json").exists()
+    assert (tmp_path / "run" / "derived" / "static_features.csv").exists()
 
 
 def test_command_line_runs_with_the_core_unavailable(tmp_path: Path) -> None:
@@ -84,8 +86,8 @@ def test_core_attributes_still_load_lazily() -> None:
     import semantic_world
 
     assert isinstance(semantic_world.__version__, str)
-    assert semantic_world.World is semantic_world.world.World
-    assert semantic_world.make is semantic_world.world.make
+    assert semantic_world.World is semantic_world.engine.World
+    assert semantic_world.make is semantic_world.engine.make
     assert "World" in dir(semantic_world)
     with pytest.raises(AttributeError):
         getattr(semantic_world, "no_such_thing")  # noqa: B009

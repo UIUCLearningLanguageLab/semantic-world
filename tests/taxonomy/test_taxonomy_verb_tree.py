@@ -410,9 +410,10 @@ def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Pat
     )
     import polars as pl
 
-    for file in folder_off.iterdir():
+    for file in sorted(p for p in folder_off.rglob("*") if p.is_file()):
         if file.name == "config.yaml":
             continue
+        relative = file.relative_to(folder_off)
         if file.name == "summary.yaml":
             # With verbs on, the summary gains a verb block (stage 12) and nothing else.
             import yaml
@@ -431,7 +432,7 @@ def test_noun_outputs_are_unchanged_when_only_verb_settings_change(tmp_path: Pat
             assert projections
             assert on.drop(projections).equals(pl.read_csv(file))
             continue
-        assert file.read_bytes() == (folder_on / file.name).read_bytes(), file.name
+        assert file.read_bytes() == (folder_on / relative).read_bytes(), str(relative)
 
 
 def test_verb_settings_do_not_change_the_noun_streams() -> None:

@@ -418,9 +418,10 @@ def test_scalar_runs_are_byte_identical(tmp_path: Path) -> None:
     overrides = {"scalars": {"count": 2, "thermometer_bins": 2}}
     a = generate(config_from_mapping(overrides)).write(tmp_path / "a")
     b = generate(config_from_mapping(overrides)).write(tmp_path / "b")
-    for file in a.iterdir():
-        if file.name != "config.yaml":
-            assert file.read_bytes() == (b / file.name).read_bytes(), file.name
+    for file in a.rglob("*"):
+        if file.is_file() and file.name != "config.yaml":
+            relative = file.relative_to(a)
+            assert file.read_bytes() == (b / relative).read_bytes(), str(relative)
 
 
 def test_tiny_with_scalars_runs(tmp_path: Path) -> None:

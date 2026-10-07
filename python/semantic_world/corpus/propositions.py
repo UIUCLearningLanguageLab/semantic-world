@@ -43,9 +43,9 @@ from typing import Any
 
 import numpy as np
 
+from semantic_world.common.boolean import settings_array
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import SCALAR_POLES, THING
-from semantic_world.taxonomy.boolean import settings_array
 from semantic_world.taxonomy.features import Feature
 from semantic_world.taxonomy.fixed import fixed_by_rule
 from semantic_world.taxonomy.generate import TaxonomyResult

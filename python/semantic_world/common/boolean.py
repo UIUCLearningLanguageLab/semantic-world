@@ -1,12 +1,13 @@
-"""Boolean functions for the taxonomy generator: truth tables, the arity-2 enumeration, the
-Shepard, Hovland, and Jenkins (SHJ) types, and minimal disjunctive normal form.
+"""Boolean functions for the taxonomy generator and the world package: truth tables, the
+arity-2 enumeration, the Shepard, Hovland, and Jenkins (SHJ) types, and minimal disjunctive
+normal form.
 
 A rule is stored as its input list and a truth table. The truth table lists the output for
 input settings ``00..0``, ``00..1``, ..., ``11..1``, with the first input as the most
 significant bit. Evaluation is a table lookup, vectorized over all objects with NumPy.
 
 Expressions (the printed and parsed form of rules) and read-once formulas live in
-``expressions.py``, which builds on this module.
+``semantic_world.taxonomy.expressions``, which builds on this module.
 """
 
 from __future__ import annotations

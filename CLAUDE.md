@@ -70,6 +70,7 @@ python -m semantic_world.wordforms all data/wordforms/corpus_tiny.yaml          
 python -m semantic_world.corpus render runs/corpus/tiny_seed1 --wordforms runs/wordforms/corpus_tiny_seed1   # attach the word forms: word labels and the spelled rendering
 python -m semantic_world.wordforms all data/wordforms/corpus_default.yaml                  # the word forms of the default corpus (after generate data/corpus/default.yaml); "forms" in place of "all" makes the word forms without audio
 pytest tests/corpus                                              # the corpus generator's tests alone
+pytest tests/world                                               # the world package's tests alone (stage a1: matrices, identity, derived values)
 ```
 
 The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).

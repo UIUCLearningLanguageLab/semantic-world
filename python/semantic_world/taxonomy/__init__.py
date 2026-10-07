@@ -7,7 +7,7 @@ between features. The specification is ``docs/specs/TAXONOMY_GENERATOR.md``.
 The generator is a standalone Python program. It does not use the Rust engine.
 """
 
-from semantic_world.taxonomy.boolean import TruthTable
+from semantic_world.common.boolean import TruthTable
 from semantic_world.taxonomy.config import Config, ConfigError, config_from_mapping, load_config
 from semantic_world.taxonomy.constraints import (
     Constraint,

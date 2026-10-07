@@ -6,8 +6,8 @@ from __future__ import annotations
 import numpy as np
 
 from semantic_world.agents import Mind, register
+from semantic_world.engine import Action
 from semantic_world.observation import Observation
-from semantic_world.world import Action
 
 
 @register("random")

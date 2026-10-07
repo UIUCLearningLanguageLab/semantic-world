@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+from semantic_world.engine import Action
 from semantic_world.observation import Observation
-from semantic_world.world import Action
 
 
 class Mind(ABC):
