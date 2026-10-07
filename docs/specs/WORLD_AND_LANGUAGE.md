@@ -9,7 +9,7 @@ This specification brings the disembodied simulation under one world model of st
 The refactor is built in four phases. Each phase ends with a working corpus:
 
 - **(a)** static and fluent one-place facts, event types with preconditions and effects, inertia, and time steps;
-- **(b)** comparisons derived from scalars (CG.65 and CG.66);
+- **(b)** comparisons derived from scalars (CG.65 and CG.66), and numeric fluents;
 - **(c)** stored fluent relations, their profiles, and locations;
 - **(d)** sorts, derived relations, and parts.
 
@@ -44,12 +44,22 @@ Three build rulings were made on October 6, in the planning conversation that wr
 
 The older specifications stay as the record of what was built before. Each stage that changes behavior described in an older specification adds a short note at the top of the affected section, pointing to this specification.
 
+### A principle for defaults
+
+Where a choice balances something that the world's own constraints would make uneven (frequencies, shares, rates), the balanced form is an option, and the default is the unbalanced form that follows from the world. The world has many frequency confounds that emerge from its constraints, as the real world does. A study that needs one of them removed turns on the balanced option. (Jon, October 7.)
+
+Defaults that change under the principle, in stage a5 (Jon, October 7):
+
+- **The content of category documents.** Each sentence of an encyclopedic document about a category now draws its kind of content (membership, a fact about the topic, a fact about a subcategory, a relation fact, and the new kinds) in proportion to the number of facts of each kind that the document can still state. `documents.content_kind_weights: proportional | equal` (default `proportional`). With `equal`, each kind has the same chance, as before. `documents.relation_fact_share` still overrides the share of relation facts.
+- **Event-type density (REL.15).** By default, the generator resamples an event type only when its requirement holds for no leaf pair or for every leaf pair, and never resamples a constraint for its density. The old checks (every event type within 1–30% of leaf pairs, every constraint at least 10%) stay available as settings.
+- **Feature base rates.** Heterogeneity is on by default: each free feature's base rate is drawn from a Beta distribution with the configured mean, so some features are common and others rare. The default concentration is 2. Setting heterogeneity off gives every free feature of a type the same base rate, as before.
+
 ## Terms
 
 - **World definition.** The data that defines a world: its entities' base facts, its feature rules, and its event types. Nothing else is part of the definition (REL.16).
 - **Entity.** An individual in the world. In phases (a) and (b), every entity is a taxonomy instance.
 - **Base fact.** A fact that is stored. **Derived fact.** A fact computed from other facts by a rule. A derived fact is never stored as an input, and never written by an event.
-- **Static.** Fixed for the whole life of the world. **Fluent.** Able to change over time. Every fact is static or fluent, and base or derived, so there are four kinds: base static (a free IS feature), derived static (a determined IS feature), base fluent (a state that events change), and derived fluent (computed from fluents).
+- **Static.** Fixed for the whole life of the world. **Fluent.** Able to change over time. Every fact is static or fluent, and base or derived, so there are four kinds: base static (a free PROPERTY feature), derived static (a determined PROPERTY feature), base fluent (a state that events change), and derived fluent (computed from fluents).
 - **Event type.** A kind of event, with participant roles (`agent`, and for a two-place event type, `patient`), a requirement, a precondition, and effects.
 - **Binding.** An assignment of entities to the roles of an event type. A binding never uses one entity twice (REL.5).
 - **Requirement.** A rule over the static facts of a binding. When the requirement holds, the entities are **able** to take part in the event: the owl can eat the mouse. Capacities ("can") are requirements.
@@ -58,8 +68,8 @@ The older specifications stay as the record of what was built before. Each stage
 - **Effect.** A change that an event makes to a base fluent of one of its participants.
 - **Event.** One occurrence of an event type, with a binding, in one time step of one episode.
 - **State.** The values of every base fluent of every entity at one time point. Static facts are not part of the state, because they never change.
-- **Time point and step.** An episode has time points `T.1`, `T.2`, and so on. Step k takes the state at `T.k` to the state at `T.k+1`. The events of step k happen between the two time points.
-- **Episode.** A run of the world over a set of participants and a number of steps. The corpus calls an episode a scene, and keeps the label `SN.<n>`.
+- **Time point and step.** An episode has time points `TIME.1`, `TIME.2`, and so on. Step k takes the state at `TIME.k` to the state at `TIME.k+1`. The events of step k happen between the two time points.
+- **Episode.** A run of the world over a set of participants and a number of steps. The corpus calls an episode a scene, and keeps the label `SCENE.<n>`.
 - **History.** The record of an episode: its participants, its initial state, and each step's events and changes.
 - **Selection policy.** The procedure that chooses which legal events happen. A selection policy is never part of the world.
 - **Runtime.** The code that computes derived facts, legal bindings, and next states from a world definition. The runtime has no randomness.
@@ -109,7 +119,7 @@ The runtime never draws a random number, and never chooses an event. The same de
 A conformance fixture is one JSON file in `tests/fixtures/world/`. Each fixture holds:
 
 - `definition`: a complete world definition, inline, in the JSON form of the definition files;
-- `initial`: the base fluents that are true at `T.1`, for each entity;
+- `initial`: the base fluents that are true at `TIME.1`, for each entity;
 - `steps`: a list of steps. Each step holds its `events` (event type and binding) and what must come out: `legal` (for each event type, the legal bindings in the state before the step), `derived` (the derived fluent facts that are true after the step), and `state` (the base fluents that are true after the step);
 - `error`: null, or the kind of error that `apply` must raise at a given step (an illegal event, or interfering events).
 
@@ -124,18 +134,49 @@ Two kinds of fixture are written:
 
 ### Labels
 
-| Object | Label | Example | Replaces |
-| --- | --- | --- | --- |
-| Base or derived fluent (Boolean) | `ST.<n>` | `ST.3` | new |
-| One-place event type | `EV.<n>` | `EV.4` | `CAN.<n>` as a feature |
-| Two-place event type, or a category of two-place event types | `E<i>.<j>...` | `E1.2` | `V<i>.<j>...` |
-| Event-type feature | `EF.<n>` | `EF.5` | `VF.<n>` |
-| Constraint of an event-type feature, or an event type's own constraint | `K.EF.<n>`, `K.<event type>` | `K.EF.5`, `K.E1.2.3` | `K.VF.<n>`, `K.<verb>` |
-| Capacity: able to be the agent of an event type (derived) | `CAN.<event type>` | `CAN.EV.4`, `CAN.E1.2` | `CAN.<n>`, `CAN.<verb>` |
-| Capacity: able to be the patient of a two-place event type (derived) | `CANBE.<event type>` | `CANBE.E1.2` | `CANBE.<verb>` |
-| Time point within an episode | `T.<k>` | `T.3` | new |
+Every label is a word that a human reader can read without a key: a capitalized name for the kind of object, a period, then the index. Indices start at 1, and periods separate every index, as before. The refactor relabels every program at once, because every dataset is regenerated: the taxonomy, the world, and the corpus in stage a5, and the word-form pipeline in stage a6. The older specifications keep the old labels, as the record of what was built.
 
-Labels for categories, instances, IS, HAS, and scalar dimensions are unchanged. Inside requirements and preconditions, a literal names its role with a prefix, as now: `a.` for the agent and `p.` for the patient (`a.HAS.4`, `p.ST.2`).
+| Object | Label | Example | Old label |
+| --- | --- | --- | --- |
+| Category | `CATEGORY.<path>` | `CATEGORY.1.3.2` | `C1.3.2` |
+| Instance (an entity) | `INSTANCE.<path>.<k>` | `INSTANCE.1.3.2.5` | `I1.3.2.5` |
+| Membership feature | `ISA.<category>` | `ISA.CATEGORY.1.3` | `ISA.C1.3` |
+| Property feature | `PROPERTY.<n>` | `PROPERTY.4` | `IS.4` |
+| Part feature | `PART.<n>` | `PART.12` | `HAS.12` |
+| Scalar dimension | `SCALARDIM.<n>` | `SCALARDIM.2` | `SC.2` |
+| Boolean fluent | `BOOLFL.<n>` | `BOOLFL.3` | new |
+| Numeric fluent (phase (b)) | `NUMFL.<n>` | `NUMFL.2` | new |
+| Stored relation (phase (c)) | `RELATION.<n>` | `RELATION.2` | new |
+| Place (phase (c)) | `PLACE.<n>` | `PLACE.4` | new |
+| Sort (phase (d)) | `SORT.<name>` | `SORT.PLACE` | new |
+| One-place event type | `EVENTTYPE1.<n>` | `EVENTTYPE1.4` | `CAN.<n>`, as a feature |
+| Two-place event type, or a category of two-place event types | `EVENTTYPE2.<path>` | `EVENTTYPE2.1.2.3` | `V1.2.3` |
+| Event-type feature | `EVENTFEAT.<n>` | `EVENTFEAT.5` | `VF.5` |
+| Constraint of an event-type feature, or an event type's own constraint | `CONSTRAINT.<owner>` | `CONSTRAINT.EVENTFEAT.5`, `CONSTRAINT.EVENTTYPE2.1.2.3` | `K.VF.5`, `K.V1.2.3` |
+| Capacity: able to be the agent of an event type (derived) | `CAN.<event type>` | `CAN.EVENTTYPE1.4`, `CAN.EVENTTYPE2.1.2` | `CAN.3`, `CAN.V1.2` |
+| Capacity: able to be the patient of a two-place event type (derived) | `CANBE.<event type>` | `CANBE.EVENTTYPE2.1.2` | `CANBE.V1.2` |
+| Role prefix inside a requirement, precondition, or effect | `agent.`, `patient.` | `patient.PROPERTY.7` | `a.`, `p.` |
+| Scene (an episode) | `SCENE.<n>` | `SCENE.8` | `SN.8` |
+| Event instance (one occurrence of an event type) | `SCENE.<n>.EVENTINSTANCE.<k>` | `SCENE.8.EVENTINSTANCE.5` | `SN.8.5` |
+| Time point within a scene | `TIME.<k>` | `TIME.3` | new |
+| Lexeme | `LEXEME.<n>` | `LEXEME.42` | `L.42` |
+| Document | `DOC.<n>` | `DOC.17` | `D.17` |
+| Sentence | `DOC.<n>.SENT.<k>` | `DOC.17.SENT.3` | `D.17.3` |
+| Proposition | `PROP.<n>` | `PROP.310` | `PR.310` |
+| Referent, within one document | `REF.<n>` | `REF.2` | `R.2` |
+| Entity variable | `VAR.<n>` | `VAR.1` | `X.1` |
+| Event variable | `EVENTVAR.<n>` | `EVENTVAR.1` | new |
+| Concept of a pole adjective | `<dimension>.HIGH`, `<dimension>.LOW` | `SCALARDIM.1.HIGH`, `NUMFL.2.LOW` | `SC.1.HIGH` |
+| Word (stage a6) | `WORD.<n>` | `WORD.12` | `W.12` |
+| Speaker (stage a6) | `SPEAKER.<n>` | `SPEAKER.3` | `S.3` |
+| Token, one recording (stage a6) | `WORD.<n>.SPEAKER.<m>.TOKEN.<k>` | `WORD.12.SPEAKER.3.TOKEN.2` | `W.12.S.3.2` |
+| Function word (stage a6) | `FUNCWORD.<n>` | `FUNCWORD.2` | `F.2` |
+| Affix (stage a6) | `AFFIX.<n>` | `AFFIX.1` | `AF.1` |
+| Inflected form (stage a6) | `WORD.<n>.AFFIX.<m>` | `WORD.12.AFFIX.1` | `W.12.AF.1` |
+| Branch marker, and marked form (stage a6) | `MARKER.<k>`, `WORD.<n>.MARKER.<k>` | `WORD.12.MARKER.2` | `M.2`, `W.12.M.2` |
+| Utterance (planned in `CONNECTED_SPEECH.md`) | `UTTERANCE.<n>.SPEAKER.<m>`, `DOC.<n>.SENT.<k>.SPEAKER.<m>` | `UTTERANCE.40.SPEAKER.3` | `U.40.S.3`, `D.17.3.S.4` |
+
+The operators of the logical form are already words, and stay as they are: `NEC`, `ALL`, `MOST`, `SOME`, `NO`, `EXISTS`, `ABLE`, `ABLE_NOW`, `EVENT`, `HOLDS`, `BECOME`, `INCREASE`, `DECREASE`, `AFTER`, `BEFORE`, `RAISES`, `LOWERS`, `GREATER`, `ABOVE`, and `BELOW`. So do the symbols `MEAN`, `RANGE`, `ENTITY`, and `THING`, and the tense and aspect values `PAST`, `PRESENT`, `SIMPLE`, and `PROGRESSIVE`. `EVENT(...)` says that an event instance occurred. Its first argument is an event instance, a scene (in test items), or an event variable.
 
 ### Files
 
@@ -146,7 +187,7 @@ A world run writes one folder, by default `runs/world/<name>_seed<seed>/`:
 | `config.yaml` | The resolved world configuration, including the resolved taxonomy configuration, all seeds, the git commit hash (flagged when the working tree had uncommitted changes), and the package version. |
 | `taxonomy/` | The taxonomy run that supplies the entities, in the taxonomy's own output format (see "Taxonomy outputs" under phase (a)). |
 | `definition.json` | The definition: every symbol, every rule in Boolean form and in matrix form, and every event type. The schema is below. |
-| `entities.csv` | One row per entity: its label, its leaf, its base static facts (free IS and HAS features, scalars), and its initial base fluents. |
+| `entities.csv` | One row per entity: its label, its leaf, its base static facts (free PROPERTY and PART features, scalars), and its initial base fluents. |
 | `derived/` | Derived values, each file tagged with the rule-set identity (see "Rule-set identity"). |
 | `world_stats.yaml` | The statistics in "World statistics". |
 
@@ -174,7 +215,7 @@ Each rule is turned into two threshold layers:
 
 A rule whose output is always true has one term with no literals and threshold 0. A rule whose output is always false has no terms. The terms are the rule's minimal DNF, which the taxonomy already computes for the complexity score. Any DNF equal to the truth table is valid: the agreement test is what guarantees correctness.
 
-Rules form layers in dependency order, as the taxonomy's rule layers do now. A threshold literal (`SC.2 > 0.4127`) and a comparison (`a.SC.1 - p.SC.1 > 0.15`) are computed before the first layer, as literals. A two-place requirement is the conjunction of its constraints: each constraint is a rule with its own two layers, and one more layer ANDs the constraints' outputs.
+Rules form layers in dependency order, as the taxonomy's rule layers do now. A threshold literal (`SCALARDIM.2 > 0.4127`) and a comparison (`agent.SCALARDIM.1 - patient.SCALARDIM.1 > 0.15`) are computed before the first layer, as literals. A two-place requirement is the conjunction of its constraints: each constraint is a rule with its own two layers, and one more layer ANDs the constraints' outputs.
 
 In `definition.json`, each layer is written sparsely: for each term, the indices of its literals in the literal table and whether each is complemented; for each output, the indices of its terms.
 
@@ -188,7 +229,7 @@ Derived values are written in `derived/`, and `derived/manifest.yaml` lists each
 
 | File in `derived/` | Contents |
 | --- | --- |
-| `static_features.csv` | One row per entity: every derived static feature (determined IS and HAS). |
+| `static_features.csv` | One row per entity: every derived static feature (determined PROPERTY and PART). |
 | `capacities.csv` | One row per entity: every capacity, `CAN.<event type>` and `CANBE.<event type>`, intensional, with a flag column for approximate capacities, then the extensional capacities (as `projections.csv` holds now). |
 | `capacity_roles.csv` | For each category and each one-place event type: whether the capacity is fixed at 1, fixed at 0, or free, and whether the exact or the local test decided. `NEC` statements use it. |
 | `relation_proportions.csv`, `relation_pairs.csv`, `event_type_stats.csv`, `thematic.csv` | As in `TAXONOMY_RELATIONS.md`, with "verb" read as "event type". Requirements only: these statistics describe what entities are able to do, never what is legal in a state. |
@@ -200,14 +241,14 @@ A capacity is a requirement only. A sleeping owl can still eat a mouse, because 
 A view chooses columns from the base facts and the derived values, and writes one table for a model. Views replace the taxonomy's single `instances.csv` and its exposure settings.
 
 ```
-python -m semantic_world.world view RUN_FOLDER --preset classic [--include IS,HAS,CAN.EV] [--out FILE]
+python -m semantic_world.world view RUN_FOLDER --preset classic [--include PROPERTY,PART,CAN.EVENTTYPE1] [--out FILE]
 ```
 
 Presets:
 
-- `base`: the base vector only (free IS and HAS features, scalars);
+- `base`: the base vector only (free PROPERTY and PART features, scalars);
 - `static`: the base vector and the derived static features;
-- `classic`: the columns of the old `instances.csv`: ISA, IS, HAS, the one-place capacities in the place of CAN, and the scalars.
+- `classic`: the columns of the old `instances.csv`: ISA, PROPERTY, PART, the one-place capacities in the place of CAN, and the scalars.
 
 `--include` takes label prefixes, and adds or narrows columns. A view records, in a sidecar YAML file, its preset, its columns, and the rule-set identity.
 
@@ -215,26 +256,27 @@ Presets:
 
 ### Taxonomy outputs
 
-The taxonomy generator keeps everything it does now for categories, instances, free features, determined IS and HAS features, roles, scalars, and statistics. Three things change:
+The taxonomy generator keeps everything it does now for categories, instances, free features, determined PROPERTY and PART features, roles, scalars, and statistics. Three things change:
 
 - **CAN features leave the taxonomy.** Their rules become the requirements of one-place event types, generated by the world package. Every configuration key that configured CAN features moves to `event_types.unary` in the world configuration, with the same meaning.
 - **Verbs leave the taxonomy.** The verb tree, verb features, constraints, projections, and relation statistics move to the world package, renamed as above. The `verbs` block of the taxonomy configuration moves to `event_types.binary` in the world configuration, with the same keys and meanings, except the exposure keys, which are removed.
-- **Base and derived values are written apart.** `instances.csv` is replaced by `base.csv` (labels, leaf, free IS and HAS features, scalars) and `derived/static_features.csv` with its manifest. The category-vector files keep both kinds of feature, because they describe categories, not world inputs. The taxonomy also writes its rules in matrix form (`rule_matrices.json`, in the `layers` format of `definition.json`), and runs the agreement test.
+- **Base and derived values are written apart.** `instances.csv` is replaced by `base.csv` (labels, leaf, free PROPERTY and PART features, scalars) and `derived/static_features.csv` with its manifest. The category-vector files keep both kinds of feature, because they describe categories, not world inputs. The taxonomy also writes its rules in matrix form (`rule_matrices.json`, in the `layers` format of `definition.json`), and runs the agreement test.
 
 The taxonomy still runs alone (`python -m semantic_world.taxonomy`), for studies that need only categories and features.
 
 ### Fluents
 
-A world has `fluents.count` Boolean fluents, `ST.1` to `ST.n`. Free fluents are base fluents: events change them. A proportion `fluents.derived_proportion` of fluents is derived instead.
+A world has `fluents.count` Boolean fluents, `BOOLFL.1` to `BOOLFL.n`. Free fluents are base fluents: events change them. A proportion `fluents.derived_proportion` of fluents is derived instead.
 
 - **Initial values.** Each base fluent gets an initial rate, drawn uniformly from `fluents.initial_rates` (default `[0.0, 0.2, 0.8, 1.0]`). Each entity's initial value is drawn at that rate, once, when the world is generated. A rate of 0 or 1 gives a fluent that starts the same for every entity. The initial values are part of `entities.csv`.
-- **No inheritance.** Fluents have no roles (defining, characteristic, undiagnostic) and do not follow the tree. Whether initial values should depend on category is a later option (see "Decisions to confirm").
-- **Derived fluents.** A derived fluent's rule reads at least one fluent (base or derived), and may also read static features and threshold literals. A rule that reads no fluent would be static, so the generator never draws one. Derived fluents are layered like determined IS and HAS features, with their own `fluents.max_chain_depth` (default 1). Rule complexity comes from the same settings as other rules.
-- **Static rules stay static.** Rules for determined IS and HAS features read static facts only. No rule for a static fact ever reads a fluent.
+- **No inheritance.** Fluents have no roles (defining, characteristic, undiagnostic) and do not follow the tree.
+- **Later options for initial values** (not built in phase (a)): initial rates inherited down the tree, as free features are, so that a category's members tend to start alike; and other kinds of distribution for the initial rates, chosen per fluent in the configuration (for example a Beta distribution, or a uniform range), in place of the fixed list.
+- **Derived fluents.** A derived fluent's rule reads at least one fluent (base or derived), and may also read static features and threshold literals. A rule that reads no fluent would be static, so the generator never draws one. Derived fluents are layered like determined PROPERTY and PART features, with their own `fluents.max_chain_depth` (default 1). Rule complexity comes from the same settings as other rules.
+- **Static rules stay static.** Rules for determined PROPERTY and PART features read static facts only. No rule for a static fact ever reads a fluent. A later option, not built in phase (a), could let such rules read fluents, so that a feature's value would change with state.
 
 ### Event types
 
-**One-place event types** (`EV.1` to `EV.n`) replace CAN features. The rule that computed `CAN.k` becomes the requirement of `EV.k`, sampled in the same way. One-place event types are flat: they have no tree.
+**One-place event types** (`EVENTTYPE1.1` to `EVENTTYPE1.n`) replace CAN features. The rule that computed `CAN.k` becomes the requirement of `EVENTTYPE1.k`, sampled in the same way. One-place event types are flat: they have no tree.
 
 **Two-place event types** replace verbs. The event-type tree, event-type features, constraint families, base relations, and the own constraint are those of Part B of `TAXONOMY_RELATIONS.md`, renamed. A two-place event type's requirement is the conjunction of its constraints, and an event-type category's requirement is its base relation. A requirement may contain cross-role constraints and comparisons, so a requirement is a rule over the whole binding, not only over each role alone. REL.17's "a requirement rule for each role" is the special case of a requirement with agent conditions and patient conditions only.
 
@@ -242,7 +284,7 @@ Requirements read static facts only: base and derived static features, threshold
 
 ### Preconditions
 
-A precondition is a conjunction of fluent literals: `a.ST.2 AND NOT p.ST.5`. A literal reads a base or a derived fluent of one role, positive or negated. An empty precondition is always true.
+A precondition is a conjunction of fluent literals: `agent.BOOLFL.2 AND NOT patient.BOOLFL.5`. A literal reads a base or a derived fluent of one role, positive or negated. An empty precondition is always true.
 
 - **One-place event types** get a number of precondition literals drawn from `event_types.preconditions.literals` (default weights `{0: 0.3, 1: 0.5, 2: 0.2}`), all on the agent.
 - **Two-place event types** get precondition literals in two ways, mirroring constraints. Each event-type feature carries a precondition literal with probability `event_types.preconditions.feature_rate` (default 0.3), and an event type gets the literals of every event-type feature that is true for it. Each event type also gets its own literals, drawn from `event_types.preconditions.literals`. So event types in one branch of the tree share preconditions, as they share base relations. Each literal's role is drawn from `event_types.preconditions.roles` (default `{agent: 0.5, patient: 0.5}`).
@@ -252,7 +294,7 @@ A precondition is a conjunction of fluent literals: `a.ST.2 AND NOT p.ST.5`. A l
 
 ### Effects
 
-An effect sets one base fluent of one role, to true or to false: `p.ST.3 := 1`. Effects never write a derived fluent or a static fact. There are no conditional effects.
+An effect sets one base fluent of one role, to true or to false: `patient.BOOLFL.3 := 1`. Effects never write a derived fluent or a static fact. There are no conditional effects.
 
 - **One-place event types** get a number of effects drawn from `event_types.effects.count` (default weights `{1: 0.7, 2: 0.3}`), all on the agent.
 - **Two-place event types** get effects in the same two ways as preconditions: an event-type feature carries an effect with probability `event_types.effects.feature_rate` (default 0.5), and each event type gets its own effects, drawn from `event_types.effects.count`. Each effect's role is drawn from `event_types.effects.roles` (default `{agent: 0.4, patient: 0.6}`).
@@ -265,28 +307,28 @@ An event file (`event_types.event_file`) can define event types by hand, as a ru
 
 ```yaml
 fluents:
-  ST.1: {initial_rate: 1.0}        # say, awake
-  ST.2: {initial_rate: 0.0}        # say, caught
+  BOOLFL.1: {initial_rate: 1.0}        # say, awake
+  BOOLFL.2: {initial_rate: 0.0}        # say, caught
 event_types:
-  E1.1:
-    precondition: "a.ST.1 AND NOT p.ST.2"
-    effects: ["p.ST.2 := 1"]
-  E1.2:
-    precondition: "a.ST.1 AND p.ST.2"
-    effects: ["p.ST.1 := 0"]
+  EVENTTYPE2.1.1:
+    precondition: "agent.BOOLFL.1 AND NOT patient.BOOLFL.2"
+    effects: ["patient.BOOLFL.2 := 1"]
+  EVENTTYPE2.1.2:
+    precondition: "agent.BOOLFL.1 AND patient.BOOLFL.2"
+    effects: ["patient.BOOLFL.1 := 0"]
 ```
 
 An explicit entry that breaks a rule above (an effect on a derived fluent, a requirement that reads a fluent, a contradiction) is a validation error that names the file and the entry. `data/world/events/chain_example.yaml` is a worked example.
 
 ### Time, steps, and inertia
 
-An episode starts at time point `T.1`, with each participant's initial base fluents. Step k takes the state at `T.k` to the state at `T.k+1`:
+An episode starts at time point `TIME.1`, with each participant's initial base fluents. Step k takes the state at `TIME.k` to the state at `TIME.k+1`:
 
-1. **Legality.** Every event of the step must be legal in the state at `T.k`.
+1. **Legality.** Every event of the step must be legal in the state at `TIME.k`.
 2. **Non-interference.** The events of one step must not interfere. Two events interfere when both write the same fluent of the same entity, or when one writes a base fluent that the other's precondition reads. A precondition reads a derived fluent's whole cone: every base fluent the derived fluent depends on, directly or through other derived fluents. The same event (same event type and binding) occurs at most once in a step.
-3. **Effects.** Each event's effects are applied to the state at `T.k`.
-4. **Inertia.** Every base fluent that no effect wrote keeps its value at `T.k+1`.
-5. **Derivation.** Derived fluents are recomputed from the state at `T.k+1`. They are never carried over.
+3. **Effects.** Each event's effects are applied to the state at `TIME.k`.
+4. **Inertia.** Every base fluent that no effect wrote keeps its value at `TIME.k+1`.
+5. **Derivation.** Derived fluents are recomputed from the state at `TIME.k+1`. They are never carried over.
 
 Because the events of a step do not interfere, applying them together gives the same state as applying them one at a time in any order. The Rust runtime may therefore apply them in sequence.
 
@@ -297,8 +339,9 @@ An effect that sets a fluent to the value it already has is still applied. The f
 Episodes replace the corpus's scene generator, which moves from `semantic_world.corpus.scenes` to `semantic_world.world.episodes`. Participants are drawn exactly as scenes draw them now: a seed instance, then others weighted by thematic relatedness, taxonomic similarity, and a constant. The scene settings stay in the corpus configuration, under `scene`.
 
 - **Initial state.** Each episode starts from the participants' initial values in `entities.csv`. Episodes are independent: nothing that happens in one episode carries into another. With `scene.initial: redraw`, each episode draws its participants' initial values afresh, at each fluent's initial rate, from the episode's own part of the stream.
-- **Each step.** The number of events in the step is drawn from a Poisson distribution with mean `scene.events_per_step`, as now. Events are then drawn one at a time by the selection policy. Each draw chooses among the events that are legal in the state at `T.k` and do not interfere with the events already chosen for the step. When no such event remains, the step has fewer events. After the draws, the runtime applies the step.
-- **The default selection policy**, `uniform_event_type`, keeps today's order of draws: the kind of event first (`scene.transitive_share`), then the event type among those with at least one available binding, weighted by `scene.event_type_weights` (the heir of `scene.verb_weights`), then a binding uniformly among the available ones. An event type that is legal for many bindings is therefore no more frequent than one legal for few.
+- **Each step.** The number of events in the step is drawn from a Poisson distribution with mean `scene.events_per_step`, as now. Events are then drawn one at a time by the selection policy. Each draw chooses among the events that are legal in the state at `TIME.k` and do not interfere with the events already chosen for the step. When no such event remains, the step has fewer events. After the draws, the runtime applies the step.
+- **The default selection policy**, `uniform_event`, draws uniformly among all available events: every legal binding of every event type that does not interfere with the events already chosen. An event type that is legal for many bindings is therefore more frequent than one legal for few, as in a world where some things simply happen more often. `scene.event_type_weights` (the heir of `scene.verb_weights`) multiplies the chance of each event type's events, and is 1 for every event type by default.
+- **The balanced policy**, `uniform_event_type`, keeps the corpus's old order of draws: the kind of event first (`scene.transitive_share`), then the event type among those with at least one available binding, weighted by `scene.event_type_weights`, then a binding uniformly among the available ones. An event type that is legal for many bindings is then no more frequent than one legal for few. A study that needs frequency kept apart from legality chooses this policy.
 - **Other policies** are registered by name in `semantic_world.world.policies`, and chosen with `scene.policy`. A policy receives the definition, the state, the participants, and its random generator, and returns the events of one step. A policy may never change the state itself.
 - **Quiescence.** When no event is legal at a time point, the episode ends there, and its history records `quiescent: true`. Otherwise the episode ends after its drawn number of steps.
 
@@ -307,18 +350,18 @@ Episodes replace the corpus's scene generator, which moves from `semantic_world.
 A history is one JSON object per episode. The corpus writes them to `scenes.jsonl`, and `python -m semantic_world.world simulate` writes them to `episodes.jsonl`. The schema is the same, and the 3D engine will write the same schema when the link is built.
 
 ```json
-{"label": "SN.8", "seed": "I1.3.2.5", "participants": ["I1.3.2.5", "I1.5.1.2", "I2.1.1.3"],
- "policy": "uniform_event_type", "rule_set_id": "4f1c...",
- "initial": {"I1.3.2.5": ["ST.1", "ST.4"], "I1.5.1.2": ["ST.1"], "I2.1.1.3": []},
+{"label": "SCENE.8", "seed": "INSTANCE.1.3.2.5", "participants": ["INSTANCE.1.3.2.5", "INSTANCE.1.5.1.2", "INSTANCE.2.1.1.3"],
+ "policy": "uniform_event", "rule_set_id": "4f1c...",
+ "initial": {"INSTANCE.1.3.2.5": ["BOOLFL.1", "BOOLFL.4"], "INSTANCE.1.5.1.2": ["BOOLFL.1"], "INSTANCE.2.1.1.3": []},
  "steps": [
    {"step": 1, "events": [
-     {"label": "SN.8.1", "type": "E1.2", "agent": "I1.3.2.5", "patient": "I1.5.1.2",
-      "changes": [{"entity": "I1.5.1.2", "fluent": "ST.2", "to": true}]}]},
+     {"label": "SCENE.8.EVENTINSTANCE.1", "type": "EVENTTYPE2.1.2", "agent": "INSTANCE.1.3.2.5", "patient": "INSTANCE.1.5.1.2",
+      "changes": [{"entity": "INSTANCE.1.5.1.2", "fluent": "BOOLFL.2", "to": true}]}]},
    {"step": 2, "events": []}],
- "final": "T.3", "quiescent": false}
+ "final": "TIME.3", "quiescent": false}
 ```
 
-- `initial` lists, for each participant, the base fluents that are true at `T.1`.
+- `initial` lists, for each participant, the base fluents that are true at `TIME.1`.
 - `changes` lists only base fluents whose value changed. A derived fluent's change is never recorded: it is recomputed.
 - Events are numbered within their episode in time order, and within a step in the order they were drawn, as now. Events have no aspect (CG.64).
 - `final` is the last time point.
@@ -377,20 +420,20 @@ event_types:
 
 | Concept | Part of speech | Concept label | Configuration key |
 | --- | --- | --- | --- |
-| Every category | noun | `C1.3.2` | `category` |
-| IS feature (free or derived) | adjective | `IS.12` | `is` |
-| HAS feature | part noun | `HAS.4` | `has` |
-| Fluent (base or derived) | state adjective | `ST.3` | `state` (new) |
-| One-place event type | intransitive verb | `EV.4` | `event_unary` (was `can`) |
-| Two-place event type | transitive verb | `E1.2.3` | `event` (was `verb`) |
-| Category of two-place event types | transitive verb (more general) | `E1.2` | `event_category` (was `verb_category`) |
-| Patient capacity | adjective | `CANBE.E1.1` | `patient_projection` |
-| Scalar dimension | two adjectives | `SC.1.HIGH`, `SC.1.LOW` (until phase (b)) | `scalar` |
+| Every category | noun | `CATEGORY.1.3.2` | `category` |
+| PROPERTY feature (free or derived) | adjective | `PROPERTY.12` | `is` |
+| PART feature | part noun | `PART.4` | `has` |
+| Fluent (base or derived) | state adjective | `BOOLFL.3` | `state` (new) |
+| One-place event type | intransitive verb | `EVENTTYPE1.4` | `event_unary` (was `can`) |
+| Two-place event type | transitive verb | `EVENTTYPE2.1.2.3` | `event` (was `verb`) |
+| Category of two-place event types | transitive verb (more general) | `EVENTTYPE2.1.2` | `event_category` (was `verb_category`) |
+| Patient capacity | adjective | `CANBE.EVENTTYPE2.1.1` | `patient_projection` |
+| Scalar dimension | two adjectives | `SCALARDIM.1.HIGH`, `SCALARDIM.1.LOW` (until phase (b)) | `scalar` |
 | The generic head noun | noun | `THING` | — |
 
 - Which patient capacities get words is a language setting (REL.16). The default keeps today's proportion: `named_proportion.patient_projection: 0.25`.
 - An event type whose requirement holds for every binding, or for none, never gets a word, as for verbs now.
-- The function word `become` is added (see "States and changes"). Its tense is marked like any verb's.
+- The function words `become` and `before` are added (see "States and changes" and "Causal statements"). The tense of `become` is marked like any verb's.
 
 ### Quantifiers (CG.59 to CG.62)
 
@@ -400,7 +443,7 @@ event_types:
 
 - `ALL`: every member of the subject set has the predicate. `NO`: none does. Both are extensional, and both are available for every predicate, including patient capacities and subjects with relative clauses. The bans of decisions 24 and 34 and CG.E61 are lifted.
 - `NEC_ALL`: the rules guarantee the predicate for the subject: the fixed test, as the law-like reading tests `all` now. "Fixed by the rules" means fixed by the feature rules and by the requirements of event types (`capacity_roles.csv`). `NEC_NO` is the same with the predicate fixed at 0. `NEC_ALL` implies `ALL`, because a subject set is never empty.
-- `NEC` applies to one-place predicates only: IS, HAS, one-place capacities, and membership. Relation facts (a two-place event type with a patient category) and patient capacities take the extensional quantifiers only, because no fixed test exists for them.
+- `NEC` applies to one-place predicates only: PROPERTY and PART features, one-place capacities, and membership. Relation facts (a two-place event type with a patient category) and patient capacities take the extensional quantifiers only, because no fixed test exists for them.
 - `MOST`: more than half of the subject set (CG.62).
 - `SOME`: at least one member.
 - Membership ("penguins are birds") is `NEC_ALL` by construction. A rule statement is always `NEC_ALL` (CG.61).
@@ -433,10 +476,10 @@ In the JSON logical form, each mention gains `"descriptive": true` or `false`. I
 
 | Sentence | Propositional rendering |
 | --- | --- |
-| the furry dog has legs | `{C1.3.2(R.1) AND IS.12(R.1)} HAS.4(R.1)` |
-| a penguin swam | `C1.3(R.1) AND EVENT(SN.8.5, PAST, SIMPLE, EV.3(R.1))` |
-| the dog that chased the cat ran | `{C1.3.2(R.1) AND C1.4.1(R.2) AND EVENT(SN.3.2, PAST, SIMPLE, E1.2(R.1, R.2))} EVENT(SN.3.4, PAST, SIMPLE, EV.7(R.1))` |
-| it has legs | `HAS.4(R.1)` |
+| the furry dog has legs | `{CATEGORY.1.3.2(REF.1) AND PROPERTY.12(REF.1)} PART.4(REF.1)` |
+| a penguin swam | `CATEGORY.1.3(REF.1) AND EVENT(SCENE.8.EVENTINSTANCE.5, PAST, SIMPLE, EVENTTYPE1.3(REF.1))` |
+| the dog that chased the cat ran | `{CATEGORY.1.3.2(REF.1) AND CATEGORY.1.4.1(REF.2) AND EVENT(SCENE.3.EVENTINSTANCE.2, PAST, SIMPLE, EVENTTYPE2.1.2(REF.1, REF.2))} EVENT(SCENE.3.EVENTINSTANCE.4, PAST, SIMPLE, EVENTTYPE1.7(REF.1))` |
+| it has legs | `PART.4(REF.1)` |
 
 - `renderings.propositional.descriptions: marked | omitted` (default `marked`). With `omitted`, the braces and their contents are left out, and the rendering holds the assertion only.
 - `test_sets.seen.descriptions: true | false` (default `true`) decides whether a description counts as stated, for `seen`. The default keeps today's counting.
@@ -448,19 +491,30 @@ Events no longer have an aspect. Each report of an event chooses its aspect, at 
 
 ### Events
 
-- An event-level proposition reports an event of a history. Its atom is `EV.3(R.1)` or `E1.2(R.1, R.2)`, named at a level of the event-type tree as verbs are now.
+- An event-level proposition reports an event of a history. Its atom is `EVENTTYPE1.3(REF.1)` or `EVENTTYPE2.1.2(REF.1, REF.2)`, named at a level of the event-type tree as verbs are now.
 - Truth is unchanged: the event occurred.
 - The grounding's `possible` field is replaced by two fields: `able` (the requirement holds for the binding) and `legal` (the binding was legal at some time point of the scene).
 - Event-level propositions are never negated.
+
+### "Can": what is held fixed
+
+A statement with "can" is true or false relative to what it holds fixed, its modal base (Kratzer, 1977, 1981). "Owls can eat mice" holds the owl's static facts fixed and leaves its state open. "The owl could not eat the mouse" holds the state at a time point fixed too. The world is closed: every condition that could stop an event is an explicit literal of a requirement or a precondition. So both readings are precise, and the proposition names which one it means.
+
+- **`ABLE(...)`** holds the static facts fixed: the requirement holds. Capacities (`CAN.`, `CANBE.`) and every class-level "can" use `ABLE`.
+- **`ABLE_NOW(SCENE.8, TIME.2, EVENTTYPE2.1.2(REF.1, REF.2))`** holds the state at time point `TIME.2` fixed too: the binding is legal at `TIME.2`. `NOT ABLE_NOW(...)` with `ABLE(...)` true says that a precondition blocks the event, as in "the owl could not eat the mouse".
+- **In narratives.** At `documents.blocked_rate` (default 0.1), after an event sentence, a sentence states that a participant could not do something at that time point: an event type for which the binding is able and not legal. The polarity is negative by default. `propositions.negation_rate.able_now` (default 0.8) sets the share of negative `ABLE_NOW` sentences, and the rest state that a participant could do something that it did not do.
+- **The language's words.** `lexicon.can_words: shared | distinct` (default `shared`). With `shared`, "can" expresses both `ABLE` and `ABLE_NOW`, as in English. With `distinct`, `ABLE_NOW` gets a function word of its own. A sentence's `readings` gain `able_now` beside `capacity`, so a shared "can" in a sentence about instances can have both readings.
+- **Test sets.** `able_now_<change>` items continue a situational narrative, and say whether a participant could do something at the scene's final time point. False items are split like false events: `blocked` (able, and not legal at that time point) and `impossible` (not able). The changes are a predicate swap (another event type) and a subject swap (another participant).
+- The qualification problem (McCarthy, 1977) does not arise inside the world, because every qualification is a literal of the definition. The problem moves to the language, which leaves the qualifications of "can" unsaid, and to the learner, who must infer them from what happened and what was blocked.
 
 ### States and changes
 
 Two new kinds of proposition, both at the instance level and both inside a scene:
 
-- **State.** `HOLDS(SN.8, T.2, PAST, ST.3(R.1))`: the fluent `ST.3` held of `R.1` at time point `T.2` of scene `SN.8`, as in "the mouse was asleep". A negative state is `HOLDS(SN.8, T.2, PAST, NOT ST.3(R.1))`: "the mouse was not asleep". Realized with the copula and the state adjective.
-- **Change.** `BECOME(SN.8, T.2, ST.3(R.1))`: `ST.3` was false of `R.1` at `T.2` and true at `T.3`, as in "the mouse became asleep". `BECOME(SN.8, T.2, NOT ST.3(R.1))` is the opposite change. Realized with `become` and the state adjective. A change says nothing about its cause, so the proposition stays precise when a derived fluent changes. The grounding records the event whose effect wrote the base fluent, when there is one (`caused_by`).
+- **State.** `HOLDS(SCENE.8, TIME.2, PAST, BOOLFL.3(REF.1))`: the fluent `BOOLFL.3` held of `REF.1` at time point `TIME.2` of scene `SCENE.8`, as in "the mouse was asleep". A negative state is `HOLDS(SCENE.8, TIME.2, PAST, NOT BOOLFL.3(REF.1))`: "the mouse was not asleep". Realized with the copula and the state adjective.
+- **Change.** `BECOME(SCENE.8, TIME.2, BOOLFL.3(REF.1))`: `BOOLFL.3` was false of `REF.1` at `TIME.2` and true at `TIME.3`, as in "the mouse became asleep". `BECOME(SCENE.8, TIME.2, NOT BOOLFL.3(REF.1))` is the opposite change. Realized with `become` and the state adjective. A change says nothing about its cause, so the proposition stays precise when a derived fluent changes. The grounding records the event whose effect wrote the base fluent, when there is one (`caused_by`).
 
-States and changes take the scene's tense (`propositions.events.tense`) and no aspect. Their JSON form is the instance-level form, with `"level": "state"` or `"level": "change"`, the scene, the time point, and the tense. Their predicate is `{"kind": "state", "fluent": "ST.3"}`.
+States and changes take the scene's tense (`propositions.events.tense`) and no aspect. Their JSON form is the instance-level form, with `"level": "state"` or `"level": "change"`, the scene, the time point, and the tense. Their predicate is `{"kind": "state", "fluent": "BOOLFL.3"}`.
 
 In narratives:
 
@@ -470,17 +524,31 @@ In narratives:
 
 **Readings.** A verb phrase whose predicate word is a state adjective, or `become`, has the reading `state`. The lexeme tells a state adjective from a static one.
 
+### Causal statements
+
+Class-level statements of what events do and what they need. Both kinds are `NEC`, because the event types' definitions guarantee them.
+
+- **Effect statement.** `NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))`: after every event of type `EVENTTYPE2.1.2`, its patient has `BOOLFL.3`. In an English gloss, "things that things catch become caught". An effect that sets a fluent to false gives `AFTER(EVENTVAR.1, NOT BOOLFL.3(VAR.2))`.
+- **Precondition statement.** `NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), BEFORE(EVENTVAR.1, BOOLFL.1(VAR.1))))`: before every event of type `EVENTTYPE2.1.2`, its agent has `BOOLFL.1`. In an English gloss, "things that catch things are awake before".
+- **Event variables.** `EVENTVAR.<n>` binds an event, as `VAR.<n>` binds an entity, and is numbered the same way. `EVENT(EVENTVAR.1, atom)` in a restrictor says that `EVENTVAR.1` is an event of the atom's event type, with the atom's participants. `AFTER(EVENTVAR.1, φ)` says that `φ` holds at the time point after `EVENTVAR.1`'s step. `BEFORE(EVENTVAR.1, φ)` says that `φ` holds at the time point before it.
+- **Truth.** An effect statement is true exactly when the event type has that effect. A precondition statement is true exactly when the event type's precondition holds that literal. A statement about an event-type category is true when every event type below the category has the effect or the literal, as happens when a defining event-type feature carries it. Statements are made about base fluents only, because the definition guarantees nothing about a derived fluent after an event. `AFTER` says nothing about change: an effect may set a fluent that was already true.
+- **Surface.** The subject is the generic head noun "thing" with a relative clause that names the event, as in rule statements: a subject relative for the agent ("things that catch things"), an object relative for the patient ("things that things catch"), and a one-place event type for its agent ("things that sleep"). The other participant is the bare plural "things". An effect statement's predicate is `become` with the state adjective. A precondition statement's predicate is the copula with the state adjective, followed by the function word `before`. Where `before` goes is a word-order setting, `grammar.word_order.before: after_predicate | before_predicate` (default `after_predicate`). Causal statements are in the present tense, and take "all" or the bare plural, by the language's quantifier settings for `NEC_ALL`. Like rule statements, they are exempt from the limits on content words. A word for an event-type category ("things that things hunt") may be used when the statement holds for the category.
+- **JSON form.** Level `class`, with the subject `{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}` and the predicate `{"kind": "effect", "fluent": "BOOLFL.3", "value": true}` or `{"kind": "precondition", ...}`. The predicate's role is the subject's role. The logical form also has `"causal": {"event_type": "EVENTTYPE2.1.2", "role": "patient", "fluent": "BOOLFL.3", "value": true}`, the definition entry that makes the statement true.
+- **In documents.** Encyclopedic documents about a feature gain two kinds of topic: an event type or event-type category, whose content is its effects and preconditions, and a fluent, whose content is the event types that set it, clear it, and need it. In these documents, a sentence is a causal statement at `propositions.causal_statement_rate` (default 0.5). Narratives keep their result sentences, so the corpus carries both the general statement and its instances.
+- **Readings.** A class-level sentence with `become`, or with `before`, has the reading `causal`.
+
 ### Test sets
 
 - **Event sets.** A false event-level item is one of three kinds, each in a test set of its own: `possible` (the binding was legal at some time point of the scene, and the event did not happen), `blocked` (the binding is able, and was never legal in the scene), and `impossible` (the binding is not able). The sets are `event_<change>_possible`, `event_<change>_blocked`, and `event_<change>_impossible`. The false-event rule is unchanged: no event with the item's event type (or any event type below it) and participants happened in the scene.
-- **State sets** (new). A state item is a continuation of a situational narrative, and states a fluent of one of its participants at the scene's final time point: `HOLDS(SN.8, T.final, PAST, ST.3(R.1))`, with the scene's actual final label. A false item is made by a predicate swap (another fluent with a word, false of the referent at that time) or a subject swap (another participant, for which the fluent is false). Each item is marked `changed` when the fluent's value at the final time point differs from its value at `T.1`. The sets are `state_<change>_changed` and `state_<change>_unchanged`: an item that changed can only be answered by tracking what the events did.
+- **State sets** (new). A state item is a continuation of a situational narrative, and states a fluent of one of its participants at the scene's final time point: `HOLDS(SCENE.8, TIME.final, PAST, BOOLFL.3(REF.1))`, with the scene's actual final label. A false item is made by a predicate swap (another fluent with a word, false of the referent at that time) or a subject swap (another participant, for which the fluent is false). Each item is marked `changed` when the fluent's value at the final time point differs from its value at `TIME.1`. The sets are `state_<change>_changed` and `state_<change>_unchanged`: an item that changed can only be answered by tracking what the events did.
+- **Causal sets** (new). `causal_effect_<change>` and `causal_precondition_<change>`, with four changes: a predicate swap (another fluent), a polarity swap (the opposite value), an event swap (another event type, or category at the same level, that lacks the effect or the literal), and a role swap (the other role, for two-place event types). Every false item is false under `NEC`. A false item that held after (or before) every event of its type in the corpus's scenes is marked `observed`, and goes into the `_lawlike` twin of its set, as CG.59 does for `ALL`.
 - All the rules of "False propositions and test sets" in `CORPUS_GENERATOR.md` still hold: matched pairs, one format, `seen`, context, and the stream rules.
 
 ### Outputs
 
 - `scenes.jsonl` holds histories, in the schema of "Histories".
 - `documents.jsonl` gains the new levels, `descriptive` on mentions, and `able` and `legal` in event groundings.
-- `stats.yaml` gains counts of state and change sentences, the share of events with a result sentence, and the share of state items marked `changed` in each state set.
+- `stats.yaml` gains counts of state, change, and causal sentences (causal by kind: effect and precondition), the share of events with a result sentence, and the share of state items marked `changed` in each state set.
 - `config.yaml` records the world run's identity (its configuration hash, seed, and rule-set identity) in place of the taxonomy run's.
 
 ### Configuration changes
@@ -495,7 +563,7 @@ In narratives:
 | `propositions.events.progressive_rate` | `documents.progressive_rate`, with `documents.one_aspect_per_event` |
 | `scene.verb_weights` | `scene.event_type_weights`; and `scene.policy`, `scene.initial` (new) |
 | `mention.verb_level_weights` | `mention.event_level_weights` |
-| — | `documents.initial_state_rate`, `documents.result_rate`, `propositions.negation_rate.state`, `renderings.propositional.descriptions`, `test_sets.seen.descriptions` |
+| — | `documents.initial_state_rate`, `documents.result_rate`, `documents.blocked_rate`, `propositions.negation_rate.state`, `propositions.negation_rate.able_now`, `lexicon.can_words`, `propositions.causal_statement_rate`, `grammar.word_order.before`, `renderings.propositional.descriptions`, `test_sets.seen.descriptions` |
 
 Every old key gets an error that names its new key.
 
@@ -553,22 +621,47 @@ Work on one branch per stage (`world-a1`, and so on). Each stage ends with its t
 2. **a2. The world generator.** Configuration, fluents, one-place and two-place event types (moved code, imported rather than removed for now), preconditions, effects, the event file, `definition.json`, `entities.csv`, capacities, views, world statistics, and `define`. *Accept:* every rule in "Preconditions" and "Effects" holds on the default world (no fluent read by a requirement, no effect on a derived fluent, no contradiction, every literal achievable); with `fluents.count: 0` and the old settings moved over, requirements, capacities, and relation statistics equal what the taxonomy computes today for the same seed (if the move makes equal draws impractical, the stage proposal says why, and the test instead re-evaluates every requirement by brute force from the truth tables); the chain example loads, and a broken event file fails with the right error; `view --preset classic` gives the columns of the old `instances.csv`.
 3. **a3. The runtime and the fixtures.** `runtime.py`, the brute-force evaluator, eight or more hand-written fixtures, generated fixtures, and `check-fixtures`. *Accept:* every fixture passes; on the tiny world, `legal` and `derive` agree with the brute-force evaluator in 1,000 random states; interfering events raise the documented error; applying a step's events together equals applying them one at a time in every order, on 1,000 random non-interfering sets.
 4. **a4. Episodes and histories.** `episodes.py`, the default policy, `history.py`, and `simulate`. *Accept:* every event in every history was legal in its step's starting state; no two events of a step interfere; replaying a history's events through `apply` from its initial state reproduces every recorded change and nothing else; with `fluents.count: 0`, every able binding is available at every step; on the chain example, the chain's events occur in the order the preconditions force.
-5. **a5. The cut-over.** The taxonomy loses CAN features, verbs, and exposure, and writes `base.csv`. The corpus reads world runs, uses `world.episodes`, and takes the new labels, the quantifiers (CG.59 to CG.62), aspect (CG.64), and `able` and `legal` in event groundings. *Accept:* every corpus test passes with its expectations updated, and each changed expectation is listed in the stage proposal; every generated proposition passes an independent recomputation of its truth from the world run's files; the law-like sets hold only `NEC` items whose extensional twin is true; the old configuration keys fail with errors that name the new keys.
-6. **a6. States, changes, and descriptions.** State adjectives, `become`, `HOLDS` and `BECOME`, initial-state and result sentences, readings, the state test sets, the three kinds of false event, CG.63's descriptions in the logical form and the rendering, and `seen`. *Accept:* every state and change sentence is true of its scene's history; every result sentence's change happened in its event's step; every `changed` mark agrees with the history; the propositional rendering parses back in both `marked` and `omitted` forms; `interpret(tree)` recovers every logical form.
-7. **a7. Documentation and datasets.** A new guide, `docs/guides/WORLD.md`; updates to `TAXONOMY.md` and `CORPUS.md`; the notes at the top of the superseded sections of older specifications; `CLAUDE.md`'s reading list and commands; and the default and tiny runs regenerated end to end (world, corpus, word forms, render). *Accept:* the full chain runs on the tiny configuration from the guide's commands alone; the default world and corpus run in under 15 minutes on a laptop, with the time recorded in the guide.
+5. **a5. The cut-over.** Every taxonomy, world, and corpus label changes to the labels of "Labels", and the defaults of "A principle for defaults" change. The taxonomy loses CAN features, verbs, and exposure, and writes `base.csv`. The corpus reads world runs, uses `world.episodes`, and takes the new labels, the quantifiers (CG.59 to CG.62), aspect (CG.64), and `able` and `legal` in event groundings. *Accept:* every corpus test passes with its expectations updated, and each changed expectation is listed in the stage proposal; every generated proposition passes an independent recomputation of its truth from the world run's files; the law-like sets hold only `NEC` items whose extensional twin is true; the old configuration keys fail with errors that name the new keys.
+6. **a6. Labels for word forms.** The word-form pipeline takes the new labels: words, speakers, tokens, function words, affixes, and inflected and marked forms. The word-form guide is updated, and `WORDFORM_PIPELINE.md` and `CONNECTED_SPEECH.md` get a note at the top of their "Labels" sections. *Accept:* every word-form output file uses only the new labels; the corpus's `render` command reads a relabeled run; with the labels mapped back, a word-form run is byte-identical to a run made before the stage with the same configuration and seed.
+7. **a7. States, changes, causal statements, and descriptions.** State adjectives, `become` and `before`, `HOLDS` and `BECOME`, initial-state and result sentences, causal statements, `ABLE_NOW` and blocked sentences, readings, the state, causal, and `able_now` test sets, the three kinds of false event, CG.63's descriptions in the logical form and the rendering, and `seen`. *Accept:* every state and change sentence is true of its scene's history; every causal statement is true by a re-reading of `definition.json`, and every false causal item is false; every `observed` mark agrees with the corpus's scenes; every result sentence's change happened in its event's step; every `changed` mark agrees with the history; the propositional rendering parses back in both `marked` and `omitted` forms; `interpret(tree)` recovers every logical form.
+8. **a8. Documentation and datasets.** A new guide, `docs/guides/WORLD.md`; updates to `TAXONOMY.md` and `CORPUS.md`; the notes at the top of the superseded sections of older specifications; `CLAUDE.md`'s reading list and commands; and the default and tiny runs regenerated end to end (world, corpus, word forms, render). *Accept:* the full chain runs on the tiny configuration from the guide's commands alone; the default world and corpus run in under 15 minutes on a laptop, with the time recorded in the guide.
 
-## Phase (b): comparisons derived from scalars
+## Phase (b): comparisons derived from scalars, and numeric fluents
 
-Scalars stay static in phase (b). Comparisons are derived static facts: computed when needed, never stored, and never written by an event.
+Scalars stay static in phase (b). Comparisons of scalars are derived static facts: computed when needed, never stored, and never written by an event. Phase (b) also adds numeric fluents: values that change over time, such as a need. Comparisons of numeric fluents are derived fluent facts, judged at a time point.
 
 ### The world
 
-- **`GREATER(SC.i, x, y)`**: the value of `x` on `SC.i` exceeds the value of `y`. The comparison is strict, so two equal values give false in both directions. `x` and `y` are entities, or category means.
-- **`ABOVE(SC.i, x, K, z)`**: the value of `x` is at least `z` standard deviations above the mean of comparison class `K`. **`BELOW(SC.i, x, K, z)`**: at least `z` standard deviations below. `K` is a category, or `ENTITY`, the world symbol for all entities, which replaces `THING` as the comparison class of a top-level category.
+- **`GREATER(SCALARDIM.i, x, y)`**: the value of `x` on `SCALARDIM.i` exceeds the value of `y`. The comparison is strict, so two equal values give false in both directions. `x` and `y` are entities, or category means.
+- **`ABOVE(SCALARDIM.i, x, K, z)`**: the value of `x` is at least `z` standard deviations above the mean of comparison class `K`. **`BELOW(SCALARDIM.i, x, K, z)`**: at least `z` standard deviations below. `K` is a category, or `ENTITY`, the world symbol for all entities, which replaces `THING` as the comparison class of a top-level category.
 - **`MEAN(C)`**: the mean value of category `C`'s instances on the scalar, used as an argument (CG.65).
 - **Comparison classes.** `derived/comparison_classes.csv` holds, for each category, `ENTITY`, and each scalar: the number of instances, the mean, and the standard deviation, computed as the corpus computes them now.
-- **The runtime.** `derive` gains `greater`, `above`, and `below`, evaluated on demand for given entities or category means. Requirement literals with margins (`a.SC.1 - p.SC.1 > 0.15`) are unchanged: they are literals of the world's rules, not comparisons that the language states.
+- **The runtime.** `derive` gains `greater`, `above`, and `below`, evaluated on demand for given entities or category means. Requirement literals with margins (`agent.SCALARDIM.1 - patient.SCALARDIM.1 > 0.15`) are unchanged: they are literals of the world's rules, not comparisons that the language states.
 - **Fixtures.** Phase (b) adds hand-written fixtures for ties, for `ENTITY`, and for a category mean.
+
+### Numeric fluents
+
+- **What they are.** A world has `numeric_fluents.count` numeric fluents, `NUMFL.1` to `NUMFL.n` (default 2). A numeric fluent is a base fluent with a real value for every entity. Each one has a range, `[0, 1]` by default, and settable per fluent. Values are clamped to the range.
+- **Initial values.** Each entity's initial value is drawn when the world is generated, from the fluent's initial distribution: `uniform` over the range (the default), `fixed` at a value, or `beta` with a mean and a concentration. The kind of distribution is set per fluent. Episodes start from these values, or redraw them with `scene.initial: redraw`, as Boolean fluents do.
+- **Drift.** A numeric fluent can change by itself at every step, as a need rises over time. A share `numeric_fluents.drift.share` of the numeric fluents (default 0.5) gets a drift per step, drawn uniformly from `numeric_fluents.drift.amounts` (default `[-0.1, 0.1]`). Drift applies to every participant of an episode, at every step.
+- **Effects.** An effect can add a constant to a numeric fluent of one role, or subtract one: `patient.NUMFL.1 += 0.3`. A share `event_types.effects.numeric_share` of effects (default 0.3) is numeric when numeric fluents exist. The constant is drawn uniformly from `event_types.effects.numeric_amounts` (default `[0.1, 0.5]`). Numeric effects attach to event-type features and to event types, as Boolean effects do.
+- **Order within a step.** For each entity and numeric fluent, the value after a step is `clamp(clamp(v + e) + d)`: first the effect `e` of the one event that wrote it (non-interference allows at most one), then the drift `d`, each clamped to the range in float64. Both runtimes use exactly this order.
+- **Preconditions** can hold numeric threshold literals: `agent.NUMFL.1 > 0.75`, or its negation `agent.NUMFL.1 <= 0.75`. The threshold is a point of the range, drawn from `event_types.preconditions.numeric_thresholds` (default the quarter points, 0.25, 0.5, and 0.75). A share `event_types.preconditions.numeric_share` of precondition literals (default 0.3) is numeric when numeric fluents exist. A literal must be achievable, by the initial distribution, by drift, or by some effect.
+- **Derived Boolean fluents** may read numeric threshold literals. Requirements still read static facts only.
+- **Comparisons at a time.** `GREATER(NUMFL.i, x, y)` compares two entities' values at one time point. `ABOVE(NUMFL.i, x, RANGE, q)` says that the value is at least the fraction `q` of the way through the fluent's range, and `BELOW(NUMFL.i, x, RANGE, q)` at most that fraction. These are absolute comparisons, with the range's ends as the standard, so no comparison class is needed. A change over one step is `INCREASE` or `DECREASE`: the value at `TIME.k+1` is greater, or less, than the value at `TIME.k`.
+- **Histories.** A numeric change is recorded as `{"entity": ..., "fluent": "NUMFL.1", "from": 0.4, "to": 0.7, "cause": "SCENE.8.EVENTINSTANCE.3"}`, with `"cause": "drift"` for a change by drift alone. Every numeric change is recorded, so a history can be replayed without the drift settings.
+- **Fixtures.** Hand-written fixtures for an effect, for drift, for clamping at both ends, for an effect and drift in one step, and for a numeric precondition at its threshold.
+
+### Conditional effects
+
+An effect can hold only under a condition, as a blow breaks a thing only if the thing is fragile. PDDL calls these conditional effects ("when" clauses).
+
+- **Form.** `when patient.PROPERTY.4 AND patient.BOOLFL.2 then patient.BOOLFL.3 := 1`. The condition is a conjunction of literals over the binding: static features, Boolean fluents, and numeric threshold literals, of either role. The effect is any effect of phases (a) and (b).
+- **Semantics.** The condition is judged in the state at `TIME.k`, before any effect of the step. When the condition is false, the effect does nothing.
+- **Non-interference** counts what a condition reads: an event whose effect writes a fluent that another event's condition reads interferes with that event.
+- **Generation.** A share `event_types.effects.conditional_share` of effects (default 0.2) gets a condition of one or two literals, drawn from `event_types.effects.condition_literals` (default weights `{1: 0.7, 2: 0.3}`). A condition must be satisfiable together with the event type's requirement and precondition.
+- **Causal statements.** The condition joins the restrictor: `NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)) AND PROPERTY.4(VAR.2), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))`. A static condition is realized as a modifier of the subject ("red things that things strike become broken", in an English gloss), and a fluent condition as a relative clause with `before`. A statement without its condition is not `NEC`, and is never generated as true. As a false item, it goes into the causal sets' `_lawlike` twins when it held in every scene.
+- **Fixtures.** Hand-written fixtures for a condition that holds, a condition that fails, a condition read by another event of the same step (interference), and a numeric condition.
 
 ### The corpus
 
@@ -576,22 +669,22 @@ Scalars stay static in phase (b). Comparisons are derived static facts: computed
 
 | Sentence | Propositional rendering |
 | --- | --- |
-| the big mouse is red | `{C1.5(R.1) AND ABOVE(SC.1, R.1, C1.5, 1.0)} IS.4(R.1)` |
-| elephants are big | `ABOVE(SC.1, MEAN(C1.4), C1, 1.0)` |
-| big penguins can swim | `MOST(C1.3(X.1) AND ABOVE(SC.1, X.1, C1.3, 1.0), ABLE(EV.3(X.1)))` |
+| the big mouse is red | `{CATEGORY.1.5(REF.1) AND ABOVE(SCALARDIM.1, REF.1, CATEGORY.1.5, 1.0)} PROPERTY.4(REF.1)` |
+| elephants are big | `ABOVE(SCALARDIM.1, MEAN(CATEGORY.1.4), CATEGORY.1, 1.0)` |
+| big penguins can swim | `MOST(CATEGORY.1.3(VAR.1) AND ABOVE(SCALARDIM.1, VAR.1, CATEGORY.1.3, 1.0), ABLE(EVENTTYPE1.3(VAR.1)))` |
 
 - A class-level comparison is a statement about the category, not a quantification over its members. Its level is `class`, with no quantifier, and its predicate kind is `comparison`. The language realizes it with a bare plural, which here carries no quantifier reading.
 - "Big" and "small" are the language's words for `ABOVE` and `BELOW` at the language's own z. `scalar_adjectives.z` stays as that language setting, and every proposition records the z it used.
 - The comparison class follows CG.3: the noun's category at the instance level, the subject's parent at the class level, and `ENTITY` for a top-level category. The setting `scalar_adjectives.class_levels_up` (default 1) lets the planner choose an ancestor further up, at the class level.
-- Concept labels `SC.1.HIGH` and `SC.1.LOW` remain the labels of the two adjectives' concepts in the lexicon.
+- Concept labels `SCALARDIM.1.HIGH` and `SCALARDIM.1.LOW` remain the labels of the two adjectives' concepts in the lexicon.
 
 **Comparatives (CG.66).**
 
 | Sentence | Propositional rendering |
 | --- | --- |
-| the owl is bigger than the mouse | `{C1.2(R.1) AND C1.5(R.2)} GREATER(SC.1, R.1, R.2)` |
-| the mouse is smaller than the owl | `{C1.5(R.2) AND C1.2(R.1)} GREATER(SC.1, R.1, R.2)` |
-| owls are bigger than mice | `GREATER(SC.1, MEAN(C1.2), MEAN(C1.5))` |
+| the owl is bigger than the mouse | `{CATEGORY.1.2(REF.1) AND CATEGORY.1.5(REF.2)} GREATER(SCALARDIM.1, REF.1, REF.2)` |
+| the mouse is smaller than the owl | `{CATEGORY.1.5(REF.2) AND CATEGORY.1.2(REF.1)} GREATER(SCALARDIM.1, REF.1, REF.2)` |
+| owls are bigger than mice | `GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2), MEAN(CATEGORY.1.5))` |
 
 - `GREATER` is the only comparative operator. "Smaller than" is the language's word for `GREATER` with its arguments in the other order. The language chooses the word, and the proposition stays one form.
 - The grammar gains a comparative form of each pole adjective, with `grammar.morphology.comparative: {realization: affix | word, position: after | before}`, and the function word `than`.
@@ -599,18 +692,33 @@ Scalars stay static in phase (b). Comparisons are derived static facts: computed
 - **Class level.** Category documents gain a content kind, a comparison fact: the topic compared with a sibling or a thematic partner, on one scalar. The kind has the same chance as the other kinds.
 - **Test sets.** `instance_comparison_role` swaps the arguments, and `instance_comparison_predicate` swaps the scalar for one on which the comparison is false. The class-level comparison facts join the class-level sets, with the same two changes.
 
+**Numeric fluents in the corpus.**
+
+| Sentence | Propositional rendering |
+| --- | --- |
+| the owl was hungry | `HOLDS(SCENE.8, TIME.2, PAST, ABOVE(NUMFL.1, REF.1, RANGE, 0.75))` |
+| the owl became hungrier | `INCREASE(SCENE.8, TIME.2, NUMFL.1(REF.1))` |
+| the owl was hungrier than the mouse | `HOLDS(SCENE.8, TIME.2, PAST, GREATER(NUMFL.1, REF.1, REF.2))` |
+| things that eat things become less hungry | `NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), LOWERS(EVENTVAR.1, NUMFL.1(VAR.1))))` |
+
+- **Words.** Each numeric fluent gets two adjectives, for its high and low ends, as a scalar does. They are absolute gradable adjectives ("full", "empty"), not relative ones ("big"). The high word is the language's word for `ABOVE` at the language's cut, `numeric_adjectives.cut_high` (default 0.75). The low word is the word for `BELOW` at `numeric_adjectives.cut_low` (default 0.25). Every proposition records its cut. The adjectives take the comparative forms of phase (b).
+- **States and changes.** Initial-state sentences can state a numeric pole. Result sentences can state a numeric change that the event's own effect made, with `become` and a comparative ("became hungrier"). A change by drift alone is never a result sentence, because the event did not cause it. Comparisons between two participants at a time point join the comparative descriptions, at `documents.comparative_rate`.
+- **Causal statements.** `RAISES(EVENTVAR.1, NUMFL.1(VAR.1))` and `LOWERS(EVENTVAR.1, NUMFL.1(VAR.1))` say that the event type's effect adds to, or subtracts from, the fluent. They are statements about the effect, not about the change that was observed, because clamping and drift can hide an effect. They are true exactly when the definition has the effect. A precondition with a numeric threshold is not stated, for the reason of decision 23: no word of the language states the exact threshold.
+- **Test sets.** The state sets gain numeric poles, judged at the scene's final time point, with the same `changed` marks. `state_comparison_role` swaps the two participants of a comparison at the final time point. The causal sets gain `RAISES` and `LOWERS`, with a direction swap as the polarity swap.
+
 **Rule statements with thresholds.** Terms that read a threshold literal are still skipped in phase (b), unless Jon chooses otherwise (decision 23 below).
 
 ### Build stages
 
-1. **b1. The world.** Comparisons in the runtime, comparison classes, `ENTITY`, and the fixtures. *Accept:* every comparison agrees with direct arithmetic on the scalar values; the comparison-class statistics agree with a recomputation from `base.csv`; the new fixtures pass.
-2. **b2. The corpus.** CG.65 and CG.66: the propositions, the comparative grammar, the planner's new content, the test sets, and the guide. *Accept:* every comparison sentence is true by an independent recomputation; every false comparison item is false; `interpret(tree)` recovers every logical form; with the comparative realized as an affix and as a word, trees are correct for all six clause orders.
+1. **b1. Conditional effects.** Conditions in the definition, the runtime, non-interference, generation, and the fixtures. *Accept:* every conditional effect fires exactly when its condition held in the step's starting state, on 1,000 random states of the tiny world; the new fixtures pass; a world with `conditional_share: 0` gives the same definition as before the stage.
+2. **b2. The world's comparisons and numeric fluents.** Comparisons in the runtime, comparison classes, `ENTITY`, numeric fluents (initial values, drift, numeric effects and preconditions, clamping, histories), and the fixtures. *Accept:* every comparison agrees with direct arithmetic on the values; the comparison-class statistics agree with a recomputation from `base.csv`; replaying every history through `apply` reproduces every recorded numeric value exactly; every value stays inside its range; the new fixtures pass.
+3. **b3. The corpus.** CG.65 and CG.66, numeric fluents, and conditional causal statements: the propositions, the comparative grammar, the numeric adjectives, the planner's new content, the test sets, and the guide. *Accept:* every comparison sentence is true by an independent recomputation; every false comparison item is false; `interpret(tree)` recovers every logical form; with the comparative realized as an affix and as a word, trees are correct for all six clause orders.
 
 ## Phase (c): stored fluent relations, their profiles, and locations (design)
 
 This section sets the design. Its detailed specification, with configuration, outputs, and build stages, is written and reviewed before the phase's build starts.
 
-**Relations are abstract.** A stored relation is `RL.<n>`, as a feature is `IS.<n>`. No relation has a built-in meaning. A relation behaves like nearness, or like location, because of its profile, never because of its name. What a language calls a relation is a setting of the language.
+**Relations are abstract.** A stored relation is `RELATION.<n>`, as a feature is `PROPERTY.<n>`. No relation has a built-in meaning. A relation behaves like nearness, or like location, because of its profile, never because of its name. What a language calls a relation is a setting of the language.
 
 - **Stored relations.** Binary fluent relations, stored sparsely as sets of ordered pairs (REL.19). There are no static stored relations.
 - **Profiles.** Each stored relation has a profile, drawn from a configured mix or given in an event file. The profiles of phase (c):
@@ -621,12 +729,12 @@ This section sets the design. Its detailed specification, with configuration, ou
   - *total functional*: each entity has exactly one partner. Adding a new pair replaces the entity's old pair.
   
   A profile is an integrity constraint that the runtime maintains. An event whose effects would break a profile is not legal, as if its precondition had failed.
-- **Effects** gain `add RL.2(a, p)` and `delete RL.2(a, p)`, between the roles of the event's binding. **Preconditions** gain relation literals over the binding: `RL.2(a, p)`, `NOT RL.2(p, a)`.
-- **Derived fluents** gain existential relation literals: `SOME.RL.2(x)`, true when `x` has at least one partner in `RL.2`, and `SOMEOF.RL.2(x)`, true when `x` is someone's partner. These literals are computed before the matrices, as threshold literals are.
+- **Effects** gain `add RELATION.2(a, p)` and `delete RELATION.2(a, p)`, between the roles of the event's binding. **Preconditions** gain relation literals over the binding: `RELATION.2(a, p)`, `NOT RELATION.2(p, a)`.
+- **Derived fluents** gain existential relation literals: `SOME.RELATION.2(x)`, true when `x` has at least one partner in `RELATION.2`, and `SOMEOF.RELATION.2(x)`, true when `x` is someone's partner. These literals are computed before the matrices, as threshold literals are.
 - **Non-interference** extends to relations: two events of one step interfere when one writes a pair that the other writes or reads. A symmetric pair counts as written in both directions.
-- **Locations.** Location is a total functional relation from entities to places: each entity is at exactly one place. An event type whose patient is a place, with an effect that adds a pair of the location relation, moves its agent. Until sorts arrive in phase (d), places are a fixed second kind of entity, labeled `PL.<n>`.
+- **Locations.** Location is a total functional relation from entities to places: each entity is at exactly one place. An event type whose patient is a place, with an effect that adds a pair of the location relation, moves its agent. Until sorts arrive in phase (d), places are a fixed second kind of entity, labeled `PLACE.<n>`.
 - **The 3D link.** A relation may carry a `spatial` mark that names a 3D detector and its parameters. Only the 3D runtime reads the mark: in 3D, the detector computes the relation from geometry, and the relation is not stored. The disembodied runtime ignores the mark. The mark is the one place where an abstract relation is tied to a concrete meaning, and the tie exists only in the 3D mode.
-- **The corpus** gains relational states and changes, such as `HOLDS(SN.8, T.2, PAST, RL.2(R.1, R.2))` and `BECOME` over relations, words for relations and places, and location sentences. A language's word for a symmetric relation ("near", in an English gloss) is a lexicon entry like any other. The relation's concept label stays `RL.2` (CG.67, as reworded).
+- **The corpus** gains relational states and changes, such as `HOLDS(SCENE.8, TIME.2, PAST, RELATION.2(REF.1, REF.2))` and `BECOME` over relations, words for relations and places, and location sentences. A language's word for a symmetric relation ("near", in an English gloss) is a lexicon entry like any other. The relation's concept label stays `RELATION.2` (CG.67, as reworded).
 
 Questions to settle before the detailed specification:
 
@@ -642,12 +750,12 @@ As for phase (c), this section sets the design, and the detailed specification f
 
 - **Sorts.** A small, coarse set of sorts (at first: entity, place, and part). Sorts are structural, like time points: they say what kinds of thing a symbol takes, not what the things are like. Every symbol gets a signature: the sorts of its arguments. Role requirements gain sort checks. Sorts replace the fixed second kind of phase (c).
 - **More profiles, and derived relations.** Phase (d) adds the *acyclic* and *transitive* profiles. Derived relations come from profiles: the converse of a relation, and the transitive closure of an acyclic one. They are computed by stratified rules, with positive recursion only.
-- **Parts.** Parts become entities of the part sort, with their own static features ("red arms", in an English gloss). Each part is linked to its whole by a stored relation whose profile is functional (a part has one whole) and acyclic. Parthood, like location, is a profile and a sort, not a built-in relation. Whole-level features can be derived from parts: `HAS.n(x)` when some part of `x` has kind `n`.
+- **Parts.** Parts become entities of the part sort, with their own static features ("red arms", in an English gloss). Each part is linked to its whole by a stored relation whose profile is functional (a part has one whole) and acyclic. Parthood, like location, is a profile and a sort, not a built-in relation. Whole-level features can be derived from parts: `PART.n(x)` when some part of `x` has kind `n`.
 
 Questions to settle before the detailed specification:
 
 1. Are part kinds generated by the taxonomy (a second tree, or a list), and does each whole category inherit its parts the way it inherits free features now?
-2. Do today's HAS features all become derived from parts, or do some stay free features?
+2. Do the PART features all become derived from parts, or do some stay free features?
 3. Is the part relation static at first, and fluent only when events attach and detach parts?
 4. Do counts of parts ("four legs") come in this phase?
 
@@ -658,49 +766,57 @@ The Rust runtime is not built in this specification. It is written when the 3D l
 - A crate loads `definition.json` and `entities.csv`, and implements `derive`, `able`, `legal`, and `apply` with the semantics of phase (a), and later of phases (b) to (d).
 - The crate passes every fixture in `tests/fixtures/world/`.
 - The 3D engine maps its actions onto event types, with an actuator and a duration for each. A step of the world model is a decision point. Relations with a `spatial` mark are computed by their detectors.
-- Milestone 1's tags, stocks, and states correspond to static facts, numeric fluents, and Boolean fluents. Numeric fluents are not part of phases (a) to (d), and are added with the link.
+- Milestone 1's tags, stocks, needs, and states correspond to static facts, numeric fluents, numeric fluents with drift, and Boolean fluents. Numeric fluents come in phase (b).
 - The link adds to contracts 2, 5, and 7 in `docs/CONTRACTS.md`. Nothing in this specification changes the contracts.
 
 ## Questions for Jon
 
 When a question comes up that this specification does not answer, and the answer would change the world's content, a file format, or what models are given, stop and ask. Write the question, the options, and a recommendation in `docs/proposals/`, one file per question. Small engineering choices inside a module need no question. Record them in the stage's proposal file.
 
-## Decisions to confirm
+## Decisions
 
-These choices were made while writing this specification. Each one is the working design unless Jon changes it.
+Jon reviewed every decision below on October 7, 2026, in five batches. Each item says whether it was confirmed as written or revised. These choices were made while writing this specification. Each one is the working design unless Jon changes it.
 
-1. **Labels.** One-place event types are `EV.<n>`, two-place event types and their categories `E<i>.<j>...`, event-type features `EF.<n>`, fluents `ST.<n>`, and time points `T.<k>`. `CAN.` and `CANBE.` remain, as the labels of derived capacities.
-2. **Fluents are Boolean, and a feature type of their own.** Numeric fluents (needs, amounts) are added with the 3D link, not in phases (a) to (d).
-3. **Initial values.** Each base fluent's initial rate is drawn from `[0.0, 0.2, 0.8, 1.0]`. Each entity's initial values are fixed when the world is generated, and every episode starts from them, with an option to redraw per episode. Initial values do not depend on category.
-4. **Static rules read static facts only.** A rule that reads a fluent makes a derived fluent.
-5. **"Can" is the requirement only.** `ABLE` and capacities ignore state. Legality adds the precondition.
-6. **Preconditions are conjunctions of fluent literals**, in the style of STRIPS. Requirements keep the full rule families.
-7. **Effects set base fluents to true or false**, with no conditional effects.
-8. **Preconditions and effects attach to event-type features** as well as to event types, so a branch of the event-type tree shares them, as it shares base relations (REL.10).
-9. **A requirement is a rule over the whole binding**, so cross-role constraints and comparisons stay. REL.17's per-role wording is read as the special case.
-10. **Parallel steps.** A step can hold several events, which must not interfere, and which are applied together. An episode ends early when nothing is legal.
-11. **The default selection policy** keeps today's order of draws: the kind of event, then the event type, then a binding among the legal ones.
-12. **Scenes move to the world package**, as episodes. The scene settings stay in the corpus configuration.
-13. **Histories** extend `scenes.jsonl` with initial states and changes. The 3D engine writes the same schema once the link is built.
-14. **The definition's format** is `definition.json` plus `entities.csv`, with rules in both Boolean and matrix form, and the matrices made from the minimal DNF.
-15. **Taxonomy outputs** split the base vector (`base.csv`) from derived values (`derived/`, tagged with the rule-set identity). Views, with a `classic` preset, replace `instances.csv`.
-16. **A quarter of patient capacities get words** by default, as before. This is now a language setting (REL.16).
-17. **Default word meanings.** "All" and "no" express `NEC_ALL` and `NEC_NO` (as the old default, the fixed reading, did). The bare plural expresses `MOST`.
-18. **Relation facts and patient capacities are never `NEC`**, because no fixed test exists for them.
-19. **Descriptions (CG.63).** The noun, modifiers, and restrictive relative clause of a definite mention are descriptions, and an indefinite mention asserts its noun and modifiers. The rendering marks descriptions with braces. `seen` counts descriptions by default, as now.
-20. **States in narratives.** Initial-state sentences (rate 0.2) and result sentences (rate 0.5). Modifiers stay static in phase (a).
-21. **Test sets.** State items come from situational narratives, at the scene's final time point, split into `changed` and `unchanged`. False events split into `possible`, `blocked`, and `impossible`.
-22. **Causal rule statements are deferred.** Class-level statements of effects and preconditions ("things that are caught become ...") need new grammar, and are left for after phase (a). In phase (a), narratives carry the evidence for effects.
-23. **Threshold terms in rule statements.** Still skipped in phase (b). Two options for later: state a threshold by comparison with the category whose mean is nearest (the language approximates, and the proposition keeps the exact threshold); or add number words.
-24. **Class-level comparatives** compare category means, and category documents gain comparison facts with a sibling or a thematic partner.
-25. **Relations stay abstract.** Stored relations are `RL.<n>`, with no built-in meaning. Profiles move into phase (c), so a relation behaves like nearness or location because of its profile, not its name. Places are a fixed second kind in phase (c), ahead of the sorts of phase (d). The `spatial` mark is read only by the 3D runtime.
+1. **Labels.** (Revised with Jon, October 7.) Every label is a readable word, a period, and an index, as listed in "Labels". Jon's scheme (CATEGORY, INSTANCE, SCALARDIM, BOOLFL, NUMFL, RELATION, PLACE) is extended to every object. Event types are `EVENTTYPE1` and `EVENTTYPE2`, and their occurrences are `EVENTINSTANCE`, following the terms of October 5. `CAN.` and `CANBE.` remain, as the labels of derived capacities. Every program is relabeled in the refactor, the word-form pipeline in a stage of its own (a6).
+2. **Fluents are a feature type of their own.** Boolean fluents come in phase (a). Numeric fluents (needs, amounts) come in phase (b), moved there from the 3D link. (Jon, October 7.)
+3. **Initial values.** Each base fluent's initial rate is drawn from `[0.0, 0.2, 0.8, 1.0]`. Each entity's initial values are fixed when the world is generated, and every episode starts from them, with an option to redraw per episode. Initial values do not depend on category. (Confirmed by Jon, October 7. Inherited initial rates, and other kinds of distribution for initial rates, are noted under "Fluents" as later options.)
+4. **Static rules read static facts only.** A rule that reads a fluent makes a derived fluent. (Confirmed by Jon, October 7. A later option could let static rules read fluents; see "Fluents".)
+5. **"Can" names its modal base.** `ABLE` holds the static facts fixed (the requirement), and `ABLE_NOW` holds the state at a time point fixed too (legality). Which one the word "can" expresses is a setting of the language. Narratives state blocked events ("the owl could not eat the mouse"), and `able_now` test sets split false items into `blocked` and `impossible`. (Revised with Jon, October 7, after Kratzer's modal bases and McCarthy's qualification problem.)
+6. **Preconditions are conjunctions of fluent literals**, in the style of STRIPS. Requirements keep the full rule families. (Confirmed by Jon, October 7.)
+7. **Effects in phase (a) are unconditional.** An effect sets a base fluent, or adds to or subtracts from a numeric one. Conditional effects come in stage b1, the first stage of phase (b). (Jon, October 7.)
+8. **Preconditions and effects attach to event-type features** as well as to event types, so a branch of the event-type tree shares them, as it shares base relations (REL.10). (Confirmed by Jon, October 7.)
+9. **A requirement is a rule over the whole binding**, so cross-role constraints and comparisons stay. REL.17's per-role wording is read as the special case. (Confirmed by Jon, October 7.)
+10. **Parallel steps.** A step can hold several events, which must not interfere, and which are applied together. An episode ends early when nothing is legal. (Confirmed by Jon, October 7.)
+11. **The default selection policy draws uniformly among all legal events** (`uniform_event`), so frequency follows from the world's constraints. The balanced policy of the old corpus (`uniform_event_type`: the kind of event, then the event type, then a binding) is an option. (Jon, October 7; see "A principle for defaults".)
+12. **Scenes move to the world package**, as episodes. The scene settings stay in the corpus configuration. (Confirmed by Jon, October 7.)
+13. **Histories** extend `scenes.jsonl` with initial states and changes. The 3D engine writes the same schema once the link is built. (Confirmed by Jon, October 7.)
+14. **The definition's format** is `definition.json` plus `entities.csv`, with rules in both Boolean and matrix form, and the matrices made from the minimal DNF. (Confirmed by Jon, October 7.)
+15. **Taxonomy outputs** split the base vector (`base.csv`) from derived values (`derived/`, tagged with the rule-set identity). Views, with a `classic` preset, replace `instances.csv`. (Confirmed by Jon, October 7.)
+16. **A quarter of patient capacities get words** by default, as before. This is now a language setting (REL.16). (Confirmed by Jon, October 7. A non-random, "Gricean" choice of which concepts get words is on the language to-do list.)
+17. **Default word meanings.** "All" and "no" express `NEC_ALL` and `NEC_NO` (as the old default, the fixed reading, did). The bare plural expresses `MOST`. (Confirmed by Jon, October 7.)
+18. **Relation facts and patient capacities are never `NEC`**, because no fixed test exists for them. (Confirmed by Jon, October 7. A fixed test over pairs, and habitual statements over event instances, are on the language to-do list.)
+19. **Descriptions (CG.63).** The noun, modifiers, and restrictive relative clause of a definite mention are descriptions, and an indefinite mention asserts its noun and modifiers. The rendering marks descriptions with braces. `seen` counts descriptions by default, as now. (Confirmed by Jon, October 7.)
+20. **States in narratives.** Initial-state sentences (rate 0.2) and result sentences (rate 0.5). Modifiers stay static in phase (a). (Confirmed by Jon, October 7, as a first version. How narratives state states is on the language to-do list.)
+21. **Test sets.** State items come from situational narratives, at the scene's final time point, split into `changed` and `unchanged`. False events split into `possible`, `blocked`, and `impossible`. (Confirmed by Jon, October 7.)
+22. **Causal statements are in phase (a).** (Jon, October 7.) Effect statements (`AFTER`) and precondition statements (`BEFORE`), over event variables `EVENTVAR.<n>`, about base fluents only, realized with `become` and the new function word `before`, with test sets of their own (see "Causal statements").
+23. **Threshold terms in rule statements.** Still skipped in phase (b). Two options for later: state a threshold by comparison with the category whose mean is nearest (the language approximates, and the proposition keeps the exact threshold); or add number words. (Confirmed by Jon, October 7.)
+24. **Class-level comparatives** compare category means, and category documents gain comparison facts with a sibling or a thematic partner. (Confirmed by Jon, October 7.)
+25. **Relations stay abstract.** Stored relations are `RELATION.<n>`, with no built-in meaning. Profiles move into phase (c), so a relation behaves like nearness or location because of its profile, not its name. Places are a fixed second kind in phase (c), ahead of the sorts of phase (d). The `spatial` mark is read only by the 3D runtime. (Confirmed by Jon, October 7. Real, defined things of every type in the disembodied world are on the worlds to-do list, not for now.)
+26. **Numeric fluents.** Each has a range (`[0, 1]` by default) and is clamped to it. Initial values are uniform over the range by default, with `fixed` and `beta` as options per fluent. Half of the numeric fluents drift at every step. Within a step, the effect applies before the drift. (Confirmed by Jon, October 7. More drift options are on the simulation to-do list.)
+27. **Numeric adjectives are absolute.** A numeric fluent's words are judged against the ends of its range ("full", "empty"), not against a comparison class as "big" is. The language's cuts are 0.75 and 0.25 by default. (Confirmed by Jon, October 7.)
+28. **Numeric causal statements are about effects.** `RAISES` and `LOWERS` state what an effect does, not what was observed, because clamping and drift can hide an effect. Numeric thresholds in preconditions are not stated, as in decision 23. (Confirmed by Jon, October 7.)
+29. **Histories record every numeric change**, with its cause: an event, or drift. (Confirmed by Jon, October 7.)
+30. **Defaults follow the world.** Where a choice balances something that the world's constraints would make uneven, the balanced form is an option and the default follows the world ("A principle for defaults"). Under the principle, category documents draw their kinds of content in proportion to the facts available, event types are resampled only when they hold for no leaf pair or for every leaf pair, and feature base rates are heterogeneous by default. (Jon, October 7.)
 
 ## References
 
-- Barwise, J., and Cooper, R. (1981). Generalized quantifiers and natural language. *Linguistics and Philosophy*, 4, 159–219.
+- Barwise, J., and Cooper, REF. (1981). Generalized quantifiers and natural language. *Linguistics and Philosophy*, 4, 159–219.
 - Blum, A. L., and Furst, M. L. (1997). Fast planning through planning graph analysis. *Artificial Intelligence*, 90, 281–300. (Non-interfering actions in one step.)
-- Fikes, R. E., and Nilsson, N. J. (1971). STRIPS: a new approach to the application of theorem proving to problem solving. *Artificial Intelligence*, 2, 189–208.
+- Fikes, REF. E., and Nilsson, N. J. (1971). STRIPS: a new approach to the application of theorem proving to problem solving. *Artificial Intelligence*, 2, 189–208.
 - Fox, M., and Long, D. (2003). PDDL2.1: an extension to PDDL for expressing temporal planning domains. *Journal of Artificial Intelligence Research*, 20, 61–124.
 - Kennedy, C. (2007). Vagueness and grammar: the semantics of relative and absolute gradable adjectives. *Linguistics and Philosophy*, 30, 1–45.
-- Kowalski, R., and Sergot, M. (1986). A logic-based calculus of events. *New Generation Computing*, 4, 67–95.
+- Kowalski, REF., and Sergot, M. (1986). A logic-based calculus of events. *New Generation Computing*, 4, 67–95.
+- Kratzer, A. (1977). What "must" and "can" must and can mean. *Linguistics and Philosophy*, 1, 337–355.
+- Kratzer, A. (1981). The notional category of modality. In H.-J. Eikmeyer and H. Rieser (Eds.), *Words, worlds, and contexts* (pp. 38–74). De Gruyter.
+- McCarthy, J. (1977). Epistemological problems of artificial intelligence. *Proceedings of the Fifth International Joint Conference on Artificial Intelligence*, 1038–1044. (The qualification problem.)
 - Thiébaux, S., Hoffmann, J., and Nebel, B. (2005). In defense of PDDL axioms. *Artificial Intelligence*, 168, 38–69.
