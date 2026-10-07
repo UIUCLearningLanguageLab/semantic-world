@@ -1,6 +1,6 @@
 # Decision log
 
-This log lists every design decision made for Semantic World's taxonomy generator, word-form pipeline, connected speech plan, and corpus generator, with who proposed it, who decided it, and where it is explained. The specs and proposals hold the detail; this log is the index.
+This log lists every design decision made for Semantic World's taxonomy generator, word-form pipeline, connected speech plan, corpus generator, and world model, with who proposed it, who decided it, and where it is explained. The specs and proposals hold the detail; this log is the index.
 
 Started October 1, 2026, from the specs and proposals on `main` at `c6ed01d`, and from the planning conversation with Claude. New decisions are appended to the end of their section.
 
@@ -72,7 +72,7 @@ Spec: `docs/specs/TAXONOMY_RELATIONS.md`.
 | REL.16 | 2026-10-05 | The world is defined by each entity's base vector (its free IS and HAS features, and its scalars), feature rules, and event types. CAN features and projections are derived values: computed, cached with the identity of the rule set, never an input, and never edited. Which derived values a model sees is an experiment setting, and which ones the language names is a setting of the corpus, so the taxonomy configuration has no exposure setting. To be built in the world-and-language refactor. | Jon, Claude (chat) | Jon | Decided | Planning conversation |
 | REL.17 | 2026-10-05 | An event type has participant roles, each with a requirement rule over the features of whatever fills the role. CAN features become one-place event types, and verbs become two-place event types. On the world side, "event type" replaces "verb"; an event is one occurrence of an event type; a verb is a word that names an event type. To be built in the world-and-language refactor. | Claude (chat), Jon | Jon | Decided | Planning conversation |
 | REL.18 | 2026-10-05 | Rules are stored in Boolean form (literals plus a truth table) and computed as two-layer threshold matrices: ANDs over the literals and their complements, then an OR over the terms. Chains of rules are layers applied in order. Each run exports the matrices, and a test checks that the two forms agree. To be built in the world-and-language refactor. | Jon, Claude (chat) | Jon | Decided | Planning conversation |
-| REL.19 | 2026-10-06 | Static relations stay featural, computed from the participants' features and values (REL.1). Stored relations exist only as fluents, created and destroyed by events, such as near, holds, and inside. Static stored relations are not included for now. To be built in the world-and-language refactor. | Claude (chat) | Jon | Decided | Planning conversation |
+| REL.19 | 2026-10-06 | Static relations stay featural, computed from the participants' features and values (REL.1). Stored relations exist only as fluents, created and destroyed by events, such as near, holds, and inside (English glosses). Static stored relations are not included for now. To be built in the world-and-language refactor. | Claude (chat) | Jon | Decided | Planning conversation |
 
 ## Word-form pipeline
 
@@ -201,7 +201,7 @@ Spec: `docs/specs/CORPUS_GENERATOR.md`. The CG numbers match the spec's numbered
 | CG.64 | 2026-10-06 | Aspect belongs to the report, not to the event. Each report chooses its aspect, and both aspects are true. A document may keep one aspect for each event, as a discourse rule. Events get durations later, with event schemas. To be built in the world-and-language refactor. | Claude (chat), at Jon's request | Jon | Decided | Planning conversation, proposition check, P7 |
 | CG.65 | 2026-10-06 | A relative gradable adjective ("big") expresses a comparison that names its comparison class and its threshold: `ABOVE(SC.1, R.1, C1.5, 1.0)` for an instance, and `ABOVE(SC.1, MEAN(C1.4), C1, 1.0)` for a category, a statement about the category rather than a quantification over its members. `BELOW` is the other pole. The threshold is in standard deviations of the comparison class. "Big" and "small" are the language's words for the comparisons at the language's own z. To be built in the world-and-language refactor. | Claude (chat), at Jon's request | Jon | Decided | Planning conversation, proposition check, P5 |
 | CG.66 | 2026-10-06 | A comparative ("bigger than") expresses `GREATER(SC.1, R.1, R.2)`: the first value exceeds the second, with no threshold and no comparison class. Comparatives are built in the same phase as CG.65, and let rules with scalar thresholds be stated. To be built in the world-and-language refactor. | Claude (chat), at Jon's request | Jon | Decided | Same |
-| CG.67 | 2026-10-06 | A spatial adjective such as "near" expresses a stored fluent relation (REL.19), `NEAR(R.1, R.2)` at a time. It comes with the phase that adds stored fluent relations and locations, not with CG.65. Adjectives formed from nouns ("wooden") are not included. | Claude (chat), at Jon's request | Jon | Decided | Same |
+| CG.67 | 2026-10-06 | A spatial word such as "near" (an English gloss) is the language's word for a stored fluent relation (REL.19). That relation is abstract, like every relation: `RL.2(R.1, R.2)` at a time. The relation behaves like nearness because of its profile (symmetric and irreflexive), not because of its name. Which relation a language names with which word is a setting of the language. The relation comes with phase (c), which adds stored fluent relations, their profiles, and locations, not with CG.65. Adjectives formed from nouns ("wooden") are not included. (Reworded on 2026-10-06: relations are abstract.) | Claude (chat), at Jon's request | Jon | Decided | Same |
 
 ### Corpus generator: Claude Code's engineering choices
 
@@ -340,6 +340,16 @@ Spec: `docs/specs/MILESTONE_1.md`.
 | --- | --- | --- | --- | --- | --- | --- |
 | M1.1 | 2026-09-29 | A need's `rise_when` gains the value `awake`, so fatigue rises while awake and falls while asleep. | Claude Code | Jon | Decided | `proposals/2026-09-29-rise-when-awake.md` |
 | M1.2 | 2026-10-02 | "Mind" replaces "nervous system" everywhere. The data-file key `nervous_system` becomes `mind` in entity types and in the `population` entries of experiments, the Rust type `NervousSystem` becomes `Mind`, and the Python base class becomes `semantic_world.agents.Mind`. The old key is not kept as an alias. | Jon | Jon | Decided | `CONTRACTS.md`, `ENTITY_DEFINITIONS.md`, `specs/MILESTONE_1.md` |
+
+## World model
+
+Spec: `docs/specs/WORLD_AND_LANGUAGE.md`.
+
+| ID | Date | Decision | Proposed by | Decided by | Status | Source |
+| --- | --- | --- | --- | --- | --- | --- |
+| WM.1 | 2026-10-06 | One definition, two runtimes. The disembodied mode and the 3D engine share a world model, not a runtime. Python generates a world and writes its definition as data; a Python runtime runs the disembodied mode; the Rust engine will later load the same files. The two modes share the definition's format, the history format, and conformance fixtures. | Claude (chat) | Jon | Decided | Planning conversation; spec, "Architecture" |
+| WM.2 | 2026-10-06 | Conformance fixtures are written from phase (a) onward, as the Python runtime is built, so the Rust runtime has its tests waiting when the 3D link is built. | Claude (chat) | Jon | Decided | Planning conversation; spec, "Conformance fixtures" |
+| WM.3 | 2026-10-06 | The Python runtime and the world generator live in a new package, `python/semantic_world/world/`. The taxonomy generator stays the generator of each entity's initial static facts. | Claude (chat), Jon | Jon | Decided | Planning conversation |
 
 ## Needs Jon's check
 

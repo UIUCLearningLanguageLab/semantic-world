@@ -70,7 +70,7 @@ The reasoning behind these choices is in `docs/ENVIRONMENT_SURVEY.md`.
 - `docs/ENVIRONMENT_SURVEY.md` — a survey of existing environments, engines, and benchmarks, with a browsable version in `docs/environment_survey.html`.
 - `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and minds are defined.
 - `docs/specs/` — draft specifications for later work: developing organisms for the generative world, and a full wave simulation of sound.
-- `docs/specs/TAXONOMY_GENERATOR.md`, `TAXONOMY_RELATIONS.md`, `WORDFORM_PIPELINE.md`, and `CORPUS_GENERATOR.md` — the specifications of the world-content and language programs: categories, features, and relations; spoken word forms and sound embeddings; and documents in an artificial language. `CONNECTED_SPEECH.md` plans spoken sentences, and is not built yet.
+- `docs/specs/TAXONOMY_GENERATOR.md`, `TAXONOMY_RELATIONS.md`, `WORDFORM_PIPELINE.md`, and `CORPUS_GENERATOR.md` — the specifications of the world-content and language programs: categories, features, and relations; spoken word forms and sound embeddings; and documents in an artificial language. `CONNECTED_SPEECH.md` plans spoken sentences, and is not built yet. `WORLD_AND_LANGUAGE.md` specifies the refactor that puts both simulation modes under one world model of state and change, and rebuilds the corpus on that model. It is drafted, and not built yet.
 - `docs/guides/` — user guides for the taxonomy generator, the word-form pipeline, and the corpus generator.
 - `docs/DECISIONS.md` — every design decision of the world-content and language programs, with who proposed it and who decided it.
 
