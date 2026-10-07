@@ -115,7 +115,7 @@ needs:
   hunger:
     initial: 0.0
     rise_per_day: 0.5                      # rise rate in normal conditions
-    rise_when: always                      # always | night_outside_shelter
+    rise_when: always                      # always | night_outside_shelter | awake
     rise_multipliers: {running: 1.0}       # multiply the rise rate while a state holds
     fall_per_day: 0.0                      # passive fall rate, when the rise condition does not hold
     fall_multipliers: {}                   # multiply the fall rate while a state holds
