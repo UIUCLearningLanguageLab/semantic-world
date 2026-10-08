@@ -16,6 +16,8 @@ every input setting.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,10 +34,17 @@ from semantic_world.taxonomy.constraints import (
 )
 from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.rules import Rule, Threshold, input_key
-from semantic_world.world.errors import WorldError
+from semantic_world.world.dynamics import ROLES, Effect, Literal
+from semantic_world.world.errors import DefinitionError, WorldError
 from semantic_world.world.event_types import ConstraintSpec, EventTypes
 from semantic_world.world.fluents import Fluents, ThresholdLiteral
-from semantic_world.world.identity import DEFINITION_VERSION, rule_set_id, write_json
+from semantic_world.world.identity import (
+    DEFINITION_VERSION,
+    read_json,
+    rule_set_id,
+    to_json,
+    write_json,
+)
 from semantic_world.world.labels import ROLE_PREFIXES, translate, translate_expression, untranslate
 from semantic_world.world.matrices import (
     AgreementReport,
@@ -251,6 +260,13 @@ class Definition:
             "layers": self.layers_record(),
             "event_types": self.event_types_record(),
         }
+
+    def runtime(self) -> RuntimeDefinition:
+        """The definition as the runtime reads it, built from this definition's own record and
+        entities table through their JSON form, exactly as a reader of the files sees them."""
+        record = json.loads(to_json(self.record(), indent=1, sort_keys=False))
+        entities = json.loads(to_json(entities_frame(self).to_dicts(), indent=1, sort_keys=False))
+        return runtime_definition(record, entities)
 
     # Literal values ---------------------------------------------------------------------------
 
@@ -564,14 +580,464 @@ def write_definition(definition: Definition, folder: str | Path) -> None:
     entities_frame(definition).write_csv(folder / ENTITIES_FILE)
 
 
+# ---------------------------------------------------------------------------------------------
+# Loading: the definition as the runtime reads it
+# ---------------------------------------------------------------------------------------------
+
+STATIC_KINDS = ("property", "part")
+SYMBOL_KINDS = STATIC_KINDS + ("scalar", "fluent", "event_type", "event_type_category")
+LITERAL_KINDS = ("feature", "threshold", "fluent", "comparison", "constraint")
+SCOPES = ("entity", "binding")
+ENTITY_COLUMNS = ("label", "leaf")
+
+
+@dataclass(frozen=True)
+class EventTypeRecord:
+    """One event type as the runtime reads it: its roles, the output label of its requirement,
+    its precondition literals, and its effects. A category of event types has no events."""
+
+    label: str
+    kind: str
+    arity: int
+    requirement: str
+    precondition: tuple[Literal, ...]
+    effects: tuple[Effect, ...]
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        return ROLES[: self.arity]
+
+    @property
+    def is_category(self) -> bool:
+        return self.kind == "event_type_category"
+
+
+@dataclass(frozen=True)
+class RuntimeDefinition:
+    """A world definition loaded from its JSON record and its entities table, never from a
+    taxonomy run. The runtime (``runtime.py``) and the fixture checker read nothing else.
+
+    The rule-set identity is recomputed from the four hashed tables when the definition is
+    loaded, and a record whose identity differs is refused.
+    """
+
+    record: dict[str, Any]
+    """The definition record as read."""
+    rule_set_id: str
+    literals: tuple[LiteralSpec, ...]
+    entity_rules: tuple[RuleSpec, ...]
+    binding_rules: tuple[RuleSpec, ...]
+    entity_matrices: RuleMatrices
+    binding_matrices: RuleMatrices
+    event_types: tuple[EventTypeRecord, ...]
+    free_features: tuple[str, ...]
+    """The base static features (free PROPERTY and PART), in symbol order."""
+    derived_features: tuple[str, ...]
+    """The derived static features, in symbol order."""
+    scalars: tuple[str, ...]
+    base_fluents: tuple[str, ...]
+    derived_fluents: tuple[str, ...]
+    entity_labels: tuple[str, ...]
+    leaves: tuple[str, ...]
+    free_values: np.ndarray
+    """Shape ``(entities, free features)``, uint8."""
+    scalar_values: np.ndarray
+    """Shape ``(entities, scalars)``, float64."""
+    initial_values: np.ndarray | None
+    """Shape ``(entities, base fluents)``, uint8: the initial base fluents of ``entities.csv``;
+    None when the entities table carries no fluent columns (a fixture gives them apart)."""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_entity_index", {v: i for i, v in enumerate(self.entity_labels)})
+        object.__setattr__(self, "_event_types", {et.label: et for et in self.event_types})
+        object.__setattr__(self, "_base_index", {v: i for i, v in enumerate(self.base_fluents)})
+        object.__setattr__(
+            self, "_derived_index", {v: i for i, v in enumerate(self.derived_fluents)}
+        )
+        object.__setattr__(self, "_cones", _fluent_cones(self))
+        object.__setattr__(self, "cache", {})
+        for arr in (self.free_values, self.scalar_values, self.initial_values):
+            if arr is not None:
+                arr.setflags(write=False)
+
+    @property
+    def entity_count(self) -> int:
+        return len(self.entity_labels)
+
+    def entity_index(self, label: str) -> int:
+        try:
+            return self._entity_index[label]  # type: ignore[attr-defined]
+        except KeyError:
+            raise WorldError(f"{label} is not an entity of the definition") from None
+
+    def event_type(self, label: str) -> EventTypeRecord:
+        try:
+            return self._event_types[label]  # type: ignore[attr-defined]
+        except KeyError:
+            raise WorldError(f"{label} is not an event type of the definition") from None
+
+    def is_base_fluent(self, label: str) -> bool:
+        return label in self._base_index  # type: ignore[attr-defined]
+
+    def base_fluent_index(self, label: str) -> int:
+        return self._base_index[label]  # type: ignore[attr-defined]
+
+    def derived_fluent_index(self, label: str) -> int:
+        return self._derived_index[label]  # type: ignore[attr-defined]
+
+    def cone(self, fluent: str) -> tuple[str, ...]:
+        """The base fluents a fluent depends on: itself for a base fluent, and for a derived
+        fluent every base fluent its rule reads, directly or through other derived fluents."""
+        return self._cones[fluent]  # type: ignore[attr-defined]
+
+
+def _fluent_cones(definition: RuntimeDefinition) -> dict[str, tuple[str, ...]]:
+    literal_of = {spec.key: spec.reads for spec in definition.literals}
+    rules = {rule.output: rule for rule in definition.entity_rules}
+    cones: dict[str, tuple[str, ...]] = {f: (f,) for f in definition.base_fluents}
+    base_order = {f: i for i, f in enumerate(definition.base_fluents)}
+
+    def cone_of(label: str) -> tuple[str, ...]:
+        if label in cones:
+            return cones[label]
+        found: set[str] = set()
+        for key in rules[label].inputs:
+            reads = literal_of[key]
+            if reads["kind"] == "fluent":
+                found.update(cone_of(reads["fluent"]))
+        cones[label] = tuple(sorted(found, key=base_order.__getitem__))
+        return cones[label]
+
+    for label in definition.derived_fluents:
+        cone_of(label)
+    return cones
+
+
+def _expect(condition: bool, message: str) -> None:
+    if not condition:
+        raise DefinitionError(message)
+
+
+def _rule_spec(entry: Mapping[str, Any], literals: Sequence[LiteralSpec]) -> RuleSpec:
+    inputs = []
+    for i in entry["inputs"]:
+        _expect(
+            isinstance(i, int) and 0 <= i < len(literals),
+            f"the rule for {entry['output']} reads literal {i}, which is not in the literal table",
+        )
+        inputs.append(literals[i].key)
+    try:
+        table = TruthTable.from_bit_string(str(entry["truth_table"]))
+        return RuleSpec(str(entry["output"]), tuple(inputs), table, entry.get("expression"))
+    except (ValueError, WorldError) as error:
+        raise DefinitionError(f"the rule for {entry['output']} is malformed: {error}") from None
+
+
+def runtime_definition(
+    record: Mapping[str, Any], entities: Sequence[Mapping[str, Any]] | pl.DataFrame
+) -> RuntimeDefinition:
+    """Build the runtime's definition from a definition record (the contents of
+    ``definition.json``) and an entities table (the rows of ``entities.csv``, or the same rows
+    without the fluent columns). Checks the identity and every reference between the tables."""
+    rows = entities.to_dicts() if isinstance(entities, pl.DataFrame) else list(entities)
+    try:
+        return _runtime_definition(record, rows)
+    except (KeyError, TypeError) as error:
+        raise DefinitionError(f"the definition record is malformed: {error!r}") from None
+
+
+def _runtime_definition(
+    record: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
+) -> RuntimeDefinition:
+    _expect(
+        record["version"] == DEFINITION_VERSION,
+        f"the definition has version {record['version']!r}; this runtime reads version "
+        f"{DEFINITION_VERSION}",
+    )
+    identity = rule_set_id(
+        record["symbols"], record["literals"], record["rules"], record["event_types"]
+    )
+    _expect(
+        record["rule_set_id"] == identity,
+        f"the definition says its rule set is {record['rule_set_id']}, but its tables hash to "
+        f"{identity}",
+    )
+
+    # Symbols.
+    symbols = {}
+    free_features: list[str] = []
+    derived_features: list[str] = []
+    scalars: list[str] = []
+    base_fluents: list[str] = []
+    derived_fluents: list[str] = []
+    for symbol in record["symbols"]:
+        label, kind = str(symbol["label"]), str(symbol["kind"])
+        _expect(kind in SYMBOL_KINDS, f"the symbol {label} has the unknown kind {kind!r}")
+        _expect(label not in symbols, f"the symbol {label} is listed twice")
+        symbols[label] = symbol
+        if kind in STATIC_KINDS:
+            (derived_features if symbol["derived"] else free_features).append(label)
+        elif kind == "scalar":
+            scalars.append(label)
+        elif kind == "fluent":
+            (derived_fluents if symbol["derived"] else base_fluents).append(label)
+
+    # Literals.
+    literals: list[LiteralSpec] = []
+    for i, entry in enumerate(record["literals"]):
+        _expect(entry["index"] == i, f"literal {i} is written with index {entry['index']}")
+        kind, role = str(entry["kind"]), entry["role"]
+        key = str(entry["key"])
+        _expect(kind in LITERAL_KINDS, f"the literal {key} has the unknown kind {kind!r}")
+        if kind == "feature":
+            _expect(role in (None, *ROLES), f"the literal {key} has the role {role!r}")
+            feature = entry["feature"]
+            _expect(
+                symbols.get(feature, {}).get("kind") in STATIC_KINDS,
+                f"the literal {key} reads {feature}, which is not a static feature",
+            )
+        elif kind == "threshold":
+            _expect(role in (None, *ROLES), f"the literal {key} has the role {role!r}")
+            _expect(
+                symbols.get(entry["scalar"], {}).get("kind") == "scalar",
+                f"the literal {key} reads {entry['scalar']}, which is not a scalar",
+            )
+            _expect(
+                entry["operator"] == ">",
+                f"the literal {key} has the operator {entry['operator']!r}; only > is defined",
+            )
+            float(entry["threshold"])
+        elif kind == "fluent":
+            _expect(
+                role is None,
+                f"the literal {key} is a fluent literal with the role {role!r}; fluent literals "
+                f"belong to the entity scope",
+            )
+            _expect(
+                symbols.get(entry["fluent"], {}).get("kind") == "fluent",
+                f"the literal {key} reads {entry['fluent']}, which is not a fluent",
+            )
+        elif kind == "comparison":
+            _expect(role == "binding", f"the literal {key} is a comparison with the role {role!r}")
+            for side in ("agent_scalar", "patient_scalar"):
+                _expect(
+                    symbols.get(entry[side], {}).get("kind") == "scalar",
+                    f"the literal {key} compares {entry[side]}, which is not a scalar",
+                )
+            _expect(
+                entry["operator"] == ">",
+                f"the literal {key} has the operator {entry['operator']!r}; only > is defined",
+            )
+            float(entry["low"])
+            if entry["high"] is not None:
+                float(entry["high"])
+        else:
+            _expect(
+                role == "binding", f"the literal {key} reads a constraint with the role {role!r}"
+            )
+        literals.append(
+            LiteralSpec(key, {k: v for k, v in entry.items() if k not in ("index", "key")})
+        )
+    literal_keys = {spec.key for spec in literals}
+    _expect(len(literal_keys) == len(literals), "the literal table has a duplicate key")
+
+    # Rules.
+    entity_rules: list[RuleSpec] = []
+    binding_rules: list[RuleSpec] = []
+    outputs: set[str] = set()
+    for entry in record["rules"]:
+        scope = entry["scope"]
+        _expect(scope in SCOPES, f"the rule for {entry['output']} has the scope {scope!r}")
+        rule = _rule_spec(entry, literals)
+        _expect(rule.output not in outputs, f"{rule.output} has two rules")
+        outputs.add(rule.output)
+        if scope == "entity":
+            _expect(
+                rule.output in derived_features or rule.output in derived_fluents,
+                f"the entity rule for {rule.output} does not compute a derived symbol",
+            )
+            entity_rules.append(rule)
+        else:
+            _expect(
+                rule.output not in symbols,
+                f"the binding rule for {rule.output} computes a symbol; constraints and "
+                f"requirements are not symbols",
+            )
+            binding_rules.append(rule)
+    for label in (*derived_features, *derived_fluents):
+        _expect(label in outputs, f"the derived symbol {label} has no rule")
+    constraint_outputs = {rule.output for rule in binding_rules}
+    for spec in literals:
+        if spec.reads["kind"] == "constraint":
+            _expect(
+                spec.reads["constraint"] in constraint_outputs,
+                f"the literal {spec.key} reads {spec.reads['constraint']}, which no binding rule "
+                f"computes",
+            )
+
+    # Layers.
+    matrices = {}
+    for scope in SCOPES:
+        layers = [layer for layer in record["layers"] if layer.get("scope") == scope]
+        try:
+            built = RuleMatrices.from_record(record["literals"], layers)
+        except WorldError as error:
+            raise DefinitionError(f"the {scope} layers are malformed: {error}") from None
+        rules = entity_rules if scope == "entity" else binding_rules
+        _expect(
+            sorted(built.outputs) == sorted(rule.output for rule in rules),
+            f"the {scope} layers and the {scope} rules do not compute the same outputs",
+        )
+        matrices[scope] = built
+    _expect(
+        all(layer.get("scope") in SCOPES for layer in record["layers"]),
+        "a layer has no scope, or an unknown one",
+    )
+
+    # Event types.
+    event_types: list[EventTypeRecord] = []
+    seen: set[str] = set()
+    for entry in record["event_types"]:
+        label = str(entry["label"])
+        _expect(
+            symbols.get(label, {}).get("kind") in ("event_type", "event_type_category"),
+            f"the event type {label} is not an event-type symbol",
+        )
+        _expect(label not in seen, f"the event type {label} is listed twice")
+        seen.add(label)
+        arity = int(entry["arity"])
+        _expect(
+            arity in (1, 2) and list(entry["roles"]) == list(ROLES[:arity]),
+            f"the event type {label} has arity {arity} and roles {entry['roles']}",
+        )
+        requirement = str(entry["requirement"]["output"])
+        _expect(
+            requirement in constraint_outputs,
+            f"the requirement {requirement} of {label} has no binding rule",
+        )
+        precondition = []
+        for lit in entry["precondition"]["literals"]:
+            _expect(
+                lit["role"] in ROLES[:arity],
+                f"the precondition of {label} reads the role {lit['role']!r}",
+            )
+            _expect(
+                symbols.get(lit["fluent"], {}).get("kind") == "fluent",
+                f"the precondition of {label} reads {lit['fluent']}, which is not a fluent",
+            )
+            precondition.append(Literal(str(lit["role"]), str(lit["fluent"]), bool(lit["value"])))
+        effects = []
+        for effect in entry["effects"]:
+            _expect(
+                effect["role"] in ROLES[:arity],
+                f"an effect of {label} writes the role {effect['role']!r}",
+            )
+            _expect(
+                effect["fluent"] in base_fluents,
+                f"an effect of {label} writes {effect['fluent']}, which is not a base fluent",
+            )
+            effects.append(
+                Effect(str(effect["role"]), str(effect["fluent"]), bool(effect["value"]))
+            )
+        event_types.append(
+            EventTypeRecord(
+                label, str(entry["kind"]), arity, requirement, tuple(precondition), tuple(effects)
+            )
+        )
+
+    # Entities.
+    _expect(len(rows) > 0, "the entities table is empty")
+    columns = list(rows[0].keys())
+    allowed = set(ENTITY_COLUMNS) | set(free_features) | set(scalars) | set(base_fluents)
+    for column in columns:
+        _expect(
+            column in allowed,
+            f"the entities table has the column {column}, which is not a label, a leaf, a free "
+            f"feature, a scalar, or a base fluent",
+        )
+    for needed in ("label", *free_features, *scalars):
+        _expect(needed in columns, f"the entities table has no column {needed}")
+    fluent_columns = [f for f in base_fluents if f in columns]
+    _expect(
+        not fluent_columns or len(fluent_columns) == len(base_fluents),
+        "the entities table has some base fluent columns but not all of them",
+    )
+    labels = []
+    for row in rows:
+        _expect(
+            set(row.keys()) == set(columns), "the entities table has rows with different columns"
+        )
+        labels.append(str(row["label"]))
+    _expect(len(set(labels)) == len(labels), "the entities table has a duplicate label")
+    leaves = tuple(str(row.get("leaf", "")) for row in rows)
+    free_values = _bit_matrix(rows, free_features)
+    scalar_values = np.array(
+        [[float(row[s]) for s in scalars] for row in rows], dtype=np.float64
+    ).reshape(len(rows), len(scalars))
+    initial = _bit_matrix(rows, base_fluents) if fluent_columns else None
+
+    definition = RuntimeDefinition(
+        record=dict(record),
+        rule_set_id=identity,
+        literals=tuple(literals),
+        entity_rules=tuple(entity_rules),
+        binding_rules=tuple(binding_rules),
+        entity_matrices=matrices["entity"],
+        binding_matrices=matrices["binding"],
+        event_types=tuple(event_types),
+        free_features=tuple(free_features),
+        derived_features=tuple(derived_features),
+        scalars=tuple(scalars),
+        base_fluents=tuple(base_fluents),
+        derived_fluents=tuple(derived_fluents),
+        entity_labels=tuple(labels),
+        leaves=leaves,
+        free_values=free_values,
+        scalar_values=scalar_values,
+        initial_values=initial,
+    )
+    return definition
+
+
+def _bit_matrix(rows: Sequence[Mapping[str, Any]], columns: Sequence[str]) -> np.ndarray:
+    matrix = np.zeros((len(rows), len(columns)), dtype=np.uint8)
+    for i, row in enumerate(rows):
+        for j, column in enumerate(columns):
+            value = row[column]
+            _expect(
+                value in (0, 1, True, False),
+                f"the entities table has the value {value!r} for {column} of {row['label']}; "
+                f"expected 0 or 1",
+            )
+            matrix[i, j] = int(value)
+    return matrix
+
+
+def load_definition(folder: str | Path) -> RuntimeDefinition:
+    """Read ``definition.json`` and ``entities.csv`` from a world run folder."""
+    folder = Path(folder)
+    path = folder / DEFINITION_FILE
+    if not path.is_file():
+        raise DefinitionError(f"{path} is missing")
+    record = read_json(path)
+    entities = pl.read_csv(
+        folder / ENTITIES_FILE, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
+    )
+    return runtime_definition(record, entities)
+
+
 __all__ = [
     "DEFINITION_FILE",
     "ENTITIES_FILE",
     "Definition",
     "DefinitionReport",
+    "EventTypeRecord",
+    "RuntimeDefinition",
     "build_definition",
     "check_definition",
     "constraint_literals",
     "entities_frame",
+    "load_definition",
+    "runtime_definition",
     "write_definition",
 ]
