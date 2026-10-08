@@ -26,6 +26,8 @@ from semantic_world.world.errors import IllegalEventError, InterferenceError, Wo
 from semantic_world.world.matrices import AgreementReport, check_agreement
 
 Binding = tuple[int, ...]
+ABLE_CHUNK_ROWS = 32768
+"""Ordered pairs are evaluated in chunks of this many rows when the requirement table is built."""
 
 
 # ---------------------------------------------------------------------------------------------
@@ -338,17 +340,60 @@ def _binding_literals(
     return literals
 
 
+def able_table(definition: RuntimeDefinition) -> dict[str, np.ndarray]:
+    """Every event type's requirement over every binding of the definition's entities, computed
+    once on first use and cached on the definition: for a one-place event type a bool array over
+    the entities, for a two-place one a bool matrix over ordered pairs (agent, patient), with the
+    diagonal false. Requirements are static, so the table holds in every state."""
+    cached = definition.cache.get("able")
+    if cached is not None:
+        return cached
+    n = definition.entity_count
+    table: dict[str, np.ndarray] = {}
+    singles = np.arange(n, dtype=np.intp).reshape(-1, 1)
+    outputs = definition.binding_matrices.evaluate(
+        _binding_literals(definition, ("agent",), singles)
+    )
+    for et in definition.event_types:
+        if et.arity == 1:
+            table[et.label] = outputs[et.requirement].astype(bool)
+    if any(et.arity == 2 for et in definition.event_types):
+        agents = np.repeat(np.arange(n, dtype=np.intp), n)
+        patients = np.tile(np.arange(n, dtype=np.intp), n)
+        keep = agents != patients
+        pairs = np.stack([agents[keep], patients[keep]], axis=1)
+        outputs = {}
+        for start in range(0, pairs.shape[0], ABLE_CHUNK_ROWS):
+            chunk = pairs[start : start + ABLE_CHUNK_ROWS]
+            part = definition.binding_matrices.evaluate(
+                _binding_literals(definition, ("agent", "patient"), chunk)
+            )
+            for key, column in part.items():
+                outputs.setdefault(key, []).append(column)
+        for et in definition.event_types:
+            if et.arity == 2:
+                matrix = np.zeros((n, n), dtype=bool)
+                matrix[pairs[:, 0], pairs[:, 1]] = np.concatenate(outputs[et.requirement]).astype(
+                    bool
+                )
+                table[et.label] = matrix
+    definition.cache["able"] = table
+    return table
+
+
 def able(
     definition: RuntimeDefinition, event_type: str, bindings: Sequence[Binding] | np.ndarray
 ) -> np.ndarray:
     """Whether each binding's requirement holds (a bool array, one entry per binding). Static:
-    the answer is the same in every state."""
+    the answer is the same in every state, and comes from the cached table."""
     et = _event_type(definition, event_type)
     array = _bindings_array(definition, et, bindings)
     if array.shape[0] == 0:
         return np.zeros(0, dtype=bool)
-    outputs = definition.binding_matrices.evaluate(_binding_literals(definition, et.roles, array))
-    return outputs[et.requirement].astype(bool)
+    table = able_table(definition)[et.label]
+    if et.arity == 1:
+        return table[array[:, 0]]
+    return table[array[:, 0], array[:, 1]]
 
 
 def check_definition_agreement(
@@ -383,33 +428,27 @@ def check_definition_agreement(
 def _precondition_holds(
     definition: RuntimeDefinition, state: State, et: EventTypeRecord, array: np.ndarray
 ) -> np.ndarray:
-    """Whether each binding's precondition holds in ``state``: a bool array, and for the failing
-    bindings nothing more (``_first_failing_literal`` names the literal)."""
+    """Whether each binding's precondition holds in ``state``: a bool array. Derived fluents
+    are computed over the bound entities only."""
     holds = np.ones(array.shape[0], dtype=bool)
     if not et.precondition or array.shape[0] == 0:
         return holds
+    needed = np.unique(array)
     facts = (
-        derive(definition, state)
+        derive(definition, state, needed)
         if any(not definition.is_base_fluent(lit.fluent) for lit in et.precondition)
         else None
     )
     for lit in et.precondition:
         rows = array[:, et.roles.index(lit.role)]
-        holds &= _fluent_values(definition, state, facts, lit.fluent, rows) == int(lit.value)
+        if definition.is_base_fluent(lit.fluent):
+            values = state.values[rows, definition.base_fluent_index(lit.fluent)]
+        else:
+            assert facts is not None
+            positions = np.searchsorted(needed, rows)
+            values = facts.fluent[positions, definition.derived_fluent_index(lit.fluent)]
+        holds &= values == int(lit.value)
     return holds
-
-
-def _fluent_values(
-    definition: RuntimeDefinition,
-    state: State,
-    facts: DerivedFacts | None,
-    fluent: str,
-    rows: np.ndarray,
-) -> np.ndarray:
-    if definition.is_base_fluent(fluent):
-        return state.values[rows, definition.base_fluent_index(fluent)]
-    assert facts is not None
-    return facts.fluent[rows, definition.derived_fluent_index(fluent)]
 
 
 def legal(
@@ -534,6 +573,21 @@ def _fact(definition: RuntimeDefinition, key: tuple[int, str]) -> str:
     return f"{key[1]} of {definition.entity_labels[key[0]]}"
 
 
+def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
+    """Whether two well-formed events interfere: both write the same fluent of the same entity,
+    one writes a base fluent that the other's precondition reads (through the cones of derived
+    fluents), or the two are the same event."""
+    if a == b:
+        return True
+    et_a, et_b = definition.event_type(a.event_type), definition.event_type(b.event_type)
+    writes_a, writes_b = set(_writes(a, et_a)), set(_writes(b, et_b))
+    if writes_a & writes_b:
+        return True
+    return bool(writes_a & _reads(definition, b, et_b)) or bool(
+        writes_b & _reads(definition, a, et_a)
+    )
+
+
 def apply(definition: RuntimeDefinition, state: State, events: Iterable[Event]) -> State:
     """The state after one step. Every event must be legal in ``state``, and the events must
     not interfere; otherwise :class:`IllegalEventError` or :class:`InterferenceError` names the
@@ -579,10 +633,12 @@ __all__ = [
     "State",
     "StaticFacts",
     "able",
+    "able_table",
     "apply",
     "check_definition_agreement",
     "derive",
     "initial_state",
+    "interferes",
     "legal",
     "legal_bindings",
     "static_facts",

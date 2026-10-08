@@ -593,10 +593,12 @@ def test_dynamics_settings_never_change_the_requirements() -> None:
 
 def test_world_stats_report_the_structure(tiny_folder: Path) -> None:
     stats = yaml.safe_load((tiny_folder / "world_stats.yaml").read_text())
-    assert stats["fluents"] == {"base": 3, "derived": 1}
+    assert stats["fluents"]["base"] == 3 and stats["fluents"]["derived"] == 1
+    assert set(stats["fluents"]["initial_rates"]) == {"BOOLFL.1", "BOOLFL.2", "BOOLFL.3"}
     assert stats["event_types"]["one_place"] == 4 and stats["event_types"]["two_place"] == 4
     assert set(stats["fix_ups"]) >= {"effects_dropped_contradiction", "effects_dropped_empty"}
-    assert "longest_chain" in stats["enabling_graph"] and stats["episodes"] is None
+    assert "longest_chain" in stats["enabling_graph"]
+    assert stats["episodes"]["count"] == 1000  # stage a4: the statistics episodes
 
 
 def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> None:

@@ -974,7 +974,7 @@ def _runtime_definition(
     scalar_values = np.array(
         [[float(row[s]) for s in scalars] for row in rows], dtype=np.float64
     ).reshape(len(rows), len(scalars))
-    initial = _bit_matrix(rows, base_fluents) if fluent_columns else None
+    initial = _bit_matrix(rows, base_fluents) if fluent_columns or not base_fluents else None
 
     definition = RuntimeDefinition(
         record=dict(record),

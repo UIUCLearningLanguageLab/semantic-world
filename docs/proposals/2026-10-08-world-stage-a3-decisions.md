@@ -1,6 +1,6 @@
 # Proposal: decisions for stage a3 of the world-and-language refactor
 
-October 8, 2026. Raised in the orientation for stage a3 of `docs/specs/WORLD_AND_LANGUAGE.md` ("The runtime and the fixtures"), and while building the stage. Status: working design. Every choice below is Claude Code's unless Jon changes it. The choices are logged as WM.E41 and following in `docs/DECISIONS.md`.
+October 8, 2026. Raised in the orientation for stage a3 of `docs/specs/WORLD_AND_LANGUAGE.md` ("The runtime and the fixtures"), and while building the stage. Status: decided. Jon approved every choice on October 8, 2026, in the stage a4 prompt, and answered the four open questions (see "Jon's rulings" at the end). The choices are logged as WM.E41 to WM.E55 in `docs/DECISIONS.md`.
 
 ## Orientation
 
@@ -62,3 +62,14 @@ None blocks the stage. Each is an easy change in stage a4.
 2. **The error step's number.** `error.step` counts from 1, as the spec counts steps (choice 7). Is that the count Jon wants, or should it be the index into `steps`?
 3. **The `entities` table of a fixture** leaves the fluent columns to `initial` (choice 7). Should it carry the full rows of `entities.csv` instead, with `initial` repeating them?
 4. **The hand world's generator script.** The twelve hand fixtures were assembled by a short script outside the repository (the hand world once, the cases by hand). Should the script be committed, for example as `tests/world/hand_world.py`, so the hand world can be extended?
+
+## Jon's rulings (October 8, 2026, in the stage a4 prompt)
+
+Choices 1 to 14 are approved. The open questions are answered:
+
+1. **Caching `able`**: yes. The requirement is computed once per event type over all ordered pairs, on first use, and reused (`able_table` in `runtime.py`, stage a4).
+2. **The error step's number**: counting from 1 is approved, as the spec numbers steps.
+3. **The `entities` table of a fixture** keeps leaving the fluent columns to `initial`.
+4. **The hand world's script** is committed as `tests/world/hand_world.py`. It builds the hand world and the cases. The expected values stay typed in by hand, never computed by the runtime or the brute-force evaluator.
+
+From Jon's review: every fixture, hand-written or generated, must pass both the runtime and the brute-force evaluator. Stage a4 adds that test. The hand values of fixture 5 were corrected to match the runtime, so they need this independent check.

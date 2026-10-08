@@ -2,7 +2,7 @@
 
 This folder holds the conformance fixtures of `docs/specs/WORLD_AND_LANGUAGE.md` ("Conformance fixtures"). Each fixture is one JSON file. The Python runtime passes every fixture (`python -m semantic_world.world check-fixtures`), and the Rust runtime must pass the same files. This note is written for whoever builds the Rust runtime: the fixture format, the exact rules of the canonical JSON behind the rule-set identity, and the semantics of each operation. The Python reference is `python/semantic_world/world/runtime.py`; the brute-force reference, which reads truth tables and never the matrices, is `BruteForce` in `python/semantic_world/world/fixtures.py`.
 
-Two kinds of fixture are here. The `hand_*` files are hand-written over one small world of three entities, with every expected value worked out by hand. The `tiny_*` files are generated from `data/world/tiny.yaml` (`python -m semantic_world.world make-fixtures data/world/tiny.yaml`), with expected values from the brute-force evaluator; regenerating them gives the committed files byte for byte.
+Two kinds of fixture are here. The `hand_*` files are hand-written over one small world of three entities, with every expected value worked out by hand; `tests/world/hand_world.py` holds that world and the cases, and assembles the files. The `tiny_*` files are generated from `data/world/tiny.yaml` (`python -m semantic_world.world make-fixtures data/world/tiny.yaml`), with expected values from the brute-force evaluator; regenerating them gives the committed files byte for byte. `check-fixtures` runs every file through the runtime and then through the brute-force evaluator, so the two implementations check each other on every fixture.
 
 ## The fixture file
 
@@ -84,3 +84,25 @@ The truth table and the matrix form of every rule agree on every entity, every o
 - **`apply(definition, state, events)`**: the state after one step. (1) Every event must be legal in the state; otherwise the error kind is `illegal`. An event whose event type is unknown or a category, whose binding has the wrong number of entities, names an unknown entity, or names one entity twice, is illegal too. (2) The events must not interfere; otherwise the error kind is `interference`. Two events interfere when both write the same fluent of the same entity (whatever the values), or when one writes a base fluent that the other's precondition reads. A precondition that reads a derived fluent reads every base fluent of its cone: every base fluent the derived fluent's rule reads, directly or through other derived fluents. The same event (same event type and binding) twice in a step is interference. (3) Every effect sets its fluent of the entity of its role to its value, even when the value is unchanged. (4) Every base fluent that no effect wrote keeps its value. Applying the events together equals applying them one at a time in any order. Legality is checked for every event before interference is checked for any pair; the Python runtime's error message names the event or events and the reason.
 
 The runtime draws no random number and chooses no event. The same definition, state, and events always give the same result.
+
+## Histories
+
+A history is the record of one episode: one JSON object, written as one line of a JSON lines file (`episodes.jsonl` from `python -m semantic_world.world simulate`, `scenes.jsonl` from the corpus). The 3D engine writes the same schema. The Python reference is `python/semantic_world/world/history.py`, and `replay` there checks a history against the runtime.
+
+| Key | Contents |
+| --- | --- |
+| `label` | `SCENE.<n>`, the episode's label. |
+| `seed` | The seed instance: the first participant. |
+| `participants` | The entity labels, the seed first, then the others in the order they were drawn. |
+| `policy` | The name of the selection policy that chose the events. |
+| `rule_set_id` | The rule-set identity of the definition the episode ran on. A history replays only on that definition. |
+| `initial` | For each participant, the base fluents true at `TIME.1`, in symbol order. Entities that are not participants keep the definition's initial values. |
+| `steps` | One object per step, in order: `step` (counted from 1: step k takes `TIME.k` to `TIME.k+1`), `events`, and, when the run recorded legality, `legal`. |
+| `final` | The last time point, `TIME.<number of steps + 1>`. |
+| `quiescent` | `true` when the episode ended because no event was legal at its last time point. |
+
+Each event of a step is `label` (`SCENE.<n>.EVENTINSTANCE.<k>`, numbered within the episode in time order and within a step in the order the events were drawn), `type` (the event type), `agent`, `patient` (two-place event types only), and `changes`: the base fluents the event's effects changed, each `{"entity", "fluent", "to"}` with `to` the new value. An effect that sets a fluent to the value it already has records no change. A derived fluent's change is never recorded. Numeric fluents (phase (b)) will add their changes, with their causes, to the same list.
+
+`legal`, when present, maps every event type that has events to the number of its legal bindings among the participants in the state before the step.
+
+A history replays when, from its initial state, every step's events are legal and free of interference under `apply`, every event's recorded changes are exactly the base fluents its effects changed, and `final` names the time point after the last step. Events of one step are applied together; because they do not interfere, applying them one at a time in any order gives the same state.
