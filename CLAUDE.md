@@ -72,7 +72,9 @@ python -m semantic_world.wordforms all data/wordforms/corpus_default.yaml       
 pytest tests/corpus                                              # the corpus generator's tests alone
 python -m semantic_world.world define data/world/default.yaml [--seed N] [--out DIR]   # generate a world: the embedded taxonomy run, definition.json, entities.csv, derived values, statistics
 python -m semantic_world.world view runs/world/tiny_seed1 --preset classic [--include PROPERTY,PART] [--out FILE]   # a table for a model: base, static, or classic
-pytest tests/world                                               # the world package's tests alone (stages a1 and a2: matrices, identity, derived values, the world generator)
+python -m semantic_world.world check-fixtures [tests/fixtures/world]   # run the Python runtime on every conformance fixture
+python -m semantic_world.world make-fixtures data/world/tiny.yaml [--out tests/fixtures/world] [--count N] [--steps N]   # regenerate the tiny world's fixtures (expected values from the brute-force evaluator)
+pytest tests/world                                               # the world package's tests alone (stages a1 to a3: matrices, identity, derived values, the world generator, the runtime, the fixtures)
 ```
 
 The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).

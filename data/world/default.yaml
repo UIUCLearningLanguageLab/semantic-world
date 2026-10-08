@@ -3,7 +3,7 @@
 
 name: default
 seed: 1
-taxonomy: {config: data/taxonomy/default.yaml, seed: null}   # null: the world's seed
+taxonomy: {config: data/taxonomy/relations.yaml, seed: null}   # null: the world's seed
 
 fluents:
   count: 8

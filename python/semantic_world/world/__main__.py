@@ -2,6 +2,8 @@
 
 python -m semantic_world.world define CONFIG [--seed N] [--out DIR]
 python -m semantic_world.world view RUN_FOLDER --preset classic [--include A,B] [--out FILE]
+python -m semantic_world.world check-fixtures [FOLDER]
+python -m semantic_world.world make-fixtures CONFIG [--out FOLDER] [--count N] [--steps N]
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from semantic_world.taxonomy.config import ConfigError
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.world.config import load_config
 from semantic_world.world.errors import WorldError
+from semantic_world.world.fixtures import FIXTURES_DIR, check_fixtures, write_world_fixtures
 from semantic_world.world.generate import define
 from semantic_world.world.views import PRESETS, write_view
 
@@ -39,10 +42,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     view_parser.add_argument(
         "--out", default=None, help="the CSV file (default: RUN/views/<preset>.csv)"
     )
+    check_parser = commands.add_parser(
+        "check-fixtures", help="run the Python runtime on every conformance fixture"
+    )
+    check_parser.add_argument(
+        "folder", nargs="?", default=str(FIXTURES_DIR), help="the folder of fixture JSON files"
+    )
+    make_parser = commands.add_parser(
+        "make-fixtures", help="generate conformance fixtures from a world configuration"
+    )
+    make_parser.add_argument("config", help="the YAML world configuration (data/world/tiny.yaml)")
+    make_parser.add_argument("--out", default=str(FIXTURES_DIR), help="the fixture folder")
+    make_parser.add_argument(
+        "--count", type=int, default=4, help="the number of fixtures without an error"
+    )
+    make_parser.add_argument("--steps", type=int, default=6, help="the steps of each fixture")
     args = parser.parse_args(argv)
     try:
         if args.command == "define":
             return _define(args)
+        if args.command == "check-fixtures":
+            return _check_fixtures(args)
+        if args.command == "make-fixtures":
+            return _make_fixtures(args)
         return _view(args)
     except (ConfigError, GenerationError, WorldError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -62,6 +84,24 @@ def _define(args: argparse.Namespace) -> int:
     )
     for warning in result.warnings:
         print(f"warning: {warning}")
+    return 0
+
+
+def _check_fixtures(args: argparse.Namespace) -> int:
+    reports = check_fixtures(args.folder)
+    for report in reports:
+        outcome = f"{report.error} error at the last step" if report.error else "no error"
+        print(f"ok  {report.name}: {report.steps} steps, {outcome}")
+    print(f"{len(reports)} fixtures passed")
+    return 0
+
+
+def _make_fixtures(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    result = define(config)
+    paths = write_world_fixtures(result.definition, config.name, args.out, args.count, args.steps)
+    for path in paths:
+        print(f"wrote {path}")
     return 0
 
 

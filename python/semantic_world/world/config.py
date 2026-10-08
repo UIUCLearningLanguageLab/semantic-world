@@ -210,7 +210,7 @@ def _merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
 
 
 def _read_taxonomy(node: _Node) -> TaxonomySetting:
-    path = node.string("config", "data/taxonomy/default.yaml")
+    path = node.string("config", "data/taxonomy/relations.yaml")
     seed = (
         node.int("seed", None, min=0, max=SEED_MAX) if node.data.get("seed") is not None else None
     )

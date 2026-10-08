@@ -2,7 +2,10 @@
 
 The specification is ``docs/specs/WORLD_AND_LANGUAGE.md``. The package is built in stages. Stage
 a1 holds rules as threshold matrices (REL.18), the rule-set identity, and derived values with
-their manifest (REL.16). The package runs with Python alone: NumPy, polars, and PyYAML.
+their manifest (REL.16). Stage a2 is the world generator (``define``). Stage a3 is the runtime
+(``runtime.py``: ``derive``, ``able``, ``legal``, ``legal_bindings``, ``apply``), the loader of a
+definition from its files (``RuntimeDefinition``), and the conformance fixtures
+(``fixtures.py``). The package runs with Python alone: NumPy, polars, and PyYAML.
 """
 
 from semantic_world.world.derived import (
@@ -13,7 +16,15 @@ from semantic_world.world.derived import (
     read_manifest,
     write_manifest,
 )
-from semantic_world.world.errors import AgreementError, DerivedError, WorldError
+from semantic_world.world.errors import (
+    AgreementError,
+    DefinitionError,
+    DerivedError,
+    IllegalEventError,
+    InterferenceError,
+    StepError,
+    WorldError,
+)
 from semantic_world.world.identity import (
     DEFINITION_VERSION,
     canonical_json,
@@ -44,7 +55,11 @@ __all__ = [
     "MAX_EXHAUSTIVE_INPUTS",
     "AgreementError",
     "AgreementReport",
+    "DefinitionError",
     "DerivedError",
+    "IllegalEventError",
+    "InterferenceError",
+    "StepError",
     "Layer",
     "LiteralSpec",
     "RuleMatrices",

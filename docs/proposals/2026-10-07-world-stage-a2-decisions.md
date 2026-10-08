@@ -1,6 +1,6 @@
 # Proposal: decisions for stage a2 of the world-and-language refactor
 
-October 7, 2026. Raised in the orientation for stage a2 of `docs/specs/WORLD_AND_LANGUAGE.md` ("The world generator"), and while building the stage. Status: working design. Every choice below is Claude Code's unless Jon changes it. The choices are logged as WM.E18 and following in `docs/DECISIONS.md`.
+October 7, 2026. Raised in the orientation for stage a2 of `docs/specs/WORLD_AND_LANGUAGE.md` ("The world generator"), and while building the stage. Status: decided. Jon approved every choice on October 8, 2026, in the stage a3 prompt, with one change to the default world's taxonomy, and answered the four open questions (see "Jon's rulings" at the end). The choices are logged as WM.E18 to WM.E40 in `docs/DECISIONS.md`.
 
 ## Orientation
 
@@ -69,3 +69,14 @@ None blocks the stage; each is an easy change in stage a3.
 2. **Constraints as rules** (choice 13): keep them in `rules` with a `scope`, or give `definition.json` a `constraints` table of its own (which the identity would then have to cover as a fifth table)?
 3. **The default of `binary`** (choice 2): `{}` turns two-place event types on even when the taxonomy file has `verbs: null`, so the default world on `data/taxonomy/default.yaml` has seven two-place event types. Is that the intended default?
 4. **Explicit entries and inheritance** (choices 10 and 11): an explicit precondition or set of effects replaces the inherited terms, while an explicit requirement keeps the inherited feature constraints. Should the two behave alike?
+
+## Jon's rulings (October 8, 2026, in the stage a3 prompt)
+
+Choices 1 to 23 are approved. The open questions are answered:
+
+1. **Symbol kinds** (choice 14): `property` and `part` stay.
+2. **Constraints as rules** (choice 13): constraints and requirements stay in `rules` with a `scope`. No `constraints` table is added.
+3. **The default of `binary`** (choice 2): `{}` turning two-place event types on is approved. But the default world must use the taxonomy that today's default corpus uses: `data/world/default.yaml` now reads `taxonomy: {config: data/taxonomy/relations.yaml, seed: null}`, and the same default is hard-coded in `python/semantic_world/world/config.py`, so the comment in `default.yaml` that every value shown is a default stays true. With `relations.yaml`, the default world has scalars and the corpus's verbs, and its requirements gain threshold literals and comparisons. The tests that read the default world were checked against the new file (stage a3).
+4. **Explicit entries and inheritance** (choices 10 and 11): the asymmetry is kept, on purpose. An explicit requirement keeps the inherited feature constraints, because every event type must entail its ancestors' base relations (REL.10), and the corpus relies on this when it names an event at a higher level of the event-type tree. An explicit precondition or set of effects replaces the inherited terms, because the inheritance of preconditions and effects is a sampling convenience, not a semantic commitment.
+
+The statistics from 1,000 episodes arrive in stage a4, as the reading of the scope says.
