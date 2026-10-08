@@ -1,0 +1,11 @@
+# The tiny world with the chain example's explicit event types.
+
+name: tiny_chain
+seed: 1
+taxonomy: {config: data/taxonomy/tiny_relations.yaml}
+
+fluents:
+  count: 4
+
+event_types:
+  event_file: events/chain_example.yaml

@@ -1,0 +1,17 @@
+# A worked example of an event file (docs/specs/WORLD_AND_LANGUAGE.md, "Explicit event types").
+# Over abstract labels, it builds a chain: EVENTTYPE2.1.1 ("catch") needs an awake agent and an
+# uncaught patient and marks the patient caught; EVENTTYPE2.1.2 ("eat") needs an awake agent and a
+# caught patient and puts the patient to sleep for good. Event types not listed are sampled.
+# Use it with the tiny world: event_types.event_file: events/chain_example.yaml, relative to the
+# configuration file's folder.
+
+fluents:
+  BOOLFL.1: {initial_rate: 1.0}        # say, awake
+  BOOLFL.2: {initial_rate: 0.0}        # say, caught
+event_types:
+  EVENTTYPE2.1.1:
+    precondition: "agent.BOOLFL.1 AND NOT patient.BOOLFL.2"
+    effects: ["patient.BOOLFL.2 := 1"]
+  EVENTTYPE2.1.2:
+    precondition: "agent.BOOLFL.1 AND patient.BOOLFL.2"
+    effects: ["patient.BOOLFL.1 := 0"]
