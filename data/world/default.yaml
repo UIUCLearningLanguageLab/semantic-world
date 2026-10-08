@@ -1,0 +1,26 @@
+# The default world configuration. Every parameter is shown with its default value.
+# See docs/specs/WORLD_AND_LANGUAGE.md, "Configuration".
+
+name: default
+seed: 1
+taxonomy: {config: data/taxonomy/default.yaml, seed: null}   # null: the world's seed
+
+fluents:
+  count: 8
+  derived_proportion: 0.25
+  max_chain_depth: 1
+  initial_rates: [0.0, 0.2, 0.8, 1.0]        # each base fluent's initial rate is drawn from this list
+
+event_types:
+  unary: {}                                   # overrides of the taxonomy's CAN settings: count, rules (the sampling overrides)
+  binary: {}                                  # the old `verbs` block, merged over the taxonomy's; null turns two-place event types off
+  preconditions:
+    literals: {0: 0.3, 1: 0.5, 2: 0.2}        # weights over the number of an event type's own precondition literals
+    feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal
+    roles: {agent: 0.5, patient: 0.5}
+    enabled_share: 0.7                        # the share of literals drawn from values that some effect produces
+  effects:
+    count: {1: 0.7, 2: 0.3}                   # weights over the number of an event type's own effects
+    feature_rate: 0.5
+    roles: {agent: 0.4, patient: 0.6}
+  event_file: null                            # a file of explicit event types

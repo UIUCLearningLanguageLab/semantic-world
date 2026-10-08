@@ -1,0 +1,9 @@
+# A world small enough to read by eye: the tiny relations taxonomy (12 instances, 4 CAN features,
+# 4 verbs) with 4 fluents. Parameters not listed keep their defaults (see default.yaml).
+
+name: tiny
+seed: 1
+taxonomy: {config: data/taxonomy/tiny_relations.yaml}
+
+fluents:
+  count: 4

@@ -1,6 +1,6 @@
 # Proposal: decisions for stage a1 of the world-and-language refactor
 
-October 7, 2026. Raised in the orientation for stage a1 of `docs/specs/WORLD_AND_LANGUAGE.md` ("Matrices and derived values"), and while building the stage. Status: working design. Every choice below is Claude Code's unless Jon changes it. The choices are logged as WM.E1 and following in `docs/DECISIONS.md`.
+October 7, 2026. Raised in the orientation for stage a1 of `docs/specs/WORLD_AND_LANGUAGE.md` ("Matrices and derived values"), and while building the stage. Status: decided. Jon approved every choice on October 7, 2026, in the stage a2 prompt, and answered the four open questions (see "Jon's rulings" at the end). The choices are logged as WM.E1 to WM.E17 in `docs/DECISIONS.md`.
 
 ## Orientation
 
@@ -67,3 +67,7 @@ None blocks the stage. Each is an easy change in stage a2 if Jon prefers another
 2. **The size of `rule_matrices.json`.** Should the taxonomy write the full tables (choice 10), or only `literals` and `layers` as the spec's wording suggests, with `rules.yaml` as the Boolean form?
 3. **CAN columns during stages a1 to a4.** `derived/static_features.csv` leaves out CAN features (choice 13). Should it carry them until `capacities.csv` exists?
 4. **Layer numbering.** Should `rule_matrices.json` use dependency layers (choice 5), or the taxonomy's layer numbers, so that the two files agree?
+
+## Jon's rulings (October 7, 2026, in the stage a2 prompt)
+
+Choices 1 to 17 are approved, including the renaming of the engine wrapper (choice 1) and the move of `boolean.py` to `semantic_world.common` (choice 2). The open questions are answered: (1) `role: null` stays for feature rules, because a static feature is a fact of one entity, and one-place event types use the role `agent` from stage a2 on; (2) `rule_matrices.json` keeps its full tables; (3) `derived/static_features.csv` does not carry CAN columns, and capacities go to `derived/capacities.csv` in stage a2; (4) dependency layers stay.
