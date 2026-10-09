@@ -1,11 +1,12 @@
-"""Event types: one-place event types from the taxonomy's CAN rules, two-place event types from
-its verbs, and the preconditions and effects that make them dynamic.
+"""Event types: the one-place and two-place event types of the static side, and the
+preconditions and effects that make them dynamic.
 
-The static side comes from the embedded taxonomy run (``docs/specs/WORLD_AND_LANGUAGE.md``,
-"Event types"): the rule of ``CAN.k`` becomes the requirement of ``EVENTTYPE1.k``, and a verb's
-constraints become the constraints of ``EVENTTYPE2.<path>``; an event-type category's requirement
-is its base relation. Every requirement is a conjunction of constraints, each a rule over binding
-literals (``agent.PROPERTY.3``, ``patient.SCALARDIM.1 > 0.4127``, comparisons).
+The static side comes from ``semantic_world.world.statics`` (``docs/specs/WORLD_AND_LANGUAGE.md``,
+"Event types"): the requirement of ``EVENTTYPE1.k`` is its sampled rule over the agent's
+features, and an event type's constraints are those of its true event-type features and its own;
+an event-type category's requirement is its base relation. Every requirement is a conjunction of
+constraints, each a rule over binding literals (``agent.PROPERTY.3``, ``patient.SCALARDIM.1 >
+0.4127``, comparisons).
 
 The dynamic side ("Preconditions", "Effects") is drawn here from ``world:effects`` and
 ``world:preconditions``: effects first, so that enabling literals can be drawn from the values
@@ -16,7 +17,8 @@ names.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import dataclasses
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,15 +26,14 @@ import numpy as np
 
 from semantic_world.common.boolean import TruthTable, dnf_literal_count
 from semantic_world.taxonomy.config import ConfigError
-from semantic_world.taxonomy.constraints import Constraint
 from semantic_world.taxonomy.expressions import Cmp, Const, Expr, Gt, Not, Op, Var
-from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.rules import MAX_TRIES, Rule, _draw, input_key
 from semantic_world.world.config import Config, EffectsConfig, PreconditionsConfig
+from semantic_world.world.constraints import Constraint
 from semantic_world.world.dynamics import ROLES, Effect, Literal, precondition_text
 from semantic_world.world.event_file import EventFile, ExplicitEventType
 from semantic_world.world.fluents import Fluents
-from semantic_world.world.labels import translate, translate_expression
+from semantic_world.world.statics import StaticWorld
 from semantic_world.world.streams import WorldStreams
 
 ONE_PLACE = "EVENTTYPE1"
@@ -49,13 +50,12 @@ MAX_FIX_ROUNDS = 20
 
 
 def prefixed(expr: Expr, role: str) -> Expr:
-    """An entity-level expression over the taxonomy's labels as a binding expression of one
-    role in the world's labels: ``HAS.4 AND NOT IS.7`` becomes ``agent.PART.4 AND NOT
-    agent.PROPERTY.7``."""
+    """An entity-level expression as a binding expression of one role: ``PART.4 AND NOT
+    PROPERTY.7`` becomes ``agent.PART.4 AND NOT agent.PROPERTY.7``."""
     if isinstance(expr, Var):
-        return Var(f"{role}.{translate(expr.name)}")
+        return Var(f"{role}.{expr.name}")
     if isinstance(expr, Gt):
-        return Gt(f"{role}.{translate(expr.scalar)}", expr.threshold)
+        return Gt(f"{role}.{expr.scalar}", expr.threshold)
     if isinstance(expr, Const):
         return expr
     if isinstance(expr, Not):
@@ -78,7 +78,7 @@ class ConstraintSpec:
     table: TruthTable
     expression: str
     source: Rule | Constraint
-    """The taxonomy object the constraint came from: a CAN rule, or a constraint."""
+    """The object the constraint came from: a one-place requirement rule, or a constraint."""
 
     @property
     def arity(self) -> int:
@@ -96,22 +96,22 @@ class ConstraintSpec:
 
 
 def constraint_from_rule(rule: Rule) -> ConstraintSpec:
-    """The requirement of a one-place event type: the CAN rule over the agent's features."""
-    label = f"{CONSTRAINT_PREFIX}.{ONE_PLACE}.{rule.output.index}"
-    inputs = tuple(f"agent.{translate_expression(input_key(item))}" for item in rule.inputs)
+    """The requirement of a one-place event type: its rule over the agent's features."""
+    label = f"{CONSTRAINT_PREFIX}.{rule.output.label}"
+    inputs = tuple(f"agent.{input_key(item)}" for item in rule.inputs)
     return ConstraintSpec(
         label, rule.family, inputs, rule.table, str(prefixed(rule.expression, "agent")), rule
     )
 
 
-def constraint_from_taxonomy(constraint: Constraint) -> ConstraintSpec:
-    inputs = tuple(translate_expression(item.key) for item in constraint.literals)
+def constraint_from_relation(constraint: Constraint) -> ConstraintSpec:
+    inputs = tuple(item.key for item in constraint.literals)
     return ConstraintSpec(
-        translate(constraint.label),
+        constraint.label,
         constraint.family,
         inputs,
         constraint.table,
-        translate_expression(str(constraint.expression)),
+        str(constraint.expression),
         constraint,
     )
 
@@ -132,8 +132,6 @@ class EventType:
     precondition: tuple[Literal, ...] = ()
     effects: tuple[Effect, ...] = ()
     explicit: bool = False
-    source_label: str = ""
-    """The taxonomy's label (``CAN.3``, ``V1.2``)."""
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -225,40 +223,37 @@ class EventTypes:
         return tuple(e for e in self.event_types if not e.category)
 
 
-def build_event_types(taxonomy: TaxonomyResult) -> EventTypes:
+def build_event_types(statics: StaticWorld) -> EventTypes:
     """The static side: constraints and event types, without preconditions or effects."""
     constraints: list[ConstraintSpec] = []
     event_types: list[EventType] = []
-    for rule in taxonomy.rules.rules:
-        if rule.output.type != "can":
-            continue
+    for rule in statics.unary.requirement_rules:
         spec = constraint_from_rule(rule)
         constraints.append(spec)
         event_types.append(
             EventType(
-                label=f"{ONE_PLACE}.{rule.output.index}",
+                label=rule.output.label,
                 arity=1,
                 category=False,
                 parent=None,
                 level=1,
                 features=(),
                 constraints=(spec.label,),
-                source_label=rule.output.label,
             )
         )
     features: tuple[str, ...] = ()
     feature_constraints: dict[str, str] = {}
-    relations = taxonomy.relations
+    relations = statics.relations
     if relations is not None:
-        verbs = relations.verbs
-        features = tuple(translate(label) for label in verbs.features.labels)
+        tree = relations.event_tree
+        features = tuple(tree.features.labels)
         for constraint in relations.constraints:
-            constraints.append(constraint_from_taxonomy(constraint))
+            constraints.append(constraint_from_relation(constraint))
         for feature, constraint in zip(
-            verbs.features.labels, relations.feature_constraints, strict=True
+            tree.features.labels, relations.feature_constraints, strict=True
         ):
-            feature_constraints[translate(feature)] = translate(constraint.label)
-        for category in verbs.categories:
+            feature_constraints[feature] = constraint.label
+        for category in tree.categories:
             if category.is_leaf:
                 mask = category.values == 1
             else:
@@ -267,14 +262,13 @@ def build_event_types(taxonomy: TaxonomyResult) -> EventTypes:
             relation = relations.relation(category)
             event_types.append(
                 EventType(
-                    label=translate(category.label),
+                    label=category.label,
                     arity=2,
                     category=not category.is_leaf,
-                    parent=None if category.parent is None else translate(category.parent.label),
+                    parent=None if category.parent is None else category.parent.label,
                     level=category.level,
                     features=true_features,
-                    constraints=tuple(translate(c.label) for c in relation.constraints),
-                    source_label=category.label,
+                    constraints=tuple(c.label for c in relation.constraints),
                 )
             )
     return EventTypes(tuple(constraints), tuple(event_types), features, feature_constraints)
@@ -704,7 +698,6 @@ class _Dynamics:
                 precondition=d.precondition,
                 effects=d.effects,
                 explicit=d.explicit is not None,
-                source_label=d.event_type.source_label,
             )
             for d in self.drafts.values()
         )
@@ -720,7 +713,7 @@ class _Dynamics:
 
 
 def generate_event_types(
-    taxonomy: TaxonomyResult,
+    statics: StaticWorld,
     fluents: Fluents,
     config: Config,
     streams: WorldStreams,
@@ -728,8 +721,66 @@ def generate_event_types(
     derived_initial: Mapping[str, np.ndarray],
 ) -> EventTypes:
     """Event types with their requirements, preconditions, and effects."""
-    static = build_event_types(taxonomy)
+    static = build_event_types(statics)
     return _Dynamics(static, fluents, config, streams, event_file, derived_initial).run()
+
+
+def redraw_preconditions(
+    event_types: EventTypes,
+    labels: Sequence[str],
+    fluents: Fluents,
+    config: Config,
+    parts: Mapping[str, np.random.Generator],
+    derived_initial: Mapping[str, np.ndarray],
+) -> EventTypes:
+    """The event types with the own precondition literals of the named event types drawn
+    again, each from its own generator (the part ``world:preconditions:<label>``), as
+    ``define`` redraws an event type that was never legal in the statistics episodes. The
+    inherited literals stay; a literal that would make one of the event type's own effects
+    empty, or that duplicates an inherited one, is drawn again. No other event type changes."""
+    cfg = config.event_types.preconditions
+    achievable: set[tuple[str, bool]] = set()
+    for i, fluent in enumerate(fluents.base):
+        for value in np.unique(fluents.initial_values[:, i]):
+            achievable.add((fluent.label, bool(value)))
+    for label, column in derived_initial.items():
+        for value in np.unique(column):
+            achievable.add((label, bool(value)))
+    produced = sorted({(e.fluent, e.value) for et in event_types.event_types for e in et.effects})
+    achievable |= set(produced)
+    feature_literals = event_types.feature_preconditions
+    redrawn: dict[str, EventType] = {}
+    for label in labels:
+        et = event_types.event_type(label)
+        rng = parts[label]
+        inherited: dict[tuple[str, str], Literal] = {}
+        for feature in event_types.features:
+            literal = feature_literals.get(feature)
+            if literal is not None and feature in et.features:
+                inherited.setdefault((literal.role, literal.fluent), literal)
+        empty = {(e.role, e.fluent, e.value) for e in et.effects}
+        kept = dict(inherited)
+        n = _draw(rng, cfg.literals)
+        for _ in range(n):
+            for _ in range(MAX_TRIES):
+                role = et.roles[0] if len(et.roles) == 1 else _draw(rng, cfg.roles)
+                if produced and rng.random() < cfg.enabled_share:
+                    fluent, value = produced[int(rng.integers(len(produced)))]
+                else:
+                    fluent = fluents.labels[int(rng.integers(len(fluents.labels)))]
+                    value = bool(rng.integers(2))
+                if (
+                    (fluent, value) in achievable
+                    and (role, fluent) not in kept
+                    and (role, fluent, value) not in empty
+                ):
+                    kept[(role, fluent)] = Literal(role, fluent, value)
+                    break
+        redrawn[label] = dataclasses.replace(et, precondition=tuple(kept.values()))
+    return dataclasses.replace(
+        event_types,
+        event_types=tuple(redrawn.get(et.label, et) for et in event_types.event_types),
+    )
 
 
 def check_dynamics(
@@ -777,8 +828,9 @@ __all__ = [
     "EventTypes",
     "build_event_types",
     "check_dynamics",
+    "constraint_from_relation",
     "constraint_from_rule",
-    "constraint_from_taxonomy",
     "generate_event_types",
     "prefixed",
+    "redraw_preconditions",
 ]

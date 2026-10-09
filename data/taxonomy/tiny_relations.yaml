@@ -1,5 +1,5 @@
-# The tiny taxonomy with 1 scalar, 4 verb features, and a verb tree of 2 superordinates with 2
-# verbs each: small enough to check by brute force over every pair of instances.
+# The tiny taxonomy with 1 scalar dimension: small enough to check by brute force over every pair
+# of instances. The tiny world (data/world/tiny.yaml) builds on it.
 
 name: tiny_relations
 seed: 1
@@ -7,7 +7,8 @@ seed: 1
 features:
   is:  {count: 8, proportion_determined: 0.25, expected_true_free: 2}
   has: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
-  can: {count: 4}
+  base_rate_heterogeneity: null  # equal base rates: with 6 free features of a type, heterogeneous rates can leave a
+                                 # superordinate with no true feature, which the similarity bound cannot place
 
 taxonomy:
   superordinates: 2
@@ -19,7 +20,3 @@ instances:
 
 scalars:
   count: 1
-
-verbs:
-  features: {count: 4, expected_true: 2}
-  taxonomy: {superordinates: 2, depth: 2, branching: 2}

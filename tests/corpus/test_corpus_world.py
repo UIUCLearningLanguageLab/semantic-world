@@ -1,6 +1,7 @@
 """Stage a5a: loading the world that a corpus is about.
 
-A world configuration file is defined in memory, without its statistics episodes. A world run
+A world configuration file is defined in memory, with its statistics episodes (they decide the
+precondition redraws, so a world is the same in memory and on disk). A world run
 folder is regenerated in memory from its ``config.yaml``, and a folder whose rule-set identity,
 ``entities.csv``, or derived manifest differs from the regenerated world is an error. The
 corpus's view of the world carries the labels of the specification, and agrees with the world
@@ -20,16 +21,19 @@ import pytest
 from corpus_support import PLAIN_WORLD, REPO, TINY_WORLD, corpus_config, write_world
 
 from semantic_world.corpus import CorpusError, config_from_mapping, load_world, world_identity
-from semantic_world.corpus.world import check_run_folder, world_hash
+from semantic_world.corpus.world import (
+    EVENT_TYPE1_KIND,
+    PART_KIND,
+    PROPERTY_KIND,
+    check_run_folder,
+    world_hash,
+)
 from semantic_world.world.config import load_config as load_world_config
 from semantic_world.world.generate import define
-from semantic_world.world.labels import translate
 
 
 def run_folder(tmp_path: Path, seed: int = 1) -> Path:
-    return define(load_world_config(TINY_WORLD, seed=seed), episode_stats=False).write(
-        tmp_path / "run"
-    )
+    return define(load_world_config(TINY_WORLD, seed=seed)).write(tmp_path / "run")
 
 
 def same_world(a, b) -> bool:
@@ -42,12 +46,12 @@ def same_world(a, b) -> bool:
 
 
 def test_a_configuration_file_is_defined_in_memory(tiny_world) -> None:
-    direct = define(load_world_config(TINY_WORLD), episode_stats=False)
+    direct = define(load_world_config(TINY_WORLD))
     world = load_world(corpus_config())
     assert world.rule_set_id == direct.rule_set_id == tiny_world.rule_set_id
     assert same_world(world, tiny_world)
-    # the statistics episodes are skipped in memory
-    assert world.result.stats["episodes"] is None
+    # the statistics episodes run in memory too: they decide the precondition redraws
+    assert world.result.stats["episodes"]["count"] == 1000
     # the live objects that the truth tests need are there
     assert world.definition.entity_count == 12 and world.scalars == ("SCALARDIM.1",)
     assert world.binary and world.patient_capacities and world.unary
@@ -67,7 +71,7 @@ def test_a_run_folder_is_regenerated_and_checked(tmp_path: Path) -> None:
     folder = run_folder(tmp_path, seed=4)
     config = config_from_mapping({"world": {"run": str(folder)}})
     world = load_world(config)
-    direct = define(load_world_config(TINY_WORLD, seed=4), episode_stats=False)
+    direct = define(load_world_config(TINY_WORLD, seed=4))
     assert world.rule_set_id == direct.rule_set_id
     # a world source works as well as a whole corpus configuration
     assert same_world(load_world(config.world), world)
@@ -144,9 +148,12 @@ def test_the_view_carries_the_new_labels(tiny_world) -> None:
     world = tiny_world
     assert all(c.startswith("CATEGORY.") for c in world.categories)
     assert all(i.startswith("INSTANCE.") for i in world.instances)
-    assert all(f.startswith("PROPERTY.") for f in world.features["is"])
-    assert all(f.startswith("PART.") for f in world.features["has"])
-    assert all(f.startswith("EVENTTYPE1.") for f in world.features["can"])
+    assert tuple(world.features) == (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND)
+    assert all(f.startswith("PROPERTY.") for f in world.features[PROPERTY_KIND])
+    assert all(f.startswith("PART.") for f in world.features[PART_KIND])
+    assert all(f.startswith("EVENTTYPE1.") for f in world.features[EVENT_TYPE1_KIND])
+    assert world.feature_kind["PROPERTY.1"] == PROPERTY_KIND
+    assert world.feature_kind["EVENTTYPE1.1"] == EVENT_TYPE1_KIND
     assert all(v.startswith("EVENTTYPE2.") for v in world.binary)
     assert all(c.startswith("CANBE.EVENTTYPE2.") for c in world.patient_capacities)
     assert world.poles == ("SCALARDIM.1.HIGH", "SCALARDIM.1.LOW")
@@ -164,11 +171,12 @@ def test_the_view_agrees_with_the_world_packages_tables(tiny_world, tmp_path: Pa
     folder = world.result.write(tmp_path / "run")
     entities = pl.read_csv(folder / "entities.csv", infer_schema_length=None)
     assert entities["label"].to_list() == list(world.instances)
-    for feature in world.features["is"] + world.features["has"]:
+    static_features = world.features[PROPERTY_KIND] + world.features[PART_KIND]
+    for feature in static_features:
         if feature in world.free:
             assert entities[feature].to_list() == world.column(feature).tolist()
     static = pl.read_csv(folder / "derived" / "static_features.csv", infer_schema_length=None)
-    for feature in world.features["is"] + world.features["has"]:
+    for feature in static_features:
         if feature not in world.free:
             assert static[feature].to_list() == world.column(feature).tolist()
     capacities = pl.read_csv(folder / "derived" / "capacities.csv", infer_schema_length=None)
@@ -177,12 +185,12 @@ def test_the_view_agrees_with_the_world_packages_tables(tiny_world, tmp_path: Pa
         assert world.able(event_type).astype(int).tolist() == world.column(event_type).tolist()
     for label in world.patient_capacities:
         assert capacities[label].to_list() == world.capacity(label).astype(int).tolist()
-    # a two-place event type's able matrix is the taxonomy's relation, a category's its base
+    # a two-place event type's able matrix is the static side's relation, a category's its base
     # relation
-    taxonomy = world.result.taxonomy
+    statics = world.result.statics
+    assert [c.label for c in statics.event_tree.categories] == list(world.binary)
     for label in world.binary:
-        old = next(c.label for c in taxonomy.verbs.categories if translate(c.label) == label)
-        assert np.array_equal(world.able(label), taxonomy.relations.matrix(old))
+        assert np.array_equal(world.able(label), statics.relations.matrix(label))
     thematic = pl.read_csv(folder / "derived" / "thematic.csv", infer_schema_length=None)
     number = {leaf: i for i, leaf in enumerate(world.leaves)}
     for row in thematic.iter_rows(named=True):
@@ -195,7 +203,8 @@ def test_rule_terms_and_the_fixed_test(tiny_world) -> None:
     world = tiny_world
     terms = world.rule_terms()
     assert terms and world.rule_count == len({t.output for t in terms})
-    assert all(t.kind in ("is", "has", "can") for t in terms)
+    assert all(t.kind in (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND) for t in terms)
+    assert {t.kind for t in terms} == {PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND}
     for term in terms:
         for label, value in term.literals:
             assert label.split(".")[0] in ("PROPERTY", "PART") and isinstance(value, bool)
@@ -204,7 +213,8 @@ def test_rule_terms_and_the_fixed_test(tiny_world) -> None:
             assert world.fixed("THING", term.literals, term.output) == (1, "exact")
     # the fixed test at a category agrees with the taxonomy's defining vectors
     vectors = world.result.taxonomy.vectors
-    labels = [translate(x) for x in vectors.feature_labels[vectors.isa_count :]]
+    labels = list(vectors.feature_labels[vectors.isa_count :])
+    assert all(label.split(".")[0] in ("PROPERTY", "PART") for label in labels)
     for row, category in enumerate(world.categories):
         defining = vectors.defining[row, vectors.isa_count :]
         for label, value in zip(labels, defining, strict=True):
@@ -218,10 +228,12 @@ def test_the_meanings_table_carries_the_new_labels(tiny_world) -> None:
     header, first = text.splitlines()[:2]
     columns = header.split(",")
     assert columns[0] == "label" and first.split(",")[0] == "CATEGORY.1"
-    assert all(
-        c.split(".")[0] in ("ISA", "PROPERTY", "PART", "CAN", "SCALARDIM") for c in columns[1:]
-    ), columns
-    assert "ISA.CATEGORY.1" in columns and "CAN.EVENTTYPE1.1" in columns
+    assert all(c.split(".")[0] in ("ISA", "PROPERTY", "PART", "SCALARDIM") for c in columns[1:]), (
+        columns
+    )
+    assert "ISA.CATEGORY.1" in columns and "PROPERTY.1" in columns and "PART.8" in columns
+    # the one-place event types are the world's, not the taxonomy's: no CAN columns
+    assert not any(c.startswith("CAN.") for c in columns)
 
 
 def test_a_world_without_two_place_event_types_loads(tmp_path: Path) -> None:

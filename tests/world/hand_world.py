@@ -3,8 +3,10 @@
 The hand world has three entities (``INSTANCE.1.1.1``, ``INSTANCE.1.1.2``, ``INSTANCE.1.2.1``),
 a free feature ``PROPERTY.1`` and a derived one ``PROPERTY.2 = NOT PROPERTY.1``, a scalar
 ``SCALARDIM.1``, the base fluents ``BOOLFL.1`` and ``BOOLFL.2`` and the derived ``BOOLFL.3 =
-BOOLFL.1 AND BOOLFL.2``, and four event types: ``EVENTTYPE1.1`` (requires ``agent.PROPERTY.1``,
-needs ``NOT agent.BOOLFL.1``, sets ``agent.BOOLFL.1``), ``EVENTTYPE1.2`` (requires
+BOOLFL.1 AND BOOLFL.2`` (the base fluents carry the initial rate 0.5 in their symbols, which no
+hand case uses: every case gives its initial state), and four event types: ``EVENTTYPE1.1``
+(requires ``agent.PROPERTY.1``, needs ``NOT agent.BOOLFL.1``, sets ``agent.BOOLFL.1``),
+``EVENTTYPE1.2`` (requires
 ``agent.PROPERTY.2``, needs ``agent.BOOLFL.3``, clears ``agent.BOOLFL.2``), ``EVENTTYPE1.3``
 (always able and legal, clears ``agent.BOOLFL.1``), and ``EVENTTYPE2.1`` (requires
 ``agent.PROPERTY.1 AND NOT patient.PROPERTY.1`` and the agent's scalar above the patient's, needs
@@ -29,8 +31,11 @@ FOLDER = Path("tests/fixtures/world")
 A, B, C = "INSTANCE.1.1.1", "INSTANCE.1.1.2", "INSTANCE.1.2.1"
 
 
-def sym(label, kind, derived=False, fluent=False, arity=1):
-    return {"label": label, "kind": kind, "derived": derived, "fluent": fluent, "arity": arity}
+def sym(label, kind, derived=False, fluent=False, arity=1, rate=None):
+    record = {"label": label, "kind": kind, "derived": derived, "fluent": fluent, "arity": arity}
+    if fluent:
+        record["initial_rate"] = rate
+    return record
 
 
 def feat(i, key, role, feature):
@@ -100,8 +105,8 @@ DEFINITION = {
         sym("PROPERTY.1", "property"),
         sym("PROPERTY.2", "property", derived=True),
         sym("SCALARDIM.1", "scalar"),
-        sym("BOOLFL.1", "fluent", fluent=True),
-        sym("BOOLFL.2", "fluent", fluent=True),
+        sym("BOOLFL.1", "fluent", fluent=True, rate=0.5),
+        sym("BOOLFL.2", "fluent", fluent=True, rate=0.5),
         sym("BOOLFL.3", "fluent", derived=True, fluent=True),
         sym("EVENTTYPE1.1", "event_type"),
         sym("EVENTTYPE1.2", "event_type"),

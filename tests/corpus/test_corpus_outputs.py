@@ -502,8 +502,9 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         "no_instance",
         "unconfirmed",
     }
-    if name == "tiny":
-        assert stats["lexicon"]["event_types_without_word"] == {"EVENTTYPE2.1": "every pair"}
+    without_word = stats["lexicon"]["event_types_without_word"]
+    # since stage a5b, every event type of the tiny world holds for some pairs and not all
+    assert without_word == ({"EVENTTYPE2.2": "every pair"} if name == "deep" else {})
 
 
 def _clause_depth(tree) -> int:
@@ -654,11 +655,11 @@ def test_partial_correlations() -> None:
 def test_cooccurrence_on_the_default_configuration(kinds) -> None:
     # The acceptance check of stage 6, on the default configuration with fewer documents:
     # situational documents' co-occurrence correlates more with thematic relatedness than
-    # encyclopedic documents' does. Since stage a5a, category documents draw their kinds of
-    # content in proportion to the facts left to state, which makes relation facts most of
-    # them, so encyclopedic co-occurrence tracks taxonomic similarity less than before: the
-    # second half of the check (situational below encyclopedic on taxonomic similarity) holds
-    # only with equal kinds of content, by Pearson's correlation. See the stage a5a proposal.
+    # encyclopedic documents' does, and less with taxonomic similarity. With the option
+    # ``proportional``, category documents draw their kinds of content in proportion to the
+    # facts left to state, which makes relation facts most of them, so encyclopedic
+    # co-occurrence tracks taxonomic similarity less: the second half of the check holds only
+    # under the default, ``equal``, by Pearson's correlation (Jon's ruling 3 on stage a5a).
     data = yaml.safe_load(Path("data/corpus/default.yaml").read_text(encoding="utf-8"))
     data["documents"]["count"] = 2500
     data["documents"]["content_kind_weights"] = kinds
@@ -677,9 +678,13 @@ def test_cooccurrence_on_the_default_configuration(kinds) -> None:
             "pearson": True,
             "spearman": True,
         }
-        taxonomic = situational["taxonomic"]["pearson"] < encyclopedic["taxonomic"]["pearson"]
-        assert taxonomic == (kinds == "equal")
-        assert check["taxonomic_situational_below_encyclopedic"]["pearson"] is taxonomic
+        taxonomic = {
+            kind: situational["taxonomic"][kind] < encyclopedic["taxonomic"][kind]
+            for kind in ("pearson", "spearman")
+        }
+        assert check["taxonomic_situational_below_encyclopedic"] == taxonomic
+        if kinds == "equal":
+            assert taxonomic["pearson"]
 
 
 def test_statistics_without_test_sets_and_without_documents(cases) -> None:

@@ -41,9 +41,9 @@ from __future__ import annotations
 
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import Lexicon
-from semantic_world.corpus.propositions import ALL, MOST, NEC_ALL, NEC_NO, NO, SOME
+from semantic_world.corpus.propositions import ALL, COUNTERPART, MOST, NEC_ALL, NEC_NO, NO, SOME
 from semantic_world.corpus.realize import Tree, token_parts
-from semantic_world.corpus.world import PROPERTY_PREFIX, SCALAR_PREFIX
+from semantic_world.corpus.world import CATEGORY_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX
 
 GENERIC = "generic"
 CAPACITY = "capacity"
@@ -85,7 +85,16 @@ class _Reader:
         self.bare_quantifiers: tuple[str, ...] = tuple(
             q for q in QUANTIFIER_READINGS if q == NEC_ALL or q in quantifiers.bare_plural_expresses
         )
-        """The quantifiers that a bare plural allows."""
+        """The quantifiers that a bare plural allows, and, when the sentence is negated, their
+        counterparts (``nec_no`` for a negative membership fact, and the negative counterpart of
+        each quantifier the bare plural expresses)."""
+        self.negated_bare_quantifiers: tuple[str, ...] = tuple(
+            q
+            for q in QUANTIFIER_READINGS
+            if q in {COUNTERPART[b] for b in self.bare_quantifiers if b != NEC_ALL}
+        )
+        """The quantifiers that a negated bare plural allows; a membership fact adds ``nec_no``
+        (a bare plural states ``nec_no`` for membership facts only)."""
 
     def gloss(self, node: Tree) -> str:
         return self.lexicon.lexeme(token_parts(self.token(node))[0]).gloss
@@ -142,8 +151,31 @@ class _Reader:
                 return ()
         determiner = self.child(subject, "Det")
         if determiner is None:
-            return self.bare_quantifiers
+            if verb_phrase is None or not self.negated(verb_phrase):
+                return self.bare_quantifiers
+            readings = self.negated_bare_quantifiers
+            if self.names_a_category(verb_phrase) and NEC_ALL in self.bare_quantifiers:
+                readings = tuple(q for q in QUANTIFIER_READINGS if q == NEC_NO or q in readings)
+            return readings
         return self.word_quantifiers.get(self.gloss(determiner), ())
+
+    def negated(self, verb_phrase: Tree) -> bool:
+        """Whether a verb phrase is negated: by ``not``, or by ``no`` on its predicate noun."""
+        if self.child(verb_phrase, "Neg") is not None:
+            return True
+        nominal = self.child(verb_phrase, "NP-PRD")
+        determiner = None if nominal is None else self.child(nominal, "Det")
+        return determiner is not None and self.gloss(determiner) == "no"
+
+    def names_a_category(self, verb_phrase: Tree) -> bool:
+        """Whether the verb phrase's predicate is a membership predicate: a predicate noun whose
+        concept is a category."""
+        nominal = self.child(verb_phrase, "NP-PRD")
+        noun = None if nominal is None else self.child(nominal, "N")
+        if noun is None:
+            return False
+        concept = self.lexicon.lexeme(token_parts(self.token(noun))[0]).concept
+        return concept.startswith(CATEGORY_PREFIX)
 
     def walk(self, node: Tree) -> set[str]:
         """The readings that every verb phrase below a node allows."""

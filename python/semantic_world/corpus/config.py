@@ -111,8 +111,8 @@ class WorldSource:
     def event_depth(self) -> int | None:
         """The depth of the event-type tree, or None when the world has no two-place event
         types."""
-        verbs = self.config.taxonomy_config().verbs
-        return None if verbs is None else verbs.taxonomy.depth
+        binary = self.config.event_types.binary
+        return None if binary is None else binary.taxonomy.depth
 
     def resolved(self) -> dict[str, Any]:
         if self.kind == "run":
@@ -584,9 +584,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         instance_description_rate=node.probability("instance_description_rate", 0.2),
         sibling_contrast_rate=node.probability("sibling_contrast_rate", 0.2),
         relation_fact_share=relation_fact_share,
-        content_kind_weights=node.choice(
-            "content_kind_weights", "proportional", CONTENT_KIND_WEIGHTS
-        ),
+        content_kind_weights=node.choice("content_kind_weights", "equal", CONTENT_KIND_WEIGHTS),
         progressive_rate=node.probability("progressive_rate", 0.3),
         one_aspect_per_event=node.bool("one_aspect_per_event", True),
     )

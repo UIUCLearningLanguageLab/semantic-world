@@ -4,16 +4,18 @@ This stage reports the structural statistics: counts of fluents, event types, pr
 literals, and effects by kind and role; the effects and literals dropped or redrawn by the
 fix-ups; the enabling graph (an edge from A to B when an effect of A produces a value that a
 precondition literal of B requires), its edge count and longest chain; and the absorbing
-fluents; and each base fluent's initial rate. The episode statistics come from 1,000 episodes
-of the default policy on the ``world:stats`` stream: for each event type, the share of steps at
-which it had a legal binding among the participants and the share at which it occurred; the
-mean number of changes per event; the share of quiescent episodes; and a warning for each event
-type that was never legal.
+fluents. The episode statistics come from 1,000 episodes of the default policy on the
+``world:stats`` stream: for each event type, the share of steps at which it had a legal binding
+among the participants and the share at which it occurred; the mean number of changes per event;
+the share of quiescent episodes; the number of times each event type's preconditions were
+redrawn because it was never legal (``precondition_redraws``); and, for each event type still
+never legal, why: ``never_able`` (no entity, or no ordered pair, meets its requirement) or
+``preconditions`` (its preconditions were never met in the episodes, after the redraws).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from semantic_world.world.event_types import EventTypes
@@ -94,10 +96,16 @@ def absorbing_fluents(event_types: EventTypes, fluents: Fluents) -> list[str]:
     return [label for label, values in set_to.items() if len(values) == 1]
 
 
-def episode_stats(histories: Sequence[History], event_types: Sequence[str]) -> dict[str, Any]:
+def episode_stats(
+    histories: Sequence[History],
+    event_types: Sequence[str],
+    redraws: Mapping[str, int] | None = None,
+    never_able: Sequence[str] = (),
+) -> dict[str, Any]:
     """The statistics of a set of histories with legal counts recorded: per event type, the share
     of steps with a legal binding and the share at which it occurred; the mean number of changes
-    per event; the share of quiescent episodes; and the event types never legal."""
+    per event; the share of quiescent episodes; the precondition redraws; and the event types
+    never legal, each with its reason."""
     steps = [step for history in histories for step in history.steps]
     total = len(steps)
     legal_steps = dict.fromkeys(event_types, 0)
@@ -112,6 +120,7 @@ def episode_stats(histories: Sequence[History], event_types: Sequence[str]) -> d
     changes = sum(len(e.changes) for e in events)
     never = [label for label in event_types if legal_steps[label] == 0]
     quiescent = sum(1 for h in histories if h.quiescent)
+    reasons = {label: "never_able" if label in never_able else "preconditions" for label in never}
     return {
         "count": len(histories),
         "steps": total,
@@ -125,8 +134,15 @@ def episode_stats(histories: Sequence[History], event_types: Sequence[str]) -> d
         },
         "mean_changes_per_event": round(changes / len(events), 6) if events else 0.0,
         "quiescent_share": round(quiescent / len(histories), 6) if histories else 0.0,
-        "never_legal": never,
-        "warnings": [f"{label} was never legal in any episode" for label in never],
+        "two_place_share": round(sum(1 for e in events if e.patient is not None) / len(events), 6)
+        if events
+        else 0.0,
+        "precondition_redraws": dict(redraws or {}),
+        "never_legal": reasons,
+        "warnings": [
+            f"{label} was never legal in any episode ({reason})"
+            for label, reason in reasons.items()
+        ],
     }
 
 
@@ -153,11 +169,7 @@ def world_stats(
             effects_by_kind[kind] += 1
     edges = enabling_edges(event_types)
     return {
-        "fluents": {
-            "base": len(fluents.base),
-            "derived": len(fluents.derived),
-            "initial_rates": {f.label: float(f.initial_rate) for f in fluents.base},
-        },
+        "fluents": {"base": len(fluents.base), "derived": len(fluents.derived)},
         "event_types": by_kind,
         "precondition_literals": {
             "total": sum(literals_by_kind.values()),

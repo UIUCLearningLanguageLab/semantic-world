@@ -1,0 +1,25 @@
+categories: 6
+leaves: 4
+instances: 12
+mean_true_features_per_instance: {is: 3.5833333333333335, has: 3.0, can: 1.75}
+constant_features: 2
+duplicate_leaves: 0
+duplicate_instances: 1
+superordinates: {similarity_min: -1.2412670766236365e-17, similarity_max: -1.2412670766236365e-17,
+  tries: 2}
+warnings: []
+verbs:
+  verb_features: 4
+  verb_categories: 6
+  verbs: 4
+  constraints: 8
+  constraint_families: {comparison: 1, key_lock: 1, agent: 2, cross: 2, patient: 2}
+  approximate_projections: 0.0
+  proportions_estimated: false
+  pairs_short:
+    V1.1: {'true': 22, 'false': 110}
+    V1.2: {'true': 4, 'false': 128}
+    V2.1: {'true': 10, 'false': 122}
+    V2.2: {'true': 5, 'false': 127}
+  verbs_outside_density: 0
+  verbs_outside_density_labels: []

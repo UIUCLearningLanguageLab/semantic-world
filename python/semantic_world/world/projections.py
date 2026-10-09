@@ -1,9 +1,10 @@
-"""Projections: the one-place features every verb gives every object.
+"""Projections: the capacities every two-place event type gives every entity.
 
-The agent projection ``CAN.<verb>`` is true for an object when some possible patient would make
-the relation true with this object as agent. The patient projection ``CANBE.<verb>`` is true
-when some possible agent would. "Possible" means any combination of features an object could
-have, not only the objects that exist in the run.
+The agent capacity ``CAN.<event type>`` is true for an entity when some possible patient would
+make the requirement true with this entity as agent. The patient capacity ``CANBE.<event type>``
+is true when some possible agent would. "Possible" means any combination of features an entity
+could have, not only the entities that exist in the world (``docs/specs/WORLD_AND_LANGUAGE.md``,
+"Rule-set identity and derived values").
 
 The exact computation treats the unknown side as unknown. Once per relation it enumerates the
 settings of the free binary features in the cones of the unknown side's binary literals (the
@@ -16,9 +17,8 @@ resulting setting satisfies every constraint. When the enumeration would exceed
 independent variable and marks the projection approximate. The local test never says false when
 the exact answer is true.
 
-Extensional projections report whether the object actually has a partner among the run's
-instances. Exposure chooses, from the ``taxonomy:constraints`` stream, which projections appear
-as columns in ``instances.csv``.
+Extensional projections report whether the entity actually has a partner among the world's
+entities. The local test's samples come from the ``world:constraints`` stream.
 """
 
 from __future__ import annotations
@@ -30,79 +30,67 @@ from typing import Any
 
 import numpy as np
 
-from semantic_world.taxonomy.config import Config
-from semantic_world.taxonomy.constraints import (
+from semantic_world.taxonomy.instances import Instances
+from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT, RuleSet, evaluate_feature
+from semantic_world.world.constraints import (
     Constraint,
     Relations,
     RoleFeature,
     RoleThreshold,
     ScalarComparison,
 )
-from semantic_world.taxonomy.instances import Instances
-from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT, RuleSet, evaluate_feature
 
 LOCAL_SAMPLES = 1 << 16
 
 
 @dataclass(frozen=True)
 class Projections:
-    verb_labels: tuple[str, ...]
+    event_type_labels: tuple[str, ...]
     agent: np.ndarray
-    """Intensional ``CAN.<verb>``: shape ``(instances, verbs)``, bool."""
+    """Intensional ``CAN.<event type>``: shape ``(entities, event types)``, bool."""
     patient: np.ndarray
-    """Intensional ``CANBE.<verb>``: shape ``(instances, verbs)``, bool."""
+    """Intensional ``CANBE.<event type>``: shape ``(entities, event types)``, bool."""
     agent_approximate: np.ndarray
-    """Per verb, whether the agent projection came from the local test."""
+    """Per event type, whether the agent projection came from the local test."""
     patient_approximate: np.ndarray
     actual_agent: np.ndarray
-    """Extensional: the instance has some actual patient among the run's instances."""
+    """Extensional: the entity has some actual patient among the world's entities."""
     actual_patient: np.ndarray
-    exposed_agent: tuple[str, ...]
-    """The verbs whose agent projection appears in ``instances.csv``, in verb order."""
-    exposed_patient: tuple[str, ...]
 
     @property
     def agent_columns(self) -> tuple[str, ...]:
-        return tuple(f"CAN.{v}" for v in self.verb_labels)
+        return tuple(f"CAN.{v}" for v in self.event_type_labels)
 
     @property
     def patient_columns(self) -> tuple[str, ...]:
-        return tuple(f"CANBE.{v}" for v in self.verb_labels)
+        return tuple(f"CANBE.{v}" for v in self.event_type_labels)
 
     def approximate_labels(self) -> list[str]:
         """The projections computed by the local test, as column names."""
         labels = [
-            f"CAN.{v}" for v, a in zip(self.verb_labels, self.agent_approximate, strict=True) if a
+            f"CAN.{v}"
+            for v, a in zip(self.event_type_labels, self.agent_approximate, strict=True)
+            if a
         ]
         labels += [
             f"CANBE.{v}"
-            for v, a in zip(self.verb_labels, self.patient_approximate, strict=True)
+            for v, a in zip(self.event_type_labels, self.patient_approximate, strict=True)
             if a
         ]
         return labels
 
-    def exposed_columns(self) -> dict[str, np.ndarray]:
-        """The exposed projections as ``instances.csv`` columns, agents then patients."""
-        index = {v: i for i, v in enumerate(self.verb_labels)}
-        columns: dict[str, np.ndarray] = {}
-        for v in self.exposed_agent:
-            columns[f"CAN.{v}"] = self.agent[:, index[v]]
-        for v in self.exposed_patient:
-            columns[f"CANBE.{v}"] = self.patient[:, index[v]]
-        return columns
-
     def all_columns(self) -> dict[str, Any]:
-        """Every column of ``projections.csv`` after the label: intensional projections, the
+        """Every two-place column of ``derived/capacities.csv``: intensional projections, the
         approximate flag, then the extensional projections."""
         columns: dict[str, Any] = {}
-        for i, v in enumerate(self.verb_labels):
+        for i, v in enumerate(self.event_type_labels):
             columns[f"CAN.{v}"] = self.agent[:, i]
-        for i, v in enumerate(self.verb_labels):
+        for i, v in enumerate(self.event_type_labels):
             columns[f"CANBE.{v}"] = self.patient[:, i]
         columns["approximate"] = ";".join(self.approximate_labels())
-        for i, v in enumerate(self.verb_labels):
+        for i, v in enumerate(self.event_type_labels):
             columns[f"ACTUAL_CAN.{v}"] = self.actual_agent[:, i]
-        for i, v in enumerate(self.verb_labels):
+        for i, v in enumerate(self.event_type_labels):
             columns[f"ACTUAL_CANBE.{v}"] = self.actual_patient[:, i]
         return columns
 
@@ -113,58 +101,36 @@ class Projections:
 
 
 def compute_projections(
-    config: Config,
     rules: RuleSet,
     relations: Relations,
     instances: Instances,
     rng: np.random.Generator,
     cone_limit: int = CONE_ENUMERATION_LIMIT,
 ) -> Projections:
-    """Every intensional and extensional projection, and the exposure choice."""
-    verbs = relations.verbs.verbs
+    """Every intensional and extensional projection of every two-place event type."""
+    event_types = relations.event_tree.event_types
     n = len(instances)
-    agent = np.zeros((n, len(verbs)), dtype=bool)
-    patient = np.zeros((n, len(verbs)), dtype=bool)
-    agent_approximate = np.zeros(len(verbs), dtype=bool)
-    patient_approximate = np.zeros(len(verbs), dtype=bool)
-    actual_agent = np.zeros((n, len(verbs)), dtype=bool)
-    actual_patient = np.zeros((n, len(verbs)), dtype=bool)
-    for vi, verb in enumerate(verbs):
-        constraints = relations.relation(verb).constraints
+    agent = np.zeros((n, len(event_types)), dtype=bool)
+    patient = np.zeros((n, len(event_types)), dtype=bool)
+    agent_approximate = np.zeros(len(event_types), dtype=bool)
+    patient_approximate = np.zeros(len(event_types), dtype=bool)
+    actual_agent = np.zeros((n, len(event_types)), dtype=bool)
+    actual_patient = np.zeros((n, len(event_types)), dtype=bool)
+    for vi, event_type in enumerate(event_types):
+        constraints = relations.relation(event_type).constraints
         agent[:, vi], agent_approximate[vi] = project(
-            constraints, "p", rules, instances, cone_limit, rng
+            constraints, "patient", rules, instances, cone_limit, rng
         )
         patient[:, vi], patient_approximate[vi] = project(
-            constraints, "a", rules, instances, cone_limit, rng
+            constraints, "agent", rules, instances, cone_limit, rng
         )
-        matrix = relations.matrix(verb)
+        matrix = relations.matrix(event_type)
         actual_agent[:, vi] = matrix.any(axis=1)
         actual_patient[:, vi] = matrix.any(axis=0)
-    labels = tuple(v.label for v in verbs)
-    assert config.verbs is not None
-    exposed_agent = _expose(labels, config.verbs.expose_agent, rng)
-    exposed_patient = _expose(labels, config.verbs.expose_patient, rng)
+    labels = tuple(v.label for v in event_types)
     return Projections(
-        labels,
-        agent,
-        patient,
-        agent_approximate,
-        patient_approximate,
-        actual_agent,
-        actual_patient,
-        exposed_agent,
-        exposed_patient,
+        labels, agent, patient, agent_approximate, patient_approximate, actual_agent, actual_patient
     )
-
-
-def _expose(
-    labels: tuple[str, ...], proportion: float, rng: np.random.Generator
-) -> tuple[str, ...]:
-    count = int(np.floor(proportion * len(labels) + 0.5))
-    if count == 0:
-        return ()
-    chosen = sorted(int(i) for i in rng.choice(len(labels), size=count, replace=False))
-    return tuple(labels[i] for i in chosen)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -210,7 +176,7 @@ class _UnknownSide:
         rng: np.random.Generator,
     ) -> None:
         self.unknown = unknown
-        self.known = "a" if unknown == "p" else "p"
+        self.known = "agent" if unknown == "patient" else "patient"
         self.binary = _unique(
             item
             for c in constraints
@@ -240,10 +206,10 @@ class _UnknownSide:
         self.patterns, self.intervals, self.approximate = self._enumerate(rules, cone_limit, rng)
 
     def unknown_scalar(self, item: ScalarComparison) -> int:
-        return item.patient_scalar if self.unknown == "p" else item.agent_scalar
+        return item.patient_scalar if self.unknown == "patient" else item.agent_scalar
 
     def known_scalar(self, item: ScalarComparison) -> int:
-        return item.agent_scalar if self.unknown == "p" else item.patient_scalar
+        return item.agent_scalar if self.unknown == "patient" else item.patient_scalar
 
     @property
     def literals(self) -> list:
@@ -320,8 +286,9 @@ def project(
     cone_limit: int,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, bool]:
-    """The projection of every instance for a relation, with the role ``unknown`` (``p`` for the
-    agent projection, ``a`` for the patient projection) treated as any possible object. Returns
+    """The projection of every instance for a relation, with the role ``unknown`` (``patient``
+    for the agent projection, ``agent`` for the patient projection) treated as any possible
+    entity. Returns
     the bool column and whether the local test was used.
 
     The grid has one axis for the instances, one for the unknown side's literal patterns, and one
@@ -415,7 +382,7 @@ def _comparison_cuts_array(
     item: ScalarComparison, known_values: np.ndarray, unknown: str
 ) -> np.ndarray:
     """The cut values of a comparison for every instance: shape ``(instances, 1 or 2)``."""
-    sign = -1.0 if unknown == "p" else 1.0
+    sign = -1.0 if unknown == "patient" else 1.0
     cuts = [known_values + sign * item.low]
     if item.high is not None:
         cuts.append(known_values + sign * item.high)
@@ -433,7 +400,7 @@ def _candidates_array(sorted_cuts: np.ndarray) -> np.ndarray:
 
 def _comparison_cuts(item: ScalarComparison, known_value: float, unknown: str) -> list[float]:
     """The values of the unknown scalar at which a comparison changes truth value."""
-    if unknown == "p":
+    if unknown == "patient":
         # a - p > low  <=>  p < a - low;  window: a - high < p < a - low
         cuts = [known_value - item.low]
         if item.high is not None:
@@ -451,7 +418,7 @@ def _comparison_values(
 ) -> np.ndarray:
     """The comparison at candidate values of the unknown scalar: ``candidates`` has one row per
     instance and ``known_scalars`` one row per instance (all scalars)."""
-    if unknown == "p":
+    if unknown == "patient":
         difference = known_scalars[:, item.agent_scalar - 1][:, None] - candidates
     else:
         difference = candidates - known_scalars[:, item.patient_scalar - 1][:, None]

@@ -29,7 +29,9 @@ from semantic_world.corpus.mentions import (
 from semantic_world.corpus.propositions import (
     CLASS,
     EVENT,
+    HAS,
     INSTANCE,
+    IS,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -183,7 +185,7 @@ def test_a_membership_sentence_never_names_the_subject_by_the_predicate(cases) -
 # ---------------------------------------------------------------------------------------------
 
 
-def attach_all(case, settings: dict, level: str, seed: int = 0, count: int = 400):
+def attach_all(case, settings: dict, level: str, seed: int = 0, count: int = 400, scenes: int = 40):
     """Plans of one level with relative clauses drawn, and the facts they were drawn from."""
     facts = case.facts(**settings)
     clauses = RelativeClauses(case.config(**settings), facts)
@@ -196,7 +198,7 @@ def attach_all(case, settings: dict, level: str, seed: int = 0, count: int = 400
         for index in rng.choice(len(pool), size=count):
             plans.append(clauses.attach(rng, plan_for(facts, pool[int(index)]), others))
     else:
-        events = [e for scene in scenes_of(case, facts) for e in scene_events(scene)]
+        events = [e for scene in scenes_of(case, facts, scenes) for e in scene_events(scene)]
         for event in events[:count]:
             report = facts.event_fact(event)
             if report is not None:
@@ -228,7 +230,11 @@ def test_a_relative_clause_expresses_a_true_proposition_about_its_head(cases, na
 
 def test_event_clauses_report_events_of_the_same_scene(cases) -> None:
     case = cases("default")
-    plans, facts = attach_all(case, rate_settings(rate=0.8, max_depth=2), EVENT)
+    # 120 scenes: two-place events, which an object relative needs, are few in the default
+    # world (since stage a5b, about 6% of its events)
+    plans, facts = attach_all(
+        case, rate_settings(rate=0.8, max_depth=2), EVENT, count=1000, scenes=120
+    )
     subject_relatives = object_relatives = 0
     for plan in plans:
         scene = scene_of(plan.predication.event)
@@ -316,7 +322,7 @@ def test_negated_literals_keep_the_clause_a_subject_relative(cases) -> None:
     labels = case.world.instances
     instance = labels[0]
     row = facts.truth.instance_index[instance]
-    lacking = next(f for f in facts.features["is"] if not facts.world.column(f)[row])
+    lacking = next(f for f in facts.features[IS] if not facts.world.column(f)[row])
     phrase = dataclasses.replace(mention(facts, instance), restriction=(Literal(lacking, False),))
     fact = facts.instance_facts(instance)[0]
     for _ in range(30):
@@ -393,9 +399,7 @@ def test_the_preference_order_is_fixed_for_the_language(cases) -> None:
     rules = rules_of(case)
     facts = case.facts()
     scalars = sorted({pole.rsplit(".", 1)[0] for pole in facts.poles})
-    assert (
-        sorted(rules.preference) == sorted(facts.features["is"] + facts.features["has"]) + scalars
-    )
+    assert sorted(rules.preference) == sorted(facts.features[IS] + facts.features[HAS]) + scalars
     assert rules_of(case).preference == rules.preference
     other = MentionRules(case.config(seed=2), facts, Streams(2))
     assert other.preference != rules.preference

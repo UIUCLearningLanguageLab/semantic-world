@@ -19,6 +19,8 @@ from corpus_support import (
     REPO,
     STATIC_WORLD,
     TINY_WORLD,
+    WRITTEN_EVENT_TYPES,
+    WRITTEN_SEEDS,
     WRITTEN_TAXONOMIES,
     Case,
     world_over,
@@ -66,7 +68,8 @@ def world_files(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
 def cases(tmp_path_factory: pytest.TempPathFactory):
     """The worlds of the proposition tests, by name, each made once: the ``tiny`` and
     ``default`` worlds, ``deep`` (chained rules and two scalars), and ``still`` (a scalar
-    without drift, and a flat event-type tree). Each has its world run folder, so truth can be
+    without drift, and a flat event-type tree), the last two as world configurations over
+    taxonomies written for the tests. Each has its world run folder, so truth can be
     recomputed from the files."""
     root = tmp_path_factory.mktemp("worlds")
     made: dict[str, Case] = {}
@@ -76,8 +79,11 @@ def cases(tmp_path_factory: pytest.TempPathFactory):
             if name in WRITTEN_TAXONOMIES:
                 taxonomy = root / f"{name}_taxonomy.yaml"
                 taxonomy.write_text(WRITTEN_TAXONOMIES[name], encoding="utf-8")
-                seed = 3 if name == "deep" else 2
-                world = write_world(root, name, world_over(name, str(taxonomy), seed))
+                world = write_world(
+                    root,
+                    name,
+                    world_over(name, str(taxonomy), WRITTEN_SEEDS[name], WRITTEN_EVENT_TYPES[name]),
+                )
             else:
                 world = str(REPO / EXAMPLE_WORLDS[name])
             made[name] = Case(name, world, root / name)

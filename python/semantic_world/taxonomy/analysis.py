@@ -203,7 +203,7 @@ def feature_stats_table(
         level_index = {label: i for i, label in enumerate(level_labels)}
         assignment = np.array(
             [
-                level_index["C" + ".".join(str(i) for i in tree.categories[k].indices[:level])]
+                level_index[tree.ancestor_label(tree.categories[k], level)]
                 for k in instances.leaf_index
             ],
             dtype=np.intp,
@@ -302,7 +302,7 @@ def summary_stats(
     values = instances.values
     n = values.shape[0]
     mean_true = {}
-    for feature_type in ("is", "has", "can"):
+    for feature_type in ("is", "has"):
         positions = [f.position for f in features.of_type(feature_type)]
         mean_true[feature_type] = (
             float(values[:, positions].sum(axis=1).mean()) if n and positions else math.nan

@@ -1,4 +1,9 @@
-"""Stage 6 acceptance tests: the output folder, the statistics, and the command line."""
+"""Stage 6 acceptance tests: the output folder, the statistics, and the command line.
+
+Since stage a5b of the world model the labels are ``CATEGORY.<path>``, ``INSTANCE.<path>.<k>``,
+``PROPERTY.<n>``, and ``PART.<n>``; ``instances.csv`` is ``base.csv`` (the free features and the
+scalars) with the determined features in ``derived/static_features.csv``; and the taxonomy has
+no CAN features, so the default run has 20 rules."""
 
 from __future__ import annotations
 
@@ -24,8 +29,10 @@ from semantic_world.taxonomy import (
 )
 from semantic_world.taxonomy.analysis import binary_entropy, mutual_information
 from semantic_world.taxonomy.io import (
+    BASE_FILE,
     CSV_FILES,
     OUTPUT_FILES,
+    STATIC_FEATURES_FILE,
     WORLD_FILES,
     default_output_dir,
     git_commit,
@@ -38,9 +45,10 @@ WORLD_ENTRIES = {name.split("/")[0] for name in WORLD_FILES}
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
 
-CATEGORY_LABEL = re.compile(r"^C[1-9]\d*(\.[1-9]\d*)*$")
-INSTANCE_LABEL = re.compile(r"^I[1-9]\d*(\.[1-9]\d*)+$")
-FEATURE_LABEL = re.compile(r"^(IS|HAS|CAN)\.[1-9]\d*$|^ISA\.C[1-9]\d*(\.[1-9]\d*)*$")
+CATEGORY_LABEL = re.compile(r"^CATEGORY\.[1-9]\d*(\.[1-9]\d*)*$")
+INSTANCE_LABEL = re.compile(r"^INSTANCE\.[1-9]\d*(\.[1-9]\d*)+$")
+FEATURE_LABEL = re.compile(r"^(PROPERTY|PART)\.[1-9]\d*$|^ISA\.CATEGORY\.[1-9]\d*(\.[1-9]\d*)*$")
+STATIC_FEATURES = f"derived/{STATIC_FEATURES_FILE}"
 
 EXPECTED_COLUMNS = {
     "features.csv": ["label", "type", "kind", "layer", "base_rate"],
@@ -63,7 +71,32 @@ def default_folder(
 
 
 def _load(folder: Path) -> dict[str, pl.DataFrame]:
-    return {name: pl.read_csv(folder / name) for name in CSV_FILES}
+    frames = {name: pl.read_csv(folder / name) for name in CSV_FILES}
+    frames[STATIC_FEATURES] = pl.read_csv(folder / STATIC_FEATURES)
+    return frames
+
+
+def _instance_columns(folder: Path) -> dict[str, np.ndarray]:
+    """Every non-ISA feature column of the instances, from base.csv (free features and
+    scalars) and derived/static_features.csv (determined features), plus the ISA columns."""
+    frames = _load(folder)
+    columns = {name: frames[BASE_FILE][name].to_numpy() for name in frames[BASE_FILE].columns}
+    for name in frames[STATIC_FEATURES].columns[1:]:
+        columns[name] = frames[STATIC_FEATURES][name].to_numpy()
+    leaf_of = dict(zip(frames[BASE_FILE]["label"], frames[BASE_FILE]["leaf"], strict=True))
+    tree = frames["tree.csv"]
+    parent_of = dict(zip(tree["label"], tree["parent"], strict=True))
+    for category in tree["label"]:
+        isa = []
+        for label in frames[BASE_FILE]["label"]:
+            node = leaf_of[label]
+            on = False
+            while node is not None:
+                on |= node == category
+                node = parent_of[node]
+            isa.append(int(on))
+        columns[f"ISA.{category}"] = np.array(isa)
+    return columns
 
 
 # ---------------------------------------------------------------------------------------------
@@ -99,8 +132,16 @@ def test_every_csv_loads_with_the_expected_columns(
     for name in ("categories_generative.csv", "categories_defining.csv", "categories_mean.csv"):
         assert frames[name].columns == ["label", *labels], name
         assert frames[name].height == len(default_result.tree.categories)
-    assert frames["instances.csv"].columns == ["label", "leaf", *labels]
-    assert frames["instances.csv"].height == len(default_result.instances)
+    features = default_result.features
+    free = [f.label for f in features.free]
+    determined = [f.label for f in features.determined]
+    assert frames[BASE_FILE].columns == ["label", "leaf", *free]
+    assert frames[BASE_FILE].height == len(default_result.instances)
+    assert frames[STATIC_FEATURES].columns == ["label", *determined]
+    assert frames[STATIC_FEATURES].height == len(default_result.instances)
+    assert frames[STATIC_FEATURES]["label"].to_list() == frames[BASE_FILE]["label"].to_list()
+    assert not any(c.startswith("CAN.") for c in frames[BASE_FILE].columns)
+    assert not (default_folder / "instances.csv").exists()
     stats = frames["feature_stats.csv"]
     assert stats.columns == [
         "feature",
@@ -127,21 +168,18 @@ def test_labels_follow_the_label_table(default_folder: Path) -> None:
     frames = _load(default_folder)
     for label in frames["tree.csv"]["label"]:
         assert CATEGORY_LABEL.match(label), label
-    for label, leaf in zip(
-        frames["instances.csv"]["label"], frames["instances.csv"]["leaf"], strict=True
-    ):
+    for label, leaf in zip(frames[BASE_FILE]["label"], frames[BASE_FILE]["leaf"], strict=True):
         assert INSTANCE_LABEL.match(label), label
-        assert label.startswith("I" + leaf[1:] + "."), (label, leaf)
+        assert CATEGORY_LABEL.match(leaf), leaf
+        assert label.startswith("INSTANCE." + leaf[len("CATEGORY.") :] + "."), (label, leaf)
     for label in frames["features.csv"]["label"]:
         assert FEATURE_LABEL.match(label), label
     labels = frames["features.csv"]["label"].to_list()
     isa = [x for x in labels if x.startswith("ISA.")]
     assert isa == ["ISA." + c for c in frames["tree.csv"]["label"]]
     rest = [x for x in labels if not x.startswith("ISA.")]
-    assert rest == [f"IS.{i}" for i in range(1, 41)] + [f"HAS.{i}" for i in range(1, 41)] + [
-        f"CAN.{i}" for i in range(1, 21)
-    ]
-    assert frames["instances.csv"]["label"][0] == "I1.1.1.1"
+    assert rest == [f"PROPERTY.{i}" for i in range(1, 41)] + [f"PART.{i}" for i in range(1, 41)]
+    assert frames[BASE_FILE]["label"][0] == "INSTANCE.1.1.1.1"
 
 
 def test_values_are_written_as_specified(default_folder: Path) -> None:
@@ -155,10 +193,12 @@ def test_values_are_written_as_specified(default_folder: Path) -> None:
         (default_folder / "categories_generative.csv").read_text().splitlines()[1].split(",")[1:]
     )
     assert set(generative) <= {"0", "1"}
-    instances = (default_folder / "instances.csv").read_text().splitlines()[1].split(",")[2:]
-    assert set(instances) <= {"0", "1"}
+    base = (default_folder / BASE_FILE).read_text().splitlines()[1].split(",")[2:]
+    assert set(base) <= {"0", "1"}
+    static = (default_folder / STATIC_FEATURES).read_text().splitlines()[1].split(",")[1:]
+    assert set(static) <= {"0", "1"}
     tree_text = (default_folder / "tree.csv").read_text().splitlines()
-    assert tree_text[1].startswith("C1,,1,")  # a superordinate has no parent
+    assert tree_text[1].startswith("CATEGORY.1,,1,")  # a superordinate has no parent
 
 
 # ---------------------------------------------------------------------------------------------
@@ -185,7 +225,7 @@ def test_different_seeds_give_different_outputs(tmp_path: Path) -> None:
     a = generate(load_config(DATA / "tiny.yaml", seed=1)).write(tmp_path / "a")
     b = generate(load_config(DATA / "tiny.yaml", seed=2)).write(tmp_path / "b")
     assert not _folders_identical(a, b)
-    assert (a / "instances.csv").read_bytes() != (b / "instances.csv").read_bytes()
+    assert (a / BASE_FILE).read_bytes() != (b / BASE_FILE).read_bytes()
     assert (a / "rules.yaml").read_bytes() != (b / "rules.yaml").read_bytes()
 
 
@@ -199,7 +239,8 @@ def test_changing_only_the_instance_count_leaves_rules_and_tree_unchanged(tmp_pa
     tree_a = pl.read_csv(a / "tree.csv").drop("instances")
     tree_b = pl.read_csv(b / "tree.csv").drop("instances")
     assert tree_a.equals(tree_b)
-    assert (a / "instances.csv").read_bytes() != (b / "instances.csv").read_bytes()
+    assert (a / BASE_FILE).read_bytes() != (b / BASE_FILE).read_bytes()
+    assert (a / STATIC_FEATURES).read_bytes() != (b / STATIC_FEATURES).read_bytes()
 
 
 def test_tree_csv_instance_counts_differ_with_instance_count(tmp_path: Path) -> None:
@@ -246,7 +287,7 @@ def test_provenance_must_be_a_mapping() -> None:
 
 def test_rules_yaml(default_result: TaxonomyResult, default_folder: Path) -> None:
     rules = yaml.safe_load((default_folder / "rules.yaml").read_text())
-    assert len(rules) == len(default_result.rules.rules) == 40
+    assert len(rules) == len(default_result.rules.rules) == 20  # 10 PROPERTY and 10 PART
     assert [r["output"] for r in rules] == [f.label for f in default_result.features.determined]
     example = rules[0]
     assert list(example) == [
@@ -273,11 +314,13 @@ def test_summary_yaml(default_result: TaxonomyResult, default_folder: Path) -> N
     assert summary["instances"] == len(default_result.instances)
     values = default_result.instances.values
     features = default_result.features
-    for t in ("is", "has", "can"):
+    assert list(summary["mean_true_features_per_instance"]) == ["is", "has"]
+    for t in ("is", "has"):
         positions = [f.position for f in features.of_type(t)]
         assert summary["mean_true_features_per_instance"][t] == pytest.approx(
             values[:, positions].sum(axis=1).mean()
         )
+    assert "verbs" not in summary
     assert summary["constant_features"] == int((values.min(axis=0) == values.max(axis=0)).sum())
     assert summary["duplicate_leaves"] == 0
     assert summary["duplicate_instances"] >= 0
@@ -389,11 +432,11 @@ def test_entropy_and_mutual_information_helpers() -> None:
 
 def test_feature_statistics(default_result: TaxonomyResult, default_folder: Path) -> None:
     stats = pl.read_csv(default_folder / "feature_stats.csv")
-    instances = pl.read_csv(default_folder / "instances.csv")
+    instances = _instance_columns(default_folder)
     tree = default_result.tree
     n_cat = len(tree.categories)
     for row in stats.iter_rows(named=True):
-        column = instances[row["feature"]].to_numpy()
+        column = instances[row["feature"]]
         assert row["proportion_true"] == pytest.approx(column.mean(), abs=1e-6)
         assert row["entropy"] == pytest.approx(binary_entropy(column.mean()), abs=1e-6)
         for level in (1, 2, 3):
@@ -416,14 +459,15 @@ def test_feature_statistics(default_result: TaxonomyResult, default_folder: Path
                 == 0
             )
     # An ISA feature of a superordinate carries information about the level-1 category.
-    first = stats.filter(pl.col("feature") == "ISA.C1").row(0, named=True)
+    first = stats.filter(pl.col("feature") == "ISA.CATEGORY.1").row(0, named=True)
     assert first["type"] == "isa" and first["kind"] == "determined"
     assert first["mi_level_1"] > 0.5
     assert first["mi_level_1"] == pytest.approx(
         first["entropy"], abs=1e-6
     )  # determined by the level-1 category
-    assert stats.filter(pl.col("feature") == "IS.1").row(0, named=True)["kind"] == "free"
-    assert stats.filter(pl.col("feature") == "CAN.1").row(0, named=True)["layer"] == 2.0
+    assert stats.filter(pl.col("feature") == "PROPERTY.1").row(0, named=True)["kind"] == "free"
+    assert stats.filter(pl.col("feature") == "PROPERTY.31").row(0, named=True)["layer"] == 1.0
+    assert stats.filter(pl.col("feature").str.starts_with("CAN.")).height == 0
 
 
 def test_roles_csv_is_consistent(default_result: TaxonomyResult, default_folder: Path) -> None:
@@ -441,7 +485,7 @@ def test_roles_csv_is_consistent(default_result: TaxonomyResult, default_folder:
     unfixed = roles.filter(pl.col("role") != "fixed_by_rule")["fixed_test"]
     assert all(value in (None, "") for value in unfixed.to_list())
     assert fixed.height == int(default_result.vectors.fixed_by_rule.sum())
-    superordinate = roles.filter(pl.col("category") == "C1")
+    superordinate = roles.filter(pl.col("category") == "CATEGORY.1")
     assert (superordinate["role"] == "defining_inherited").sum() == 0
 
 
@@ -449,11 +493,15 @@ def test_features_csv(default_folder: Path) -> None:
     features = pl.read_csv(default_folder / "features.csv")
     free = features.filter(pl.col("kind") == "free")
     assert free.height == 60
-    assert np.allclose(free["base_rate"].to_numpy(), 0.2)
+    # default.yaml draws the base rates (heterogeneity 2) around the mean 6 / 30.
+    rates = free["base_rate"].to_numpy()
+    assert np.all((rates > 0) & (rates < 1)) and len(set(rates.tolist())) > 1
+    assert 0.1 < rates.mean() < 0.3
     assert set(free["layer"].to_list()) == {0.0}
     determined = features.filter((pl.col("kind") == "determined") & (pl.col("type") != "isa"))
+    assert determined.height == 20
     assert determined["base_rate"].is_nan().all()
-    assert set(determined["layer"].to_list()) == {1.0, 2.0}
+    assert set(determined["layer"].to_list()) == {1.0}  # no CAN layer above the last
 
 
 # ---------------------------------------------------------------------------------------------
@@ -464,7 +512,14 @@ def test_features_csv(default_folder: Path) -> None:
 def test_tiny_and_rule_file_examples_run(tmp_path: Path) -> None:
     tiny = generate(load_config(DATA / "tiny.yaml"))
     folder = tiny.write(tmp_path / "tiny")
-    assert pl.read_csv(folder / "instances.csv").height == 12
+    assert pl.read_csv(folder / BASE_FILE).height == 12
+    assert pl.read_csv(folder / STATIC_FEATURES).columns == [
+        "label",
+        "PROPERTY.7",
+        "PROPERTY.8",
+        "PART.7",
+        "PART.8",
+    ]
     rule_file = generate(load_config(DATA / "rule_file.yaml"))
     assert any(r.family == "explicit" for r in rule_file.rules.rules)
     rule_file.write(tmp_path / "rule_file")
@@ -493,7 +548,7 @@ def test_command_line(tmp_path: Path) -> None:
         cwd=REPO,
     )
     assert run.returncode == 0, run.stderr
-    assert run.stdout.startswith(f"wrote {out}: 6 categories, 4 leaves, 12 instances, 8 rules")
+    assert run.stdout.startswith(f"wrote {out}: 6 categories, 4 leaves, 12 instances, 4 rules")
     assert sorted(p.name for p in out.iterdir()) == sorted(set(OUTPUT_FILES) | WORLD_ENTRIES)
     assert yaml.safe_load((out / "config.yaml").read_text())["seed"] == 3
 

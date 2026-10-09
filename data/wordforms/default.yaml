@@ -74,5 +74,5 @@ assignment:
   strict: false                  # true: a target correlation that is not reached within the tolerance is an error
   target_correlation: {target: 0.3, tolerance: 0.01, max_swaps: 20000}
   branch_markers: {depth: 1, position: initial, shape: CV, min_distance: 2}   # position: initial or final; shape: CV, VC, or CVC; min_distance: the fewest phonemes by which two markers differ
-  acoustic_mapping: []           # for example [{feature: IS.3, property: pitch, amount: 2.0}]
+  acoustic_mapping: []           # for example [{feature: PROPERTY.3, property: pitch, amount: 2.0}]
 device: auto

@@ -15,7 +15,10 @@ from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.propositions import (
     ALL,
     CLASS,
+    HAS,
     INSTANCE,
+    IS,
+    LABEL_KEY,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -107,8 +110,8 @@ def test_every_false_item_fails_and_differs_by_exactly_one_change(cases, name) -
             changed = differences(true_form, false_form)
             if change == PREDICATE:
                 assert changed == {"predicate"}
-                kept = {k: v for k, v in true_form["predicate"].items() if k not in _LABEL_KEYS}
-                new = {k: v for k, v in false_form["predicate"].items() if k not in _LABEL_KEYS}
+                kept = {k: v for k, v in true_form["predicate"].items() if k != LABEL_KEY}
+                new = {k: v for k, v in false_form["predicate"].items() if k != LABEL_KEY}
                 assert kept == new  # the kind, the patient, and the comparison class stay
             elif change == SUBJECT:
                 assert changed == {"subject"}
@@ -123,9 +126,6 @@ def test_every_false_item_fails_and_differs_by_exactly_one_change(cases, name) -
                 assert false.predicate.patient == item.subject
                 assert false.predicate.label == item.predicate.label
     assert all(count > 10 for count in made.values()), made
-
-
-_LABEL_KEYS = ("feature", "pole", "category", "projection", "verb")
 
 
 def test_changes_that_can_apply(cases) -> None:
@@ -212,7 +212,7 @@ def test_quantifier_swaps(cases) -> None:
                     assert not truth.is_true(false) and truth.statable(false)
                     seen.add((fact.predicate.kind, fact.quantifier, false.quantifier))
     # "all" (nec_all) for a "most" fact, as in the specification, and "no" for a "some" fact
-    assert ("has", MOST, NEC_ALL) in seen and ("is", SOME, NEC_NO) in seen
+    assert (HAS, MOST, NEC_ALL) in seen and (IS, SOME, NEC_NO) in seen
     # under the default words, the extensional quantifiers cannot be said
     assert not any(false in (ALL, NO) for _, _, false in seen)
     # a scalar pole has no quantifier, and membership is true or false of the whole category,
@@ -263,7 +263,7 @@ def test_false_items_are_never_vacuous(cases) -> None:
     restricted = []
     for category in facts.categories:
         members = facts.truth.members(CategoryTerm(category))
-        for feature in facts.features["has"]:
+        for feature in facts.features[HAS]:
             term = CategoryTerm(category, (Literal(feature),))
             if 0 < len(facts.truth.members(term)) < len(members):
                 restricted += facts.class_facts(term, patients=facts.categories[:2])

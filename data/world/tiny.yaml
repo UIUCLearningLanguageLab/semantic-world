@@ -1,5 +1,6 @@
-# A world small enough to read by eye: the tiny relations taxonomy (12 instances, 4 CAN features,
-# 4 verbs) with 4 fluents. Parameters not listed keep their defaults (see default.yaml).
+# A world small enough to read by eye: the tiny taxonomy with 1 scalar dimension (12 instances),
+# 4 one-place event types, 4 two-place event types in a tree of 2 superordinates, and 4 fluents.
+# Parameters not listed keep their defaults (see default.yaml).
 
 name: tiny
 seed: 1
@@ -7,3 +8,9 @@ taxonomy: {config: data/taxonomy/tiny_relations.yaml}
 
 fluents:
   count: 4
+
+event_types:
+  unary: {count: 4}
+  binary:
+    features: {count: 4, expected_true: 2}
+    taxonomy: {superordinates: 2, depth: 2, branching: 2}

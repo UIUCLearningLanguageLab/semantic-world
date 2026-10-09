@@ -113,3 +113,27 @@ Every expectation that changed, with the reason. Rewritten files are listed by w
 ## Needs Jon's check
 
 - Open questions 1 to 6 above. Nothing blocks the stage.
+
+## Notes for stage a5b
+
+What the next stage must know, beyond the choices above.
+
+- **Where the old labels still live in the package.** `world/labels.py` is imported by `corpus/world.py` (the one corpus boundary) and by `world/definition.py`, `event_types.py`, `requirements.py`, `fluents.py`, `capacities.py`, `relation_stats.py`, `episodes.py` (`Relatedness.from_taxonomy`, with a `translated` flag for the embedded taxonomy's files), `views.py`, and `generate.py` (the static features). `corpus/world.py` also keeps `_categories_old` and `untranslate` for the taxonomy's fixed test and rule terms, and `meanings_csv` translates the taxonomy's `categories_generative.csv`.
+- **Tests that still read old labels or translate.** `tests/corpus/truth_oracle.py` (its own `new_label` table, and the embedded taxonomy's `tree.csv`, `roles.csv`, and `categories_generative.csv`), `tests/corpus/test_corpus_world.py` (the taxonomy's verb categories and defining vectors through `translate`), `tests/corpus/test_corpus_facts.py` (rule terms through `translate`), `tests/corpus/test_corpus_scenes.py` (`test_the_able_bindings` maps `EVENTTYPE2.` back to `V` and calls `taxonomy.relations.holds`), `tests/corpus/corpus_support.py` (the deep and still taxonomies are written in the old configuration keys with `features.can` and `verbs`, and `old_scene_participants` keeps the old draw), `tests/world/test_world_define.py` (constraints and verb statistics through `translate`), `tests/world/test_world_episodes.py` (the participants reference), the taxonomy suite and its golden files in `tests/taxonomy/golden/`, and the word-form suite (`branch_of("C1.2.3")` in `test_wordforms_assign.py`, and `test_wordforms_request.py`).
+- **The word-form pipeline reads taxonomy outputs.** Its assignment modes read a taxonomy run's `categories_generative.csv` as the meanings (`wordforms.config`, the `meanings` key), so its data files and tests that point at taxonomy runs move to the new labels with the taxonomy; `branch_of` can then drop the old form. `docs/guides/WORDFORMS.md` quotes old labels in its examples.
+- **Figures to re-check.** `docs/guides/CORPUS.md` quotes the tiny and default corpora of this stage (counts, excerpts, the co-occurrence table, the seen shares, the law-like set sizes); the content-kind default, the precondition retune, and the renamed predicate kinds change them. `docs/guides/TAXONOMY.md` quotes old labels throughout.
+- **Co-occurrence under equal kinds (default configuration, 2,500 documents, counting words):** situational thematic 0.49 and taxonomic 0.16; encyclopedic thematic 0.32 and taxonomic 0.25. The taxonomic half of the stage-6 property holds by Pearson and fails by Spearman (0.145 against 0.136). The retune of the preconditions changes the situational numbers.
+- **The never-occurring event types of the tiny world** (`EVENTTYPE1.4`, `EVENTTYPE2.1.2`, `EVENTTYPE2.2.1`) need `BOOLFL.3` false (and `EVENTTYPE2.1.2` also `BOOLFL.1` true) of the agent; the initial values set `BOOLFL.3` true for every entity, and the only effect that makes it false belongs to `EVENTTYPE2.1.2` itself. `EVENTTYPE1.2` has no able agent at all.
+- **Timings.** The default corpus takes about 90 s; `pytest tests/corpus` about 10 minutes; the whole suite about 25 minutes (the word-form suite is most of it). The co-occurrence acceptance test runs 2,500 documents twice.
+- **Housekeeping.** `ruff format` was applied to the corpus and world packages and their tests in this stage, and `test_corpus_grammar.py` and `test_corpus_renderings.py` carry `# ruff: noqa: E501` for their label-heavy lines. `data/corpus/*.yaml` and the corpus tests use the world configurations in `data/world/`; `PLAIN_WORLD` and `STATIC_WORLD` in `corpus_support.py` are world configurations written over `data/taxonomy/tiny.yaml` and `tiny_relations.yaml`.
+
+## Jon's rulings (October 8, 2026, in the stage a5b prompt)
+
+Choices 1 to 26 are approved, except that choice 24 is superseded by ruling 1. The open questions are answered:
+
+1. **The predicate kinds of `documents.jsonl`**: renamed in stage a5b to match the labels: `property`, `part`, `scalar`, `member`, `event_type1`, `event_type2`, and `patient_capacity`, each naming its symbol with the key `label`. The scalar predicate keeps its `class` key and the two-place predicate its `patient` key. Whether the corpus's internal constants rename too is an engineering choice.
+2. **The class-level scalar pole** has no quantifier: approved. Phase (b) replaces its rendering.
+3. **The co-occurrence property of stage 6**: the default of `documents.content_kind_weights` goes back to `equal`, with `proportional` as an option. How a document divides its sentences among kinds of content is a discourse choice, not a world frequency, so "A principle for defaults" does not apply to it. Jon updates the specification and decision 30. The stage-6 co-occurrence property must hold again under the default by Pearson's correlation, for both measures (words and referents), with Spearman's reported as well; the documents are not tuned to force it.
+4. **Few two-place events under the preconditions**: handled in stage a5b (the never-legal redraw and the retune of the precondition defaults).
+5. **Fewer sibling contrasts under `universal_words: nec`**: approved, as the intended meaning of "all".
+6. **`seen` ignores the aspect**: approved.

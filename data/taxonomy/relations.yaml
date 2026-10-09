@@ -1,10 +1,9 @@
-# The default taxonomy with 2 scalar dimensions and the default verbs. Parameters not listed
-# keep their defaults (see default.yaml and docs/specs/TAXONOMY_RELATIONS.md).
+# The default taxonomy with 2 scalar dimensions. The default world (data/world/default.yaml)
+# builds on it. Parameters not listed keep their defaults (see default.yaml and
+# docs/specs/TAXONOMY_RELATIONS.md).
 
 name: relations
 seed: 1
 
 scalars:
   count: 2
-
-verbs: {}                        # every verb setting at its default

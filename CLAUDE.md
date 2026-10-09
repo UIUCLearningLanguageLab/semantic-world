@@ -11,8 +11,8 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 1. `docs/specs/MILESTONE_1.md` — the current build specification: scope, world content, build stages, and acceptance tests. Start here.
 2. `docs/CONTRACTS.md` — the ten contracts between the engine, the world, the agents, and the viewer. The contracts are the source of truth for every interface and file format.
 3. `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and minds are defined.
-4. `docs/specs/TAXONOMY_GENERATOR.md` — the taxonomy feature generator: a standalone Python program in `python/semantic_world/taxonomy/` that builds datasets of categories, instances, and binary features with recorded rules. It does not use the Rust engine.
-5. `docs/specs/TAXONOMY_RELATIONS.md` — the extension of the generator with scalar dimensions, transitive verbs, and a verb taxonomy. The decided proposals in `docs/proposals/` are part of both taxonomy specifications.
+4. `docs/specs/TAXONOMY_GENERATOR.md` — the taxonomy feature generator: a standalone Python program in `python/semantic_world/taxonomy/` that builds datasets of categories, instances, and binary features with recorded rules. It does not use the Rust engine. Since stage a5b of the world-and-language refactor the generator writes the labels of `WORLD_AND_LANGUAGE.md` and makes no CAN features: they are the one-place event types of the world package.
+5. `docs/specs/TAXONOMY_RELATIONS.md` — the extension of the generator with scalar dimensions, transitive verbs, and a verb taxonomy. The decided proposals in `docs/proposals/` are part of both taxonomy specifications. The scalars stay in the taxonomy; the verbs, their constraints, projections, and relation statistics live in the world package since stage a5b, as the two-place event types (`python/semantic_world/world/event_tree.py`, `constraints.py`, `projections.py`, `relation_stats.py`).
 6. `docs/specs/WORDFORM_PIPELINE.md` — the word-form pipeline: a Python program in `python/semantic_world/wordforms/` that makes spoken word forms, synthesizes them, and builds sound embeddings.
 7. `docs/specs/CORPUS_GENERATOR.md` — the corpus generator: a Python program in `python/semantic_world/corpus/` that writes documents about the taxonomy's world in an artificial language, with a parse tree and a logical form for every sentence. Its numbered decisions, and the proposals they point to, are part of the specification.
 8. `docs/specs/CONNECTED_SPEECH.md` — the plan for spoken sentences: whole utterances, alignment, pauses, speakers, and register. Planned, not built.
@@ -73,10 +73,11 @@ pytest tests/corpus                                              # the corpus ge
 python -m semantic_world.world define data/world/default.yaml [--seed N] [--out DIR]   # generate a world: the embedded taxonomy run, definition.json, entities.csv, derived values, statistics
 python -m semantic_world.world view runs/world/tiny_seed1 --preset classic [--include PROPERTY,PART] [--out FILE]   # a table for a model: base, static, or classic
 python -m semantic_world.world simulate runs/world/tiny_seed1 --episodes 100 [--seed N] [--legal] [--out FILE] [--config data/corpus/default.yaml]   # run episodes of a world run and write episodes.jsonl; --config reads a corpus file's scene block
+python tests/taxonomy/make_golden_hashes.py                      # rewrite the taxonomy's golden hashes after a deliberate change of the generator
 python -m semantic_world.world check-fixtures [tests/fixtures/world]   # run the Python runtime and the brute-force evaluator on every conformance fixture
 python -m semantic_world.world make-fixtures data/world/tiny.yaml [--out tests/fixtures/world] [--count N] [--steps N]   # regenerate the tiny world's fixtures (expected values from the brute-force evaluator)
 python tests/world/hand_world.py                                 # rewrite the hand-written fixtures from the hand world and its hand-typed cases
-pytest tests/world                                               # the world package's tests alone (stages a1 to a4: matrices, identity, derived values, the world generator, the runtime, the fixtures, episodes and histories)
+pytest tests/world                                               # the world package's tests alone (matrices, identity, derived values, the world generator, event types and relations, the runtime, the fixtures, episodes and histories)
 ```
 
 The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).

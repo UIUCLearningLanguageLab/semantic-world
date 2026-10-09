@@ -1,5 +1,8 @@
 """Stage 5 acceptance tests: instances, node vectors, and the fixed-by-rule test."""
 
+# Since stage a5b of the world model the labels are CATEGORY.<path> and INSTANCE.<path>.<k>, and
+# the taxonomy has no CAN features.
+
 from __future__ import annotations
 
 import itertools
@@ -30,11 +33,11 @@ from semantic_world.taxonomy.tree import Role
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
 
+CATEGORY = "CATEGORY."
 CHAINED = {
     "features": {
         "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
         "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-        "can": {"count": 10},
     },
     "rules": {"max_chain_depth": 3},
     "inheritance": {"proportion_defining": 0.3, "proportion_characteristic": 0.4},
@@ -69,19 +72,22 @@ def test_instance_labels_and_counts() -> None:
         leaf = tree.categories[index]
         assert leaf.label == leaf_label
         assert leaf.is_leaf
-        assert label == "I" + leaf.label[1:] + f".{len(per_leaf.get(leaf_label, [])) + 1}"
+        assert leaf.label.startswith(CATEGORY)
+        path = leaf.label[len(CATEGORY) :]
+        assert label == f"INSTANCE.{path}.{len(per_leaf.get(leaf_label, [])) + 1}"
         per_leaf.setdefault(leaf_label, []).append(label)
     assert list(per_leaf) == [leaf.label for leaf in tree.leaves]  # leaf order
     assert all(5 <= len(v) <= 10 for v in per_leaf.values())
     assert set(len(v) for v in per_leaf.values()) != {5}
-    assert instances.labels[0] == "I1.1.1.1"
+    assert instances.labels[0] == "INSTANCE.1.1.1.1"
 
 
 def test_tiny_instances() -> None:
     _, _, tree, instances = build(path=DATA / "tiny.yaml")
     assert len(tree.leaves) == 4
     assert len(instances) == 12
-    assert instances.labels[:3] == ("I1.1.1", "I1.1.2", "I1.1.3")
+    assert instances.labels[:3] == ("INSTANCE.1.1.1", "INSTANCE.1.1.2", "INSTANCE.1.1.3")
+    assert instances.leaf_labels[:3] == ("CATEGORY.1.1",) * 3
 
 
 def test_instances_follow_the_leaf_roles() -> None:
@@ -94,8 +100,12 @@ def test_instances_follow_the_leaf_roles() -> None:
 
 
 def test_instance_copy_and_base_rates() -> None:
+    # Equal base rates, so the undiagnostic draws have one rate to compare with.
     _, rules, tree, instances = build(
-        {"instances": {"per_leaf": 40, "characteristic_probability": 0.8}}
+        {
+            "features": {"base_rate_heterogeneity": None},
+            "instances": {"per_leaf": 40, "characteristic_probability": 0.8},
+        }
     )
     free = instances.free_values(rules.features)
     copies = total_characteristic = trues = total_undiagnostic = 0
@@ -272,7 +282,6 @@ def test_fixed_by_rule_matches_brute_force_on_tiny(seed: int) -> None:
                 "features": {
                     "is": {"count": 8, "expected_true_free": 2},
                     "has": {"count": 8, "expected_true_free": 2},
-                    "can": {"count": 4},
                 }
             },
             "taxonomy": {"superordinates": 2, "depth": 2, "branching": 2},

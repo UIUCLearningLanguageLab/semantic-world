@@ -2,9 +2,9 @@
 
 The taxonomy generator builds an artificial world of categories and objects. The categories form a tree. The objects, called instances, sit at the tree's leaves. Every category and every instance has a vector of binary features, and optionally some continuous scalar dimensions. The features follow controlled rules of inheritance down the tree, and controlled logical rules between features. Every rule and every inheritance decision is written to the output, so we always know the ground truth a model is trying to learn.
 
-This guide covers running the generator, the ideas behind it, the configuration file, the output files, and the Python interface. The design is specified in `docs/specs/TAXONOMY_GENERATOR.md` and `docs/specs/TAXONOMY_RELATIONS.md`.
+This guide covers running the generator, the ideas behind it, the configuration file, the output files, and the Python interface. The design is specified in `docs/specs/TAXONOMY_GENERATOR.md` and `docs/specs/TAXONOMY_RELATIONS.md`, with the changes of the world-and-language refactor (`docs/specs/WORLD_AND_LANGUAGE.md`, "Labels" and "Taxonomy outputs").
 
-**Status.** Complete: the base generator, scalar dimensions, and verbs and relations. Stage a1 of the world-and-language refactor (`docs/specs/WORLD_AND_LANGUAGE.md`) adds the rules in matrix form, the rule-set identity, and the first derived-value file; see "`rule_matrices.json`" and "`derived/`" below.
+**Status.** Complete: the base generator and scalar dimensions. Since stage a5b of the world-and-language refactor, the generator writes the labels of that specification (`CATEGORY.1.2`, `INSTANCE.1.2.3`, `PROPERTY.4`, `PART.5`, `SCALARDIM.1`), writes the base vector and the derived values apart (`base.csv` and `derived/`), and makes categories, instances, features, and scalars only. The actions (the old CAN features) and the verbs with their relations are made by the world package; see "Where CAN features and verbs went" below.
 
 ## Quick start
 
@@ -17,10 +17,10 @@ PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/tiny.yaml
 The program prints one line:
 
 ```
-wrote runs/taxonomy/tiny_seed1: 6 categories, 4 leaves, 12 instances, 8 rules
+wrote runs/taxonomy/tiny_seed1: 6 categories, 4 leaves, 12 instances, 4 rules
 ```
 
-The tiny configuration makes 2 superordinate categories with 2 subcategories each, 3 instances per leaf, 8 IS features, 8 HAS features, and 4 CAN features. The run is small enough to read every file by eye, which is the best way to learn the outputs.
+The tiny configuration makes 2 superordinate categories with 2 subcategories each, 3 instances per leaf, 8 PROPERTY features, and 8 PART features. The run is small enough to read every file by eye, which is the best way to learn the outputs.
 
 Two options change a run without editing the configuration:
 
@@ -32,38 +32,42 @@ The example configurations in `data/taxonomy/` are:
 | File | What it makes |
 | --- | --- |
 | `tiny.yaml` | The tiny world above. |
-| `default.yaml` | A mid-sized world: 4 superordinates, depth 3, 40 IS, 40 HAS, and 20 CAN features. Every parameter appears with its default value, so this file is also the reference for defaults. |
+| `default.yaml` | A mid-sized world: 4 superordinates, depth 3, 40 PROPERTY and 40 PART features. Every parameter appears with its default value, so this file is also the reference for defaults. |
 | `rule_file.yaml` | The default world with rules drawn from a rule file (`rules/example.yaml`) instead of the automatic settings. |
-| `tiny_relations.yaml` | The tiny world with 1 scalar dimension and a small verb tree. |
-| `relations.yaml` | The default world with 2 scalar dimensions and the default verbs. |
+| `tiny_relations.yaml` | The tiny world with 1 scalar dimension. The tiny world of the world package (`data/world/tiny.yaml`) builds on it. |
+| `relations.yaml` | The default world with 2 scalar dimensions. The default world of the world package (`data/world/default.yaml`) builds on it. |
 
 ## Concepts
 
 ### Labels
 
-All labels are formal. Indices start at 1, and periods separate indices.
+Every label is a word a reader can read without a key, a period, and an index. Indices start at 1, and periods separate indices.
 
 | Object | Label | Example |
 | --- | --- | --- |
-| Superordinate category | `C<i>` | `C1` |
-| Subcategory | `C<i>.<j>...` | `C1.2` is subcategory 2 of superordinate 1 |
-| Instance | `I<category indices>.<k>` | `I1.2.3` is instance 3 of leaf `C1.2` |
-| Features | `IS.<n>`, `HAS.<n>`, `CAN.<n>` | `IS.4` |
-| Membership features | `ISA.<category>` | `ISA.C1.2` |
-| Scalar dimensions | `SC.<n>` | `SC.1` |
+| Superordinate category | `CATEGORY.<i>` | `CATEGORY.1` |
+| Subcategory | `CATEGORY.<i>.<j>...` | `CATEGORY.1.2` is subcategory 2 of superordinate 1 |
+| Instance | `INSTANCE.<category indices>.<k>` | `INSTANCE.1.2.3` is instance 3 of leaf `CATEGORY.1.2` |
+| Property feature | `PROPERTY.<n>` | `PROPERTY.4` |
+| Part feature | `PART.<n>` | `PART.12` |
+| Membership feature | `ISA.<category>` | `ISA.CATEGORY.1.2` |
+| Scalar dimension | `SCALARDIM.<n>` | `SCALARDIM.1` |
+
+The old labels (`C1.2`, `I1.2.3`, `IS.4`, `HAS.12`, `SC.1`) appear in the two taxonomy specifications, which keep them as the record of what was built. The full table of labels, including the world's event types and the corpus's documents, is in `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels".
 
 ### Feature types
 
-- **ISA** features record membership. An instance has `ISA.C1 = 1` and `ISA.C1.2 = 1` when it belongs to leaf `C1.2`. ISA features come from the tree alone. No rule reads them.
-- **IS** features are properties, and **HAS** features are parts.
-- **CAN** features are actions. Every CAN feature is computed by a rule from IS and HAS features.
-- **Scalar** dimensions (`SC.<n>`) are continuous values, such as size. Scalars are off unless the configuration turns them on.
+- **ISA** features record membership. An instance has `ISA.CATEGORY.1 = 1` and `ISA.CATEGORY.1.2 = 1` when it belongs to leaf `CATEGORY.1.2`. ISA features come from the tree alone. No rule reads them.
+- **PROPERTY** features are properties, and **PART** features are parts. The configuration keeps the short names of the two types: `features.is` configures the PROPERTY features and `features.has` the PART features, and the `type` column of `features.csv` says `is` or `has`.
+- **Scalar** dimensions (`SCALARDIM.<n>`) are continuous values, such as size. Scalars are off unless the configuration turns them on.
 
-IS and HAS features are either **free** or **determined**. A free feature's value comes from sampling and inheritance. A determined feature's value is computed by a rule from other features. A configured proportion of IS and HAS features is determined.
+PROPERTY and PART features are either **free** or **determined**. A free feature's value comes from sampling and inheritance. A determined feature's value is computed by a rule from other features. A configured proportion of each type is determined.
+
+Actions (the old CAN features, every one computed by a rule) are not features of the taxonomy any more. They are the one-place event types of the world package, whose requirements are rules of the same kind over the taxonomy's features; see "Where CAN features and verbs went".
 
 ### Rules
 
-A rule is a Boolean function of a few input features. Rules range from simple (`CAN.3 = HAS.2`) to complex. Four settings control complexity: the number of inputs (arity), the mix of operators (AND, OR, XOR), how deeply operators nest, and how often inputs are negated.
+A rule is a Boolean function of a few input features. Rules range from simple (`PROPERTY.7 = PART.2`) to complex. Four settings control complexity: the number of inputs (arity), the mix of operators (AND, OR, XOR), how deeply operators nest, and how often inputs are negated.
 
 - With 1 input, the rule copies or negates its input.
 - With 2 inputs, the rule is one of the 10 functions that depend on both inputs.
@@ -92,11 +96,13 @@ Instances inherit from their leaf in the same way, using the roles assigned at t
 
 A determined feature can also end up fixed for a whole category, when its rule's output no longer depends on anything that varies below that category. The generator detects these cases and reports them as `fixed_by_rule`.
 
+**Base rates.** By default, each free feature has a base rate of its own, drawn from a Beta distribution whose mean is `expected_true_free` divided by the number of free features of the type and whose concentration is `features.base_rate_heterogeneity` (2 by default), so some features are common and others rare, as in the real world ("A principle for defaults" in `docs/specs/WORLD_AND_LANGUAGE.md`). `base_rate_heterogeneity: null` gives every free feature of a type the same base rate. The tiny configurations set it to null: with 6 free features of a type, a heterogeneous draw can leave a superordinate with no true feature, which the similarity bound cannot place.
+
 ### Scalar dimensions
 
 A superordinate's scalar values are drawn from a standard normal distribution. Each child's value is its parent's value plus normal noise with standard deviation `drift`. Each instance adds noise with standard deviation `instance_drift`. Related categories therefore have similar values.
 
-Rules can read scalars through threshold literals, such as `SC.1 > -0.5822`. Inside a rule, a threshold literal acts like a binary input. Thresholds come from the configuration alone, never from the realized data. With `scalars.count: 0`, the world is purely binary.
+Rules can read scalars through threshold literals, such as `SCALARDIM.1 > -0.5822`. Inside a rule, a threshold literal acts like a binary input. Thresholds come from the configuration alone, never from the realized data. With `scalars.count: 0`, the world is purely binary.
 
 ### Three vectors for every category
 
@@ -116,47 +122,49 @@ One row per category.
 
 ```
 label,parent,level,children,instances
-C1,,1,2,6
-C1.1,C1,2,0,3
-C1.2,C1,2,0,3
+CATEGORY.1,,1,2,6
+CATEGORY.1.1,CATEGORY.1,2,0,3
+CATEGORY.1.2,CATEGORY.1,2,0,3
 ```
 
 ### `features.csv`
 
-One row per feature: `label`, `type` (`isa`, `is`, `has`, `can`, or `scalar`), `kind` (`free` or `determined`), `layer`, and `base_rate` (free binary features only).
+One row per feature: `label`, `type` (`isa`, `is`, `has`, or `scalar`), `kind` (`free` or `determined`), `layer`, and `base_rate` (free binary features only).
 
 ### `rules.yaml`
 
 One entry per determined feature. For example:
 
 ```yaml
-- output: IS.8
+- output: PROPERTY.7
   layer: 1
-  family: shj
-  shj_type: II
-  arity: 3
-  nesting_depth: null
-  inputs: [HAS.4, HAS.5, HAS.6]
-  relevant_inputs: [HAS.4, HAS.5]
-  expression: (NOT HAS.4 AND NOT HAS.5) OR (HAS.4 AND HAS.5)
-  truth_table: '11000011'
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [PROPERTY.1, PROPERTY.4, PART.2, PART.3]
+  relevant_inputs: [PROPERTY.1, PROPERTY.4, PART.2, PART.3]
+  expression: PROPERTY.1 OR PROPERTY.4 OR NOT PART.2 OR PART.3
+  truth_table: '1101111111111111'
   min_dnf_literals: 4
 ```
 
-`IS.8` is true when `HAS.4` and `HAS.5` agree. The rule is SHJ type II, which depends on only two of its three inputs, so `relevant_inputs` lists two. The truth table gives the output for input settings 000 to 111, with the first input as the most significant bit. Rules that read scalars also list their `thresholds`.
+`PROPERTY.7` is true unless `PART.2` is the only one of its four inputs that is true, so every input is relevant. The truth table gives the output for input settings 0000 to 1111, with the first input as the most significant bit. A rule with three inputs is usually an SHJ type, named in `shj_type`; a type that depends on only two of its inputs lists two `relevant_inputs`. Rules that read scalars also list their `thresholds`.
 
-### `instances.csv`
+### `base.csv`
 
-The main feature matrix: one row per instance, with its label, its leaf, and every feature. Columns are ordered ISA, IS, HAS, CAN, then scalars.
+The base vector: one row per instance, with its label, its leaf, every free PROPERTY and PART feature, and every scalar. These are the inputs of the world; nothing in the file is computed by a rule.
 
 ```
-label,leaf,ISA.C1,ISA.C1.1,ISA.C1.2,ISA.C2,ISA.C2.1,ISA.C2.2,IS.1,IS.2,...
-I1.1.1,C1.1,1,1,0,0,0,0,0,1,...
+label,leaf,PROPERTY.1,PROPERTY.2,PROPERTY.3,PROPERTY.4,PROPERTY.5,PROPERTY.6,PART.1,PART.2,...
+INSTANCE.1.1.1,CATEGORY.1.1,0,1,0,0,0,1,0,0,...
 ```
+
+`base.csv` replaced the old `instances.csv`, which held the ISA columns, the determined features, and the CAN features as well. The determined features are in `derived/static_features.csv`. A table with the old columns comes from the world package: `python -m semantic_world.world view RUN --preset classic` writes the ISA, PROPERTY, PART, one-place capacity, and scalar columns of a world run (`docs/specs/WORLD_AND_LANGUAGE.md`, "Views").
 
 ### `categories_generative.csv`, `categories_defining.csv`, `categories_mean.csv`
 
-The three vectors for every category, with the same columns as `instances.csv` (without `leaf`). In the defining file, `NaN` marks features that vary among the category's members.
+The three vectors for every category, with the ISA columns, every PROPERTY and PART feature (free and determined), and the scalars. The category files keep both kinds of feature because they describe categories, not world inputs. In the defining file, `NaN` marks features that vary among the category's members. The word-form pipeline reads `categories_generative.csv` as its meanings.
 
 ### `roles.csv`
 
@@ -186,32 +194,32 @@ The same rules as `rules.yaml`, in the form the world runtime computes: two-laye
 
 - `version`: the definition format's version, 1.
 - `rule_set_id`: the rule-set identity, the SHA-256 hash of the canonical JSON of `symbols`, `literals`, `rules`, and (for a taxonomy, an empty) `event_types`. The same configuration and seed always give the same identity. Changing any one rule, or any threshold, changes it.
-- `symbols`: one entry per IS, HAS, and CAN feature and per scalar: its label, kind, whether it is derived (computed by a rule) or base, whether it is a fluent (never, in a taxonomy), and its arity.
-- `literals`: the literal table: everything the rules read. Each literal has an `index`, its `key` (the variable name in expressions, such as `IS.3` or `SC.2>0.4127`), its `kind` (`feature` or `threshold`), and what it reads.
+- `symbols`: one entry per PROPERTY and PART feature and per scalar: its label, kind (`property`, `part`, or `scalar`), whether it is derived (computed by a rule) or base, whether it is a fluent (never, in a taxonomy), and its arity.
+- `literals`: the literal table: everything the rules read. Each literal has an `index`, its `key` (the variable name in expressions, such as `PROPERTY.3` or `SCALARDIM.2>0.4127`), its `kind` (`feature` or `threshold`), and what it reads.
 - `rules`: every rule's `output`, `inputs` (indices into the literal table), `truth_table`, and `expression`.
 - `layers`: the matrices, written sparsely. Rules are grouped in dependency layers: a rule that reads only free features and threshold literals is in layer 1, a rule that reads a layer-1 output is in layer 2, and so on. Each layer lists its `terms` (the rows of the first matrix: the literal indices of one term of the rule's minimal DNF, whether each is complemented, and the threshold, which is the number of literals) and its `outputs` (the rows of the second matrix: the output and the indices of its terms within the layer, with threshold 1). A rule that is always true has one term with no literals and threshold 0; a rule that is always false has no terms.
 
 ```json
 {"literals": [0, 1], "complemented": [false, true], "threshold": 2}
-{"output": "IS.7", "terms": [0, 1, 2, 3], "threshold": 1}
+{"output": "PROPERTY.7", "terms": [0, 1, 2, 3], "threshold": 1}
 ```
 
-The first line is a term that is true when `IS.1` is true and `IS.2` is false. The second says `IS.7` is true when any of its first four terms is true.
+The first line is a term that is true when `PROPERTY.1` is true and `PROPERTY.2` is false. The second says `PROPERTY.7` is true when any of its first four terms is true.
 
 **The agreement test.** At the end of every run, the generator evaluates the matrices on every instance and compares them with the truth tables, and checks every rule with at most 12 inputs on every setting of its inputs. If any rule disagrees anywhere, the run fails: nothing is written, and the command line prints an error that names the rule and the first disagreement and exits with status 1. A failure means a bug in the generator, not in the configuration; report it.
 
 ### `derived/`
 
-Derived values: columns computed from the base vector by the rules, written apart from the inputs (REL.16). In stage a1 the folder holds one table.
+Derived values: columns computed from the base vector by the rules, written apart from the inputs (REL.16). A taxonomy run holds one table.
 
-- `static_features.csv`: one row per instance, with its label and every determined IS and HAS feature. The values equal the same columns of `instances.csv`.
+- `static_features.csv`: one row per instance, with its label and every determined PROPERTY and PART feature.
 - `manifest.yaml`: for each file in the folder, the rule-set identity that produced it.
 
 ```yaml
 version: 1
 files:
   static_features.csv:
-    rule_set_id: e99e55a6a1fb7827183b19acb8e2daaa9213aec0368081c454d88b5f9f45963b
+    rule_set_id: a2e8f084f05f969836fdfde01e00823cb4fa26b99d9122a64a9b5dd6574e86e6
 ```
 
 A derived file is read through the world package, which refuses a file whose identity differs from the rule set in use, with an error that names the file and both identities:
@@ -222,7 +230,7 @@ from semantic_world.world import load_derived_csv
 frame = load_derived_csv("runs/taxonomy/tiny_seed1/derived", "static_features.csv", result.rule_set_id)
 ```
 
-Nothing in `derived/` is an input to anything, and nothing there is edited by hand. CAN features stay in `instances.csv` until stage a2, which writes them as capacities.
+Nothing in `derived/` is an input to anything, and nothing there is edited by hand. A world run's `derived/` folder holds more tables: the capacities, the capacity roles, and the relation statistics (see "Where CAN features and verbs went").
 
 ## The configuration file
 
@@ -234,12 +242,11 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | --- | --- | --- |
 | `name` | `default` | Names the output folder. |
 | `seed` | 1 | The master seed. |
-| `features.is.count`, `features.has.count` | 40, 40 | Number of IS and HAS features. |
-| `features.<type>.proportion_determined` | 0.25 | Proportion of IS or HAS features computed by rules. |
+| `features.is.count`, `features.has.count` | 40, 40 | Number of PROPERTY and PART features. |
+| `features.<type>.proportion_determined` | 0.25 | Proportion of PROPERTY or PART features computed by rules. |
 | `features.<type>.expected_true_free` | 6 | Expected number of true free features per object. Base rate = this number ÷ the number of free features. |
-| `features.can.count` | 20 | Number of CAN features. |
 | `features.base_rate_override` | null | One base rate for every free feature. |
-| `features.base_rate_heterogeneity` | null | A number gives each free feature its own base rate, from a Beta distribution with this concentration. |
+| `features.base_rate_heterogeneity` | 2 | Each free feature gets its own base rate from a Beta distribution with this concentration; null gives every free feature of a type the same base rate. |
 | `rules.max_chain_depth` | 1 | Number of layers of determined features. |
 | `rules.arity` | `{1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}` | Weights over the number of rule inputs. |
 | `rules.operator_mix` | equal AND, OR, XOR | Weights over operators. |
@@ -247,7 +254,7 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | `rules.arity_3_families` | equal | Weights over SHJ types I–VI and `compositional` for 3-input rules. |
 | `rules.nesting_depth` | `{1: 0.5, 2: 0.5}` | Weights over nesting depth, for rules with 4 or more inputs. |
 | `rules.input_type_weights` | `{is: 1, has: 1, scalar: 1}` | Weights over input types. The scalar weight matters only when scalars are on. |
-| `rules.overrides` | `{}` | Different rule settings for IS, HAS, or CAN outputs, for example `{can: {arity: {2: 1, 3: 1}}}`. |
+| `rules.overrides` | `{}` | Different rule settings for PROPERTY (`is`) or PART (`has`) outputs, for example `{has: {arity: {2: 1, 3: 1}}}`. |
 | `rules.allow_duplicate_rules` | false | Whether two determined features can have identical rules. |
 | `rules.variance_bound` | null | `[low, high]`: resample rules whose expected proportion of true outputs falls outside the range. |
 | `rules.source`, `rules.file` | automatic, null | Set `source: file` and name a rule file to use rule templates and explicit rules (see below). |
@@ -267,6 +274,8 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | `scalars.instance_drift` | 0.2 | Standard deviation of an instance's change from its leaf. |
 | `scalars.threshold_quantiles` | `[0.2, 0.8]` | Range of quantiles for rule thresholds on scalars. |
 | `scalars.thermometer_bins` | 0 | A number above 0 writes binary thermometer codes for the scalars. |
+
+The keys that configured CAN features and verbs are no longer taxonomy keys. `features.can` and `rules.overrides.can` fail with an error that names `event_types.unary` of the world configuration, and `verbs` with one that names `event_types.binary`.
 
 ### Parameters that change with depth
 
@@ -289,95 +298,55 @@ A rule file lists rule templates with weights, and optionally explicit rules for
 templates:
   - {family: literal, weight: 0.1}
   - {family: shj, type: IV, weight: 0.2}
+  - {family: shj, type: VI, weight: 0.05, applies_to: has}
   - {family: compositional, arity: 4, operators: {AND: 1, OR: 1}, nesting_depth: 2, weight: 0.3}
 explicit:
-  - {output: CAN.3, expression: "(HAS.2 AND NOT IS.5) OR IS.7"}
+  - {output: PROPERTY.35, expression: "(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7"}
 ```
 
-The rule file's path is read relative to the configuration file's folder.
+The rule file's path is read relative to the configuration file's folder. A template applies to PROPERTY outputs (`is`), PART outputs (`has`), or both. The requirement of a one-place event type is given by hand in the world's event file, not in a rule file.
 
-## Verbs and relations
+## Where CAN features and verbs went
 
-Verbs are two-place relations between instances: an agent and a patient. "Penguins chase fish" is a verb relating penguin instances as agents to fish instances as patients. Verbs are off unless the configuration has a `verbs` block. `data/taxonomy/tiny_relations.yaml` and `relations.yaml` turn them on. The design is in `docs/specs/TAXONOMY_RELATIONS.md`.
+The taxonomy once made actions (CAN features) and verbs with their relations. Both are made by the world package since stage a5b, from the taxonomy's features, with the same machinery under new names: CAN features are the **one-place event types** `EVENTTYPE1.<n>`, and verbs are the **two-place event types** `EVENTTYPE2.<path>`. A world configuration (`data/world/default.yaml`) names a taxonomy configuration and adds the event types:
 
-### How verbs work
+```yaml
+taxonomy: {config: data/taxonomy/relations.yaml, seed: null}   # null: the world's seed
+event_types:
+  unary: {count: 20, rules: {}}      # the old features.can.count and rules.overrides.can
+  binary: {}                         # the old verbs block, every key at its default; null turns it off
+```
 
-**Constraints.** A verb holds for a pair of instances when every one of its constraints holds. A constraint is a rule over the features of the agent (`a.`), the patient (`p.`), or both. There are five families:
+`python -m semantic_world.world define data/world/tiny.yaml` runs the taxonomy (the run is written to `taxonomy/` in the world's folder, byte-identical to the taxonomy run alone), then draws the event types from the world's own streams (`world:requirements`, `world:event_tree`, `world:constraints`, `world:pairs`), the fluents, the preconditions, and the effects. The corpus generator reads worlds, not taxonomy runs.
+
+**One-place event types.** The requirement of `EVENTTYPE1.<k>` is a rule over the agent's PROPERTY and PART features of any layer and threshold literals, sampled with the taxonomy's `rules` settings and the overrides in `event_types.unary.rules`, exactly as the old CAN rules were. `derived/capacities.csv` of a world run holds the column `CAN.EVENTTYPE1.<k>`: whether each entity meets the requirement. `derived/capacity_roles.csv` says, for each category and one-place event type, whether the capacity is fixed at 1, fixed at 0, or free for the category's members, and which test decided.
+
+**Two-place event types.** An event type holds for a pair of entities (an agent and a patient) when every one of its constraints holds. A constraint is a rule over the static facts of the agent (`agent.`), the patient (`patient.`), or both, from the same five families as before:
 
 | Family | Example | Models |
 | --- | --- | --- |
-| `agent` | `a.IS.24 OR a.HAS.38` | what the agent must be like |
-| `patient` | `p.IS.12 AND NOT p.HAS.4` | what the patient must be like |
-| `cross` | `a.HAS.5 OR NOT p.HAS.3` | any rule mixing both arguments |
-| `key_lock` | `(a.IS.6 AND NOT p.IS.5) OR (NOT a.HAS.1 AND NOT p.HAS.6)` | matching pairs: barbers cut hair, lumberjacks cut wood |
-| `comparison` | `-0.6950 < a.SC.1 - p.SC.1 < -0.0460` | scalar comparisons: owls eat things smaller than themselves, but not much smaller |
+| `agent` | `agent.PROPERTY.24 OR agent.PART.38` | what the agent must be like |
+| `patient` | `patient.PROPERTY.12 AND NOT patient.PART.4` | what the patient must be like |
+| `cross` | `agent.PART.5 OR NOT patient.PART.3` | any rule mixing both roles |
+| `key_lock` | `(agent.PROPERTY.6 AND NOT patient.PROPERTY.5) OR (NOT agent.PART.1 AND NOT patient.PART.6)` | matching pairs: barbers cut hair, lumberjacks cut wood |
+| `comparison` | `-0.6950 < agent.SCALARDIM.1 - patient.SCALARDIM.1 < -0.0460` | scalar comparisons: owls eat things smaller than themselves, but not much smaller |
 
-Comparisons need scalar dimensions. With `scalars.count: 0`, the comparison family is never drawn.
+Comparisons need scalar dimensions. An entity is never related to itself. Two entities of the same leaf can be related.
 
-An instance is never related to itself. Two instances of the same leaf can be related: a penguin can chase another penguin.
+The event-type tree (`EVENTTYPE2.1`, `EVENTTYPE2.1.2`) is generated by the same machinery as the category tree, with binary event-type features (`EVENTFEAT.<n>`) in defining, characteristic, and undiagnostic roles. Every event-type feature carries one constraint (`CONSTRAINT.EVENTFEAT.<n>`), and every event type (a leaf of the tree) has one of its own (`CONSTRAINT.EVENTTYPE2.<path>`). An event type's requirement is the conjunction of the constraints of its true features and its own constraint. Every category of event types has a base relation, the constraints of its defining features, which every event type below it entails. `definition.json` of a world run lists every constraint and every event type with its requirement, preconditions, and effects.
 
-**The verb tree.** Verbs are generated by the same machinery as the noun tree. Verb categories (`V1`, `V1.2`) have binary verb features (`VF.<n>`), with defining, characteristic, and undiagnostic roles, exactly as nouns do. Every verb feature carries one constraint (`K.VF.<n>`). The verbs are the leaves of the verb tree. A verb's relation is the conjunction of:
+**Density.** By default, the generator redraws an event type only when its requirement holds for no pair of leaf categories or for every pair, and a constraint only when it holds for no leaf pair or for every leaf pair, so the share of pairs an event type relates follows from its constraints ("A principle for defaults"). The old checks stay as settings of `event_types.binary`: `density: {min: 0.01, max: 0.3}` keeps every event type between 1% and 30% of leaf pairs, and `constraint_min_density: 0.1` keeps every constraint at 10% or more. An event type that cannot be brought into range is kept as close as possible and named in the warnings.
 
-- the constraints of every verb feature that is true for the verb;
-- the verb's own constraint (`K.<verb>`), which keeps two verbs from being the same relation.
+**Capacities.** Each two-place event type gives every entity two derived one-place facts, in `derived/capacities.csv`: `CAN.<event type>`, the entity could be the agent with some possible patient, and `CANBE.<event type>`, it could be the patient with some possible agent. "Possible" means any combination of features an entity could have, not only the entities in the world. The `ACTUAL_` columns say whether the entity has a partner among the world's entities. Exposure is gone: a view (`python -m semantic_world.world view`) chooses which columns a model sees.
 
-Every verb category also has a **base relation**: the constraints of its defining verb features. Defining features stay defining down the tree, so every verb entails the base relation of every category above it. If `V1` is predation, then chasing (`V1.1`) and eating (`V1.2`) are both kinds of predation.
-
-**Density.** Each verb must relate between 1% and 30% of pairs of leaf categories (`verbs.density`), and no single constraint may relate fewer than 10% (`verbs.constraint_min_density`). The generator resamples constraints and verb features until each verb fits. A verb that cannot fit is kept as close as possible and named in the warnings. Density is measured on the leaves, not the instances, so changing the instance count never changes the verbs. Without the density check, most verbs were empty or nearly empty.
-
-**Projections.** Each verb gives every instance two derived one-place features:
-
-- `CAN.<verb>`: the instance could be the verb's agent with some possible patient;
-- `CANBE.<verb>`: the instance could be the verb's patient with some possible agent.
-
-"Possible" means any combination of features an object could have, not only the instances in the run. The `ACTUAL_` versions report whether the instance actually has a partner among the run's instances. By default, all `CAN` projections and a quarter of the `CANBE` projections appear as columns in `instances.csv`. `CANBE` features model words like "edible", which languages lexicalize only for some verbs.
-
-### Relation outputs
-
-| File | Contents |
-| --- | --- |
-| `verb_tree.csv` | One row per verb category: label, parent, level, number of children. |
-| `verb_features.csv` | One row per verb feature: label, base rate, and the label of its constraint. |
-| `verb_roles.csv`, `verbs_generative.csv`, `verbs_defining.csv` | The verb tree's roles and vectors, in the same formats as the noun files. |
-| `constraints.yaml` | One entry per constraint: family, literals, comparisons, expression, truth table, and leaf-pair density. |
-| `relations.yaml` | One entry per verb category: its constraints and the relation's full expression. `base: true` marks base relations of internal categories. |
-| `verb_stats.csv` | One row per verb (below). |
-| `relation_proportions.csv` | Category-level facts (below). |
-| `relation_pairs.csv` | Sampled instance pairs: `verb`, `agent`, `patient`, and `holds` (1 or 0). By default, 1000 true pairs and 1000 false pairs per verb. |
-| `projections.csv` | Every projection for every instance, with the `ACTUAL_` columns and a flag for any projection computed approximately. |
-| `thematic.csv` | Thematic relatedness and taxonomic similarity for every pair of leaves (below). |
-
-`verb_stats.csv` columns: `proportion_true` (the proportion of ordered instance pairs related), `agents` and `patients` (the number of instances with an actual partner), `constraints` and `families`, `symmetric_proportion` (the share of true pairs whose reverse is also true), `within_leaf_proportion` (the share of true pairs within one leaf), `leaf_pair_density`, and `tries`.
-
-`relation_proportions.csv` holds the category-level facts that generic sentences describe. One row per verb, agent category, and patient category at the same level, with `true_pairs`, `total_pairs`, and `proportion`. Rows with no true pairs are left out. For example, this row from the tiny relations run says that verb `V1.1` holds for 6 of the 36 pairs with a `C1` agent and a `C2` patient:
+**Relation statistics.** A world run's `derived/` folder holds the relation files of the old taxonomy, with `event_type` for `verb`: `relation_proportions.csv` (category-level facts: for each event type, agent category, and patient category at the same level, the share of pairs related), `relation_pairs.csv` (sampled true and false pairs), `event_type_stats.csv` (one row per event type: the proportion of pairs related, the numbers of agents and patients with a partner, the constraints and their families, the symmetric and within-leaf shares, and with the density check its leaf-pair density and tries), and `thematic.csv` (for every pair of leaves, a `thematic` score, the sum over event types and both directions of the leaf-pair proportions, and the leaves' taxonomic `similarity`). For example, this row of the tiny world says that `EVENTTYPE2.1.1` holds for 16 of the 30 pairs with a `CATEGORY.1` agent and a `CATEGORY.1` patient:
 
 ```
-verb,level,agent,patient,true_pairs,total_pairs,proportion,estimated
-V1.1,1,C1,C2,6,36,0.166667,false
+event_type,level,agent,patient,true_pairs,total_pairs,proportion,estimated
+EVENTTYPE2.1.1,1,CATEGORY.1,CATEGORY.1,16,30,0.533333,false
 ```
 
-A proportion near 1 at the leaf level is a generic truth ("penguins chase fish"). `relation_pairs.csv` holds the episodic facts ("this penguin chased that fish").
-
-`thematic.csv` gives, for every pair of leaves, a `thematic` score (the sum over verbs and both directions of the leaf-pair proportions) and the leaves' taxonomic `similarity`. Across seeds of `relations.yaml`, the two measures are nearly uncorrelated. Leaves can be thematic partners without being similar, as lions and deer are.
-
-### Verb parameters
-
-The `verbs` block takes these keys. `verbs: {}` turns verbs on with every default. `config.yaml` in any relations run shows them all.
-
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `features` | `{count: 12, expected_true: 3}` | Number of verb features, and the expected number true per verb. |
-| `taxonomy` | 3 superordinates, depth 2, branching `[2, 3]` | The shape of the verb tree, in the same form as the noun `taxonomy` block. |
-| `inheritance` | 0.4 defining, 0.4 characteristic, 0.9 copy probability | Verb-tree inheritance, in the same form as the noun `inheritance` block. |
-| `own_constraint` | true | Whether every verb gets a constraint of its own. |
-| `constraint_families` | equal weights | Weights over `agent`, `patient`, `cross`, `key_lock`, and `comparison`. |
-| `key_lock_pairs` | `{1: 0.5, 2: 0.3, 3: 0.2}` | Weights over the number of matching pairs in a key-lock constraint. |
-| `comparison` | windows 0.3, cross-dimension 0.2 | How often a comparison is a window, and how often it compares two different scalars. |
-| `rules` | the top-level rule settings | Complexity settings for constraints, with the same keys as the top-level `rules` block. |
-| `projections` | `{expose_agent: 1.0, expose_patient: 0.25}` | Proportions of projections shown in `instances.csv`. |
-| `pairs` | 1000 true, 1000 false | Sampled pairs per verb, and `max_exact_pairs`, above which proportions are estimated from a sample. |
-| `density` | `{min: 0.01, max: 0.3, max_tries: 200}` | The allowed leaf-pair density of every verb. Null turns the check off. |
-| `constraint_min_density` | 0.1 | The smallest density allowed for a single constraint. Null turns the check off. |
+**Event-type parameters.** `event_types.binary` takes the keys of the old `verbs` block, without `projections`: `features` (`{count: 12, expected_true: 3}`), `taxonomy` (3 superordinates, depth 2, branching `[2, 3]`), `inheritance` (0.4 defining, 0.4 characteristic, 0.9 copy probability), `own_constraint` (true), `constraint_families` (equal weights), `key_lock_pairs` (`{1: 0.5, 2: 0.3, 3: 0.2}`), `comparison` (windows 0.3, cross-dimension 0.2), `rules` (the taxonomy's rule settings), `pairs` (1000 true, 1000 false, `max_exact_pairs`), `density` (`{min: 0.0, max: 1.0, max_tries: 200}`: the degenerate check), and `constraint_min_density` (null). `event_types.unary` takes `count` (20) and `rules` (overrides of the taxonomy's rule settings for the requirements). `config.yaml` of a world run shows every value.
 
 ## Using the generator from Python
 
@@ -392,15 +361,14 @@ result.write("runs/taxonomy/tiny_seed7")
 `result` holds everything the run produced:
 
 - `result.tree`: the categories, with `result.tree.leaves` and `result.tree.superordinates`;
-- `result.instances`: the instances, with `result.instances.values` (the IS, HAS, and CAN features as a NumPy array, without the ISA columns) and `result.instances.labels`;
-- `result.rules`: the rules, with `result.rules.rule_for("CAN.3")` for one rule;
+- `result.instances`: the instances, with `result.instances.values` (the PROPERTY and PART features as a NumPy array, without the ISA columns) and `result.instances.labels`;
+- `result.rules`: the rules, with `result.rules.rule_for("PROPERTY.7")` for one rule;
 - `result.matrices`: the rules in matrix form (`result.matrices.matrices.evaluate(...)`), and `result.rule_set_id`, the rule-set identity;
 - `result.features`: the feature layout;
 - `result.frames()`: every output table as a polars data frame, keyed by file name;
-- `result.summary` and `result.warnings`;
-- with verbs on, `result.verbs` (the verb tree), `result.relations`, and `result.projections`.
+- `result.summary` and `result.warnings`.
 
-`result.relations.holds(verb, agents, patients)` says whether a verb holds for pairs of instances, given as aligned arrays of instance indices (rows of `instances.csv`). `result.relations.matrix(verb)` gives the verb over every ordered pair of instances, as a square Boolean array.
+The event types, the capacities, and the relations of a world are in `semantic_world.world`: `define(config)` returns a result whose `statics` holds the one-place requirements (`statics.unary`), the event-type tree (`statics.event_tree`), the relations (`statics.relations`, with `holds(event_type, agents, patients)` over aligned arrays of entity indices and `matrix(event_type)` over every ordered pair), the capacities (`statics.projections`), and the relation statistics (`statics.relation_stats`).
 
 To change settings in code, build the configuration from a dictionary with `config_from_mapping`. Any key left out takes its default:
 
@@ -421,32 +389,32 @@ for seed in range(1, 11):
 ```python
 import polars as pl
 
-instances = pl.read_csv("runs/taxonomy/tiny_seed1/instances.csv")
-features = instances.select(pl.exclude("label", "leaf"))
+base = pl.read_csv("runs/taxonomy/tiny_seed1/base.csv")
+features = base.select(pl.exclude("label", "leaf"))
 ```
 
-The ISA columns give category labels at every level. Drop them when a model should learn categories from features alone.
+`base.csv` holds the free features and the scalars. For the determined features too, join `derived/static_features.csv` on `label`; for the ISA columns and the one-place capacities as well, write a view of a world run with `python -m semantic_world.world view RUN --preset classic`. Drop the ISA columns when a model should learn categories from features alone.
 
 **A flatter or deeper world.** `taxonomy.depth` and `taxonomy.branching` set the shape. With `depth: 1`, the superordinates are the leaves.
 
 **Tighter or looser categories.** Raise `inheritance.proportion_defining` and `characteristic_probability` for tight categories with sharp boundaries. Lower them for loose categories with graded, family-resemblance structure. `similarity.csv` shows the result.
 
-**Taxonomic versus thematic structure.** Compare the `similarity` and `thematic` columns of `thematic.csv`. A model that learns from features alone should track similarity. A model that learns from who does what to whom should track thematic relatedness.
+**Taxonomic versus thematic structure.** Compare the `similarity` and `thematic` columns of a world run's `derived/thematic.csv`. A model that learns from features alone should track similarity. A model that learns from who does what to whom should track thematic relatedness.
 
 **Simpler or harder rules.** Put all of `rules.arity`'s weight on 1 and 2 for simple rules. Weight SHJ type VI for the hardest 3-input rules. Raise `rules.max_chain_depth` for chains of inference.
 
 ## Troubleshooting
 
-- **The similarity bound cannot be met.** With few features, or a tight bound, no set of superordinates satisfies `superordinates.similarity_bound`. The error reports the closest similarity reached. Loosen `max`, add features, or set the bound to null.
+- **The similarity bound cannot be met.** With few features, or a tight bound, no set of superordinates satisfies `superordinates.similarity_bound`. The error reports the closest similarity reached. Loosen `max`, add features, set `features.base_rate_heterogeneity: null` in a small configuration, or set the bound to null.
 - **Leaves cannot be made distinct.** With few features and many leaves, two leaves may be forced to match. Add features, reduce branching, or set `require_distinct_leaves: false`.
 - **The largest arity does not fit.** A rule cannot have more inputs than the features available to it. Lower the largest arity with nonzero weight, or add free features.
-- **A key is unknown.** Check the spelling against `data/taxonomy/default.yaml`.
+- **A key is unknown.** Check the spelling against `data/taxonomy/default.yaml`. `features.can`, `rules.overrides.can`, and `verbs` moved to the world configuration, and the error says where.
 - **The agreement test fails.** The error begins "the matrix form of the rule for ... disagrees with its truth table". The matrices and the truth tables are two forms of one rule set, so a disagreement is a bug in the generator, not a problem with the configuration. Keep the configuration and seed and report it.
 
 ## Reference
 
-- `docs/specs/TAXONOMY_GENERATOR.md`: the full design of the base generator.
-- `docs/specs/TAXONOMY_RELATIONS.md`: scalars, verbs, and relations.
-- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model; "Rules: Boolean form and matrices" and "Rule-set identity and derived values" describe `rule_matrices.json` and `derived/`.
+- `docs/specs/TAXONOMY_GENERATOR.md`: the full design of the base generator (with the old labels).
+- `docs/specs/TAXONOMY_RELATIONS.md`: scalars, verbs, and relations (with the old labels; the verbs are the world's two-place event types now).
+- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model; "Labels", "Taxonomy outputs", "Event types", "Rules: Boolean form and matrices", and "Rule-set identity and derived values".
 - `docs/proposals/`: decisions made during the build, where the build differs from the first draft of a specification.
 - Shepard, R. N., Hovland, C. I., & Jenkins, H. M. (1961). Learning and memorization of classifications. *Psychological Monographs*, 75(13, Whole No. 517).

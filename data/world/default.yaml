@@ -12,8 +12,8 @@ fluents:
   initial_rates: [0.0, 0.2, 0.8, 1.0]        # each base fluent's initial rate is drawn from this list
 
 event_types:
-  unary: {}                                   # overrides of the taxonomy's CAN settings: count, rules (the sampling overrides)
-  binary: {}                                  # the old `verbs` block, merged over the taxonomy's; null turns two-place event types off
+  unary: {count: 20, rules: {}}              # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
+  binary: {}                                  # the two-place event types (the old `verbs` block of the taxonomy, every key at its default); null turns them off
   preconditions:
     literals: {0: 0.3, 1: 0.5, 2: 0.2}        # weights over the number of an event type's own precondition literals
     feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal

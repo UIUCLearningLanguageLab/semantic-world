@@ -73,7 +73,7 @@ def test_scalar_settings_load_and_resolve() -> None:
             },
         }
     )
-    assert config.scalars.labels == ("SC.1", "SC.2", "SC.3")
+    assert config.scalars.labels == ("SCALARDIM.1", "SCALARDIM.2", "SCALARDIM.3")
     assert config.scalars.drift == pytest.approx((1.0, 0.5, 0.0))
     assert config.scalars.fixed_below(4)  # a leaf: only the instance drift, which is 0
     assert config.scalars.fixed_below(3)  # level-3 parents have drift 0
@@ -130,8 +130,8 @@ def test_scalar_values_have_the_right_shapes() -> None:
     assert result.tree.scalar_matrix().shape == (n_cat, 2)
     assert result.instances.scalars.shape == (len(result.instances), 2)
     assert result.features.scalar_count == 2
-    assert result.features.scalar_labels == ("SC.1", "SC.2")
-    assert result.vectors.scalar_labels == ("SC.1", "SC.2")
+    assert result.features.scalar_labels == ("SCALARDIM.1", "SCALARDIM.2")
+    assert result.vectors.scalar_labels == ("SCALARDIM.1", "SCALARDIM.2")
     assert result.vectors.scalar_generative.shape == (n_cat, 2)
     for category in result.tree.categories:
         assert category.scalars.shape == (2,)
@@ -279,14 +279,19 @@ def test_scalars_use_only_the_scalar_streams() -> None:
     # The other streams are in the same state whether scalars are on or off.
     for name in ("base_rates", "rules", "superordinates", "tree", "instances", "analysis"):
         assert getattr(on, name).random() == getattr(off, name).random(), name
-    # With threshold literals allowed, only the rules stream draws more (the thresholds).
+    # With threshold literals allowed, only the rules stream draws differently (the thresholds).
+    # The end state of the rules stream is not a safe witness: at seed 1 the two runs happen to
+    # draw the same number of values. The rules themselves show the difference.
     thresholds = Streams(1)
+    with_thresholds = generate_rules(config_from_mapping({"scalars": {"count": 2}}), thresholds)
     run(config_from_mapping({"scalars": {"count": 2}}), thresholds)
     baseline = Streams(1)
+    without = generate_rules(config_from_mapping({"rules": NO_THRESHOLDS}), baseline)
     run(config_from_mapping({"rules": NO_THRESHOLDS}), baseline)
     for name in ("base_rates", "superordinates", "tree", "instances", "analysis"):
         assert getattr(thresholds, name).random() == getattr(baseline, name).random(), name
-    assert thresholds.rules.random() != baseline.rules.random()
+    assert with_thresholds.has_thresholds and not without.has_thresholds
+    assert with_thresholds.records() != without.records()
 
 
 def test_changing_the_instance_count_leaves_category_scalars_unchanged() -> None:
@@ -312,7 +317,7 @@ def scalar_folder(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, objec
 def test_features_csv_lists_scalars(scalar_folder) -> None:
     folder, result = scalar_folder
     features = pl.read_csv(folder / "features.csv")
-    assert features["label"].to_list()[-2:] == ["SC.1", "SC.2"]
+    assert features["label"].to_list()[-2:] == ["SCALARDIM.1", "SCALARDIM.2"]
     scalars = features.filter(pl.col("type") == "scalar")
     assert scalars.height == 2
     assert scalars["kind"].to_list() == ["free", "free"]
@@ -320,24 +325,29 @@ def test_features_csv_lists_scalars(scalar_folder) -> None:
     assert scalars["base_rate"].is_nan().all()
 
 
-def test_scalar_columns_come_after_can_with_six_decimals(scalar_folder) -> None:
+def test_scalar_columns_come_last_with_six_decimals(scalar_folder) -> None:
     folder, result = scalar_folder
-    instances = pl.read_csv(folder / "instances.csv")
-    assert instances.columns[-3:] == ["CAN.20", "SC.1", "SC.2"]
-    text = (folder / "instances.csv").read_text().splitlines()
+    base = pl.read_csv(folder / "base.csv")
+    # base.csv holds the free features, so the scalars follow the last free PART feature.
+    assert base.columns[-3:] == ["PART.30", "SCALARDIM.1", "SCALARDIM.2"]
+    text = (folder / "base.csv").read_text().splitlines()
     for line in text[1:4]:
         cells = line.split(",")[-2:]
         assert all(len(cell.split(".")[1]) == 6 for cell in cells), cells
-    assert np.allclose(instances["SC.1"].to_numpy(), result.instances.scalars[:, 0], atol=1e-6)
+    assert np.allclose(base["SCALARDIM.1"].to_numpy(), result.instances.scalars[:, 0], atol=1e-6)
+    static = pl.read_csv(folder / "derived" / "static_features.csv")
+    assert not any(c.startswith("SCALARDIM.") for c in static.columns)
     for name in ("categories_generative.csv", "categories_defining.csv", "categories_mean.csv"):
         frame = pl.read_csv(folder / name)
-        assert frame.columns[-3:] == ["CAN.20", "SC.1", "SC.2"], name
+        assert frame.columns[-3:] == ["PART.40", "SCALARDIM.1", "SCALARDIM.2"], name
     generative = pl.read_csv(folder / "categories_generative.csv")
-    assert np.allclose(generative["SC.2"].to_numpy(), result.tree.scalar_matrix()[:, 1], atol=1e-6)
+    assert np.allclose(
+        generative["SCALARDIM.2"].to_numpy(), result.tree.scalar_matrix()[:, 1], atol=1e-6
+    )
     defining = pl.read_csv(folder / "categories_defining.csv")
-    assert defining["SC.1"].is_nan().all()  # the default drifts are not 0
+    assert defining["SCALARDIM.1"].is_nan().all()  # the default drifts are not 0
     mean = pl.read_csv(folder / "categories_mean.csv")
-    assert np.allclose(mean["SC.1"].to_numpy(), result.vectors.scalar_mean[:, 0], atol=1e-6)
+    assert np.allclose(mean["SCALARDIM.1"].to_numpy(), result.vectors.scalar_mean[:, 0], atol=1e-6)
 
 
 def test_feature_stats_for_scalars(scalar_folder) -> None:
@@ -345,7 +355,7 @@ def test_feature_stats_for_scalars(scalar_folder) -> None:
     stats = pl.read_csv(folder / "feature_stats.csv")
     assert stats.columns[-5:] == ["mean", "std", "eta2_level_1", "eta2_level_2", "eta2_level_3"]
     scalar_rows = stats.filter(pl.col("type") == "scalar")
-    assert scalar_rows["feature"].to_list() == ["SC.1", "SC.2"]
+    assert scalar_rows["feature"].to_list() == ["SCALARDIM.1", "SCALARDIM.2"]
     assert scalar_rows["proportion_true"].is_nan().all()
     assert scalar_rows["entropy"].is_nan().all()
     assert scalar_rows["mi_level_1"].is_nan().all()
@@ -376,15 +386,15 @@ def test_thermometer_codes(scalar_folder) -> None:
     codes = pl.read_csv(folder / "instances_scalar_codes.csv")
     assert codes.columns == [
         "label",
-        "SC.1>q1",
-        "SC.1>q2",
-        "SC.1>q3",
-        "SC.2>q1",
-        "SC.2>q2",
-        "SC.2>q3",
+        "SCALARDIM.1>q1",
+        "SCALARDIM.1>q2",
+        "SCALARDIM.1>q3",
+        "SCALARDIM.2>q1",
+        "SCALARDIM.2>q2",
+        "SCALARDIM.2>q3",
     ]
     assert codes["label"].to_list() == list(result.instances.labels)
-    for scalar in ("SC.1", "SC.2"):
+    for scalar in ("SCALARDIM.1", "SCALARDIM.2"):
         q1, q2, q3 = (codes[f"{scalar}>q{b}"].to_numpy() for b in (1, 2, 3))
         assert set(np.unique(q1)) <= {0, 1}
         assert np.all(q3 <= q2) and np.all(q2 <= q1)

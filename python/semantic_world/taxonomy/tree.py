@@ -2,7 +2,8 @@
 
 Superordinates are generated in index order from the ``taxonomy:superordinates`` stream. Roles,
 branching counts, children, and distinct-leaf redraws come from the ``taxonomy:tree`` stream.
-Categories are visited depth first, in category order (``C1``, ``C1.1``, ``C1.1.1``, ...): a
+Categories are visited depth first, in category order (``CATEGORY.1``, ``CATEGORY.1.1``,
+``CATEGORY.1.1.1``, ...): a
 category's roles are assigned, its children's free features are generated from its generative
 vector according to those roles, and then each child is visited in turn.
 """
@@ -102,6 +103,12 @@ class Tree:
 
     def __post_init__(self) -> None:
         self._by_label = {c.label: c for c in self.categories}
+        self._by_indices = {c.indices: c for c in self.categories}
+
+    def ancestor_label(self, category: Category, level: int) -> str:
+        """The label of a category's ancestor at a level (the category itself at its own
+        level)."""
+        return self._by_indices[category.indices[:level]].label
 
     def __getitem__(self, label: str) -> Category:
         try:
@@ -160,8 +167,9 @@ def build_tree(
     rng_tree: np.random.Generator,
     rng_scalars: np.random.Generator | None = None,
 ) -> Tree:
-    """Generate a tree from explicit settings and streams. The verb tree uses this with its own
-    settings, an empty rule set over the verb features, and the ``verb_tree`` stream."""
+    """Generate a tree from explicit settings and streams. The world's event-type tree uses this
+    with its own settings, an empty rule set over the event-type features, and the
+    ``world:event_tree`` stream."""
     return _TreeBuilder(settings, rules, rng_superordinates, rng_tree, rng_scalars).build()
 
 
@@ -201,10 +209,7 @@ class _TreeBuilder:
     def _scope_columns(self, scope: str) -> np.ndarray:
         if scope == "free":
             return self.features.free_positions
-        if scope == "is_has":
-            return np.array(
-                [f.position for f in self.features.features if f.type != "can"], dtype=np.intp
-            )
+        # ``is_has`` and ``all`` are the same scope now that the taxonomy has no CAN features.
         return np.arange(len(self.features), dtype=np.intp)
 
     def build(self) -> Tree:
@@ -439,7 +444,7 @@ class _TreeBuilder:
             leaf.values = self._compute(leaf.free_values, leaf.scalars)
         other = self.leaf_vectors[leaf.values.tobytes()]
         raise GenerationError(
-            f"leaf {leaf.label} duplicates leaf {other} on its IS, HAS, and CAN features after "
+            f"leaf {leaf.label} duplicates leaf {other} on every feature after "
             f"{inheritance.distinct_max_tries} redraws; turn off "
             f"inheritance.require_distinct_leaves, lower the defining proportions, or add free "
             f"features"

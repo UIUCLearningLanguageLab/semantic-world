@@ -38,7 +38,6 @@ TAXONOMY = {
     "features": {
         "is": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
         "has": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
-        "can": {"count": 6},
     },
     "taxonomy": {"superordinates": 3, "depth": 2, "branching": 4},
     "instances": {"per_leaf": 1},

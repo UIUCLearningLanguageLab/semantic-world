@@ -60,6 +60,7 @@ from semantic_world.corpus.propositions import (
     HAS,
     INSTANCE,
     IS,
+    LABEL_KEY,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -196,16 +197,6 @@ def write(formula: Formula) -> str:
 # From the JSON logical form
 # ---------------------------------------------------------------------------------------------
 
-_LABEL_KEY = {
-    IS: "feature",
-    HAS: "feature",
-    CAN: "feature",
-    SCALAR: "pole",
-    MEMBER: "category",
-    PROJECTION: "projection",
-    VERB: "verb",
-}
-
 
 def _literal(text: str, argument: str, comparison: str | None) -> Any:
     literal = Literal.parse(text)
@@ -234,7 +225,7 @@ def _term(term: dict[str, Any], variable: str, variables: _Variables) -> list[An
     parts: list[Any] = [] if category == THING else [Atom(category, (variable,))]
     parts += [_literal(text, variable, category) for text in term.get("restriction", ())]
     for clause in term.get("clauses", ()):
-        label = clause[_LABEL_KEY[clause["kind"]]]
+        label = clause[LABEL_KEY]
         if clause["kind"] == CAN:
             parts.append(Able(Atom(label, (variable,))))
             continue
@@ -260,7 +251,7 @@ def _predication(
 ) -> Any:
     """The proposition of one predicate: an atom, a capacity, or an event."""
     kind = predicate["kind"]
-    label = predicate[_LABEL_KEY[kind]]
+    label = predicate[LABEL_KEY]
     if kind == VERB:
         if patient is None:
             raise RenderingError(f"the verb {label} has no patient")

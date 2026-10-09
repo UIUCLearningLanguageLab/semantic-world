@@ -3,7 +3,10 @@
 A rule file lists ``templates``, each with a sampling weight, and optionally ``explicit`` rules
 that fix a named output feature to a named expression. Determined features without an explicit
 rule are sampled from the templates that apply to their type. Checks that need the feature
-layout (labels, layers, the input pool) happen in ``rules.py`` when the rules are built.
+layout (labels, layers, the input pool) happen in ``rules.py`` when the rules are built. The
+one-place event types of the world package (the old CAN features) are not rules of the taxonomy:
+their requirements are given in an event file (``event_types.event_file``), and sampled with the
+settings of ``event_types.unary``.
 
 Example::
 
@@ -11,10 +14,10 @@ Example::
       - {family: literal, weight: 0.1}
       - {family: fixed, arity: 2, operator: XOR, weight: 0.1}
       - {family: shj, type: IV, weight: 0.2}
-      - {family: shj, type: VI, weight: 0.05, applies_to: can}
+      - {family: shj, type: VI, weight: 0.05, applies_to: has}
       - {family: compositional, arity: 4, operators: {AND: 1, OR: 1}, nesting_depth: 2, weight: 0.3}
     explicit:
-      - {output: CAN.3, expression: "(HAS.2 AND NOT IS.5) OR IS.7"}
+      - {output: PROPERTY.35, expression: "(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7"}
 """
 
 from __future__ import annotations
@@ -46,7 +49,7 @@ class Template:
     family: str
     weight: float
     applies_to: tuple[str, ...]
-    """The output types the template applies to, in ``(is, has, can)`` order."""
+    """The output types the template applies to, in ``(is, has)`` order."""
     arity: int | None = None
     operator: str | None = None
     """The operator of a ``fixed`` template."""
@@ -144,11 +147,18 @@ def _read_applies_to(node: _Node) -> tuple[str, ...]:
         return FEATURE_TYPES
     values = [value] if isinstance(value, str) else value
     if not isinstance(values, list) or not values:
-        raise node.error("applies_to", "expected one of is, has, can, or a list of them")
+        raise node.error("applies_to", "expected one of is, has, or a list of them")
     for v in values:
+        if v == "can":
+            raise node.error(
+                "applies_to",
+                "CAN features left the taxonomy in stage a5b of the world model: one-place event "
+                "types are sampled with event_types.unary.rules of the world configuration, and "
+                "given by hand in its event file (event_types.event_file)",
+            )
         if v not in FEATURE_TYPES:
             raise node.error(
-                "applies_to", f"expected one of is, has, can, or a list of them, found {v!r}"
+                "applies_to", f"expected one of is, has, or a list of them, found {v!r}"
             )
     return tuple(t for t in FEATURE_TYPES if t in values)
 
@@ -210,6 +220,12 @@ def _read_nesting_depth(node: _Node) -> dict[int, float] | None:
 
 def _read_explicit(node: _Node) -> ExplicitRule:
     output = node.string("output", _MISSING)
+    if output.startswith(("CAN.", "EVENTTYPE1.")):
+        raise node.error(
+            "output",
+            f"{output} is a one-place event type, not a feature of the taxonomy; give its "
+            f"requirement in the world's event file (event_types.event_file)",
+        )
     text = node.string("expression", _MISSING)
     try:
         expression = parse_expression(text)

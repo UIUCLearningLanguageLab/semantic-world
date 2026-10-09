@@ -26,7 +26,6 @@ from semantic_world.world.definition import DEFINITION_FILE, ENTITIES_FILE
 from semantic_world.world.derived import DERIVED_DIR, load_derived_csv
 from semantic_world.world.errors import WorldError
 from semantic_world.world.identity import read_json
-from semantic_world.world.labels import translate
 
 PRESETS = ("base", "static", "classic")
 VIEWS_DIR = "views"
@@ -78,9 +77,9 @@ def available_columns(run: Path) -> tuple[pl.DataFrame, dict[str, list[str]]]:
 
 
 def _isa_frame(run: Path, entities: pl.DataFrame) -> pl.DataFrame:
-    tree = pl.read_csv(run / "taxonomy" / "tree.csv")
-    labels = [translate(label) for label in tree["label"].to_list()]
-    parents = [None if p is None else translate(p) for p in tree["parent"].to_list()]
+    tree = pl.read_csv(run / "taxonomy" / "tree.csv", schema_overrides={"parent": pl.Utf8})
+    labels = tree["label"].to_list()
+    parents = tree["parent"].to_list()
     parent_of = dict(zip(labels, parents, strict=True))
     data: dict[str, Any] = {"label": entities["label"].to_list()}
     ancestors_of: dict[str, set[str]] = {}

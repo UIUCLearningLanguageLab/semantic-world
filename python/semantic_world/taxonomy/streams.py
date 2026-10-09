@@ -27,9 +27,6 @@ STREAM_NAMES = (
     "analysis",
     "scalars",
     "scalar_instances",
-    "verb_tree",
-    "constraints",
-    "pairs",
 )
 """The short names of the generator's streams. The full name is ``taxonomy:<short name>``."""
 
@@ -50,7 +47,7 @@ def stream_generator(master_seed: int, name: str) -> np.random.Generator:
 
 
 class Streams:
-    """The six named streams of one run, each a fresh ``numpy.random.Generator``.
+    """The named streams of one run, each a fresh ``numpy.random.Generator``.
 
     Every attribute is created once, when the object is made, so a stage that draws from
     ``streams.tree`` continues where the previous stage left off.
@@ -64,9 +61,6 @@ class Streams:
     analysis: np.random.Generator
     scalars: np.random.Generator
     scalar_instances: np.random.Generator
-    verb_tree: np.random.Generator
-    constraints: np.random.Generator
-    pairs: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

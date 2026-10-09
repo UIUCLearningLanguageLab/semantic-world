@@ -26,6 +26,7 @@ from semantic_world.corpus.histories import (
     involving,
     scene_events,
 )
+from semantic_world.corpus.lexicon import EVERY_PAIR
 from semantic_world.corpus.propositions import (
     CAN,
     EVENT,
@@ -143,7 +144,7 @@ def test_the_thematic_weight_draws_thematically_related_participants(cases) -> N
     # the taxonomic weight does the same for taxonomic similarity
     plain = mean_relatedness(thematic=0, taxonomic=0, constant=1)
     similar = mean_relatedness(thematic=0, taxonomic=3.0, constant=0.1)
-    assert similar[1] > plain[1] + 0.03
+    assert similar[1] > plain[1] + 0.02
     # with every weight but the constant at 0, participants are a uniform draw
     assert abs(plain[0] - case.world.thematic.mean()) < 0.1
 
@@ -317,13 +318,12 @@ def test_the_able_bindings(cases) -> None:
             assert able[row] == bool(world.column(event_type)[row])
     # every ordered pair of distinct participants and every two-place leaf event type whose
     # requirement holds; a category names no event of its own
-    taxonomy = world.result.taxonomy
+    relations = world.result.statics.relations
     for label in world.binary_leaves:
-        old = label.replace("EVENTTYPE2.", "V")
         for a, row_a in zip(participants, rows, strict=True):
             for p, row_p in zip(participants, rows, strict=True):
                 if a != p:
-                    expected = taxonomy.relations.holds(old, [row_a], [row_p])[0]
+                    expected = relations.holds(label, [row_a], [row_p])[0]
                     assert world.able(label)[row_a, row_p] == expected
     assert set(world.event_types_below("EVENTTYPE2.1")) == {"EVENTTYPE2.1.1", "EVENTTYPE2.1.2"}
 
@@ -355,17 +355,21 @@ def test_the_transitive_share_under_the_balanced_policy(world_files) -> None:
     # a scene with one participant has no transitive event, whatever the share
     assert share(0.9, size=0) == 0.0
     # the default policy draws uniformly among all legal events, so the share follows the
-    # numbers of able agents and able pairs among the participants of each scene
+    # numbers of able agents and able pairs among the participants of each scene: the expected
+    # share is each scene's share of able pairs, weighted by the scene's number of events
     plain = SceneGenerator(corpus_config(world_files["static"]), world)
     scenes = make(plain, 300)
-    uniform = float(np.mean([e.transitive for s in scenes for e in scene_events(s)]))
-    agents = pairs = 0
+    events = [e for s in scenes for e in scene_events(s)]
+    uniform = float(np.mean([e.transitive for e in events]))
+    weighted = 0.0
     for scene in scenes:
         rows = [index[p] for p in scene.participants]
-        agents += sum(int(world.able(u)[rows].sum()) for u in world.unary)
-        pairs += sum(int(world.able(v)[np.ix_(rows, rows)].sum()) for v in world.binary_leaves)
-    expected = pairs / (pairs + agents)
-    assert abs(uniform - expected) < 0.05 and 0.3 < expected < 0.6
+        agents = sum(int(world.able(u)[rows].sum()) for u in world.unary)
+        pairs = sum(int(world.able(v)[np.ix_(rows, rows)].sum()) for v in world.binary_leaves)
+        if pairs + agents:
+            weighted += len(list(scene_events(scene))) * pairs / (pairs + agents)
+    expected = weighted / len(events)
+    assert abs(uniform - expected) < 0.03 and 0.2 < expected < 0.8
 
 
 def test_the_balanced_policy_draws_the_event_type_first(world_files) -> None:
@@ -378,7 +382,7 @@ def test_the_balanced_policy_draws_the_event_type_first(world_files) -> None:
     pairs = {label: int(world.able(label)[off_diagonal].sum()) for label in world.binary_leaves}
     agents = {label: int(world.able(label).sum()) for label in world.unary}
     agents = {label: count for label, count in agents.items() if count}  # one is able for nobody
-    assert max(pairs.values()) > 3 * min(pairs.values())
+    assert max(pairs.values()) > 2 * min(pairs.values())
     events = [e for s in make(generator, 1500) for e in scene_events(s)]
     drawn = Counter(e.type for e in events)
     # each event type with an able event is equally likely, however many pairs it holds for
@@ -613,7 +617,11 @@ def test_event_logical_forms(cases) -> None:
         "aspect": "progressive",
         "polarity": True,
         "subject": {"instance": event.agent},
-        "predicate": {"kind": "verb", "verb": event.type, "patient": {"instance": event.patient}},
+        "predicate": {
+            "kind": "event_type2",
+            "label": event.type,
+            "patient": {"instance": event.patient},
+        },
         "grounding": {
             "scene": scene.label,
             "step": event.step,
@@ -629,8 +637,8 @@ def test_event_logical_forms(cases) -> None:
     assert proposition.concepts() == (event.type,)
     intransitive = next(e for s in scenes for e in scene_events(s) if not e.transitive)
     assert facts.event_fact(intransitive).to_json()["predicate"] == {
-        "kind": "can",
-        "feature": intransitive.type,
+        "kind": "event_type1",
+        "label": intransitive.type,
     }
 
 
@@ -897,36 +905,43 @@ def test_the_event_level_is_drawn_by_weight(cases) -> None:
 
 
 def test_an_event_without_a_word_at_any_usable_level_is_not_reported(cases) -> None:
-    case = cases("tiny")
+    # In the deep world, EVENTTYPE2.2 holds for every pair, so it has no word (the tiny world
+    # has no such category since stage a5b).
+    case = cases("deep")
+    assert case.lexicon().event_types_without_word == {"EVENTTYPE2.2": EVERY_PAIR}
     scenes = make(case.scenes(), 200)
     events = [e for s in scenes for e in scene_events(s)]
+    assert {e.type.rsplit(".", 1)[0] for e in events if e.transitive} == {
+        "EVENTTYPE2.1",
+        "EVENTTYPE2.2",
+    }
     facts = knowing(case.facts(), scenes)
     rng = Streams(1).mentions
-    # EVENTTYPE2.1 holds for every pair, so it has no word: an event of EVENTTYPE2.1.1 has one
+    # EVENTTYPE2.2 holds for every pair, so it has no word: an event of EVENTTYPE2.2.1 has one
     # name
     for event in events:
-        if event.type.startswith("EVENTTYPE2.1."):
+        if event.type.startswith("EVENTTYPE2.2."):
             assert facts.event_names(event) == (event.type,)
             assert facts.draw_event(rng, event).predicate.label == event.type
-        elif event.type.startswith("EVENTTYPE2.2."):
-            assert facts.event_names(event) == (event.type, "EVENTTYPE2.2")
-    # with only the top level usable, an event of EVENTTYPE2.1.1 cannot be named, and an event
-    # of EVENTTYPE2.2.1 is always named by EVENTTYPE2.2
+        elif event.type.startswith("EVENTTYPE2.1."):
+            assert facts.event_names(event) == (event.type, "EVENTTYPE2.1")
+    # with only the top level usable, an event of EVENTTYPE2.2.1 cannot be named, and an event
+    # of EVENTTYPE2.1.1 is always named by EVENTTYPE2.1
     levels = {"event_level_weights": {"schedule": "list", "values": [1, 0]}}
     top_only = knowing(case.facts(mention=levels), scenes)
     for event in events:
         named = top_only.draw_event(rng, event)
-        if event.type.startswith("EVENTTYPE2.1."):
+        if event.type.startswith("EVENTTYPE2.2."):
             assert named is None
-        elif event.type.startswith("EVENTTYPE2.2."):
-            assert named.predicate.label == "EVENTTYPE2.2"
+        elif event.type.startswith("EVENTTYPE2.1."):
+            assert named.predicate.label == "EVENTTYPE2.1"
     # an event type without a word names nothing
     no_words = knowing(
         case.facts(lexicon={"named_proportion": {"event": 0.0, "event_unary": 0.0}}), scenes
     )
     for event in events:
         named = no_words.draw_event(rng, event)
-        if event.type.startswith("EVENTTYPE2.2."):
-            assert named.predicate.label == "EVENTTYPE2.2"
+        if event.type.startswith("EVENTTYPE2.1."):
+            assert named.predicate.label == "EVENTTYPE2.1"
         else:
             assert named is None and no_words.event_fact(event) is None

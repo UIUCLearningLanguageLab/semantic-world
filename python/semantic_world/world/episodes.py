@@ -28,7 +28,6 @@ import polars as pl
 import yaml
 
 from semantic_world.taxonomy.config import ConfigError, _Node
-from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.similarity import similarity_matrix
 from semantic_world.taxonomy.streams import stream_seed
 from semantic_world.world.definition import RuntimeDefinition, load_definition
@@ -43,7 +42,6 @@ from semantic_world.world.history import (
     changes_of,
     write_histories,
 )
-from semantic_world.world.labels import translate
 from semantic_world.world.policies import DEFAULT_POLICY, StepContext, policy
 from semantic_world.world.runtime import (
     Event,
@@ -52,6 +50,7 @@ from semantic_world.world.runtime import (
     initial_state,
     legal_bindings,
 )
+from semantic_world.world.statics import StaticWorld
 
 EPISODE_STREAM = "world:episodes"
 """The stream of ``simulate``; the world statistics use ``world:stats``. Both are in the world's
@@ -133,32 +132,32 @@ def _weights(node: _Node, key: str, default: dict[str, float], allowed: tuple[st
 
 
 def _event_type_weights(node: _Node, definition: RuntimeDefinition | None) -> dict[str, float]:
-    """``event_type_weights`` (new labels), or ``verb_weights`` (the corpus's old labels,
-    translated). ``uniform`` or ``null`` means 1 for every event type."""
+    """``event_type_weights``: a weight per event type; ``uniform`` or ``null`` means 1 for every
+    event type. The old key ``verb_weights`` is an error that names the new one."""
     weights: dict[str, float] = {}
-    for key, translated in (("event_type_weights", False), ("verb_weights", True)):
-        value = node.get(key, None, nullable=True)
-        if value is None or value == "uniform":
-            continue
-        if not isinstance(value, dict):
-            raise node.error(key, f"expected a mapping, 'uniform', or null, found {value!r}")
-        for label, weight in value.items():
-            name = translate(str(label)) if translated else str(label)
-            node.check_number(f"{key}.{label}", weight, min=0)
-            if definition is not None and not any(
-                et.label == name and not et.is_category for et in definition.event_types
-            ):
-                raise node.error(f"{key}.{label}", "is not an event type of the world")
-            weights[name] = float(weight)
+    if "verb_weights" in node.data:
+        raise node.error("verb_weights", "this key is now scene.event_type_weights")
+    key = "event_type_weights"
+    value = node.get(key, None, nullable=True)
+    if value is None or value == "uniform":
+        return weights
+    if not isinstance(value, dict):
+        raise node.error(key, f"expected a mapping, 'uniform', or null, found {value!r}")
+    for label, weight in value.items():
+        name = str(label)
+        node.check_number(f"{key}.{label}", weight, min=0)
+        if definition is not None and not any(
+            et.label == name and not et.is_category for et in definition.event_types
+        ):
+            raise node.error(f"{key}.{label}", "is not an event type of the world")
+        weights[name] = float(weight)
     return weights
 
 
 def read_scene_settings(
     data: Mapping[str, Any], source: str, definition: RuntimeDefinition | None = None
 ) -> EpisodeSettings:
-    """The episode settings from the ``scene`` block of a corpus configuration mapping. Keys the
-    corpus does not know yet (``event_type_weights``, ``policy``, ``initial``) are read here;
-    the corpus's ``verb_weights`` is accepted with its labels translated."""
+    """The episode settings from the ``scene`` block of a corpus configuration mapping."""
     if not isinstance(data, dict):
         raise ConfigError(source, "<file>", "expected a mapping")
     node = _Node(source, "scene", data.get("scene") or {})
@@ -259,13 +258,12 @@ class Relatedness:
         return cls.from_frames(definition, thematic, _leaf_similarity_from_run(folder, definition))
 
     @classmethod
-    def from_taxonomy(cls, taxonomy: TaxonomyResult, definition: RuntimeDefinition) -> Relatedness:
-        """In memory, from the taxonomy run a world embeds."""
-        from semantic_world.world.relation_stats import relation_frames
-
-        frames = relation_frames(taxonomy)
+    def from_statics(cls, statics: StaticWorld, definition: RuntimeDefinition) -> Relatedness:
+        """In memory, from the static side of a world."""
+        taxonomy = statics.taxonomy
+        thematic = None if statics.relation_stats is None else statics.relation_stats.thematic
         leaves = tuple(dict.fromkeys(definition.leaves))
-        rows = {translate(c.label): i for i, c in enumerate(taxonomy.tree.categories)}
+        rows = {c.label: i for i, c in enumerate(taxonomy.tree.categories)}
         leaf_rows = np.array([rows[leaf] for leaf in leaves], dtype=np.intp)
         analysis = taxonomy.config.analysis
         similarity = _leaf_similarity(
@@ -275,7 +273,7 @@ class Relatedness:
             analysis.similarity_metric,
             analysis.similarity_features,
         )
-        return cls.from_frames(definition, frames.get(THEMATIC_FILE), similarity)
+        return cls.from_frames(definition, thematic, similarity)
 
 
 def _leaf_similarity(
@@ -287,7 +285,7 @@ def _leaf_similarity(
     return similarity_matrix(generative[leaf_rows][:, start:], metric)
 
 
-VECTOR_PREFIXES = ("ISA", "IS", "HAS", "CAN", "PROPERTY", "PART")
+VECTOR_PREFIXES = ("ISA", "PROPERTY", "PART")
 
 
 def _leaf_similarity_from_run(folder: Path, definition: RuntimeDefinition) -> np.ndarray:
@@ -298,7 +296,7 @@ def _leaf_similarity_from_run(folder: Path, definition: RuntimeDefinition) -> np
     columns = [c for c in frame.columns if c.split(".")[0] in VECTOR_PREFIXES]
     generative = frame.select(columns).to_numpy().astype(np.uint8)
     isa_count = sum(1 for c in columns if c.startswith("ISA."))
-    rows = {translate(label): i for i, label in enumerate(frame["label"].to_list())}
+    rows = {label: i for i, label in enumerate(frame["label"].to_list())}
     leaves = tuple(dict.fromkeys(definition.leaves))
     leaf_rows = np.array([rows[leaf] for leaf in leaves], dtype=np.intp)
     return _leaf_similarity(
@@ -329,7 +327,9 @@ class EpisodeGenerator:
         self.definition = definition
         self.relatedness = relatedness
         self.settings = settings or EpisodeSettings()
-        self.initial_rates = dict(initial_rates or {})
+        self.initial_rates = dict(
+            definition.initial_rates if initial_rates is None else initial_rates
+        )
         self.record_legal = record_legal
         self.policy = policy(self.settings.policy)
         self.performable = tuple(et.label for et in definition.event_types if not et.is_category)
@@ -511,16 +511,6 @@ def _event_changes(
 # ---------------------------------------------------------------------------------------------
 
 
-def read_initial_rates(folder: str | Path) -> dict[str, float]:
-    """Each base fluent's initial rate, from ``world_stats.yaml`` of a run."""
-    path = Path(folder) / "world_stats.yaml"
-    if not path.is_file():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    rates = (data.get("fluents") or {}).get("initial_rates") or {}
-    return {str(k): float(v) for k, v in rates.items()}
-
-
 def simulate(
     folder: str | Path,
     episodes: int,
@@ -537,11 +527,7 @@ def simulate(
         config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8")) or {}
         seed = int(config.get("seed", 1))
     generator = EpisodeGenerator(
-        definition,
-        Relatedness.from_run(folder, definition),
-        settings,
-        read_initial_rates(folder),
-        record_legal,
+        definition, Relatedness.from_run(folder, definition), settings, None, record_legal
     )
     histories = generator.run(seed, episodes)
     path = Path(out) if out is not None else folder / EPISODES_FILE
@@ -558,7 +544,6 @@ __all__ = [
     "EpisodeSettings",
     "Relatedness",
     "load_scene_settings",
-    "read_initial_rates",
     "read_scene_settings",
     "simulate",
 ]

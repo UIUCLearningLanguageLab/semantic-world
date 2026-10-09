@@ -101,13 +101,18 @@ UNIVERSALS = (NEC_ALL, ALL, NO, NEC_NO)
 COUNTERPART = {NEC_ALL: NEC_NO, NEC_NO: NEC_ALL, ALL: NO, NO: ALL, MOST: MOST, SOME: SOME}
 """Each quantifier's counterpart for a fact of the other polarity."""
 
-IS = "is"
-HAS = "has"
-CAN = "can"
+IS = "property"
+"""The kind of a PROPERTY predicate (the constant keeps the name of the old ``is`` kind)."""
+HAS = "part"
+"""The kind of a PART predicate (the old ``has`` kind)."""
+CAN = "event_type1"
+"""The kind of a one-place event-type predicate (the old ``can`` kind)."""
 SCALAR = "scalar"
 MEMBER = "member"
-PROJECTION = "projection"
-VERB = "verb"
+PROJECTION = "patient_capacity"
+"""The kind of a patient-capacity predicate (the old ``projection`` kind)."""
+VERB = "event_type2"
+"""The kind of a two-place event-type predicate (the old ``verb`` kind)."""
 KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB)
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
@@ -139,15 +144,9 @@ VALUE = "value"
 OCCURRED = "event"
 """An event-level proposition: whether such an event occurred in the scene."""
 
-_JSON_KEY = {
-    IS: "feature",
-    HAS: "feature",
-    CAN: "feature",
-    SCALAR: "pole",
-    MEMBER: "category",
-    PROJECTION: "projection",
-    VERB: "verb",
-}
+LABEL_KEY = "label"
+"""The key under which every predicate and clause of the JSON logical form names its symbol."""
+_JSON_KEY = dict.fromkeys(KINDS, LABEL_KEY)
 _LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2}
 
 
@@ -202,7 +201,7 @@ class Clause:
     of another category as its agent ("mice that owls eat", with ``agent``)."""
 
     kind: str
-    """``can`` or ``verb``."""
+    """``event_type1`` or ``event_type2``."""
     label: str
     patient: CategoryTerm | None = None
     """A two-place event type in a subject relative: the other category, which the head acts
@@ -286,11 +285,12 @@ class CategoryTerm:
 @dataclass(frozen=True)
 class Predicate:
     kind: str
-    """``is``, ``has``, ``can``, ``scalar``, ``member``, ``projection``, or ``verb``."""
+    """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
+    or ``event_type2``."""
     label: str
-    """The predicate's concept: a PROPERTY or PART feature, a one-place event type (``can``), a
-    scalar pole, a category, a patient capacity (``projection``), or a two-place event type or a
-    category of them (``verb``)."""
+    """The predicate's concept: a PROPERTY or PART feature, a one-place event type, a scalar
+    pole, a category, a patient capacity (``CANBE.<event type>``), or a two-place event type or
+    a category of them."""
     patient: CategoryTerm | str | None = None
     """Two-place event types only: the patient category (class level) or the patient instance
     (instance level)."""

@@ -1,0 +1,111 @@
+name: relations
+seed: 1
+features:
+  is: {count: 40, proportion_determined: 0.25, expected_true_free: 6}
+  has: {count: 40, proportion_determined: 0.25, expected_true_free: 6}
+  can: {count: 20}
+  base_rate_override: null
+  base_rate_heterogeneity: null
+rules:
+  source: automatic
+  file: null
+  max_chain_depth: 1
+  arity: {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
+  operator_mix: {AND: 1, OR: 1, XOR: 1}
+  negation_probability: 0.2
+  arity_3_families: {I: 1, II: 1, III: 1, IV: 1, V: 1, VI: 1, compositional: 1}
+  nesting_depth: {1: 0.5, 2: 0.5}
+  input_type_weights: {is: 1, has: 1, scalar: 1}
+  overrides: {}
+  allow_duplicate_rules: false
+  variance_bound: null
+taxonomy:
+  superordinates: 4
+  depth: 3
+  branching:
+    schedule: list
+    values:
+    - [2, 4]
+    - [2, 4]
+superordinates:
+  similarity_bound: {metric: phi, scope: free, min: null, max: 0.3, max_tries: 10000,
+    local_search: true}
+inheritance:
+  proportion_defining:
+    schedule: list
+    values: [0.1, 0.1, 0.1]
+  proportion_characteristic:
+    schedule: list
+    values: [0.5, 0.5, 0.5]
+  characteristic_probability:
+    schedule: list
+    values: [0.9, 0.9, 0.9]
+  require_distinct_leaves: true
+  distinct_max_tries: 1000
+instances:
+  per_leaf: [5, 10]
+  characteristic_probability: 0.9
+analysis: {similarity_metric: cosine, similarity_features: non_isa, max_pairs: 200000}
+scalars:
+  count: 2
+  drift:
+    schedule: list
+    values: [0.5, 0.5]
+  instance_drift: 0.2
+  threshold_quantiles: [0.2, 0.8]
+  thermometer_bins: 0
+verbs:
+  features: {count: 12, expected_true: 3}
+  taxonomy:
+    superordinates: 3
+    depth: 2
+    branching:
+      schedule: list
+      values:
+      - [2, 3]
+  superordinates: {similarity_bound: null}
+  inheritance:
+    proportion_defining:
+      schedule: list
+      values: [0.4, 0.4]
+    proportion_characteristic:
+      schedule: list
+      values: [0.4, 0.4]
+    characteristic_probability:
+      schedule: list
+      values: [0.9, 0.9]
+    require_distinct_leaves: true
+    distinct_max_tries: 1000
+  own_constraint: true
+  constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1, comparison: 1}
+  key_lock_pairs: {1: 0.5, 2: 0.3, 3: 0.2}
+  comparison:
+    window_probability: 0.3
+    cross_dimension_probability: 0.2
+    margin_quantiles: [0.1, 0.9]
+  rules:
+    arity: {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
+    operator_mix: {AND: 1, OR: 1, XOR: 1}
+    negation_probability: 0.2
+    arity_3_families: {I: 1, II: 1, III: 1, IV: 1, V: 1, VI: 1, compositional: 1}
+    nesting_depth: {1: 0.5, 2: 0.5}
+    input_type_weights: {is: 1, has: 1, scalar: 1}
+  projections: {expose_agent: 1.0, expose_patient: 0.25}
+  pairs: {sampled_true: 1000, sampled_false: 1000, max_exact_pairs: 50000000}
+  density: {min: 0.01, max: 0.3, max_tries: 200}
+  constraint_min_density: 0.1
+provenance:
+  git_commit: 8bdf84cbb31bbb28b64033f7fd2169a3024e391a
+  git_dirty: false
+  package_version: 0.1.0
+  stream_seeds: {'taxonomy:base_rates': 62329891537121046362963677271070578810010733763006158817907896126429270944263,
+    'taxonomy:rules': 27640572522727452744182043368199085913796669335166767209556260316189912458429,
+    'taxonomy:superordinates': 103036945527689773425162544588219861203737846749682948439638730413040665232275,
+    'taxonomy:tree': 24945472229550621691521188581062127506946659923423747117092871549376537448986,
+    'taxonomy:instances': 98232556604939197138919912747894053466214844262451780508074870084733736741255,
+    'taxonomy:analysis': 46015020034215618088007401462366493660427730940381358579990426374514347259695,
+    'taxonomy:scalars': 4349473676039448027533877612400192316852132985600536600256827383862078904906,
+    'taxonomy:scalar_instances': 61814687025870020918703365909730265387231064057289016782568816227542862798691,
+    'taxonomy:verb_tree': 16577676660268400287279529020930350222520029485997009083360528567616412645368,
+    'taxonomy:constraints': 47906684627913922057287770107926346694059082918557262074264289494874315180009,
+    'taxonomy:pairs': 50764398042965621592170294703691189514454017353973012812937030798895804445846}

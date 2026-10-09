@@ -19,8 +19,23 @@ import yaml
 
 SEED_MAX = 2**64 - 1
 
-FEATURE_TYPES = ("is", "has", "can")
-FREE_FEATURE_TYPES = ("is", "has")
+FEATURE_TYPES = ("is", "has")
+"""The binary feature types: ``is`` makes ``PROPERTY.<n>`` features and ``has`` makes
+``PART.<n>`` features. Both have free and determined features. CAN features left the taxonomy in
+stage a5b of ``docs/specs/WORLD_AND_LANGUAGE.md``: they are the one-place event types of the world
+package (``event_types.unary``)."""
+FREE_FEATURE_TYPES = FEATURE_TYPES
+LABEL_PREFIX = {"is": "PROPERTY", "has": "PART"}
+"""The label prefix of each feature type."""
+SCALAR_PREFIX = "SCALARDIM"
+CATEGORY_PREFIX = "CATEGORY."
+INSTANCE_PREFIX = "INSTANCE."
+MOVED_KEYS = {
+    "features.can": "event_types.unary",
+    "rules.overrides.can": "event_types.unary.rules",
+    "verbs": "event_types.binary",
+}
+"""Taxonomy keys that moved to the world configuration (``data/world/default.yaml``)."""
 INPUT_TYPES = ("is", "has", "scalar")
 OPERATORS = ("AND", "OR", "XOR")
 SHJ_TYPES = ("I", "II", "III", "IV", "V", "VI")
@@ -30,7 +45,6 @@ SIMILARITY_SCOPES = ("free", "is_has", "all")
 SIMILARITY_FEATURE_SETS = ("non_isa", "all")
 RULE_SOURCES = ("automatic", "file")
 SCHEDULE_KINDS = ("linear", "exponential", "list")
-CONSTRAINT_FAMILIES = ("agent", "patient", "cross", "key_lock", "comparison")
 
 
 class ConfigError(ValueError):
@@ -66,7 +80,8 @@ class Range:
 
 @dataclass(frozen=True)
 class FreeFeatureTypeConfig:
-    """The IS or HAS feature settings: ``features.is`` and ``features.has``."""
+    """The settings of one feature type: ``features.is`` (PROPERTY features) and
+    ``features.has`` (PART features)."""
 
     count: int
     proportion_determined: float
@@ -83,17 +98,9 @@ class FreeFeatureTypeConfig:
 
 
 @dataclass(frozen=True)
-class CanFeatureConfig:
-    """The CAN feature settings: ``features.can``. Every CAN feature is determined."""
-
-    count: int
-
-
-@dataclass(frozen=True)
 class FeaturesConfig:
     is_: FreeFeatureTypeConfig
     has: FreeFeatureTypeConfig
-    can: CanFeatureConfig
     base_rate_override: float | None
     base_rate_heterogeneity: float | None
 
@@ -105,18 +112,12 @@ class FeaturesConfig:
         raise ValueError(f"{feature_type!r} is not a free feature type")
 
     def count(self, feature_type: str) -> int:
-        if feature_type == "can":
-            return self.can.count
         return self.free_type(feature_type).count
 
     def determined_count(self, feature_type: str) -> int:
-        if feature_type == "can":
-            return self.can.count
         return self.free_type(feature_type).determined_count
 
     def free_count(self, feature_type: str) -> int:
-        if feature_type == "can":
-            return 0
         return self.free_type(feature_type).free_count
 
     def base_rate(self, feature_type: str) -> float | None:
@@ -238,7 +239,7 @@ class ScalarsConfig:
 
     @property
     def labels(self) -> tuple[str, ...]:
-        return tuple(f"SC.{i}" for i in range(1, self.count + 1))
+        return tuple(f"{SCALAR_PREFIX}.{i}" for i in range(1, self.count + 1))
 
     def fixed_below(self, level: int) -> bool:
         """Whether a scalar is fixed for the members of a category at ``level``: every drift
@@ -265,107 +266,6 @@ class TreeSettings:
 
 
 @dataclass(frozen=True)
-class ComparisonConfig:
-    window_probability: float
-    cross_dimension_probability: float
-    margin_quantiles: tuple[float, float]
-
-
-@dataclass(frozen=True)
-class DensityConfig:
-    """The allowed range of leaf-pair density for every verb, and how many tries the generator
-    spends bringing a verb or a constraint into range."""
-
-    min: float
-    max: float
-    max_tries: int
-
-
-@dataclass(frozen=True)
-class VerbsConfig:
-    """Transitive verbs and the verb taxonomy (``docs/specs/TAXONOMY_RELATIONS.md``, Part B)."""
-
-    feature_count: int
-    expected_true: float
-    taxonomy: TaxonomyConfig
-    similarity_bound: SimilarityBound | None
-    inheritance: InheritanceConfig
-    own_constraint: bool
-    constraint_families: dict[str, float]
-    key_lock_pairs: dict[int, float]
-    comparison: ComparisonConfig
-    rules: RuleSampling
-    """The rule-complexity settings for constraints: the top-level settings with the
-    ``verbs.rules`` overrides applied."""
-    expose_agent: float
-    expose_patient: float
-    sampled_true: int
-    sampled_false: int
-    max_exact_pairs: int
-    density: DensityConfig | None = None
-    """The verb density range (``docs/proposals/2026-09-29-taxonomy-verb-density.md``); None
-    turns the check off."""
-    constraint_min_density: float | None = None
-    """The smallest leaf-pair density allowed for any single constraint; None turns it off."""
-
-    @property
-    def density_tries(self) -> int:
-        return self.density.max_tries if self.density is not None else 200
-
-    @property
-    def base_rate(self) -> float | None:
-        """The base rate shared by the verb features, or None without verb features."""
-        return self.expected_true / self.feature_count if self.feature_count else None
-
-    @property
-    def feature_labels(self) -> tuple[str, ...]:
-        return tuple(f"VF.{i}" for i in range(1, self.feature_count + 1))
-
-    def tree_settings(self) -> TreeSettings:
-        return TreeSettings(self.taxonomy, self.inheritance, self.similarity_bound, None, "V")
-
-    def resolved(self) -> dict[str, Any]:
-        return {
-            "features": {"count": self.feature_count, "expected_true": self.expected_true},
-            "taxonomy": {
-                "superordinates": self.taxonomy.superordinates,
-                "depth": self.taxonomy.depth,
-                "branching": _list_schedule([r.resolved() for r in self.taxonomy.branching]),
-            },
-            "superordinates": {"similarity_bound": _resolved_bound(self.similarity_bound)},
-            "inheritance": _resolved_inheritance(self.inheritance),
-            "own_constraint": self.own_constraint,
-            "constraint_families": dict(self.constraint_families),
-            "key_lock_pairs": dict(self.key_lock_pairs),
-            "comparison": {
-                "window_probability": self.comparison.window_probability,
-                "cross_dimension_probability": self.comparison.cross_dimension_probability,
-                "margin_quantiles": list(self.comparison.margin_quantiles),
-            },
-            "rules": self.rules.resolved(),
-            "projections": {
-                "expose_agent": self.expose_agent,
-                "expose_patient": self.expose_patient,
-            },
-            "pairs": {
-                "sampled_true": self.sampled_true,
-                "sampled_false": self.sampled_false,
-                "max_exact_pairs": self.max_exact_pairs,
-            },
-            "density": (
-                None
-                if self.density is None
-                else {
-                    "min": self.density.min,
-                    "max": self.density.max,
-                    "max_tries": self.density.max_tries,
-                }
-            ),
-            "constraint_min_density": self.constraint_min_density,
-        }
-
-
-@dataclass(frozen=True)
 class Config:
     """A fully validated and resolved run configuration."""
 
@@ -379,13 +279,12 @@ class Config:
     instances: InstancesConfig
     analysis: AnalysisConfig
     scalars: ScalarsConfig
-    verbs: VerbsConfig | None
     source: str
     """Where the configuration came from: the file path, or a label for an in-memory mapping."""
 
     def tree_settings(self) -> TreeSettings:
         return TreeSettings(
-            self.taxonomy, self.inheritance, self.similarity_bound, self.scalars, "C"
+            self.taxonomy, self.inheritance, self.similarity_bound, self.scalars, CATEGORY_PREFIX
         )
 
     def rule_file_path(self) -> Path | None:
@@ -414,7 +313,6 @@ class Config:
             "features": {
                 "is": _resolved_free_type(features.is_),
                 "has": _resolved_free_type(features.has),
-                "can": {"count": features.can.count},
                 "base_rate_override": features.base_rate_override,
                 "base_rate_heterogeneity": features.base_rate_heterogeneity,
             },
@@ -452,7 +350,6 @@ class Config:
                 "threshold_quantiles": list(self.scalars.threshold_quantiles),
                 "thermometer_bins": self.scalars.thermometer_bins,
             },
-            "verbs": None if self.verbs is None else self.verbs.resolved(),
         }
 
     def to_yaml(self) -> str:
@@ -834,16 +731,23 @@ def _read_free_type(node: _Node) -> FreeFeatureTypeConfig:
     return FreeFeatureTypeConfig(count, proportion, expected)
 
 
+def _moved_key_error(node: _Node, key: str, moved: str) -> ConfigError:
+    return node.error(
+        key,
+        f"this key left the taxonomy in stage a5b of the world model; set {MOVED_KEYS[moved]} "
+        f"in the world configuration (data/world/default.yaml) instead",
+    )
+
+
 def _read_features(node: _Node) -> FeaturesConfig:
+    if "can" in node.data:
+        raise _moved_key_error(node, "can", "features.can")
     is_node = node.mapping("is")
     has_node = node.mapping("has")
-    can_node = node.mapping("can")
     is_ = _read_free_type(is_node)
     has = _read_free_type(has_node)
-    can = CanFeatureConfig(can_node.int("count", 20, min=0))
-    can_node.finish()
     override = node.probability("base_rate_override", None, nullable=True)
-    heterogeneity = node.number("base_rate_heterogeneity", None, nullable=True)
+    heterogeneity = node.number("base_rate_heterogeneity", 2.0, nullable=True)
     if heterogeneity is not None and heterogeneity <= 0:
         raise node.error(
             "base_rate_heterogeneity",
@@ -858,7 +762,7 @@ def _read_features(node: _Node) -> FeaturesConfig:
                     f"must be at most the number of free features ({cfg.free_count}), "
                     f"found {cfg.expected_true_free}",
                 )
-    return FeaturesConfig(is_, has, can, override, heterogeneity)
+    return FeaturesConfig(is_, has, override, heterogeneity)
 
 
 def _read_sampling(node: _Node, base: RuleSampling) -> RuleSampling:
@@ -890,14 +794,10 @@ def _check_arity_pool(
 ) -> None:
     """The largest arity with nonzero weight must fit the smallest eligible input pool."""
     types = sampling.input_types
-    if output_type == "can":
-        pool = sum(features.count(t) for t in types)
-        what = "IS or HAS features"
-    else:
-        pool = sum(features.free_count(t) for t in types)
-        what = "free IS or HAS features (layer 0)"
+    pool = sum(features.free_count(t) for t in types)
+    what = "free PROPERTY or PART features (layer 0)"
     if len(types) == 1:
-        what = what.replace("IS or HAS", types[0].upper())
+        what = what.replace("PROPERTY or PART", LABEL_PREFIX[types[0]])
     if scalars.count and sampling.scalar_weight > 0:
         pool += scalars.count
         what += f" plus {scalars.count} scalar threshold literals"
@@ -905,7 +805,7 @@ def _check_arity_pool(
         raise node.error(
             "arity",
             f"the largest arity with nonzero weight is {sampling.max_arity}, but a rule for a "
-            f"{output_type.upper()} feature can read at most {pool} {what}",
+            f"{LABEL_PREFIX[output_type]} feature can read at most {pool} {what}",
         )
 
 
@@ -917,6 +817,8 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
     max_chain_depth = node.int("max_chain_depth", 1, min=0)
     sampling = _read_sampling(node, DEFAULT_SAMPLING)
     overrides_node = node.mapping("overrides")
+    if "can" in overrides_node.data:
+        raise _moved_key_error(overrides_node, "can", "rules.overrides.can")
     overrides: dict[str, RuleSampling] = {}
     for feature_type in FEATURE_TYPES:
         if feature_type in overrides_node.data:
@@ -932,7 +834,8 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
     if determined > 0 and max_chain_depth < 1:
         raise node.error(
             "max_chain_depth",
-            f"must be at least 1 when any IS or HAS feature is determined ({determined} are)",
+            f"must be at least 1 when any PROPERTY or PART feature is determined "
+            f"({determined} are)",
         )
     binary_inputs_possible = scalars.count > 0
     for owner, effective in [(node, sampling)] + [
@@ -1076,92 +979,6 @@ def _read_analysis(node: _Node) -> AnalysisConfig:
 # ---------------------------------------------------------------------------------------------
 
 
-def _read_verbs(root: _Node, rules: RulesConfig, scalars: ScalarsConfig) -> VerbsConfig | None:
-    """The ``verbs`` block; null (the default) means no verbs."""
-    if root.data.get("verbs") is None:
-        root.seen.add("verbs")
-        return None
-    node = root.mapping("verbs")
-    features = node.mapping("features")
-    count = features.int("count", 12, min=0)
-    expected_true = features.number("expected_true", 3, min=0)
-    features.finish()
-    if count and expected_true > count:
-        raise features.error(
-            "expected_true",
-            f"must be at most the number of verb features ({count}), found {expected_true}",
-        )
-    taxonomy = _read_taxonomy(node.mapping("taxonomy"), defaults=(3, 2, [2, 3]))
-    similarity_bound = _read_similarity_bound(node.mapping("superordinates"), default_on=False)
-    inheritance = _read_inheritance(
-        node.mapping("inheritance"), taxonomy.depth, defaults=(0.4, 0.4, 0.9)
-    )
-    own_constraint = node.bool("own_constraint", True)
-    families = node.weights(
-        "constraint_families",
-        {"agent": 1, "patient": 1, "cross": 1, "key_lock": 1, "comparison": 1},
-        allowed=CONSTRAINT_FAMILIES,
-    )
-    usable = [f for f, w in families.items() if w > 0 and (f != "comparison" or scalars.count > 0)]
-    if not usable:
-        raise node.error(
-            "constraint_families",
-            "no constraint family with positive weight can be used: the comparison family needs "
-            "scalars.count above 0",
-        )
-    key_lock_pairs = node.weights("key_lock_pairs", {1: 0.5, 2: 0.3, 3: 0.2}, int_keys=True)
-    comparison_node = node.mapping("comparison")
-    comparison = ComparisonConfig(
-        comparison_node.probability("window_probability", 0.3),
-        comparison_node.probability("cross_dimension_probability", 0.2),
-        _read_open_interval(comparison_node, "margin_quantiles", [0.1, 0.9]),
-    )
-    comparison_node.finish()
-    rules_node = node.mapping("rules")
-    constraint_rules = _read_sampling(rules_node, rules.sampling)
-    rules_node.finish()
-    projections = node.mapping("projections")
-    expose_agent = projections.probability("expose_agent", 1.0)
-    expose_patient = projections.probability("expose_patient", 0.25)
-    projections.finish()
-    pairs = node.mapping("pairs")
-    sampled_true = pairs.int("sampled_true", 1000, min=0)
-    sampled_false = pairs.int("sampled_false", 1000, min=0)
-    max_exact_pairs = pairs.int("max_exact_pairs", 50_000_000, min=1)
-    pairs.finish()
-    density_node = node.mapping("density", nullable=True)
-    density = None
-    if density_node is not None:
-        low = density_node.probability("min", 0.01)
-        high = density_node.probability("max", 0.3)
-        tries = density_node.int("max_tries", 200, min=1)
-        density_node.finish()
-        if low > high:
-            raise density_node.error("min", f"min {low} exceeds max {high}")
-        density = DensityConfig(low, high, tries)
-    constraint_min_density = node.probability("constraint_min_density", 0.1, nullable=True)
-    node.finish()
-    return VerbsConfig(
-        feature_count=count,
-        expected_true=expected_true,
-        taxonomy=taxonomy,
-        similarity_bound=similarity_bound,
-        inheritance=inheritance,
-        own_constraint=own_constraint,
-        constraint_families=families,
-        key_lock_pairs=key_lock_pairs,
-        comparison=comparison,
-        rules=constraint_rules,
-        expose_agent=expose_agent,
-        expose_patient=expose_patient,
-        sampled_true=sampled_true,
-        sampled_false=sampled_false,
-        max_exact_pairs=max_exact_pairs,
-        density=density,
-        constraint_min_density=constraint_min_density,
-    )
-
-
 def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | None = None) -> Config:
     """Build a configuration from an already parsed mapping.
 
@@ -1188,7 +1005,8 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     inheritance = _read_inheritance(root.mapping("inheritance"), taxonomy.depth)
     instances = _read_instances(root.mapping("instances"))
     analysis = _read_analysis(root.mapping("analysis"))
-    verbs = _read_verbs(root, rules, scalars)
+    if "verbs" in root.data:
+        raise _moved_key_error(root, "verbs", "verbs")
     root.finish()
     return Config(
         name=name,
@@ -1201,7 +1019,6 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         instances=instances,
         analysis=analysis,
         scalars=scalars,
-        verbs=verbs,
         source=source,
     )
 

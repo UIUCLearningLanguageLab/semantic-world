@@ -39,7 +39,6 @@ TINY_SCALARS = {
     "features": {
         "is": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
         "has": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
-        "can": {"count": 4},
     },
     "taxonomy": {"superordinates": 2, "depth": 2, "branching": 2},
     "instances": {"per_leaf": 3},
@@ -59,33 +58,45 @@ def rules_for(overrides: dict, seed: int = 1):
 
 
 def test_threshold_literals_parse_and_print() -> None:
-    assert parse_expression("SC.2 > 0.4127") == Gt("SC.2", 0.4127)
-    assert parse_expression("SC.2>0.4127") == Gt("SC.2", 0.4127)
-    assert parse_expression("SC.2 <= 0.4127") == Not(Gt("SC.2", 0.4127))
-    assert parse_expression("SC.1 > -1.5") == Gt("SC.1", -1.5)
-    assert parse_expression("SC.1 > 2") == Gt("SC.1", 2.0)
-    assert str(Gt("SC.2", 0.4127)) == "SC.2 > 0.4127"
-    assert str(Not(Gt("SC.2", 0.4127))) == "SC.2 <= 0.4127"
-    assert str(Not(Not(Gt("SC.2", 0.4127)))) == "NOT SC.2 <= 0.4127"
-    expr = parse_expression("(IS.1 AND SC.1 > 0.5) OR NOT SC.2 <= -1.25")
+    assert parse_expression("SCALARDIM.2 > 0.4127") == Gt("SCALARDIM.2", 0.4127)
+    assert parse_expression("SCALARDIM.2>0.4127") == Gt("SCALARDIM.2", 0.4127)
+    assert parse_expression("SCALARDIM.2 <= 0.4127") == Not(Gt("SCALARDIM.2", 0.4127))
+    assert parse_expression("SCALARDIM.1 > -1.5") == Gt("SCALARDIM.1", -1.5)
+    assert parse_expression("SCALARDIM.1 > 2") == Gt("SCALARDIM.1", 2.0)
+    assert str(Gt("SCALARDIM.2", 0.4127)) == "SCALARDIM.2 > 0.4127"
+    assert str(Not(Gt("SCALARDIM.2", 0.4127))) == "SCALARDIM.2 <= 0.4127"
+    assert str(Not(Not(Gt("SCALARDIM.2", 0.4127)))) == "NOT SCALARDIM.2 <= 0.4127"
+    expr = parse_expression("(PROPERTY.1 AND SCALARDIM.1 > 0.5) OR NOT SCALARDIM.2 <= -1.25")
     assert expr == Op(
         "OR",
-        (Op("AND", (Var("IS.1"), Gt("SC.1", 0.5))), Not(Not(Gt("SC.2", -1.25)))),
+        (
+            Op("AND", (Var("PROPERTY.1"), Gt("SCALARDIM.1", 0.5))),
+            Not(Not(Gt("SCALARDIM.2", -1.25))),
+        ),
     )
-    assert str(expr) == "(IS.1 AND SC.1 > 0.5000) OR NOT SC.2 <= -1.2500"
-    assert expr.variables() == ("IS.1", "SC.1>0.5000", "SC.2>-1.2500")
-    assert expr.atoms() == (Var("IS.1"), Gt("SC.1", 0.5), Gt("SC.2", -1.25))
+    assert str(expr) == "(PROPERTY.1 AND SCALARDIM.1 > 0.5000) OR NOT SCALARDIM.2 <= -1.2500"
+    assert expr.variables() == ("PROPERTY.1", "SCALARDIM.1>0.5000", "SCALARDIM.2>-1.2500")
+    assert expr.atoms() == (Var("PROPERTY.1"), Gt("SCALARDIM.1", 0.5), Gt("SCALARDIM.2", -1.25))
 
 
 def test_thresholds_are_rounded_to_four_decimals() -> None:
-    assert Gt("SC.1", 0.41275).threshold == 0.4128 or Gt("SC.1", 0.41275).threshold == 0.4127
-    assert parse_expression("SC.1 > 0.123456").threshold == 0.1235
-    assert parse_expression(str(Gt("SC.1", 0.123456))) == Gt("SC.1", 0.123456)
+    rounded = Gt("SCALARDIM.1", 0.41275).threshold
+    assert rounded == 0.4128 or rounded == 0.4127
+    assert parse_expression("SCALARDIM.1 > 0.123456").threshold == 0.1235
+    assert parse_expression(str(Gt("SCALARDIM.1", 0.123456))) == Gt("SCALARDIM.1", 0.123456)
 
 
 @pytest.mark.parametrize(
     "text",
-    ["SC.1 < 0.5", "SC.1 >= 0.5", "SC.1 >", "SC.1 > IS.2", "> 0.5", "0.5", "IS.1 AND 3"],
+    [
+        "SCALARDIM.1 < 0.5",
+        "SCALARDIM.1 >= 0.5",
+        "SCALARDIM.1 >",
+        "SCALARDIM.1 > PROPERTY.2",
+        "> 0.5",
+        "0.5",
+        "PROPERTY.1 AND 3",
+    ],
 )
 def test_malformed_threshold_literals_are_rejected(text: str) -> None:
     with pytest.raises(ExpressionError):
@@ -94,7 +105,13 @@ def test_malformed_threshold_literals_are_rejected(text: str) -> None:
 
 def test_printed_expressions_with_thresholds_parse_back() -> None:
     rng = np.random.default_rng(3)
-    atoms = [Var("IS.1"), Var("HAS.2"), Gt("SC.1", 0.25), Gt("SC.2", -0.75), Gt("SC.1", 1.5)]
+    atoms = [
+        Var("PROPERTY.1"),
+        Var("PART.2"),
+        Gt("SCALARDIM.1", 0.25),
+        Gt("SCALARDIM.2", -0.75),
+        Gt("SCALARDIM.1", 1.5),
+    ]
     keys = [a.name if isinstance(a, Var) else a.key for a in atoms]
     for depth in (1, 2, 3):
         for _ in range(20):
@@ -110,11 +127,11 @@ def test_printed_expressions_with_thresholds_parse_back() -> None:
 
 
 def test_arity_pool_counts_scalars() -> None:
+    # Two free PROPERTY features and three determined ones, whose rules want three inputs.
     small = {
         "features": {
-            "is": {"count": 2, "proportion_determined": 0, "expected_true_free": 1},
+            "is": {"count": 5, "proportion_determined": 0.6, "expected_true_free": 1},
             "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
-            "can": {"count": 3},
         },
         "rules": {"arity": {3: 1}},
     }
@@ -177,7 +194,8 @@ def test_rules_read_threshold_literals() -> None:
             assert t.threshold == round(t.threshold, 4)
             assert low - 1e-4 <= t.threshold <= high + 1e-4
             assert 0.2 <= t.quantile <= 0.8
-            assert t.label == f"SC.{t.scalar}" and t.key == f"SC.{t.scalar}>{t.threshold:.4f}"
+            assert t.label == f"SCALARDIM.{t.scalar}"
+            assert t.key == f"SCALARDIM.{t.scalar}>{t.threshold:.4f}"
         # Binary inputs first in feature order, then thresholds by scalar.
         kinds = [isinstance(i, Threshold) for i in rule.inputs]
         assert kinds == sorted(kinds)
@@ -205,7 +223,8 @@ def test_threshold_weight_controls_their_use() -> None:
     # At most one literal per scalar caps a rule at two thresholds.
     fraction = sum(len(r.thresholds) for r in many.rules) / sum(r.arity for r in many.rules)
     assert fraction > 0.35
-    assert sum(1 for r in many.rules if r.thresholds) >= 30
+    assert len(many.rules) == 20
+    assert sum(1 for r in many.rules if r.thresholds) >= 15  # was 30 of the 40 rules with CAN
     _, only = rules_for(
         {
             "scalars": {"count": 4},
@@ -223,7 +242,6 @@ def test_thresholds_in_layered_rules() -> None:
         "features": {
             "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
             "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-            "can": {"count": 10},
         },
         "rules": {"max_chain_depth": 3, "input_type_weights": {"is": 1, "has": 1, "scalar": 5}},
         "scalars": {"count": 3},
@@ -231,15 +249,10 @@ def test_thresholds_in_layered_rules() -> None:
     for seed in range(3):
         _, rules = rules_for(chained, seed)
         for rule in rules.rules:
-            if rule.output.type != "can":
-                k = rule.output.layer
-                assert all(i.layer < k for i in rule.inputs)
-                assert any(i.layer == k - 1 for i in rule.inputs)
-        layered = [
-            r
-            for r in rules.rules
-            if r.output.type != "can" and r.output.layer >= 2 and r.thresholds
-        ]
+            k = rule.output.layer
+            assert all(i.layer < k for i in rule.inputs)
+            assert any(i.layer == k - 1 for i in rule.inputs)
+        layered = [r for r in rules.rules if r.output.layer >= 2 and r.thresholds]
         assert layered  # thresholds join layer-2 rules as layer-0 inputs
         for rule in layered:
             assert rules.thresholds_of(rule.output)
@@ -282,12 +295,13 @@ def test_generated_instances_and_categories_use_their_scalars() -> None:
 
 def test_canonical_key_distinguishes_thresholds() -> None:
     _, rules = rules_for({"scalars": {"count": 2}})
-    feature = rules.features["IS.1"]
+    feature = rules.features["PROPERTY.1"]
     a = Threshold(1, 0.5, 0.6)
     b = Threshold(1, 0.7, 0.7)
-    table = parse_expression("IS.1 AND SC.1 > 0.5").truth_table(["IS.1", "SC.1>0.5000"])
+    text = "PROPERTY.1 AND SCALARDIM.1 > 0.5"
+    table = parse_expression(text).truth_table(["PROPERTY.1", "SCALARDIM.1>0.5000"])
     assert canonical_key((feature, a), table) != canonical_key((feature, b), table)
-    swapped = parse_expression("IS.1 AND SC.1 > 0.5").truth_table(["SC.1>0.5000", "IS.1"])
+    swapped = parse_expression(text).truth_table(["SCALARDIM.1>0.5000", "PROPERTY.1"])
     assert canonical_key((a, feature), swapped) == canonical_key((feature, a), table)
     keys = [canonical_key(r.inputs, r.table) for r in rules.rules]
     assert len(set(keys)) == len(keys)
@@ -323,31 +337,36 @@ def test_explicit_rules_with_threshold_literals(tmp_path: Path) -> None:
     rule_file = {
         "templates": [{"family": "literal", "weight": 1}],
         "explicit": [
-            {"output": "CAN.1", "expression": "IS.1 AND SC.1 > 0.3"},
-            {"output": "CAN.2", "expression": "SC.2 <= -0.25 OR HAS.2"},
+            {"output": "PROPERTY.31", "expression": "PROPERTY.1 AND SCALARDIM.1 > 0.3"},
+            {"output": "PROPERTY.32", "expression": "SCALARDIM.2 <= -0.25 OR PART.2"},
         ],
     }
     config, rules = rules_for(_rule_file_config(tmp_path, {"scalars": {"count": 2}}, rule_file))
-    can_1 = rules.rule_for("CAN.1")
-    assert [i.label for i in can_1.inputs] == ["IS.1", "SC.1"]
-    assert can_1.thresholds[0].threshold == 0.3
-    assert can_1.thresholds[0].quantile == pytest.approx(
+    first = rules.rule_for("PROPERTY.31")
+    assert [i.label for i in first.inputs] == ["PROPERTY.1", "SCALARDIM.1"]
+    assert first.thresholds[0].threshold == 0.3
+    assert first.thresholds[0].quantile == pytest.approx(
         NormalDist(0, config.scalars.model_std).cdf(0.3)
     )
-    assert str(can_1.expression) == "IS.1 AND SC.1 > 0.3000"
-    can_2 = rules.rule_for("CAN.2")
-    assert can_2.table == parse_expression("NOT A OR B").truth_table(["A", "B"])
-    assert rules.expected_true_proportion(can_1) == pytest.approx(
-        0.2 * (1 - can_1.thresholds[0].quantile)
+    assert str(first.expression) == "PROPERTY.1 AND SCALARDIM.1 > 0.3000"
+    second = rules.rule_for("PROPERTY.32")
+    assert second.table == parse_expression("NOT A OR B").truth_table(["A", "B"])
+    # The base rate of PROPERTY.1 is Beta-drawn under the default heterogeneity.
+    rate = rules.features["PROPERTY.1"].base_rate
+    assert rules.expected_true_proportion(first) == pytest.approx(
+        rate * (1 - first.thresholds[0].quantile)
     )
 
 
 @pytest.mark.parametrize(
     ("expression", "message"),
     [
-        ("IS.1 AND SC.9 > 0.3", "unknown scalar SC.9"),
-        ("IS.1 AND SC.1", "without a threshold"),
-        ("SC.1 > 0.1 AND SC.1 > 0.5", "more than one threshold literal on the same scalar"),
+        ("PROPERTY.1 AND SCALARDIM.9 > 0.3", "unknown scalar SCALARDIM.9"),
+        ("PROPERTY.1 AND SCALARDIM.1", "without a threshold"),
+        (
+            "SCALARDIM.1 > 0.1 AND SCALARDIM.1 > 0.5",
+            "more than one threshold literal on the same scalar",
+        ),
     ],
 )
 def test_bad_threshold_literals_in_explicit_rules(
@@ -355,7 +374,7 @@ def test_bad_threshold_literals_in_explicit_rules(
 ) -> None:
     rule_file = {
         "templates": [{"family": "literal", "weight": 1}],
-        "explicit": [{"output": "CAN.1", "expression": expression}],
+        "explicit": [{"output": "PROPERTY.31", "expression": expression}],
     }
     with pytest.raises(ConfigError, match=message) as error:
         rules_for(_rule_file_config(tmp_path, {"scalars": {"count": 2}}, rule_file))
@@ -367,7 +386,6 @@ def test_threshold_literals_are_layer_zero_in_explicit_rules(tmp_path: Path) -> 
         "features": {
             "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
             "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-            "can": {"count": 4},
         },
         "rules": {"max_chain_depth": 2},
         "scalars": {"count": 1},
@@ -378,7 +396,7 @@ def test_threshold_literals_are_layer_zero_in_explicit_rules(tmp_path: Path) -> 
     layer2 = [f.label for f in features.layer(2)][0]
     rule_file = {
         "templates": [{"family": "literal", "weight": 1}],
-        "explicit": [{"output": layer2, "expression": "IS.1 AND SC.1 > 0.2"}],
+        "explicit": [{"output": layer2, "expression": "PROPERTY.1 AND SCALARDIM.1 > 0.2"}],
     }
     with pytest.raises(ConfigError, match="no feature from layer 1"):
         rules_for(_rule_file_config(tmp_path, chained, rule_file))

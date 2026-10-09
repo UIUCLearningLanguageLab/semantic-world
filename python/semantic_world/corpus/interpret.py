@@ -32,6 +32,7 @@ and are ignored.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 
 from semantic_world.corpus.grammar import (
@@ -50,6 +51,8 @@ from semantic_world.corpus.propositions import (
     HAS,
     IS,
     MEMBER,
+    NEC_NO,
+    NO,
     PROJECTION,
     SCALAR,
     VERB,
@@ -160,6 +163,14 @@ class _Reader:
         target = self.child(self.tree, "NP-OBJ") or self.child(verb_phrase, "NP-OBJ")
         predication, _ = self.predication(verb_phrase, target, subject.kind, None)
         quantifier = self.quantifier if subject.kind == CLASS_NP else None
+        if (
+            subject.kind == CLASS_NP
+            and subject.determiner is None
+            and quantifier in (NO, NEC_NO)
+            and not predication.polarity
+        ):
+            # the negation of a bare plural states the quantifier ("penguins are not fish")
+            predication = dataclasses.replace(predication, polarity=True)
         return SentencePlan(subject, predication, quantifier)
 
     def noun_phrase(self, node: Tree) -> NounPhrase:

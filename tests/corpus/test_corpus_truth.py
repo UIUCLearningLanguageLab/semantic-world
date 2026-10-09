@@ -48,7 +48,6 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
 )
-from semantic_world.world.labels import translate
 
 SMALL = ("tiny", "deep", "still")
 SETTINGS = {
@@ -338,11 +337,11 @@ def test_relative_clauses_in_the_logical_form() -> None:
         "restriction": [],
         "clauses": [
             {
-                "kind": "verb",
-                "verb": "EVENTTYPE2.2.1",
+                "kind": "event_type2",
+                "label": "EVENTTYPE2.2.1",
                 "patient": {"category": "CATEGORY.1.5", "restriction": ["PROPERTY.4"]},
             },
-            {"kind": "can", "feature": "EVENTTYPE1.3"},
+            {"kind": "event_type1", "label": "EVENTTYPE1.3"},
         ],
     }
     assert CategoryTerm.from_json(owls.to_json()) == owls
@@ -351,8 +350,8 @@ def test_relative_clauses_in_the_logical_form() -> None:
     )
     assert eaten.to_json()["clauses"] == [
         {
-            "kind": "verb",
-            "verb": "EVENTTYPE2.2.1",
+            "kind": "event_type2",
+            "label": "EVENTTYPE2.2.1",
             "agent": {"category": "CATEGORY.1.2", "restriction": []},
         }
     ]
@@ -409,7 +408,7 @@ def test_the_fixed_test_matches_the_defining_vectors(cases, name) -> None:
     case = cases(name)
     truth = case.facts().truth
     vectors = case.world.result.taxonomy.vectors
-    labels = [translate(x) for x in vectors.feature_labels[vectors.isa_count :]]
+    labels = list(vectors.feature_labels[vectors.isa_count :])
     for row, category in enumerate(case.world.categories):
         defining = vectors.defining[row, vectors.isa_count :]
         for label, value in zip(labels, defining, strict=True):
@@ -450,7 +449,7 @@ def test_a_threshold_literal_is_held_when_the_scalar_never_drifts(cases) -> None
     case = cases("still")
     truth = case.facts().truth
     taxonomy = case.world.result.taxonomy
-    reading = [translate(r.output.label) for r in taxonomy.rules.rules if r.thresholds]
+    reading = [r.output.label for r in taxonomy.rules.rules if r.thresholds]
     assert reading
     fixed_somewhere = 0
     for feature in reading:
@@ -995,7 +994,7 @@ def test_the_logical_form_of_the_specification() -> None:
         "quantifier": "most",
         "polarity": True,
         "subject": {"category": "CATEGORY.1.3", "restriction": ["PROPERTY.4", "not PART.2"]},
-        "predicate": {"kind": "can", "feature": "EVENTTYPE1.3"},
+        "predicate": {"kind": "event_type1", "label": "EVENTTYPE1.3"},
         "grounding": {"proportion": 0.93, "fixed": False, "test": "observed"},
     }
 
@@ -1003,17 +1002,17 @@ def test_the_logical_form_of_the_specification() -> None:
 def test_json_forms_of_every_predicate_kind() -> None:
     subject = CategoryTerm("CATEGORY.1")
     forms = {
-        Predicate(IS, "PROPERTY.1"): {"kind": "is", "feature": "PROPERTY.1"},
-        Predicate(HAS, "PART.1"): {"kind": "has", "feature": "PART.1"},
-        Predicate(CAN, "EVENTTYPE1.2"): {"kind": "can", "feature": "EVENTTYPE1.2"},
-        Predicate(MEMBER, "CATEGORY.2"): {"kind": "member", "category": "CATEGORY.2"},
+        Predicate(IS, "PROPERTY.1"): {"kind": "property", "label": "PROPERTY.1"},
+        Predicate(HAS, "PART.1"): {"kind": "part", "label": "PART.1"},
+        Predicate(CAN, "EVENTTYPE1.2"): {"kind": "event_type1", "label": "EVENTTYPE1.2"},
+        Predicate(MEMBER, "CATEGORY.2"): {"kind": "member", "label": "CATEGORY.2"},
         Predicate(PROJECTION, "CANBE.EVENTTYPE2.1.1"): {
-            "kind": "projection",
-            "projection": "CANBE.EVENTTYPE2.1.1",
+            "kind": "patient_capacity",
+            "label": "CANBE.EVENTTYPE2.1.1",
         },
         Predicate(VERB, "EVENTTYPE2.1", CategoryTerm("CATEGORY.2", (Literal("PROPERTY.3"),))): {
-            "kind": "verb",
-            "verb": "EVENTTYPE2.1",
+            "kind": "event_type2",
+            "label": "EVENTTYPE2.1",
             "patient": {"category": "CATEGORY.2", "restriction": ["PROPERTY.3"]},
         },
     }
@@ -1022,7 +1021,7 @@ def test_json_forms_of_every_predicate_kind() -> None:
         assert proposition.to_json()["predicate"] == form
         assert Proposition.from_json(proposition.to_json()) == proposition
     pole = Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.LOW"))
-    assert pole.to_json()["predicate"] == {"kind": "scalar", "pole": "SCALARDIM.1.LOW"}
+    assert pole.to_json()["predicate"] == {"kind": "scalar", "label": "SCALARDIM.1.LOW"}
     assert pole.to_json()["quantifier"] is None
     assert Proposition.from_json(pole.to_json()) == pole
     instance = Proposition(
@@ -1034,8 +1033,8 @@ def test_json_forms_of_every_predicate_kind() -> None:
         "polarity": False,
         "subject": {"instance": "INSTANCE.1.1.1"},
         "predicate": {
-            "kind": "verb",
-            "verb": "EVENTTYPE2.1.1",
+            "kind": "event_type2",
+            "label": "EVENTTYPE2.1.1",
             "patient": {"instance": "INSTANCE.2.1.2"},
         },
         "grounding": None,
@@ -1046,7 +1045,7 @@ def test_json_forms_of_every_predicate_kind() -> None:
     )
     assert scalar.to_json()["predicate"] == {
         "kind": "scalar",
-        "pole": "SCALARDIM.1.HIGH",
+        "label": "SCALARDIM.1.HIGH",
         "class": "CATEGORY.1",
     }
     assert Proposition.from_json(scalar.to_json()) == scalar

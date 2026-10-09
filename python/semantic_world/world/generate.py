@@ -12,8 +12,7 @@ import yaml
 
 from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.generate import generate as generate_taxonomy
-from semantic_world.taxonomy.io import STATIC_FEATURES_FILE, provenance
-from semantic_world.taxonomy.io import static_features_frame as taxonomy_static_features
+from semantic_world.taxonomy.io import STATIC_FEATURES_FILE, provenance, static_features_frame
 from semantic_world.taxonomy.streams import Streams as TaxonomyStreams
 from semantic_world.world.capacities import (
     CAPACITIES_FILE,
@@ -32,25 +31,32 @@ from semantic_world.world.definition import (
 from semantic_world.world.derived import DERIVED_DIR, write_manifest
 from semantic_world.world.errors import WorldError
 from semantic_world.world.event_file import EventFile, load_event_file
-from semantic_world.world.event_types import EventTypes, check_dynamics, generate_event_types
+from semantic_world.world.event_types import (
+    EventTypes,
+    check_dynamics,
+    generate_event_types,
+    redraw_preconditions,
+)
 from semantic_world.world.fluents import Fluents, derived_initial_values, generate_fluents
-from semantic_world.world.labels import translate, translate_column
-from semantic_world.world.relation_stats import relation_frames
-from semantic_world.world.requirements import apply_requirements
+from semantic_world.world.statics import StaticWorld, build_statics
 from semantic_world.world.stats import episode_stats, world_stats
 from semantic_world.world.streams import WorldStreams
 
 TAXONOMY_DIR = "taxonomy"
 STATS_FILE = "world_stats.yaml"
+MAX_REDRAW_ROUNDS = 5
+"""How many times the preconditions of an event type that was never legal in the statistics
+episodes are drawn again before the world keeps it as it is."""
 
 
 @dataclass(frozen=True)
 class WorldResult:
     config: Config
     taxonomy: TaxonomyResult
-    """The taxonomy run the world is built on, with explicit requirements applied."""
-    taxonomy_run: TaxonomyResult
-    """The unmodified taxonomy run, written to ``taxonomy/``."""
+    """The taxonomy run the world is built on, written to ``taxonomy/``."""
+    statics: StaticWorld
+    """The static side: the one-place requirements, the event tree, the relations, the
+    capacities, and the relation statistics."""
     event_file: EventFile | None
     fluents: Fluents
     event_types: EventTypes
@@ -66,17 +72,13 @@ class WorldResult:
 
     def derived_frames(self) -> dict[str, pl.DataFrame]:
         """Every table of ``derived/``, keyed by file name."""
-        static = taxonomy_static_features(self.taxonomy)
-        static.columns = [translate_column(c) for c in static.columns]
-        static = static.with_columns(
-            pl.Series("label", [translate(v) for v in static["label"].to_list()], dtype=pl.Utf8)
-        )
         frames = {
-            STATIC_FEATURES_FILE: static,
-            CAPACITIES_FILE: capacities_frame(self.taxonomy),
-            CAPACITY_ROLES_FILE: capacity_roles_frame(self.taxonomy),
+            STATIC_FEATURES_FILE: static_features_frame(self.taxonomy),
+            CAPACITIES_FILE: capacities_frame(self.statics),
+            CAPACITY_ROLES_FILE: capacity_roles_frame(self.statics),
         }
-        frames.update(relation_frames(self.taxonomy))
+        if self.statics.relation_stats is not None:
+            frames.update(self.statics.relation_stats.frames())
         return frames
 
     def write(self, path: str | Path | None = None) -> Path:
@@ -87,23 +89,31 @@ def default_output_dir(config: Config, base: str | Path = "runs/world") -> Path:
     return Path(base) / f"{config.name}_seed{config.seed}"
 
 
-def define(config: Config, *, episode_stats: bool = True) -> WorldResult:
-    """Generate a world: the taxonomy run, the fluents, the event types, the definition, and the
-    agreement test. A disagreement, or a broken invariant of the dynamics, raises
-    :class:`WorldError` and fails the run.
+def _initial_present(fluents: Fluents, derived_initial: dict[str, np.ndarray]) -> set:
+    present: set[tuple[str, bool]] = set()
+    for i, fluent in enumerate(fluents.base):
+        for value in np.unique(fluents.initial_values[:, i]):
+            present.add((fluent.label, bool(value)))
+    for label, column in derived_initial.items():
+        for value in np.unique(column):
+            present.add((label, bool(value)))
+    return present
 
-    With ``episode_stats`` false, the 1,000 statistics episodes of ``world_stats.yaml`` are not
-    run, and ``stats["episodes"]`` is None: for a world used in memory (the corpus, tests). A
-    written run always has them: ``write`` runs them when they are missing."""
-    taxonomy_run = generate_taxonomy(config.taxonomy_config())
+
+def define(config: Config) -> WorldResult:
+    """Generate a world: the taxonomy run, the static side, the fluents, the event types, the
+    definition, the agreement test, and the statistics episodes. An event type that is never
+    legal in the statistics episodes has its own precondition literals drawn again, from its own
+    part of ``world:preconditions``, up to ``MAX_REDRAW_ROUNDS`` times; the redraws and whatever
+    is still never legal are reported in ``world_stats.yaml``. A disagreement, or a broken
+    invariant of the dynamics, raises :class:`WorldError` and fails the run."""
+    taxonomy = generate_taxonomy(config.taxonomy_config())
     event_file = None
     path = config.event_file_path()
     if path is not None:
         event_file = load_event_file(path)
-    taxonomy = (
-        apply_requirements(taxonomy_run, event_file) if event_file is not None else taxonomy_run
-    )
     streams = WorldStreams(config.seed)
+    statics = build_statics(taxonomy, config, streams, event_file)
     fluents = generate_fluents(
         config,
         taxonomy,
@@ -113,28 +123,45 @@ def define(config: Config, *, episode_stats: bool = True) -> WorldResult:
     )
     derived_initial = derived_initial_values(fluents, taxonomy)
     event_types = generate_event_types(
-        taxonomy, fluents, config, streams, event_file, derived_initial
+        statics, fluents, config, streams, event_file, derived_initial
     )
-    initial_present: set[tuple[str, bool]] = set()
-    for i, fluent in enumerate(fluents.base):
-        for value in np.unique(fluents.initial_values[:, i]):
-            initial_present.add((fluent.label, bool(value)))
-    for label, column in derived_initial.items():
-        for value in np.unique(column):
-            initial_present.add((label, bool(value)))
-    try:
-        check_dynamics(event_types, fluents, initial_present)
-    except ValueError as error:
-        raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
-    definition = build_definition(taxonomy, fluents, event_types)
+    initial_present = _initial_present(fluents, derived_initial)
+    _check(event_types, fluents, initial_present)
+    definition = build_definition(statics, fluents, event_types)
+    fixed = set()
+    if event_file is not None:
+        fixed = {
+            label
+            for label, entry in event_file.event_types.items()
+            if entry.precondition is not None
+        }
+    redraws: dict[str, int] = {}
+    parts: dict[str, np.random.Generator] = {}
+    episodes = statistics_episodes(definition, statics, config, redraws)
+    for _ in range(MAX_REDRAW_ROUNDS):
+        never = [
+            label
+            for label, reason in episodes["never_legal"].items()
+            if reason == "preconditions" and label not in fixed
+        ]
+        if not never:
+            break
+        for label in never:
+            parts.setdefault(label, streams.part("preconditions", label))
+            redraws[label] = redraws.get(label, 0) + 1
+        event_types = redraw_preconditions(
+            event_types, never, fluents, config, parts, derived_initial
+        )
+        _check(event_types, fluents, initial_present)
+        definition = build_definition(statics, fluents, event_types)
+        episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
-    episodes = statistics_episodes(definition, taxonomy, config) if episode_stats else None
     stats = world_stats(fluents, event_types, episodes)
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     return WorldResult(
         config=config,
         taxonomy=taxonomy,
-        taxonomy_run=taxonomy_run,
+        statics=statics,
         event_file=event_file,
         fluents=fluents,
         event_types=event_types,
@@ -142,12 +169,22 @@ def define(config: Config, *, episode_stats: bool = True) -> WorldResult:
         report=report,
         stream_seeds=seeds,
         stats=stats,
-        warnings=tuple(taxonomy.warnings),
+        warnings=tuple(taxonomy.warnings) + tuple(statics.warnings),
     )
 
 
+def _check(event_types: EventTypes, fluents: Fluents, initial_present: set) -> None:
+    try:
+        check_dynamics(event_types, fluents, initial_present)
+    except ValueError as error:
+        raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
+
+
 def statistics_episodes(
-    definition: Definition, taxonomy: TaxonomyResult, config: Config
+    definition: Definition,
+    statics: StaticWorld,
+    config: Config,
+    redraws: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """The episode statistics of ``world_stats.yaml``: 1,000 episodes of the default policy with
     the default scene settings, on the ``world:stats`` stream, each from its own part."""
@@ -157,13 +194,16 @@ def statistics_episodes(
         EpisodeGenerator,
         Relatedness,
     )
+    from semantic_world.world.runtime import able_table
 
     runtime = definition.runtime()
     generator = EpisodeGenerator(
-        runtime, Relatedness.from_taxonomy(taxonomy, runtime), record_legal=True
+        runtime, Relatedness.from_statics(statics, runtime), record_legal=True
     )
     histories = generator.run(config.seed, STATS_EPISODES, STATS_STREAM)
-    return episode_stats(histories, generator.performable)
+    able = able_table(runtime)
+    never_able = [label for label in generator.performable if not able[label].any()]
+    return episode_stats(histories, generator.performable, redraws, never_able)
 
 
 def _yaml(data: Any) -> str:
@@ -176,7 +216,7 @@ def write_result(result: WorldResult, path: str | Path | None = None) -> Path:
     config_data = result.config.resolved()
     config_data["provenance"] = provenance(result.stream_seeds)
     (folder / "config.yaml").write_text(_yaml(config_data), encoding="utf-8")
-    result.taxonomy_run.write(folder / TAXONOMY_DIR)
+    result.taxonomy.write(folder / TAXONOMY_DIR)
     write_definition(result.definition, folder)
     derived = folder / DERIVED_DIR
     derived.mkdir(exist_ok=True)
@@ -185,8 +225,18 @@ def write_result(result: WorldResult, path: str | Path | None = None) -> Path:
         frame.write_csv(derived / name, float_precision=6, null_value="")
     write_manifest(derived, {name: result.rule_set_id for name in frames})
     stats = dict(result.stats)
-    if stats.get("episodes") is None:
-        stats["episodes"] = statistics_episodes(result.definition, result.taxonomy, result.config)
     stats["warnings"] = list(result.warnings)
     (folder / STATS_FILE).write_text(_yaml(stats), encoding="utf-8")
     return folder
+
+
+__all__ = [
+    "MAX_REDRAW_ROUNDS",
+    "STATS_FILE",
+    "TAXONOMY_DIR",
+    "WorldResult",
+    "default_output_dir",
+    "define",
+    "statistics_episodes",
+    "write_result",
+]

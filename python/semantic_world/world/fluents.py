@@ -26,7 +26,6 @@ from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.rules import MAX_TRIES, _draw, build_function, model_quantile_threshold
 from semantic_world.world.config import Config
 from semantic_world.world.errors import WorldError
-from semantic_world.world.labels import translate
 from semantic_world.world.streams import WorldStreams
 
 FLUENT_PREFIX = "BOOLFL"
@@ -322,9 +321,8 @@ def _inputs(
     atoms: list[Expr] = []
     thresholds: list[ThresholdLiteral] = []
     for feature in features:
-        label = translate(feature.label)
-        keys.append(label)
-        atoms.append(Var(label))
+        keys.append(feature.label)
+        atoms.append(Var(feature.label))
     for fluent in fluents:
         keys.append(fluent.label)
         atoms.append(Var(fluent.label))
@@ -360,9 +358,7 @@ def derived_initial_values(fluents: Fluents, taxonomy: TaxonomyResult) -> dict[s
                 literal = next(t for t in rule.thresholds if t.key == key)
                 inputs.append(literal.values(scalars))
             else:
-                from semantic_world.world.labels import untranslate
-
-                inputs.append(values[:, features[untranslate(key)].position])
+                inputs.append(values[:, features[key].position])
         stacked = (
             np.stack(inputs, axis=1) if inputs else np.zeros((values.shape[0], 0), dtype=np.uint8)
         )
