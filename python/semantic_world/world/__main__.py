@@ -2,6 +2,8 @@
 
 python -m semantic_world.world define CONFIG [--seed N] [--out DIR]
 python -m semantic_world.world view RUN_FOLDER --preset classic [--include A,B] [--out FILE]
+python -m semantic_world.world simulate RUN_FOLDER --episodes N [--seed N] [--legal] [--out FILE]
+    [--config CORPUS.yaml]
 python -m semantic_world.world check-fixtures [FOLDER]
 python -m semantic_world.world make-fixtures CONFIG [--out FOLDER] [--count N] [--steps N]
 """
@@ -15,6 +17,8 @@ from collections.abc import Sequence
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.world.config import load_config
+from semantic_world.world.definition import load_definition
+from semantic_world.world.episodes import load_scene_settings, simulate
 from semantic_world.world.errors import WorldError
 from semantic_world.world.fixtures import FIXTURES_DIR, check_fixtures, write_world_fixtures
 from semantic_world.world.generate import define
@@ -42,6 +46,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     view_parser.add_argument(
         "--out", default=None, help="the CSV file (default: RUN/views/<preset>.csv)"
     )
+    simulate_parser = commands.add_parser("simulate", help="run episodes of a world run")
+    simulate_parser.add_argument("run", help="a world run folder")
+    simulate_parser.add_argument("--episodes", type=int, required=True, help="how many episodes")
+    simulate_parser.add_argument(
+        "--seed", type=int, default=None, help="the master seed (default: the run's seed)"
+    )
+    simulate_parser.add_argument(
+        "--legal", action="store_true", help="record each step's legal binding counts"
+    )
+    simulate_parser.add_argument(
+        "--out", default=None, help="the JSON lines file (default: RUN/episodes.jsonl)"
+    )
+    simulate_parser.add_argument(
+        "--config",
+        default=None,
+        help="a corpus configuration file whose scene block gives the settings",
+    )
     check_parser = commands.add_parser(
         "check-fixtures", help="run the Python runtime on every conformance fixture"
     )
@@ -61,6 +82,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "define":
             return _define(args)
+        if args.command == "simulate":
+            return _simulate(args)
         if args.command == "check-fixtures":
             return _check_fixtures(args)
         if args.command == "make-fixtures":
@@ -87,12 +110,26 @@ def _define(args: argparse.Namespace) -> int:
     return 0
 
 
+def _simulate(args: argparse.Namespace) -> int:
+    settings = None
+    if args.config is not None:
+        settings = load_scene_settings(args.config, load_definition(args.run))
+    path, histories = simulate(args.run, args.episodes, args.seed, settings, args.legal, args.out)
+    events = sum(len(h.events) for h in histories)
+    quiescent = sum(1 for h in histories if h.quiescent)
+    print(
+        f"wrote {path}: {len(histories)} episodes, {events} events, {quiescent} quiescent, "
+        f"policy {histories[0].policy if histories else '-'}"
+    )
+    return 0
+
+
 def _check_fixtures(args: argparse.Namespace) -> int:
     reports = check_fixtures(args.folder)
     for report in reports:
         outcome = f"{report.error} error at the last step" if report.error else "no error"
         print(f"ok  {report.name}: {report.steps} steps, {outcome}")
-    print(f"{len(reports)} fixtures passed")
+    print(f"{len(reports)} fixtures passed the runtime and the brute-force evaluator")
     return 0
 
 

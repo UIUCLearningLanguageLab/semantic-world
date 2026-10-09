@@ -37,7 +37,7 @@ from semantic_world.world.fluents import Fluents, derived_initial_values, genera
 from semantic_world.world.labels import translate, translate_column
 from semantic_world.world.relation_stats import relation_frames
 from semantic_world.world.requirements import apply_requirements
-from semantic_world.world.stats import world_stats
+from semantic_world.world.stats import episode_stats, world_stats
 from semantic_world.world.streams import WorldStreams
 
 TAXONOMY_DIR = "taxonomy"
@@ -124,7 +124,7 @@ def define(config: Config) -> WorldResult:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
     definition = build_definition(taxonomy, fluents, event_types)
     report = check_definition(definition)
-    stats = world_stats(fluents, event_types)
+    stats = world_stats(fluents, event_types, statistics_episodes(definition, taxonomy, config))
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     return WorldResult(
         config=config,
@@ -139,6 +139,26 @@ def define(config: Config) -> WorldResult:
         stats=stats,
         warnings=tuple(taxonomy.warnings),
     )
+
+
+def statistics_episodes(
+    definition: Definition, taxonomy: TaxonomyResult, config: Config
+) -> dict[str, Any]:
+    """The episode statistics of ``world_stats.yaml``: 1,000 episodes of the default policy with
+    the default scene settings, on the ``world:stats`` stream, each from its own part."""
+    from semantic_world.world.episodes import (
+        STATS_EPISODES,
+        STATS_STREAM,
+        EpisodeGenerator,
+        Relatedness,
+    )
+
+    runtime = definition.runtime()
+    generator = EpisodeGenerator(
+        runtime, Relatedness.from_taxonomy(taxonomy, runtime), record_legal=True
+    )
+    histories = generator.run(config.seed, STATS_EPISODES, STATS_STREAM)
+    return episode_stats(histories, generator.performable)
 
 
 def _yaml(data: Any) -> str:

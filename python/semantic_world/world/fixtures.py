@@ -401,16 +401,81 @@ def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
     return FixtureReport(name, len(fixture["steps"]), None)
 
 
+def _brute_event_kind(brute: BruteForce, event: BruteEvent, state: BruteState) -> str | None:
+    """``illegal`` when the brute-force evaluator finds the event malformed or not legal."""
+    if event.event_type not in brute.performable():
+        return "illegal"
+    roles = ("agent", "patient")[: brute.event_types[event.event_type]["arity"]]
+    if set(event.binding) != set(roles) or len(set(event.binding.values())) != len(roles):
+        return "illegal"
+    if any(label not in brute.entities for label in event.binding.values()):
+        return "illegal"
+    return None if brute.legal(event, state) else "illegal"
+
+
+def check_fixture_brute(fixture: Mapping[str, Any]) -> FixtureReport:
+    """Run the brute-force evaluator on one fixture, apart from the runtime: the legal bindings
+    before each step, the error step's illegality or interference, and the state and the
+    derived fluents after each step. Raises :class:`FixtureError` on the first disagreement."""
+    name = str(fixture.get("name", "?"))
+    brute = BruteForce(fixture["definition"], fixture["entities"])
+    state: BruteState = {e: frozenset(fixture["initial"].get(e, ())) for e in brute.entity_labels}
+    error = fixture["error"]
+    for k, step in enumerate(fixture["steps"], start=1):
+        legal = brute.legal_record(state)
+        if legal != {label: list(b) for label, b in step["legal"].items()}:
+            raise _fail(
+                name,
+                f"step {k}: the brute-force legal bindings are {legal}, but the fixture expects "
+                f"{step['legal']}",
+            )
+        events = [BruteEvent(e["event_type"], dict(e["binding"])) for e in step.get("events", [])]
+        kinds = [k for k in (_brute_event_kind(brute, e, state) for e in events) if k]
+        if not kinds and any(brute.interfere(a, b) for a, b in itertools.combinations(events, 2)):
+            kinds.append("interference")
+        found = kinds[0] if kinds else None
+        if error is not None and error["step"] == k:
+            if found != error["kind"]:
+                raise _fail(
+                    name,
+                    f"step {k}: the brute-force evaluator finds {found or 'no error'}; the "
+                    f"fixture expects {error['kind']}",
+                )
+            return FixtureReport(name, len(fixture["steps"]), error["kind"])
+        if found is not None:
+            raise _fail(name, f"step {k}: the brute-force evaluator finds the step {found}")
+        state = brute.apply(state, events)
+        if brute.state_record(state) != {e: list(v) for e, v in step["state"].items()}:
+            raise _fail(
+                name,
+                f"step {k}: the brute-force state is {brute.state_record(state)}, but the "
+                f"fixture expects {step['state']}",
+            )
+        if brute.derived_record(state) != {e: list(v) for e, v in step["derived"].items()}:
+            raise _fail(
+                name,
+                f"step {k}: the brute-force derived fluents are {brute.derived_record(state)}, "
+                f"but the fixture expects {step['derived']}",
+            )
+    return FixtureReport(name, len(fixture["steps"]), None)
+
+
 def fixture_paths(folder: str | Path = FIXTURES_DIR) -> list[Path]:
     return sorted(Path(folder).glob("*.json"))
 
 
 def check_fixtures(folder: str | Path = FIXTURES_DIR) -> list[FixtureReport]:
-    """Check every fixture in the folder, in name order. Raises on the first failure."""
+    """Check every fixture in the folder, in name order, with the runtime and then with the
+    brute-force evaluator. Raises on the first failure."""
     paths = fixture_paths(folder)
     if not paths:
         raise FixtureError(f"no fixture found in {folder}")
-    return [check_fixture(read_fixture(path)) for path in paths]
+    reports = []
+    for path in paths:
+        fixture = read_fixture(path)
+        reports.append(check_fixture(fixture))
+        check_fixture_brute(fixture)
+    return reports
 
 
 # ---------------------------------------------------------------------------------------------
@@ -590,6 +655,7 @@ __all__ = [
     "FixtureError",
     "FixtureReport",
     "check_fixture",
+    "check_fixture_brute",
     "check_fixtures",
     "fixture_inputs",
     "fixture_paths",

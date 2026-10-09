@@ -15,6 +15,7 @@ from semantic_world.world.fixtures import (
     BruteForce,
     FixtureError,
     check_fixture,
+    check_fixture_brute,
     check_fixtures,
     fixture_inputs,
     fixture_paths,
@@ -66,6 +67,55 @@ def test_every_fixture_passes(path: Path) -> None:
     )
     # The file is in the indented JSON form, so a reader can diff it.
     assert path.read_text(encoding="utf-8") == to_json(fixture, indent=1, sort_keys=False) + "\n"
+
+
+@pytest.mark.parametrize("path", fixture_paths(FIXTURES_DIR), ids=lambda p: p.stem)
+def test_every_fixture_passes_the_brute_force_evaluator(path: Path) -> None:
+    """Independently of the runtime: the brute-force evaluator, which reads truth tables only,
+    reproduces every expected value of every fixture, hand-written or generated."""
+    fixture = read_fixture(path)
+    report = check_fixture_brute(fixture)
+    assert report.steps == len(fixture["steps"])
+    assert report.error == (fixture["error"] or {}).get("kind")
+
+
+def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
+    record, entities, initial = fixture_inputs(tiny.definition)
+    fixture = generate_fixture("probe", "a probe", record, entities, initial, 3, 3)
+    broken = json.loads(json.dumps(fixture))
+    first = next(k for k, v in broken["steps"][0]["legal"].items() if v)
+    broken["steps"][0]["legal"][first] = []
+    with pytest.raises(FixtureError, match="brute-force legal bindings"):
+        check_fixture_brute(broken)
+    broken = json.loads(json.dumps(fixture))
+    entity = broken["entities"][0]["label"]
+    fluents = broken["steps"][0]["state"][entity]
+    broken["steps"][0]["state"][entity] = [] if fluents else ["BOOLFL.1"]
+    with pytest.raises(FixtureError, match="brute-force state"):
+        check_fixture_brute(broken)
+    illegal = generate_fixture("probe", "a probe", record, entities, initial, 3, 3, error="illegal")
+    wrong = json.loads(json.dumps(illegal))
+    wrong["error"]["kind"] = "interference"
+    with pytest.raises(FixtureError, match="finds illegal"):
+        check_fixture_brute(wrong)
+
+
+def test_hand_fixtures_are_what_the_hand_world_script_writes() -> None:
+    """The committed hand fixtures are the files ``tests/world/hand_world.py`` assembles from
+    the hand world and the hand-typed cases."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("hand_world", Path("tests/world/hand_world.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fixtures = module.hand_fixtures()
+    assert len(fixtures) == 12
+    for fixture in fixtures:
+        path = FIXTURES_DIR / f"{fixture['name']}.json"
+        assert (
+            path.read_text(encoding="utf-8") == to_json(fixture, indent=1, sort_keys=False) + "\n"
+        ), path
 
 
 def test_generated_fixtures_are_reproducible(tiny: WorldResult) -> None:

@@ -4,16 +4,21 @@ This stage reports the structural statistics: counts of fluents, event types, pr
 literals, and effects by kind and role; the effects and literals dropped or redrawn by the
 fix-ups; the enabling graph (an edge from A to B when an effect of A produces a value that a
 precondition literal of B requires), its edge count and longest chain; and the absorbing
-fluents. The statistics from 1,000 episodes need the runtime and episodes, and arrive with
-stage a4.
+fluents; and each base fluent's initial rate. The episode statistics come from 1,000 episodes
+of the default policy on the ``world:stats`` stream: for each event type, the share of steps at
+which it had a legal binding among the participants and the share at which it occurred; the
+mean number of changes per event; the share of quiescent episodes; and a warning for each event
+type that was never legal.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from semantic_world.world.event_types import EventTypes
 from semantic_world.world.fluents import Fluents
+from semantic_world.world.history import History
 
 
 def enabling_edges(event_types: EventTypes) -> list[tuple[str, str]]:
@@ -89,7 +94,45 @@ def absorbing_fluents(event_types: EventTypes, fluents: Fluents) -> list[str]:
     return [label for label, values in set_to.items() if len(values) == 1]
 
 
-def world_stats(fluents: Fluents, event_types: EventTypes) -> dict[str, Any]:
+def episode_stats(histories: Sequence[History], event_types: Sequence[str]) -> dict[str, Any]:
+    """The statistics of a set of histories with legal counts recorded: per event type, the share
+    of steps with a legal binding and the share at which it occurred; the mean number of changes
+    per event; the share of quiescent episodes; and the event types never legal."""
+    steps = [step for history in histories for step in history.steps]
+    total = len(steps)
+    legal_steps = dict.fromkeys(event_types, 0)
+    occurred_steps = dict.fromkeys(event_types, 0)
+    for step in steps:
+        for label, count in (step.legal or {}).items():
+            if count:
+                legal_steps[label] += 1
+        for label in {e.type for e in step.events}:
+            occurred_steps[label] += 1
+    events = [e for step in steps for e in step.events]
+    changes = sum(len(e.changes) for e in events)
+    never = [label for label in event_types if legal_steps[label] == 0]
+    quiescent = sum(1 for h in histories if h.quiescent)
+    return {
+        "count": len(histories),
+        "steps": total,
+        "events": len(events),
+        "legal_share": {
+            label: round(legal_steps[label] / total, 6) if total else 0.0 for label in event_types
+        },
+        "occurrence_share": {
+            label: round(occurred_steps[label] / total, 6) if total else 0.0
+            for label in event_types
+        },
+        "mean_changes_per_event": round(changes / len(events), 6) if events else 0.0,
+        "quiescent_share": round(quiescent / len(histories), 6) if histories else 0.0,
+        "never_legal": never,
+        "warnings": [f"{label} was never legal in any episode" for label in never],
+    }
+
+
+def world_stats(
+    fluents: Fluents, event_types: EventTypes, episodes: dict[str, Any] | None = None
+) -> dict[str, Any]:
     leaves = event_types.leaves
     by_kind = {
         "one_place": sum(1 for et in leaves if et.arity == 1),
@@ -110,7 +153,11 @@ def world_stats(fluents: Fluents, event_types: EventTypes) -> dict[str, Any]:
             effects_by_kind[kind] += 1
     edges = enabling_edges(event_types)
     return {
-        "fluents": {"base": len(fluents.base), "derived": len(fluents.derived)},
+        "fluents": {
+            "base": len(fluents.base),
+            "derived": len(fluents.derived),
+            "initial_rates": {f.label: float(f.initial_rate) for f in fluents.base},
+        },
         "event_types": by_kind,
         "precondition_literals": {
             "total": sum(literals_by_kind.values()),
@@ -132,5 +179,5 @@ def world_stats(fluents: Fluents, event_types: EventTypes) -> dict[str, Any]:
             "longest_chain": longest_chain([et.label for et in leaves], edges),
         },
         "absorbing_fluents": absorbing_fluents(event_types, fluents),
-        "episodes": None,
+        "episodes": episodes,
     }
