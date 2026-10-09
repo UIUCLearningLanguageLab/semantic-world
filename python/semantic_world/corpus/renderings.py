@@ -2,34 +2,40 @@
 rendering of a logical form. The realizer makes the formal and the conceptual renderings of a
 sentence from its tokens (``realize.py``), and the spelled rendering comes with the word forms.
 
-**The formal rendering** writes every word as its gloss and its lexeme label: ``the/L.176
-C1.3/L.5 CAN.2/L.138``. The gloss of a content lexeme is its concept's label, and the gloss of a
-function word is its English gloss.
+**The formal rendering** writes every word as its gloss and its lexeme label: ``the/LEXEME.176
+CATEGORY.1.3/LEXEME.5 EVENTTYPE1.2/LEXEME.138``. The gloss of a content lexeme is its concept's
+label, and the gloss of a function word is its English gloss.
 
 **The propositional rendering** is the logical form of a sentence, written as a formula. It is
-never ambiguous: capacity and event, tense, aspect, and number are explicit in it, whatever the
-grammar settings. It is made from the JSON logical form alone (:func:`propositional`), and it
-parses back (:func:`parse_propositional`, :func:`proposition_of`). The notation:
+never ambiguous: capacity and event, tense, aspect, number, and the quantifier are explicit in
+it, whatever the grammar settings. It is made from the JSON logical form alone
+(:func:`propositional`), and it parses back (:func:`parse_propositional`,
+:func:`proposition_of`). The notation:
 
-- an atom is a concept label with its arguments: ``C1.3.2(R.1)`` (membership), ``IS.12(R.1)``,
-  ``HAS.4(R.1)``, ``CANBE.V1.1(R.1)``, and ``SC.1.HIGH(R.1, C1.3.2)``, a scalar pole with its
-  comparison class. ``NOT`` before an atom negates it;
-- a capacity is wrapped in ``ABLE``: ``ABLE(CAN.3(R.1))`` and ``ABLE(V1.2(R.1, R.2))``, with the
-  agent first. ``ABLE`` wraps only CAN features and verbs. A negative capacity is ``NOT
-  ABLE(...)``;
-- an event is ``EVENT(<event label>, <tense>, <aspect>, <atom>)``: ``EVENT(SN.8.5, PAST,
-  PROGRESSIVE, V1.2(R.1, R.2))``. The tense and the aspect are always written. A test item names
-  only the scene, ``EVENT(SN.8, PAST, SIMPLE, V1.2(R.1, R.2))``: some event of the scene was
-  this one;
-- ``R.n`` is one individual, a referent of the document, and ``X.n`` is a variable bound by a
-  quantifier;
-- a class-level form is a quantifier with a restrictor and a scope: ``MOST(C1.3(X.1) AND
-  IS.4(X.1), ABLE(CAN.3(X.1)))``, with ``ALL``, ``MOST``, ``SOME``, ``NO``, and ``GEN``. A verb's
-  patient category is in the restrictor with a variable of its own, so the quantifier ranges
-  over pairs: ``GEN(C1.2(X.1) AND C1.5(X.2), ABLE(V2.1(X.1, X.2)))``;
+- an atom is a concept label with its arguments: ``CATEGORY.1.3.2(REF.1)`` (membership),
+  ``PROPERTY.12(REF.1)``, ``PART.4(REF.1)``, ``CANBE.EVENTTYPE2.1.1(REF.1)``, and
+  ``SCALARDIM.1.HIGH(REF.1, CATEGORY.1.3.2)``, a scalar pole with its comparison class. ``NOT``
+  before an atom negates it;
+- a capacity is wrapped in ``ABLE``: ``ABLE(EVENTTYPE1.3(REF.1))`` and
+  ``ABLE(EVENTTYPE2.1.2(REF.1, REF.2))``, with the agent first. ``ABLE`` wraps only event types.
+  A negative capacity is ``NOT ABLE(...)``;
+- an event is ``EVENT(<event label>, <tense>, <aspect>, <atom>)``:
+  ``EVENT(SCENE.8.EVENTINSTANCE.5, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.2))``. The tense
+  and the aspect are always written. A test item names only the scene, ``EVENT(SCENE.8, PAST,
+  SIMPLE, EVENTTYPE2.1.2(REF.1, REF.2))``: some event of the scene was this one;
+- ``REF.n`` is one individual, a referent of the document, and ``VAR.n`` is a variable bound by
+  a quantifier;
+- a class-level form is a quantifier with a restrictor and a scope:
+  ``MOST(CATEGORY.1.3(VAR.1) AND PROPERTY.4(VAR.1), ABLE(EVENTTYPE1.3(VAR.1)))``, with
+  ``NEC(ALL(...))``, ``ALL``, ``MOST``, ``SOME``, ``NO``, and ``NEC(NO(...))``. A two-place event
+  type's patient category is in the restrictor with a variable of its own, so the quantifier
+  ranges over pairs: ``MOST(CATEGORY.1.2(VAR.1) AND CATEGORY.1.5(VAR.2),
+  ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2)))``;
+- a class-level scalar pole is a statement about the category's mean, with no quantifier:
+  ``SCALARDIM.1.HIGH(CATEGORY.1.3, CATEGORY.1)``, the category and its comparison class;
 - a relative clause about another category means at least one member of it, written ``EXISTS``
-  inside the restrictor: ``GEN(C1.2(X.1) AND EXISTS(X.2, C1.5(X.2) AND ABLE(V2.1(X.1, X.2))),
-  SC.1.HIGH(X.1, C1))`` for "owls that eat mice are big".
+  inside the restrictor: ``MOST(CATEGORY.1.2(VAR.1) AND EXISTS(VAR.2, CATEGORY.1.5(VAR.2) AND
+  ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2))), PART.3(VAR.1))`` for "owls that eat mice have claws".
 
 A sentence about instances is a conjunction. Each noun phrase gives its noun and its modifiers,
 then the propositions of its relative clause, and the proposition of the main clause comes last.
@@ -51,12 +57,13 @@ from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EVENT,
-    GENERIC,
     HAS,
     INSTANCE,
     IS,
     MEMBER,
     MOST,
+    NEC_ALL,
+    NEC_NO,
     NO,
     PROJECTION,
     SCALAR,
@@ -70,10 +77,25 @@ from semantic_world.corpus.propositions import (
     event_of,
     scene_of,
 )
+from semantic_world.corpus.world import (
+    CATEGORY_PREFIX,
+    ONE_PLACE_PREFIX,
+    PART_PREFIX,
+    PATIENT_CAPACITY_PREFIX,
+    PROPERTY_PREFIX,
+    SCALAR_PREFIX,
+    TWO_PLACE_PREFIX,
+)
 
 REFERENT_MODES = ("local", "instance")
-QUANTIFIER_NAMES = {ALL: "ALL", MOST: "MOST", SOME: "SOME", NO: "NO", GENERIC: "GEN"}
+QUANTIFIER_NAMES = {ALL: "ALL", MOST: "MOST", SOME: "SOME", NO: "NO"}
+"""The operators of the extensional quantifiers. ``nec_all`` and ``nec_no`` are ``NEC(ALL(...))``
+and ``NEC(NO(...))``."""
+NEC = "NEC"
 _QUANTIFIERS = {name: quantifier for quantifier, name in QUANTIFIER_NAMES.items()}
+_NEC_OF = {NEC_ALL: ALL, NEC_NO: NO}
+_NEC_BACK = {ALL: NEC_ALL, NO: NEC_NO}
+VARIABLE_PREFIX = "VAR."
 
 
 class RenderingError(CorpusError):
@@ -150,6 +172,9 @@ class Quantified:
     scope: Any
 
     def __str__(self) -> str:
+        if self.quantifier in _NEC_OF:
+            inner = QUANTIFIER_NAMES[_NEC_OF[self.quantifier]]
+            return f"{NEC}({inner}({_conjunction(self.restrictor)}, {self.scope}))"
         name = QUANTIFIER_NAMES[self.quantifier]
         return f"{name}({_conjunction(self.restrictor)}, {self.scope})"
 
@@ -199,7 +224,7 @@ class _Variables:
 
     def new(self) -> str:
         self.count += 1
-        return f"X.{self.count}"
+        return f"{VARIABLE_PREFIX}{self.count}"
 
 
 def _term(term: dict[str, Any], variable: str, variables: _Variables) -> list[Any]:
@@ -262,6 +287,9 @@ def formula(form: dict[str, Any], referents: str = "local") -> Formula:
         raise ValueError(f"unknown referent labels {referents!r}")
     predicate = form["predicate"]
     if form["level"] == CLASS:
+        if predicate["kind"] == SCALAR:
+            # a statement about the category's mean, with no quantifier
+            return (_predication(predicate, form["subject"]["category"], None, form["polarity"]),)
         variables = _Variables()
         subject = variables.new()
         restrictor = _term(form["subject"], subject, variables)
@@ -385,6 +413,12 @@ class _Parser:
             body = self.conjunction()
             self.take(")")
             return Exists(variable, body)
+        if word == NEC:
+            inner = self.item()
+            self.take(")")
+            if not isinstance(inner, Quantified) or inner.quantifier not in _NEC_BACK:
+                raise RenderingError(f"NEC wraps ALL or NO in {self.text!r}")
+            return Quantified(_NEC_BACK[inner.quantifier], inner.restrictor, inner.scope)
         if word in _QUANTIFIERS:
             restrictor = self.conjunction()
             self.take(",")
@@ -411,19 +445,23 @@ def parse_propositional(text: str) -> Formula:
 def _kind(label: str) -> str:
     """The predicate kind that a concept label belongs to."""
     for prefix, kind in (
-        ("IS.", IS),
-        ("HAS.", HAS),
-        ("CANBE.", PROJECTION),
-        ("CAN.", CAN),
-        ("SC.", SCALAR),
+        (PROPERTY_PREFIX, IS),
+        (PART_PREFIX, HAS),
+        (PATIENT_CAPACITY_PREFIX, PROJECTION),
+        (ONE_PLACE_PREFIX, CAN),
+        (SCALAR_PREFIX, SCALAR),
+        (TWO_PLACE_PREFIX, VERB),
+        (CATEGORY_PREFIX, MEMBER),
     ):
         if label.startswith(prefix):
             return kind
-    if label == THING or label.startswith("C"):
+    if label == THING:
         return MEMBER
-    if label.startswith("V"):
-        return VERB
     raise RenderingError(f"unknown kind of concept {label!r}")
+
+
+def _is_category(label: str) -> bool:
+    return label == THING or label.startswith(CATEGORY_PREFIX)
 
 
 def _read_term(variable: str, parts: tuple[Any, ...]) -> CategoryTerm:
@@ -493,6 +531,11 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
     body = main if polarity else main.body
     atom = body.body if isinstance(body, Able | Report) else body
     kind = _kind(atom.label)
+    if kind == SCALAR and _is_category(atom.arguments[0]):
+        # a class-level scalar pole: the category's mean against its comparison class
+        return Proposition(
+            CLASS, CategoryTerm(atom.arguments[0]), Predicate(SCALAR, atom.label), polarity, None
+        )
     subject = names.get(atom.arguments[0], atom.arguments[0])
     patient = comparison = None
     if kind == VERB:

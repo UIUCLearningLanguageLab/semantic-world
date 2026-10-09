@@ -10,15 +10,18 @@ import numpy as np
 import pytest
 
 from semantic_world.corpus import Streams
+from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.propositions import (
     ALL,
     CLASS,
-    GENERIC,
     INSTANCE,
     MEMBER,
     MOST,
+    NEC_ALL,
+    NEC_NO,
     NO,
+    QUANTIFIERS,
     SCALAR,
     SOME,
     VERB,
@@ -47,9 +50,8 @@ def true_items(case, per_kind: int = 12) -> list:
     categories = facts.categories[:: max(1, len(facts.categories) // 8)]
     for category in categories:
         for negative in (False, True):
-            stated = facts.class_facts(category, negative, patients=facts.categories[:6])
-            pool += list(stated) + [g for g in map(facts.generic, stated[::3]) if g is not None]
-    labels = case.result.instances.labels
+            pool += facts.class_facts(category, negative, patients=facts.categories[:6])
+    labels = case.world.instances
     for instance in labels[:: max(1, len(labels) // 6)]:
         for negative in (False, True):
             pool += facts.instance_facts(instance, negative, patients=labels[:10])
@@ -88,15 +90,20 @@ def test_every_false_item_fails_and_differs_by_exactly_one_change(cases, name) -
                 for candidate in candidates(facts, item, change):
                     evaluation = facts.truth.evaluate(candidate)
                     assert (
-                        not evaluation.valid or evaluation.true or not facts.expressible(candidate)
+                        not evaluation.valid
+                        or evaluation.true
+                        or not facts.expressible(candidate)
+                        or (candidate.level == CLASS and not facts.truth.statable(candidate))
                     )
                 continue
             made[change] += 1
             false_form = false.to_json()
-            # false by the independent recomputation, and not vacuous
+            # false by the independent recomputation, not vacuous, and statable
             assert oracle.truth(false_form) is False, (true_form, false_form)
             assert false.grounding is not None and false.id is None and false.rule is None
             assert facts.expressible(false)
+            if false.level == CLASS:
+                assert facts.truth.statable(false)
             changed = differences(true_form, false_form)
             if change == PREDICATE:
                 assert changed == {"predicate"}
@@ -123,10 +130,10 @@ _LABEL_KEYS = ("feature", "pole", "category", "projection", "verb")
 
 def test_changes_that_can_apply(cases) -> None:
     facts = cases("tiny").facts()
-    verb = next(f for f in facts.class_facts("C1") if f.predicate.kind == VERB)
-    feature = facts.class_facts("C1")[0]
-    instance = facts.instance_facts("I1.1.1")[0]
-    capacity = next(f for f in facts.instance_facts("I1.1.1") if f.predicate.kind == VERB)
+    verb = next(f for f in facts.class_facts("CATEGORY.1") if f.predicate.kind == VERB)
+    feature = facts.class_facts("CATEGORY.1")[0]
+    instance = facts.instance_facts("INSTANCE.1.1.1")[0]
+    capacity = next(f for f in facts.instance_facts("INSTANCE.1.1.1") if f.predicate.kind == VERB)
     assert changes_for(feature) == (PREDICATE, SUBJECT, QUANTIFIER)
     assert changes_for(verb) == (PREDICATE, SUBJECT, QUANTIFIER, ROLE)
     assert changes_for(instance) == (PREDICATE, SUBJECT)
@@ -146,10 +153,14 @@ def test_false_events_did_not_happen_in_their_scene(cases) -> None:
     generator = case.scenes()
     made = dict.fromkeys(CHANGES, 0)
     rng = np.random.default_rng(0)
-    for number, seed in enumerate(case.result.instances.labels[:40], start=1):
-        scene = generator.scene(Streams(1), number, seed)
-        for event in scene.events[:4]:
-            report = event.proposition()
+    instances = case.world.instances
+    for number in range(1, 151):
+        scene = generator.scene(Streams(1), number, instances[(number * 7) % len(instances)])
+        facts.truth.add_scene(scene)
+        for event in scene_events(scene)[:6]:
+            report = facts.event_fact(event)
+            if report is None:
+                continue
             assert facts.truth.is_true(report)
             assert changes_for(report) == (
                 (PREDICATE, SUBJECT, ROLE) if event.transitive else (PREDICATE, SUBJECT)
@@ -164,14 +175,14 @@ def test_false_events_did_not_happen_in_their_scene(cases) -> None:
                 assert (false.tense, false.aspect) == (report.tense, report.aspect)
                 evaluation = facts.truth.evaluate(false)
                 assert evaluation.valid and not evaluation.true
-                assert false.grounding == evaluation.grounding and "possible" in false.grounding
-                # no event of the scene has its verb, its agent, its patient, and its aspect
+                assert false.grounding == evaluation.grounding
+                assert {"able", "legal"} <= set(false.grounding)
+                # no event of the scene has its event type, its agent, and its patient
                 assert not any(
                     e.agent == false.subject
                     and e.patient == false.predicate.patient
-                    and false.predicate.label in facts.truth.verb_names(e.verb)
-                    and e.aspect == false.aspect
-                    for e in scene.events
+                    and false.predicate.label in facts.truth.verb_names(e.type)
+                    for e in scene_events(scene)
                 )
     assert all(made[change] > 20 for change in (PREDICATE, SUBJECT, ROLE)), made
 
@@ -188,19 +199,24 @@ def test_quantifier_swaps(cases) -> None:
                 quantifiers = {c.quantifier for c in options}
                 assert fact.quantifier not in quantifiers
                 assert all(c.polarity == fact.polarity for c in options)
+                if fact.predicate.kind == SCALAR:
+                    assert options == []  # a scalar pole has no quantifier
+                    continue
                 if fact.polarity:
-                    assert quantifiers == {ALL, MOST, SOME, NO, GENERIC} - {fact.quantifier}
+                    assert quantifiers == set(QUANTIFIERS) - {fact.quantifier}
                 else:
                     # "no" replaces sentence negation, so a negative proposition never takes it
-                    assert quantifiers == {MOST, SOME, GENERIC} - {fact.quantifier}
+                    assert quantifiers == {MOST, SOME} - {fact.quantifier}
                 false = falsify(facts, fact, QUANTIFIER, rng)
                 if false is not None:
-                    assert not truth.is_true(false)
+                    assert not truth.is_true(false) and truth.statable(false)
                     seen.add((fact.predicate.kind, fact.quantifier, false.quantifier))
-    # "all" for a "most" fact, as in the specification, and "no" for a "some" fact
-    assert ("has", MOST, ALL) in seen and ("is", SOME, NO) in seen
-    # a scalar pole takes the generic only, and membership is true or false of the whole
-    # category, so neither has a false quantifier swap
+    # "all" (nec_all) for a "most" fact, as in the specification, and "no" for a "some" fact
+    assert ("has", MOST, NEC_ALL) in seen and ("is", SOME, NEC_NO) in seen
+    # under the default words, the extensional quantifiers cannot be said
+    assert not any(false in (ALL, NO) for _, _, false in seen)
+    # a scalar pole has no quantifier, and membership is true or false of the whole category,
+    # so neither has a false quantifier swap
     assert not any(kind == SCALAR for kind, _, _ in seen)
 
 
@@ -209,7 +225,7 @@ def test_a_false_item_about_a_scalar_pole_keeps_its_comparison_class(cases) -> N
     facts = case.facts(scalar_adjectives={"z": 0.5})
     rng = np.random.default_rng(1)
     made = 0
-    for instance in case.result.instances.labels[::9]:
+    for instance in case.world.instances[::9]:
         for fact in facts.instance_facts(instance):
             if fact.predicate.kind != SCALAR:
                 continue
@@ -237,7 +253,7 @@ def test_rule_statements_have_false_versions(cases) -> None:
         assert swapped.subject.category == THING and swapped.rule is None
         assert oracle.truth(swapped.to_json()) is False
         denied = falsify(facts, statement, QUANTIFIER, rng)
-        assert denied is not None and denied.quantifier == NO  # the only false quantifier
+        assert denied is not None and denied.quantifier == NEC_NO  # the only statable false one
 
 
 def test_false_items_are_never_vacuous(cases) -> None:

@@ -1,6 +1,6 @@
 # Proposal: decisions for stage a4 of the world-and-language refactor
 
-October 8, 2026. Raised in the orientation for stage a4 of `docs/specs/WORLD_AND_LANGUAGE.md` ("Episodes and histories"), and while building the stage. Status: working design. Every choice below is Claude Code's unless Jon changes it. The choices are logged as WM.E56 and following in `docs/DECISIONS.md`.
+October 8, 2026. Raised in the orientation for stage a4 of `docs/specs/WORLD_AND_LANGUAGE.md` ("Episodes and histories"), and while building the stage. Status: decided. Jon approved every choice on October 8, 2026, in the stage a5a prompt, and answered the four open questions (see "Jon's rulings" at the end). The choices are logged as WM.E56 to WM.E70 in `docs/DECISIONS.md`.
 
 ## Orientation
 
@@ -65,3 +65,12 @@ None blocks the stage. The first is the one that touches a file's content.
 2. **The chain example's seed.** With seed 1, the sampled requirements of `tiny_chain.yaml` make no entity both catchable (a patient of `EVENTTYPE2.1.1`) and eatable (a patient of `EVENTTYPE2.1.2`), so the chain never completes, and eatings happen only because sampled event types also set `BOOLFL.2`. The test checks the forced order on seed 1 and the strict chain on seed 3, where six patients overlap. Should the worked example give the chain's requirements explicitly (the event file can), so the chain completes on every seed? Recommendation: yes, at stage a5, as world content for Jon to write.
 3. **`world:episodes`** is a stream name that `WorldStreams` does not list (choice 2). Should it join `STREAM_NAMES`, so a run's `config.yaml` records its seed under `provenance.stream_seeds`?
 4. **Seed instances of `simulate`.** Each episode draws its seed instance uniformly from its own part (choice 2). Should `simulate` instead cycle through the entities, or take a list, for studies that want every entity seeded?
+
+## Jon's rulings (October 8, 2026, in the stage a5a prompt)
+
+Choices 1 to 15 are approved. The open questions are answered:
+
+1. **Where the initial rates live** (choice 11): the starting rates of base fluents go into `definition.json`, on each base fluent's symbol, not into a `fluents.csv`. This happens in stage a5b; until then they stay in `world_stats.yaml` as built.
+2. **The chain example's seed** (choice 10 of stage a2, open question 2 here): the chain example gets explicit requirements in stage a5b, so the chain completes on every seed.
+3. **`world:episodes`** (choice 2): the stream is recorded in `config.yaml`'s provenance with the other streams. Stage a5a adds it to the world's stream table in `python/semantic_world/world/streams.py`, so every world run's `config.yaml` changes by one line, and the a2 and a4 tests that compare the provenance keys are updated. World outputs may change in stage a5a; taxonomy outputs may not.
+4. **Seed instances of `simulate`** (choice 2): `simulate` keeps drawing each episode's seed instance.

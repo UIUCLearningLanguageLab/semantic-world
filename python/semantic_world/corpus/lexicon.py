@@ -1,14 +1,16 @@
 """Layer 1: the lexicon. Concepts from the world get words.
 
-A **concept** is something the language can name: a category, a feature, a verb, a verb category,
-an exposed patient projection, a pole of a scalar dimension, the generic head noun, or a function
-word. Each concept has a concept label. Categories, features, verbs, and projections keep their
-taxonomy labels (``C1.3.2``, ``IS.12``, ``V1.2``, ``CANBE.V1.1``). A scalar pole is its dimension's
-label with ``HIGH`` or ``LOW`` (``SC.1.HIGH``). The generic head noun is ``THING``, and a function
-word's concept label is its gloss in capitals (``THE``).
+A **concept** is something the language can name: a category, a PROPERTY or PART feature, a
+one-place event type, a two-place event type or a category of them, a patient capacity, a pole
+of a scalar dimension, the generic head noun, or a function word. Each concept has a concept
+label: the world's label (``CATEGORY.1.3.2``, ``PROPERTY.12``, ``EVENTTYPE2.1.2``,
+``CANBE.EVENTTYPE2.1.1``). A scalar pole is its dimension's label with ``HIGH`` or ``LOW``
+(``SCALARDIM.1.HIGH``). The generic head noun is ``THING``, and a function word's concept label
+is its gloss in capitals (``THE``). Fluents become state adjectives in stage a7; the concept type
+``state`` is listed, and names nothing yet.
 
-A **lexeme** is a word of the language, labeled ``L.<n>``. Every lexeme has exactly one concept.
-By default there is one lexeme per named concept. Two knobs add ambiguity:
+A **lexeme** is a word of the language, labeled ``LEXEME.<n>``. Every lexeme has exactly one
+concept. By default there is one lexeme per named concept. Two knobs add ambiguity:
 
 - a concept with a synonym has two lexemes;
 - a homonym is two lexemes, with different concepts, that share one word form. The later lexeme
@@ -19,8 +21,10 @@ concept order; then the second lexemes of concepts with synonyms; then the funct
 Content lexemes therefore keep their labels when the grammar settings change the set of function
 words.
 
-Word forms are attached later, by the ``render`` command, so ``word`` and ``spelling`` start
-empty.
+Which concepts get words is a language setting: for each concept type,
+``lexicon.named_proportion`` gives the proportion of concepts that get a word. A quarter of the
+patient capacities get words by default. Word forms are attached later, by the ``render``
+command, so ``word`` and ``spelling`` start empty.
 """
 
 from __future__ import annotations
@@ -34,7 +38,7 @@ import polars as pl
 
 from semantic_world.corpus.config import CONCEPT_TYPES, Config
 from semantic_world.corpus.streams import Streams
-from semantic_world.taxonomy.generate import TaxonomyResult
+from semantic_world.corpus.world import SCALAR_POLES, THING, World
 
 NOUN = "noun"
 ADJECTIVE = "adjective"
@@ -48,8 +52,7 @@ GENERIC = "generic"
 """The concept type of the generic head noun."""
 FUNCTION = "function"
 """The concept type of a function word."""
-THING = "THING"
-SCALAR_POLES = ("HIGH", "LOW")
+LEXEME_PREFIX = "LEXEME."
 
 FUNCTION_WORDS = (
     "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
@@ -105,9 +108,10 @@ class Lexicon:
     lexemes: tuple[Lexeme, ...]
     unnamed: tuple[str, ...]
     """The concepts that the named proportions left without a word."""
-    verbs_without_word: dict[str, str]
-    """The verbs and verb categories that never get a word, because their relation holds for
-    ``every pair`` of distinct instances or for ``no pair``. They are not among ``concepts``."""
+    event_types_without_word: dict[str, str]
+    """The two-place event types and categories that never get a word, because their
+    requirement holds for ``every pair`` of distinct instances or for ``no pair``. They are not
+    among ``concepts``."""
 
     def __post_init__(self) -> None:
         by_concept: dict[str, list[Lexeme]] = {}
@@ -167,7 +171,7 @@ class Lexicon:
 
     def stats(self) -> dict[str, Any]:
         """The lexicon's block of ``stats.yaml``: counts by concept type and part of speech, the
-        realized synonym and homonym rates, and the verbs without a word."""
+        realized synonym and homonym rates, and the event types without a word."""
         content_concepts = [c for c in self.concepts if c.content and self.is_named(c.label)]
         content = self.content_lexemes
         pairs = self.homonym_pairs()
@@ -190,7 +194,7 @@ class Lexicon:
             "homonym_rate": 2 * len(pairs) / len(content) if content else 0.0,
             "homonym_pairs": len(pairs),
             "homonym_pairs_same_pos": sum(a.pos == b.pos for a, b in pairs),
-            "verbs_without_word": dict(self.verbs_without_word),
+            "event_types_without_word": dict(self.event_types_without_word),
         }
 
 
@@ -210,13 +214,12 @@ def function_word_glosses(config: Config) -> tuple[str, ...]:
     return glosses + morphology.inflection_words()
 
 
-def relation_extent(result: TaxonomyResult, verb: str) -> str | None:
-    """``every pair`` when a verb's relation (a verb category's base relation) holds for every
-    ordered pair of distinct instances, ``no pair`` when it holds for none, and None otherwise.
-    With fewer than two instances there is no pair."""
-    assert result.relations is not None
-    n = len(result.instances)
-    true_pairs = int(result.relations.matrix(verb).sum())
+def relation_extent(world: World, event_type: str) -> str | None:
+    """``every pair`` when a two-place event type's requirement (a category's base relation)
+    holds for every ordered pair of distinct instances, ``no pair`` when it holds for none, and
+    None otherwise. With fewer than two instances there is no pair."""
+    n = world.count
+    true_pairs = int(world.able(event_type).sum())
     if true_pairs == 0:
         return NO_PAIR
     if true_pairs == n * (n - 1):
@@ -224,42 +227,40 @@ def relation_extent(result: TaxonomyResult, verb: str) -> str | None:
     return None
 
 
-def world_concepts(result: TaxonomyResult) -> tuple[tuple[Concept, ...], dict[str, str]]:
-    """The content concepts of a world, in the order of the specification's table, and the verbs
-    and verb categories that never get a word."""
-    features = result.features
-    concepts = [Concept(c.label, "category", NOUN, c.label) for c in result.tree.categories]
-    for feature_type, pos in (("is", ADJECTIVE), ("has", PART_NOUN), ("can", INTRANSITIVE_VERB)):
-        concepts += [
-            Concept(f.label, feature_type, pos, f.label) for f in features.of_type(feature_type)
-        ]
-    without_word: dict[str, str] = {}
-    if result.verbs is not None:
-        categories = result.verbs.categories
-        for concept_type, leaf in (("verb", True), ("verb_category", False)):
-            for category in categories:
-                if category.is_leaf != leaf:
-                    continue
-                extent = relation_extent(result, category.label)
-                if extent is not None:
-                    without_word[category.label] = extent
-                else:
-                    concepts.append(
-                        Concept(category.label, concept_type, TRANSITIVE_VERB, category.label)
-                    )
-        # category order, whatever the order of the two passes above
-        order = {c.label: i for i, c in enumerate(categories)}
-        without_word = dict(sorted(without_word.items(), key=lambda item: order[item[0]]))
-    if result.projections is not None:
-        for verb in result.projections.exposed_patient:
-            label = f"CANBE.{verb}"
-            concepts.append(Concept(label, "patient_projection", ADJECTIVE, label))
-    for scalar in features.scalar_labels:
+def world_concepts(world: World) -> tuple[Concept, ...]:
+    """The content concepts of a world, in the order of the specification's table. The
+    two-place event types whose requirement holds for every pair or for no pair are left out:
+    :func:`event_types_without_word` lists them."""
+    concepts = [Concept(c, "category", NOUN, c) for c in world.categories]
+    concepts += [Concept(f, "is", ADJECTIVE, f) for f in world.features["is"]]
+    concepts += [Concept(f, "has", PART_NOUN, f) for f in world.features["has"]]
+    concepts += [Concept(f, "event_unary", INTRANSITIVE_VERB, f) for f in world.features["can"]]
+    for concept_type, leaf in (("event", True), ("event_category", False)):
+        for label in world.binary:
+            if world.event_types[label].category == leaf:
+                continue
+            if relation_extent(world, label) is None:
+                concepts.append(Concept(label, concept_type, TRANSITIVE_VERB, label))
+    concepts += [
+        Concept(label, "patient_projection", ADJECTIVE, label) for label in world.patient_capacities
+    ]
+    for scalar in world.scalars:
         for pole in SCALAR_POLES:
             label = f"{scalar}.{pole}"
             concepts.append(Concept(label, "scalar", ADJECTIVE, label))
     concepts.append(Concept(THING, GENERIC, NOUN, THING))
-    return tuple(concepts), without_word
+    return tuple(concepts)
+
+
+def event_types_without_word(world: World) -> dict[str, str]:
+    """The two-place event types and categories that never get a word, with the reason, in
+    tree order."""
+    found = {}
+    for label in world.binary:
+        extent = relation_extent(world, label)
+        if extent is not None:
+            found[label] = extent
+    return found
 
 
 def _round_half_up(x: float) -> int:
@@ -330,9 +331,9 @@ def _homonym_pairs(
     return pairs
 
 
-def build_lexicon(config: Config, result: TaxonomyResult, streams: Streams) -> Lexicon:
+def build_lexicon(config: Config, world: World, streams: Streams) -> Lexicon:
     """The lexicon of a world: its concepts, and the lexemes of the named ones."""
-    content, without_word = world_concepts(result)
+    content = world_concepts(world)
     named = _named(config, streams, content)
     named_concepts = [c for c in content if c.label in named]
 
@@ -344,7 +345,7 @@ def build_lexicon(config: Config, result: TaxonomyResult, streams: Streams) -> L
     ]
 
     lexemes = [
-        Lexeme(f"L.{i}", c.pos, c.label, c.gloss)
+        Lexeme(f"{LEXEME_PREFIX}{i}", c.pos, c.label, c.gloss)
         for i, c in enumerate(named_concepts + with_synonym, start=1)
     ]
     pairs = _homonym_pairs(
@@ -361,12 +362,12 @@ def build_lexicon(config: Config, result: TaxonomyResult, streams: Streams) -> L
         for gloss in function_word_glosses(config)
     )
     lexemes += [
-        Lexeme(f"L.{i}", c.pos, c.label, c.gloss)
+        Lexeme(f"{LEXEME_PREFIX}{i}", c.pos, c.label, c.gloss)
         for i, c in enumerate(function, start=len(lexemes) + 1)
     ]
     return Lexicon(
         concepts=content + function,
         lexemes=tuple(lexemes),
         unnamed=tuple(c.label for c in content if c.label not in named),
-        verbs_without_word=without_word,
+        event_types_without_word=event_types_without_word(world),
     )

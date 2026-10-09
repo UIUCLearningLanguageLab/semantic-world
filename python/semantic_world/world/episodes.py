@@ -54,7 +54,8 @@ from semantic_world.world.runtime import (
 )
 
 EPISODE_STREAM = "world:episodes"
-"""The stream of ``simulate``; the world statistics use ``world:stats``."""
+"""The stream of ``simulate``; the world statistics use ``world:stats``. Both are in the world's
+stream table, so a run's ``config.yaml`` records their seeds."""
 STATS_STREAM = "world:stats"
 STATS_EPISODES = 1000
 PARTICIPANT_WEIGHTS = ("thematic", "taxonomic", "constant")

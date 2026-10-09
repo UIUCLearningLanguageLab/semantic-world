@@ -3,8 +3,8 @@
 A run writes one folder, by default ``runs/corpus/<name>_seed<seed>/``:
 
 - ``config.yaml``: the resolved configuration, with its provenance: every stream seed, the
-  taxonomy run's identity (its configuration hash and its seed), the word-form run's identity
-  when one is attached, the git commit hash, and the package versions;
+  world run's identity (its configuration hash, its seed, and its rule-set identity), the
+  word-form run's identity when one is attached, the git commit hash, and the package versions;
 - ``lexicon.csv``: one row per lexeme;
 - ``documents.jsonl``: one JSON object per document;
 - ``corpus.txt``, ``corpus_formal.txt``, ``corpus_conceptual.txt``, and
@@ -14,12 +14,13 @@ A run writes one folder, by default ``runs/corpus/<name>_seed<seed>/``:
 - ``wordform_request.yaml`` and ``wordform_meanings.csv``: the request for the word-form
   pipeline, and the categories' meaning vectors that the request names
   (:mod:`semantic_world.corpus.request`);
-- ``scenes.jsonl``: one JSON object per scene;
+- ``scenes.jsonl``: one history per scene, in the schema of ``docs/specs/WORLD_AND_LANGUAGE.md``
+  ("Histories");
 - ``tests/<set>.jsonl``: the test sets, one item per line, each true item before the false item
   made from it;
 - ``stats.yaml``: the statistics.
 
-The same taxonomy, configuration, and seed give byte-identical folders: nothing here depends on
+The same world, configuration, and seed give byte-identical folders: nothing here depends on
 the time, the machine, or the folder's own path, apart from the git commit hash and the package
 versions in ``config.yaml``. The ``render`` command attaches the word forms afterwards
 (:mod:`semantic_world.corpus.render`).
@@ -42,7 +43,7 @@ from semantic_world.corpus.request import (
     wordform_request,
 )
 from semantic_world.corpus.streams import Streams
-from semantic_world.corpus.world import taxonomy_identity
+from semantic_world.corpus.world import World
 from semantic_world.taxonomy.io import git_commit
 
 if TYPE_CHECKING:
@@ -84,14 +85,14 @@ def package_versions() -> dict[str, str | None]:
     return versions
 
 
-def provenance(config: Config, streams: Streams) -> dict[str, Any]:
+def provenance(config: Config, streams: Streams, world: World) -> dict[str, Any]:
     commit, dirty = git_commit()
     return {
         "git_commit": commit,
         "git_dirty": dirty,
         "packages": package_versions(),
         "stream_seeds": streams.seeds(),
-        "taxonomy": taxonomy_identity(config.taxonomy),
+        "world": world.identity(),
         "wordforms": None,
     }
 
@@ -122,7 +123,7 @@ def write_corpus(corpus: Corpus, path: str | Path | None = None) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
 
     config_data = config.resolved()
-    config_data["provenance"] = provenance(config, corpus.planner.streams)
+    config_data["provenance"] = provenance(config, corpus.planner.streams, corpus.planner.world)
     (folder / "config.yaml").write_text(_yaml(config_data), encoding="utf-8")
     corpus.planner.lexicon.frame().write_csv(folder / "lexicon.csv", null_value="")
     records = [document.to_json() for document in corpus.documents]
@@ -130,7 +131,7 @@ def write_corpus(corpus: Corpus, path: str | Path | None = None) -> Path:
     for name, field in RENDERINGS.items():
         (folder / name).write_text(corpus_text(records, field), encoding="utf-8")
     (folder / REQUEST_FILE).write_text(_yaml(wordform_request(corpus)), encoding="utf-8")
-    (folder / MEANINGS_FILE).write_text(meanings_csv(corpus.planner.result), encoding="utf-8")
+    (folder / MEANINGS_FILE).write_text(meanings_csv(corpus.planner.world), encoding="utf-8")
     scenes = (scene.to_json() for scene in corpus.planner.scenes)
     (folder / "scenes.jsonl").write_text(_json_lines(scenes), encoding="utf-8")
     (folder / "stats.yaml").write_text(_yaml(corpus.stats), encoding="utf-8")

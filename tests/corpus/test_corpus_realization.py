@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from semantic_world.corpus import Streams
+from semantic_world.corpus import Streams, scene_events
 from semantic_world.corpus.grammar import CLASS_NP, check_plan
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.mentions import RelativeClauses, plan_for
@@ -76,21 +76,19 @@ def plans_of(case, limit: int = 2):
     clauses = RelativeClauses(case.config(**settings), facts)
     rng = np.random.default_rng(8)
     propositions = []
+    bare = []  # class-level propositions said with a bare plural
     features = facts.features[IS] + facts.features[HAS]
     for category in facts.categories[:: max(1, len(facts.categories) // 6)]:
         for negative in (False, True):
             stated = facts.class_facts(category, negative, patients=facts.categories[:4])
             propositions += stated[:: max(1, len(stated) // 12)]
-            propositions += [g for g in map(facts.generic, stated[::9]) if g is not None]
+            bare += stated[::9]
         # subjects with a restriction that one member satisfies, negated IS literals included
         members = facts.truth.members(CategoryTerm(category))
         for _ in range(3):
             row = int(rng.choice(members))
             chosen = [features[int(i)] for i in rng.choice(len(features), size=3, replace=False)]
-            literals = [
-                Literal(f, bool(facts.truth.values[row, facts.truth.features[f].position]))
-                for f in chosen
-            ]
+            literals = [Literal(f, bool(case.world.column(f)[row])) for f in chosen]
             if facts.poles:
                 literals.append(Literal(facts.poles[0]))
             term = CategoryTerm(category, tuple(literals))
@@ -108,10 +106,11 @@ def plans_of(case, limit: int = 2):
                 ]
                 propositions += [fact for fact in reversed_role if fact is not None]
     propositions += list(facts.rule_statements())
-    propositions += [g for g in map(facts.generic, facts.rule_statements()[::2]) if g is not None]
+    bare += facts.rule_statements()[::2]
     plans = [plan_for(facts, p) for p in propositions]
+    plans += [plan_for(facts, p, bare=True) for p in bare]
 
-    labels = case.result.instances.labels
+    labels = case.world.instances
     others = labels[:: max(1, len(labels) // 6)][:6]
     for instance in others[:4]:
         for negative in (False, True):
@@ -122,8 +121,9 @@ def plans_of(case, limit: int = 2):
     streams = Streams(1)
     for number in range(1, 26):
         scene = scenes.scene(streams, number, labels[(number * 5) % len(labels)])
-        for event in scene.events:
-            report = facts.draw_event(rng, event)
+        facts.truth.add_scene(scene)
+        for event in scene_events(scene):
+            report = facts.draw_event(rng, event, "progressive" if rng.random() < 0.3 else "simple")
             if report is not None:
                 plans.append(clauses.attach(rng, plan_for(facts, report)))
     for plan in plans:
@@ -273,7 +273,10 @@ def test_generated_sentences(cases, plans, name, grammar) -> None:
             token_parts(t)[0] in {x.label for x in lexicon.lexemes} for t in sentence.tokens[:3]
         )
         # interpret(tree) recovers the plan exactly
-        assert interpret(sentence.tree, lexicon, sentence.referents, sentence.events) == plan
+        read = interpret(
+            sentence.tree, lexicon, sentence.referents, sentence.events, plan.quantifier
+        )
+        assert read == plan
         # every verb and auxiliary agrees with its subject
         agreement.sentence(sentence.tree)
         # the tree is as deep as the plan, and no deeper than the limit

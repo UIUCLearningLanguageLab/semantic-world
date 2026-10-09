@@ -1,7 +1,8 @@
-"""Stage 1: configuration loading, validation, and the resolved configuration.
+"""Stage 1 and stage a5a: configuration loading, validation, and the resolved configuration.
 
 The example configurations load. Deliberately broken configurations each fail with an error that
-names the file and the field. The resolved configuration round-trips.
+names the file and the field. Every key that the world-and-language refactor renamed fails with
+an error that names its new key. The resolved configuration round-trips.
 """
 
 from __future__ import annotations
@@ -12,12 +13,12 @@ from typing import Any
 
 import pytest
 import yaml
-from corpus_support import TINY_TAXONOMY, corpus_config
+from corpus_support import PLAIN_WORLD, TINY_WORLD, corpus_config, write_world
 
 from semantic_world.corpus import ConfigError, config_from_mapping, load_config
-from semantic_world.taxonomy import generate
-from semantic_world.taxonomy import load_config as load_taxonomy_config
 from semantic_world.taxonomy.config import Range
+from semantic_world.world.config import load_config as load_world_config
+from semantic_world.world.generate import define
 
 DATA = Path("data/corpus")
 EXAMPLES = ("default.yaml", "tiny.yaml")
@@ -28,28 +29,30 @@ def test_example_configurations_load(name: str) -> None:
     config = load_config(DATA / name)
     assert config.source == str(DATA / name)
     assert config.name == Path(name).stem
-    # the examples name taxonomy configuration files, so they run with nothing saved on disk
-    assert config.taxonomy.kind == "config"
-    assert Path(config.taxonomy.path).is_file()
+    # the examples name world configuration files, so they run with nothing saved on disk
+    assert config.world.kind == "config"
+    assert Path(config.world.path).is_file()
 
 
 def test_default_values() -> None:
     config = load_config(DATA / "default.yaml")
     assert config.seed == 1
-    assert (config.taxonomy.path, config.taxonomy.seed) == ("data/taxonomy/relations.yaml", 1)
-    assert config.taxonomy.depth == 3
+    assert (config.world.path, config.world.seed) == ("data/world/default.yaml", 1)
+    assert config.world.depth == 3 and config.world.event_depth == 2
     lexicon = config.lexicon
-    assert set(lexicon.named_proportion.values()) == {1.0}
     assert list(lexicon.named_proportion) == [
         "category",
         "is",
         "has",
-        "can",
-        "verb",
-        "verb_category",
+        "state",
+        "event_unary",
+        "event",
+        "event_category",
         "patient_projection",
         "scalar",
     ]
+    assert lexicon.named_proportion["patient_projection"] == 0.25
+    assert all(v == 1.0 for k, v in lexicon.named_proportion.items() if k != "patient_projection")
     assert (lexicon.synonym_rate, lexicon.homonym_rate, lexicon.homonym_same_pos) == (0, 0, 0.5)
     documents = config.documents
     assert documents.count == 10000
@@ -63,25 +66,40 @@ def test_default_values() -> None:
     assert documents.sentences["situational"] == Range(5, 20)
     assert documents.topic_level_weights == (1.0, 1.5, 2.0)
     assert (documents.shuffle, documents.instance_description_rate) == (0.3, 0.2)
+    assert documents.sibling_contrast_rate == 0.2
+    assert documents.relation_fact_share is None
+    assert documents.content_kind_weights == "proportional"
+    assert documents.progressive_rate == 0.3 and documents.one_aspect_per_event is True
     assert config.propositions.negation_rate == {"class": 0.1, "instance": 0.1}
     assert config.propositions.rule_statement_rate == 0.3
     assert config.propositions.rule_max_literals is None
+    assert config.propositions.restriction_rate == 0.1
+    assert config.propositions.event_tense == "past"
     quantifiers = config.quantifiers
-    assert quantifiers.all_grounding == "fixed"
-    assert quantifiers.most_min_proportion == 0.7
+    assert quantifiers.universal_words == "nec"
+    assert quantifiers.most_usage_min == 0.7
     assert quantifiers.some_exclude_all is True
-    assert (quantifiers.generic_means, quantifiers.generic_rate) == ("most", 0.5)
-    assert quantifiers.weights == {"all": 1.0, "most": 1.0, "some": 1.0, "no": 1.0}
+    assert quantifiers.bare_plural_expresses == ("most",)
+    assert quantifiers.generic_rate == 0.5
+    assert quantifiers.weights == {
+        "nec_all": 1.0,
+        "all": 1.0,
+        "most": 1.0,
+        "some": 1.0,
+        "no": 1.0,
+        "nec_no": 1.0,
+    }
     assert quantifiers.weighted is False
     scene = config.scene
     assert (scene.size, scene.steps) == (Range(2, 6), Range(3, 8))
     assert (scene.events_per_step, scene.transitive_share) == (1.5, 0.5)
-    assert scene.verb_weights is None
+    assert scene.event_type_weights is None
     assert scene.participant_weights == {"thematic": 1.0, "taxonomic": 0.5, "constant": 0.1}
+    assert (scene.policy, scene.initial) == ("uniform_event", "keep")
     assert config.entity_scenes == Range(2, 5)
     mention = config.mention
     assert mention.level_weights == (1.0, 2.5, 4.0)
-    assert mention.verb_level_weights == (1.0, 4.0)  # the default verb tree has two levels
+    assert mention.event_level_weights == (1.0, 4.0)  # the default event-type tree has two levels
     assert (mention.pronoun_rate, mention.modifier_rate) == (0.5, 0.3)
     assert (mention.max_adjectives, mention.max_with_phrases) == (3, 2)
     assert mention.max_content_words == 20
@@ -105,11 +123,6 @@ def test_default_values() -> None:
     assert (morphology.number.realization, morphology.number.verb_marks) == ("affix", "plural")
     assert morphology.number.agreement is True and morphology.agreement is False
     assert (morphology.tense.realization, morphology.aspect.realization) == ("affix", "word")
-    assert config.propositions.event_tense == "past"
-    assert config.propositions.progressive_rate == 0.3
-    assert config.propositions.restriction_rate == 0.1
-    assert config.documents.sibling_contrast_rate == 0.2
-    assert config.documents.relation_fact_share is None
     assert config.scalar_z == 1.0
     assert config.propositional_referents == "local"
     assert config.test_sets.size == 500
@@ -119,7 +132,7 @@ def test_default_values() -> None:
 def test_default_file_lists_every_default() -> None:
     # default.yaml shows every parameter, and an empty configuration gives the same values.
     listed = load_config(DATA / "default.yaml")
-    bare = config_from_mapping({"taxonomy": {"config": "data/taxonomy/relations.yaml"}})
+    bare = config_from_mapping({"world": {"config": "data/world/default.yaml"}})
     assert listed.resolved() == bare.resolved()
     written = yaml.safe_load((DATA / "default.yaml").read_text(encoding="utf-8"))
     assert _key_paths(written) == _key_paths(listed.resolved())
@@ -139,32 +152,32 @@ def _key_paths(data: Any, prefix: str = "") -> set[str]:
 def test_tiny_configuration() -> None:
     config = load_config(DATA / "tiny.yaml")
     assert config.documents.count == 20
-    assert config.taxonomy.path == TINY_TAXONOMY
+    assert config.world.path == TINY_WORLD
     # the level schedules are resolved over the tiny taxonomy's two levels
-    assert config.taxonomy.depth == 2
+    assert config.world.depth == 2
     assert config.mention.level_weights == (1.0, 4.0)
     assert config.documents.topic_level_weights == (1.0, 2.0)
 
 
-def test_rule_statement_cap_and_verb_level_weights() -> None:
+def test_rule_statement_cap_and_event_level_weights(tmp_path: Path) -> None:
     config = corpus_config(
         propositions={"rule_statements": {"max_literals": 3}},
-        mention={"verb_level_weights": {"schedule": "list", "values": [0, 1]}},
+        mention={"event_level_weights": {"schedule": "list", "values": [0, 1]}},
     )
     assert config.propositions.rule_max_literals == 3
-    assert config.mention.verb_level_weights == (0.0, 1.0)
+    assert config.mention.event_level_weights == (0.0, 1.0)
     assert config.resolved()["propositions"]["rule_statements"] == {"max_literals": 3}
     assert config_from_mapping(config.resolved()) == config
-    # a taxonomy without verbs has no verb levels to weigh
-    plain = corpus_config("data/taxonomy/tiny.yaml")
-    assert plain.taxonomy.verb_depth is None and plain.mention.verb_level_weights == ()
+    # a world without two-place event types has no event-type levels to weigh
+    plain = corpus_config(write_world(tmp_path, "plain", PLAIN_WORLD))
+    assert plain.world.event_depth is None and plain.mention.event_level_weights == ()
     assert config_from_mapping(plain.resolved()) == plain
 
 
 def test_seed_override_is_the_corpus_seed_only() -> None:
     config = load_config(DATA / "tiny.yaml", seed=9)
     assert config.seed == 9
-    assert config.taxonomy.seed == 1
+    assert config.world.seed == 1
     with pytest.raises(ConfigError) as info:
         load_config(DATA / "tiny.yaml", seed=-1)
     assert info.value.field == "seed"
@@ -183,7 +196,12 @@ def test_resolved_configuration_keeps_changed_values() -> None:
     config = corpus_config(
         lexicon={"synonym_rate": 0.2, "named_proportion": {"is": 0.5}},
         documents={"mix": {"situational": 1}, "sentences": {"entity": 7}},
-        scene={"verb_weights": {"CAN.1": 2, "V1.1": 0.5}},
+        scene={
+            "event_type_weights": {"EVENTTYPE1.1": 2, "EVENTTYPE2.1.1": 0.5},
+            "policy": "uniform_event_type",
+            "initial": "redraw",
+        },
+        quantifiers={"universal_words": "either", "bare_plural": {"expresses": ["nec_all", "all"]}},
         grammar={"morphology": {"number": {"enabled": True, "realization": "word"}}},
         test_sets={"changes": ["role"]},
     )
@@ -196,7 +214,11 @@ def test_resolved_configuration_keeps_changed_values() -> None:
         "situational": 1.0,
     }
     assert resolved["documents"]["sentences"]["entity"] == [7, 7]
-    assert resolved["scene"]["verb_weights"] == {"CAN.1": 2.0, "V1.1": 0.5}
+    assert resolved["scene"]["event_type_weights"] == {"EVENTTYPE1.1": 2.0, "EVENTTYPE2.1.1": 0.5}
+    assert resolved["scene"]["policy"] == "uniform_event_type"
+    assert resolved["scene"]["initial"] == "redraw"
+    assert resolved["quantifiers"]["universal_words"] == "either"
+    assert resolved["quantifiers"]["bare_plural"] == {"expresses": ["nec_all", "all"]}
     assert resolved["grammar"]["morphology"]["number"]["enabled"] is True
     assert config_from_mapping(yaml.safe_load(config.to_yaml())) == config
 
@@ -208,68 +230,129 @@ def test_provenance_is_accepted_when_a_run_folder_configuration_is_read_back() -
 
 
 # ---------------------------------------------------------------------------------------------
-# The taxonomy setting
+# The world setting
 # ---------------------------------------------------------------------------------------------
 
 
-def test_taxonomy_configuration_file_with_a_seed() -> None:
+def test_world_configuration_file_with_a_seed() -> None:
     config = corpus_config()
-    assert (config.taxonomy.kind, config.taxonomy.path) == ("config", TINY_TAXONOMY)
-    assert config.taxonomy.seed == 1  # seed left out: the seed in the taxonomy file
-    assert config.taxonomy.config == load_taxonomy_config(TINY_TAXONOMY)
-    assert config.taxonomy.resolved() == {"config": TINY_TAXONOMY, "seed": 1}
+    assert (config.world.kind, config.world.path) == ("config", TINY_WORLD)
+    assert config.world.seed == 1  # seed left out: the seed in the world file
+    assert config.world.config == load_world_config(TINY_WORLD)
+    assert config.world.resolved() == {"config": TINY_WORLD, "seed": 1}
     for seed in (None, 5):
-        data = {"taxonomy": {"config": TINY_TAXONOMY, "seed": seed}}
-        assert config_from_mapping(data).taxonomy.seed == (1 if seed is None else seed)
+        data = {"world": {"config": TINY_WORLD, "seed": seed}}
+        assert config_from_mapping(data).world.seed == (1 if seed is None else seed)
 
 
-def test_taxonomy_output_folder(tmp_path: Path) -> None:
-    taxonomy = load_taxonomy_config(TINY_TAXONOMY, seed=3)
-    folder = generate(taxonomy).write(tmp_path / "run")
-    config = config_from_mapping({"taxonomy": {"run": str(folder)}})
-    assert (config.taxonomy.kind, config.taxonomy.path) == ("run", str(folder))
-    assert config.taxonomy.seed == 3
-    assert config.taxonomy.config.resolved() == taxonomy.resolved()
-    assert config.taxonomy.resolved() == {"run": str(folder)}
+def test_world_run_folder(tmp_path: Path) -> None:
+    world = load_world_config(TINY_WORLD, seed=3)
+    folder = define(world, episode_stats=False).write(tmp_path / "run")
+    config = config_from_mapping({"world": {"run": str(folder)}})
+    assert (config.world.kind, config.world.path) == ("run", str(folder))
+    assert config.world.seed == 3
+    assert config.world.config.resolved() == world.resolved()
+    assert config.world.resolved() == {"run": str(folder)}
     assert config_from_mapping(config.resolved()) == config
 
 
-TAXONOMY_ERRORS: list[tuple[Any, str, str]] = [
-    (None, "taxonomy", "must not be null"),
-    ("runs/taxonomy/relations_seed1", "taxonomy", "expected a mapping"),
-    ({}, "taxonomy", "exactly one of config and run"),
-    ({"config": TINY_TAXONOMY, "run": "runs/x"}, "taxonomy", "exactly one of config and run"),
-    ({"seed": 1}, "taxonomy", "exactly one of config and run"),
-    ({"config": "data/taxonomy/missing.yaml"}, "taxonomy.config", "cannot read"),
-    ({"run": "data/taxonomy"}, "taxonomy.run", "no config.yaml"),
-    ({"run": "data/taxonomy", "seed": 1}, "taxonomy.seed", "goes with config only"),
-    ({"config": TINY_TAXONOMY, "seed": -1}, "taxonomy.seed", "at least 0"),
-    ({"config": TINY_TAXONOMY, "seed": "one"}, "taxonomy.seed", "expected an integer"),
-    ({"config": TINY_TAXONOMY, "folder": "x"}, "taxonomy.folder", "unknown key"),
+WORLD_ERRORS: list[tuple[Any, str, str]] = [
+    (None, "world", "must not be null"),
+    ("runs/world/default_seed1", "world", "expected a mapping"),
+    ({}, "world", "exactly one of config and run"),
+    ({"config": TINY_WORLD, "run": "runs/x"}, "world", "exactly one of config and run"),
+    ({"seed": 1}, "world", "exactly one of config and run"),
+    ({"config": "data/world/missing.yaml"}, "world.config", "cannot read"),
+    ({"run": "data/world"}, "world.run", "not a world run folder"),
+    ({"run": "data/world", "seed": 1}, "world.seed", "goes with config only"),
+    ({"config": TINY_WORLD, "seed": -1}, "world.seed", "at least 0"),
+    ({"config": TINY_WORLD, "seed": "one"}, "world.seed", "expected an integer"),
+    ({"config": TINY_WORLD, "folder": "x"}, "world.folder", "unknown key"),
 ]
 
 
-@pytest.mark.parametrize(("value", "field", "message"), TAXONOMY_ERRORS)
-def test_taxonomy_setting_errors(value: Any, field: str, message: str) -> None:
+@pytest.mark.parametrize(("value", "field", "message"), WORLD_ERRORS)
+def test_world_setting_errors(value: Any, field: str, message: str) -> None:
     with pytest.raises(ConfigError) as info:
-        config_from_mapping({"taxonomy": value}, source="broken.yaml")
+        config_from_mapping({"world": value}, source="broken.yaml")
     assert info.value.source == "broken.yaml"
     assert info.value.field == field
     assert message in info.value.message
 
 
-def test_taxonomy_setting_is_required() -> None:
+def test_world_setting_is_required() -> None:
     with pytest.raises(ConfigError) as info:
         config_from_mapping({})
-    assert info.value.field == "taxonomy" and "is required" in info.value.message
+    assert info.value.field == "world" and "is required" in info.value.message
 
 
-def test_errors_in_the_taxonomy_file_name_that_file(tmp_path: Path) -> None:
-    broken = tmp_path / "taxonomy.yaml"
-    broken.write_text("taxonomy: {depth: 0}\n", encoding="utf-8")
+def test_errors_in_the_world_file_name_that_file(tmp_path: Path) -> None:
+    broken = tmp_path / "world.yaml"
+    broken.write_text("fluents: {count: -1}\n", encoding="utf-8")
     with pytest.raises(ConfigError) as info:
-        config_from_mapping({"taxonomy": {"config": str(broken)}})
-    assert info.value.source == str(broken) and info.value.field == "taxonomy.depth"
+        config_from_mapping({"world": {"config": str(broken)}})
+    assert info.value.source == str(broken) and info.value.field == "fluents.count"
+
+
+# ---------------------------------------------------------------------------------------------
+# The renamed keys
+# ---------------------------------------------------------------------------------------------
+
+RENAMED: list[tuple[dict[str, Any], str, str]] = [
+    ({"taxonomy": {"config": "data/taxonomy/relations.yaml"}}, "taxonomy", "world"),
+    (
+        {"lexicon": {"named_proportion": {"can": 1.0}}},
+        "lexicon.named_proportion.can",
+        "event_unary",
+    ),
+    ({"lexicon": {"named_proportion": {"verb": 1.0}}}, "lexicon.named_proportion.verb", "event"),
+    (
+        {"lexicon": {"named_proportion": {"verb_category": 1.0}}},
+        "lexicon.named_proportion.verb_category",
+        "event_category",
+    ),
+    ({"quantifiers": {"all_grounding": "fixed"}}, "quantifiers.all_grounding", "universal_words"),
+    (
+        {"quantifiers": {"most": {"min_proportion": 0.7}}},
+        "quantifiers.most.min_proportion",
+        "quantifiers.most.usage_min",
+    ),
+    (
+        {"quantifiers": {"generic": {"means": "most"}}},
+        "quantifiers.generic",
+        "quantifiers.bare_plural.expresses",
+    ),
+    (
+        {"propositions": {"events": {"progressive_rate": 0.3}}},
+        "propositions.events.progressive_rate",
+        "documents.progressive_rate",
+    ),
+    ({"scene": {"verb_weights": "uniform"}}, "scene.verb_weights", "scene.event_type_weights"),
+    (
+        {"mention": {"verb_level_weights": 1}},
+        "mention.verb_level_weights",
+        "mention.event_level_weights",
+    ),
+    (
+        {"grammar": {"morphology": {"aspect": {"progressive_rate": 0.3}}}},
+        "grammar.morphology.aspect.progressive_rate",
+        "documents.progressive_rate",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("change", "field", "new"), RENAMED, ids=[field for _, field, _ in RENAMED]
+)
+def test_every_old_key_names_its_new_key(change: dict[str, Any], field: str, new: str) -> None:
+    data = {"world": {"config": TINY_WORLD}, **copy.deepcopy(change)}
+    if field == "taxonomy":
+        data.pop("world")
+    with pytest.raises(ConfigError) as info:
+        config_from_mapping(data, source="old.yaml")
+    assert info.value.source == "old.yaml"
+    assert info.value.field == field
+    assert new in info.value.message
 
 
 # ---------------------------------------------------------------------------------------------
@@ -321,6 +404,13 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
     ({"documents": {"topic_level_weights": 0}}, "documents.topic_level_weights", "positive"),
     ({"documents": {"shuffle": 2}}, "documents.shuffle", "at most 1"),
     (
+        {"documents": {"content_kind_weights": "random"}},
+        "documents.content_kind_weights",
+        "proportional, equal",
+    ),
+    ({"documents": {"progressive_rate": 2}}, "documents.progressive_rate", "at most 1"),
+    ({"documents": {"one_aspect_per_event": "yes"}}, "documents.one_aspect_per_event", "true or"),
+    (
         {"propositions": {"negation_rate": {"event": 0.1}}},
         "propositions.negation_rate.event",
         "unknown key",
@@ -347,33 +437,64 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "unknown key",
     ),
     (
-        {"mention": {"verb_level_weights": {"schedule": "list", "values": [1, 2, 3]}}},
-        "mention.verb_level_weights.values",
+        {"mention": {"event_level_weights": {"schedule": "list", "values": [1, 2, 3]}}},
+        "mention.event_level_weights.values",
         "exactly 2 values",
     ),
-    ({"mention": {"verb_level_weights": -1}}, "mention.verb_level_weights", "must not be negative"),
-    ({"quantifiers": {"all_grounding": "law"}}, "quantifiers.all_grounding", "fixed, observed"),
-    ({"quantifiers": {"most": {"min_proportion": 0}}}, "quantifiers.most.min_proportion", "more"),
-    ({"quantifiers": {"most": {"min_proportion": 1.2}}}, "quantifiers.most.min_proportion", "1"),
+    (
+        {"mention": {"event_level_weights": -1}},
+        "mention.event_level_weights",
+        "must not be negative",
+    ),
+    (
+        {"quantifiers": {"universal_words": "law"}},
+        "quantifiers.universal_words",
+        "nec, extensional",
+    ),
+    ({"quantifiers": {"most": {"usage_min": 0}}}, "quantifiers.most.usage_min", "more"),
+    ({"quantifiers": {"most": {"usage_min": 1.2}}}, "quantifiers.most.usage_min", "1"),
     ({"quantifiers": {"some": {"exclude_all": "yes"}}}, "quantifiers.some.exclude_all", "true or"),
-    ({"quantifiers": {"generic": {"means": "few"}}}, "quantifiers.generic.means", "all, most"),
+    (
+        {"quantifiers": {"bare_plural": {"expresses": ["few"]}}},
+        "quantifiers.bare_plural.expresses",
+        "nec_all, all, most, some",
+    ),
+    (
+        {"quantifiers": {"bare_plural": {"expresses": []}}},
+        "quantifiers.bare_plural.expresses",
+        "non-empty",
+    ),
+    (
+        {"quantifiers": {"bare_plural": {"expresses": "most"}}},
+        "quantifiers.bare_plural.expresses",
+        "list",
+    ),
     ({"quantifiers": {"generic_rate": -1}}, "quantifiers.generic_rate", "at least 0"),
     ({"quantifiers": {"weights": {"some": -1}}}, "quantifiers.weights.some", "at least 0"),
     ({"quantifiers": {"weights": {"few": 1}}}, "quantifiers.weights.few", "unknown key"),
     (
-        {"quantifiers": {"weights": {"all": 0, "most": 0, "some": 0, "none": 0}}},
+        {
+            "quantifiers": {
+                "weights": {"nec_all": 0, "all": 0, "most": 0, "some": 0, "none": 0, "nec_none": 0}
+            }
+        },
         "quantifiers.weights",
         "at least one weight must be positive",
-    ),
+    ),  # fmt: skip
     # YAML reads a bare no as the boolean false, so the key of the quantifier "no" is none
     ({"quantifiers": {"weights": {False: 2}}}, "quantifiers.weights.no", "is written none"),
     ({"quantifiers": {"weights": {"no": 2}}}, "quantifiers.weights.no", "is written none"),
+    ({"quantifiers": {"weights": {"nec_no": 2}}}, "quantifiers.weights.nec_no", "nec_none"),
     ({"scene": {"size": [6, 2]}}, "scene.size", "exceeds the maximum"),
     ({"scene": {"steps": 0}}, "scene.steps", "at least 1"),
     ({"scene": {"events_per_step": -1}}, "scene.events_per_step", "at least 0"),
     ({"scene": {"transitive_share": 3}}, "scene.transitive_share", "at most 1"),
-    ({"scene": {"verb_weights": "equal"}}, "scene.verb_weights", "expected uniform"),
-    ({"scene": {"verb_weights": {"V1.1": -2}}}, "scene.verb_weights.V1.1", "at least 0"),
+    ({"scene": {"event_type_weights": "equal"}}, "scene.event_type_weights", "expected uniform"),
+    (
+        {"scene": {"event_type_weights": {"EVENTTYPE2.1.1": -2}}},
+        "scene.event_type_weights.EVENTTYPE2.1.1",
+        "at least 0",
+    ),
     (
         {"scene": {"participant_weights": {"random": 1}}},
         "scene.participant_weights.random",
@@ -384,6 +505,8 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "scene.participant_weights",
         "at least one weight",
     ),
+    ({"scene": {"policy": "random_walk"}}, "scene.policy", "uniform_event"),
+    ({"scene": {"initial": "fresh"}}, "scene.initial", "keep, redraw"),
     ({"entity": {"scenes": 0}}, "entity.scenes", "at least 1"),
     ({"mention": {"pronoun_rate": 7}}, "mention.pronoun_rate", "at most 1"),
     ({"mention": {"max_adjectives": -1}}, "mention.max_adjectives", "at least 0"),
@@ -442,19 +565,9 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "past, present",
     ),
     (
-        {"propositions": {"events": {"progressive_rate": 2}}},
-        "propositions.events.progressive_rate",
-        "at most 1",
-    ),
-    (
         {"grammar": {"morphology": {"tense": {"event_tense": "past"}}}},
         "grammar.morphology.tense.event_tense",
         "is now propositions.events.tense",
-    ),
-    (
-        {"grammar": {"morphology": {"aspect": {"progressive_rate": 0.3}}}},
-        "grammar.morphology.aspect.progressive_rate",
-        "is now propositions.events.progressive_rate",
     ),
     (
         {"grammar": {"morphology": {"tense": {"enabled": "yes"}}}},
@@ -489,7 +602,7 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
 def test_broken_configurations_name_the_file_and_the_field(
     change: dict[str, Any], field: str, message: str
 ) -> None:
-    data = {"taxonomy": {"config": TINY_TAXONOMY}, **copy.deepcopy(change)}
+    data = {"world": {"config": TINY_WORLD}, **copy.deepcopy(change)}
     with pytest.raises(ConfigError) as info:
         config_from_mapping(data, source="broken.yaml")
     assert info.value.source == "broken.yaml"
@@ -541,7 +654,7 @@ def test_the_old_on_key_says_where_it_went(tmp_path: Path) -> None:
     path = tmp_path / "corpus.yaml"
     for written in ("on: true", '"on": true'):
         path.write_text(
-            f"taxonomy: {{config: {TINY_TAXONOMY}}}\n"
+            f"world: {{config: {TINY_WORLD}}}\n"
             f"grammar: {{morphology: {{number: {{{written}}}}}}}\n",
             encoding="utf-8",
         )
@@ -550,7 +663,7 @@ def test_the_old_on_key_says_where_it_went(tmp_path: Path) -> None:
         assert info.value.field == "grammar.morphology.number.on"
         assert "is now enabled" in info.value.message
     path.write_text(
-        f"taxonomy: {{config: {TINY_TAXONOMY}}}\n"
+        f"world: {{config: {TINY_WORLD}}}\n"
         "grammar: {morphology: {number: {enabled: true}, aspect: {enabled: true}}}\n",
         encoding="utf-8",
     )

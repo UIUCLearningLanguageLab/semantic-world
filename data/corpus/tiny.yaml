@@ -1,11 +1,11 @@
-# A tiny corpus for fast tests: 20 documents about the tiny relations taxonomy (6 categories,
-# 12 instances, 1 scalar dimension, 4 verbs). Parameters not listed keep their defaults (see
-# default.yaml and docs/specs/CORPUS_GENERATOR.md).
+# A tiny corpus for fast tests: 20 documents about the tiny world (6 categories, 12 instances,
+# 1 scalar dimension, 4 one-place and 4 two-place event types, 4 fluents). Parameters not listed
+# keep their defaults (see default.yaml and docs/specs/CORPUS_GENERATOR.md).
 
 name: tiny
 seed: 1
 
-taxonomy: {config: data/taxonomy/tiny_relations.yaml, seed: 1}
+world: {config: data/world/tiny.yaml, seed: 1}
 
 documents:
   count: 20

@@ -1,9 +1,11 @@
 """The corpus generator.
 
-The generator turns the taxonomy generator's world into a corpus of documents written in an
+The generator turns a world run of the world package into a corpus of documents written in an
 artificial language. The corpus is built in four layers: a lexicon, propositions that are checked
 against the world, documents, and sentences. The specification is
-``docs/specs/CORPUS_GENERATOR.md``.
+``docs/specs/CORPUS_GENERATOR.md``, with the changes of ``docs/specs/WORLD_AND_LANGUAGE.md``
+("Phase (a): the corpus"): the corpus reads world runs, its scenes are the world's episodes, and
+it takes the new labels, the quantifiers of CG.59 to CG.62, and the aspect of CG.64.
 
 Stage 1 builds the configuration, the loading of the taxonomy, the lexicon, and the formal
 rendering. Stage 2 builds the class-level and instance-level propositions, their truth tests,
@@ -29,6 +31,7 @@ from semantic_world.corpus.grammar import (
     RelativeClause,
     SentencePlan,
 )
+from semantic_world.corpus.histories import SceneEvent, SceneGenerator, scene_events
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.lexicon import Concept, Lexeme, Lexicon, build_lexicon
 from semantic_world.corpus.logical import logical_form
@@ -53,11 +56,10 @@ from semantic_world.corpus.renderings import (
     propositional,
 )
 from semantic_world.corpus.request import wordform_request
-from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
 from semantic_world.corpus.stats import corpus_stats
 from semantic_world.corpus.streams import STREAM_NAMES, Streams
 from semantic_world.corpus.testsets import Item, ItemSet, build_test_sets, falsify
-from semantic_world.corpus.world import load_taxonomy, taxonomy_identity
+from semantic_world.corpus.world import World, load_world, world_identity
 
 __all__ = [
     "STREAM_NAMES",
@@ -71,7 +73,6 @@ __all__ = [
     "Document",
     "DocumentSentence",
     "Evaluation",
-    "Event",
     "Facts",
     "GrammarError",
     "Item",
@@ -89,12 +90,13 @@ __all__ = [
     "Realizer",
     "RelativeClause",
     "RelativeClauses",
-    "Scene",
+    "SceneEvent",
     "SceneGenerator",
     "Sentence",
     "SentencePlan",
     "Streams",
     "Truth",
+    "World",
     "build_lexicon",
     "build_test_sets",
     "config_from_mapping",
@@ -104,7 +106,7 @@ __all__ = [
     "generate",
     "interpret",
     "load_config",
-    "load_taxonomy",
+    "load_world",
     "logical_form",
     "parse_propositional",
     "plan_for",
@@ -112,6 +114,7 @@ __all__ = [
     "propositional",
     "readings",
     "render",
-    "taxonomy_identity",
+    "scene_events",
     "wordform_request",
+    "world_identity",
 ]

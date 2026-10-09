@@ -325,27 +325,64 @@ def test_each_episode_depends_only_on_its_own_part(tiny: WorldResult) -> None:
     assert all(h.seed == generator.definition.entity_labels[4] for h in given)
 
 
-def test_participants_are_drawn_as_corpus_scenes_draw_them(tiny: WorldResult) -> None:
-    """The weights are the corpus scene generator's: thematic relatedness, taxonomic
-    similarity, and a constant, over the leaf of each entity and the seed's leaf."""
-    from semantic_world.corpus.config import config_from_mapping
-    from semantic_world.corpus.scenes import SceneGenerator
-    from semantic_world.world.labels import translate
+def old_scene_participants(taxonomy, settings: EpisodeSettings):
+    """A reference of the participant draw of the corpus's scene generator before stage a5a
+    (``corpus/scenes.py``): the weights over the instances, and the draw. Thematic relatedness
+    comes from the taxonomy's ``thematic`` table, and similarity from the leaves' generative
+    vectors with the taxonomy's similarity settings, undefined and negative values counting 0."""
+    from semantic_world.taxonomy.similarity import similarity_matrix
 
-    corpus = config_from_mapping({"taxonomy": {"config": "data/taxonomy/tiny_relations.yaml"}})
-    scenes = SceneGenerator(corpus, tiny.taxonomy)
+    instances, tree = taxonomy.instances, taxonomy.tree
+    leaves = [leaf.label for leaf in tree.leaves]
+    number = {label: i for i, label in enumerate(leaves)}
+    leaf_rows = np.array([tree.categories.index(leaf) for leaf in tree.leaves], dtype=np.intp)
+    leaf_of_row = {int(row): i for i, row in enumerate(leaf_rows)}
+    leaf = np.array([leaf_of_row[int(row)] for row in instances.leaf_index], dtype=np.intp)
+    thematic = np.zeros((len(leaves), len(leaves)))
+    if taxonomy.relation_stats is not None:
+        for row in taxonomy.relation_stats.thematic.iter_rows(named=True):
+            a, b = number[row["leaf_a"]], number[row["leaf_b"]]
+            thematic[a, b] = thematic[b, a] = row["thematic"]
+    analysis = taxonomy.config.analysis
+    start = 0 if analysis.similarity_features == "all" else taxonomy.vectors.isa_count
+    similarity = similarity_matrix(
+        taxonomy.vectors.generative[leaf_rows][:, start:], analysis.similarity_metric
+    )
+    similarity = np.clip(np.nan_to_num(similarity, nan=0.0), 0.0, None)
+    weights = settings.participant_weights
+
+    def participant_weights(seed: int) -> np.ndarray:
+        values = (
+            weights["thematic"] * thematic[leaf, leaf[seed]]
+            + weights["taxonomic"] * similarity[leaf, leaf[seed]]
+            + weights["constant"]
+        )
+        values[seed] = 0.0
+        return values
+
+    def draw(rng: np.random.Generator, seed: int) -> tuple[int, ...]:
+        low, high = settings.size
+        size = int(rng.integers(low, high + 1))
+        values = participant_weights(seed)
+        size = min(size, int(np.count_nonzero(values)))
+        if size == 0:
+            return (seed,)
+        drawn = rng.choice(len(values), size=size, replace=False, p=values / values.sum())
+        return (seed,) + tuple(int(i) for i in drawn)
+
+    return participant_weights, draw
+
+
+def test_participants_are_drawn_as_corpus_scenes_drew_them(tiny: WorldResult) -> None:
+    """The weights are the old corpus scene generator's: thematic relatedness, taxonomic
+    similarity, and a constant, over the leaf of each entity and the seed's leaf."""
     generator = _generator(tiny)
     definition = generator.definition
+    theirs, draw = old_scene_participants(tiny.taxonomy, generator.settings)
     for seed in range(definition.entity_count):
-        ours = generator.participant_weights(seed)
-        theirs = scenes.participant_weights(tiny.taxonomy.instances.labels[seed])
-        assert np.allclose(ours, theirs, atol=1e-6)
+        assert np.allclose(generator.participant_weights(seed), theirs(seed), atol=1e-6)
         rng_a, rng_b = np.random.default_rng(seed), np.random.default_rng(seed)
-        drawn = generator.draw_participants(rng_a, seed)
-        expected = scenes.draw_participants(rng_b, tiny.taxonomy.instances.labels[seed])
-        assert tuple(definition.entity_labels[i] for i in drawn) == tuple(
-            translate(label) for label in expected
-        )
+        assert generator.draw_participants(rng_a, seed) == draw(rng_b, seed)
 
 
 def test_relatedness_from_a_run_equals_in_memory(tiny: WorldResult, tmp_path: Path) -> None:

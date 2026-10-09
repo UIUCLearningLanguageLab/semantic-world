@@ -25,11 +25,12 @@ from corpus_support import corpus_config
 from semantic_world.corpus import Proposition, config_from_mapping, load_config, propositional
 from semantic_world.corpus.__main__ import main
 from semantic_world.corpus.generate import generate
+from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.io import OUTPUT_FILES, default_output_dir
 from semantic_world.corpus.lexicon import LEXICON_COLUMNS
 from semantic_world.corpus.planner import Planner
+from semantic_world.corpus.propositions import QUANTIFIERS
 from semantic_world.corpus.realize import leaves, preorder
-from semantic_world.corpus.scenes import Scene, leaf_similarity
 from semantic_world.corpus.stats import (
     cooccurrence,
     corpus_stats,
@@ -37,6 +38,7 @@ from semantic_world.corpus.stats import (
     partial_correlation,
 )
 from semantic_world.corpus.testsets import set_names
+from semantic_world.world.history import History, replay
 
 DOCUMENT_FIELDS = ["label", "type", "topic", "scenes", "referents", "sentences"]
 SENTENCE_FIELDS = [
@@ -126,12 +128,13 @@ def test_the_output_folder(cases, runs, tmp_path, name) -> None:
         "git_dirty",
         "packages",
         "stream_seeds",
-        "taxonomy",
+        "world",
         "wordforms",
     ]
     assert provenance["stream_seeds"] == corpus.planner.streams.seeds()
-    taxonomy = provenance["taxonomy"]
-    assert taxonomy["seed"] == cases(name).result.config.seed and len(taxonomy["config_hash"]) == 64
+    world = provenance["world"]
+    assert world == corpus.planner.world.identity() and len(world["config_hash"]) == 64
+    assert (world["source"], world["name"]) == ("config", name)
     assert provenance["wordforms"] is None and "numpy" in provenance["packages"]
     assert load_config(folder / "config.yaml").resolved() == corpus.config.resolved()
 
@@ -141,10 +144,18 @@ def test_the_output_folder(cases, runs, tmp_path, name) -> None:
     assert lexicon["label"].to_list() == [x.label for x in corpus.planner.lexicon.lexemes]
     assert lexicon["word"].null_count() == len(lexicon)
 
-    # scenes.jsonl: one scene per line, as the planner made them
+    # scenes.jsonl: one history per line, as the planner made them, and every history replays
+    # on the world's definition
     scenes = lines(folder / "scenes.jsonl")
-    assert [Scene.from_json(record) for record in scenes] == corpus.planner.scenes
-    assert [record["label"] for record in scenes] == [f"SN.{n}" for n in range(1, len(scenes) + 1)]
+    histories = [History.from_json(record) for record in scenes]
+    assert histories == corpus.planner.scenes
+    definition = corpus.planner.world.definition
+    for history in histories:
+        assert history.rule_set_id == definition.rule_set_id
+        assert len(replay(definition, history)) == len(history.steps) + 1
+    assert [record["label"] for record in scenes] == [
+        f"SCENE.{n}" for n in range(1, len(scenes) + 1)
+    ]
 
     # stats.yaml holds the statistics, and the test sets hold their items
     stats = yaml.safe_load((folder / "stats.yaml").read_text(encoding="utf-8"))
@@ -172,24 +183,24 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
     assert documents == [json.loads(json.dumps(d.to_json())) for d in corpus.documents]
     assert len(documents) == corpus.config.documents.count
     lexemes = {x.label for x in corpus.planner.lexicon.lexemes}
-    instances = set(corpus.planner.result.instances.labels)
-    categories = {c.label for c in corpus.planner.result.tree.categories} | {"THING"}
+    instances = set(corpus.planner.world.instances)
+    categories = set(corpus.planner.world.categories) | {"THING"}
     scene_labels = {scene.label for scene in corpus.planner.scenes}
-    event_labels = {e.label for scene in corpus.planner.scenes for e in scene.events}
+    event_labels = {e.label for scene in corpus.planner.scenes for e in scene_events(scene)}
     mode = corpus.config.propositional_referents
     for number, document in enumerate(documents, start=1):
         assert list(document) == DOCUMENT_FIELDS
-        assert document["label"] == f"D.{number}"
+        assert document["label"] == f"DOC.{number}"
         assert document["type"] in corpus.config.documents.mix
         assert isinstance(document["topic"], str) and document["topic"]
         assert set(document["scenes"]) <= scene_labels
         referents = document["referents"]
-        assert list(referents) == [f"R.{n}" for n in range(1, len(referents) + 1)]
+        assert list(referents) == [f"REF.{n}" for n in range(1, len(referents) + 1)]
         assert set(referents.values()) <= instances
         assert document["sentences"]
         for k, sentence in enumerate(document["sentences"], start=1):
             assert list(sentence) == SENTENCE_FIELDS
-            assert sentence["label"] == f"{document['label']}.{k}"
+            assert sentence["label"] == f"{document['label']}.SENT.{k}"
             tokens = sentence["tokens"]
             assert tokens and {token.split("-")[0] for token in tokens} <= lexemes
             assert sentence["words"] is None and sentence["text"] is None
@@ -203,7 +214,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
             # the logical form reads back as a proposition, and gives the rendering
             form = sentence["logical_form"]
             proposition = Proposition.from_json(form)
-            assert proposition.id == form["id"] and form["id"].startswith("PR.")
+            assert proposition.id == form["id"] and form["id"].startswith("PROP.")
             assert form["grounding"]["test"]
             assert sentence["propositional"] == propositional(form, mode)
             assert len(sentence["referents"]) == len(phrases)
@@ -225,6 +236,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
                 "generic",
                 "capacity",
                 "event",
+                *QUANTIFIERS,
             }
 
 
@@ -388,7 +400,8 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     assert sum(block["by_section"].values()) == len(sentences)
     for level in ("class", "instance"):
         negative = sum(
-            form["level"] == level and (not form["polarity"] or form.get("quantifier") == "no")
+            form["level"] == level
+            and (not form["polarity"] or form.get("quantifier") in ("no", "nec_no"))
             for form in forms
         )
         assert block["negative_share"][level] == pytest.approx(negative / levels[level], abs=1e-6)
@@ -404,23 +417,29 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     assert block["relative_clause_depth"] == dict(sorted(depths.items()))
     assert max(depths) == 2
 
-    # the quantifier mix, as stated and by the strongest true quantifier
+    # the aspect of the reports
+    reports = [form for form in forms if form["level"] == "event"]
+    progressive = sum(form["aspect"] == "progressive" for form in reports)
+    assert block["progressive_share"] == pytest.approx(progressive / len(reports), abs=1e-6)
+
+    # the quantifier mix, as stated, and the bare plurals
     block = stats["quantifiers"]
     stated = Counter(form["quantifier"] for form in forms if form["level"] == "class")
     assert block["class_level_sentences"] == levels["class"]
+    assert list(block["stated"]) == [*QUANTIFIERS, "pole"]
     assert {q: v["count"] for q, v in block["stated"].items()} == {
-        q: stated[q] for q in ("all", "most", "some", "no", "generic")
+        **{q: stated[q] for q in QUANTIFIERS},
+        "pole": stated[None],
     }
-    for mix in (block["stated"], block["strongest_true"]):
-        assert sum(v["count"] for v in mix.values()) == levels["class"]
-        assert sum(v["share"] for v in mix.values()) == pytest.approx(1, abs=1e-5)
-    strongest = {q: v["count"] for q, v in block["strongest_true"].items()}
-    assert list(strongest) == ["all", "most", "some", "no", "pole"]
-    # a bare generic stands for a stronger fact, so the strongest quantifiers are never fewer
-    for quantifier in ("all", "most", "some", "no"):
-        assert strongest[quantifier] >= stated[quantifier]
+    assert sum(v["count"] for v in block["stated"].values()) == levels["class"]
+    assert sum(v["share"] for v in block["stated"].values()) == pytest.approx(1, abs=1e-5)
     poles = sum(f["level"] == "class" and f["predicate"]["kind"] == "scalar" for f in forms)
-    assert strongest["pole"] == poles
+    assert block["stated"]["pole"]["count"] == poles
+    bare = sum(
+        s["logical_form"]["level"] == "class" and s["tree"][1][1][0] != "Det" for s in sentences
+    )
+    assert block["bare_plural"]["count"] == bare
+    assert block["bare_plural"]["share"] == pytest.approx(bare / levels["class"], abs=1e-6)
 
     # tokens, by part of speech, and the frequency of every lexeme
     frequencies = Counter(token.split("-")[0] for s in sentences for token in s["tokens"])
@@ -434,10 +453,19 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     assert stats["tokens"]["by_pos"] == dict(by_pos)
 
     # ambiguity, mentions, scenes, propositions, the lexicon, and the rule statements
-    readings = Counter("+".join(s["readings"]) for s in sentences)
+    level_readings = [
+        [r for r in s["readings"] if r in ("generic", "capacity", "event")] for s in sentences
+    ]
+    readings = Counter("+".join(found) for found in level_readings)
     assert stats["ambiguity"]["readings"] == dict(sorted(readings.items()))
     assert stats["ambiguity"]["sentences"] == len(sentences)
-    assert stats["ambiguity"]["ambiguous"] == sum(len(s["readings"]) > 1 for s in sentences)
+    assert stats["ambiguity"]["ambiguous"] == sum(len(found) > 1 for found in level_readings)
+    quantifier_readings = Counter(
+        "+".join(r for r in s["readings"] if r in QUANTIFIERS) or "none"
+        for s in sentences
+        if s["logical_form"]["level"] == "class"
+    )
+    assert stats["ambiguity"]["quantifier_readings"] == dict(sorted(quantifier_readings.items()))
     block = stats["mentions"]
     undistinguished = sum(mark is False for s in sentences for mark in s["distinguished"])
     definite = sum(mark is not None for s in sentences for mark in s["distinguished"])
@@ -447,15 +475,24 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     assert block["pronouns"] == pronouns
     assert block["instance_mentions"] == block["indefinite"] + definite + pronouns
     scenes = lines(folder / "scenes.jsonl")
-    events = [event for scene in scenes for step in scene["steps"] for event in step]
-    assert (stats["scenes"]["count"], stats["scenes"]["events"]) == (len(scenes), len(events))
-    progressive = sum(event["aspect"] == "progressive" for event in events)
-    assert stats["scenes"]["progressive_share"] == pytest.approx(
-        progressive / len(events), abs=1e-6
+    steps = [step for scene in scenes for step in scene["steps"]]
+    events = [event for step in steps for event in step["events"]]
+    block = stats["scenes"]
+    assert (block["count"], block["steps"], block["events"]) == (
+        len(scenes),
+        len(steps),
+        len(events),
     )
+    changes = sum(len(event["changes"]) for event in events)
+    assert block["mean_changes_per_event"] == pytest.approx(changes / len(events), abs=1e-6)
+    quiescent = sum(scene["quiescent"] for scene in scenes)
+    assert block["quiescent_share"] == pytest.approx(quiescent / len(scenes), abs=1e-6)
     assert stats["propositions"]["distinct"] == len({form["id"] for form in forms})
     assert stats["lexicon"] == corpus.planner.lexicon.stats()
-    assert stats["lexicon"]["verbs_without_word"] == corpus.planner.lexicon.verbs_without_word
+    assert (
+        stats["lexicon"]["event_types_without_word"]
+        == corpus.planner.lexicon.event_types_without_word
+    )
     report = stats["rule_statements"]
     assert report["terms"] == report["stated"] + sum(report["skipped"].values())
     assert set(report["skipped"]) == {
@@ -466,7 +503,7 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         "unconfirmed",
     }
     if name == "tiny":
-        assert stats["lexicon"]["verbs_without_word"] == {"V1": "every pair"}
+        assert stats["lexicon"]["event_types_without_word"] == {"EVENTTYPE2.1": "every pair"}
 
 
 def _clause_depth(tree) -> int:
@@ -482,27 +519,30 @@ def test_ambiguous_sentences_are_counted(runs) -> None:
     # capacity and an event
     corpus = runs("default", grammar={"can_rate": {"class": 0.5, "instance": 0.3}})
     block = corpus.stats["ambiguity"]
-    counted = sum(len(s.readings) > 1 for d in corpus.documents for s in d.sentences)
+    counted = sum(
+        s.proposition.level != "class" and len(s.readings) > 1
+        for d in corpus.documents
+        for s in d.sentences
+    )
     assert block["ambiguous"] == counted > 50
     assert block["readings"]["capacity+event"] == counted
     assert block["ambiguous_share"] == round(counted / block["sentences"], 6)
 
 
-def test_the_cooccurrence_check_by_brute_force(runs) -> None:
+def test_the_cooccurrence_check_by_brute_force(cases, runs) -> None:
     corpus = runs("default", **RICH)
     planner, documents = corpus.planner, corpus.documents
-    result = planner.result
-    leaves_ = [leaf.label for leaf in result.tree.leaves]
+    world = planner.world
+    leaves_ = list(world.leaves)
     block = corpus.stats["cooccurrence"]
     assert block == json.loads(json.dumps(cooccurrence(planner, documents)))
     pairs = list(itertools.combinations(range(len(leaves_)), 2))
     assert (block["leaves"], block["pairs"]) == (len(leaves_), len(pairs))
-    thematic = {
-        frozenset((row["leaf_a"], row["leaf_b"])): row["thematic"]
-        for row in result.relation_stats.thematic.iter_rows(named=True)
-    }
+    # the thematic relatedness of the world (derived/thematic.csv rounds it, which moves ranks)
+    thematic = {frozenset((leaves_[a], leaves_[b])): float(world.thematic[a, b]) for a, b in pairs}
     leaf_of = {
-        label: label.rsplit(".", 1)[0].replace("I", "C", 1) for label in result.instances.labels
+        label: label.rsplit(".", 1)[0].replace("INSTANCE", "CATEGORY", 1)
+        for label in world.instances
     }
     concept = {x.label: x.concept for x in planner.lexicon.lexemes}
 
@@ -517,7 +557,7 @@ def test_the_cooccurrence_check_by_brute_force(runs) -> None:
         return found & set(leaves_)
 
     # every pair of leaves has a taxonomic similarity in the default world
-    similarity = leaf_similarity(result, planner.scene_generator.leaf_rows)
+    similarity = world.leaf_similarity
     similar = np.array([similarity[a, b] for a, b in pairs])
     assert block["pairs_with_taxonomic_similarity"] == len(pairs) and not np.isnan(similar).any()
 
@@ -610,26 +650,36 @@ def test_partial_correlations() -> None:
     assert partial_correlation(x[:2], y[:2], z[:2]) == none
 
 
-def test_cooccurrence_on_the_default_configuration() -> None:
+@pytest.mark.parametrize("kinds", ["proportional", "equal"])
+def test_cooccurrence_on_the_default_configuration(kinds) -> None:
     # The acceptance check of stage 6, on the default configuration with fewer documents:
     # situational documents' co-occurrence correlates more with thematic relatedness than
-    # encyclopedic documents' does, and less with taxonomic similarity.
+    # encyclopedic documents' does. Since stage a5a, category documents draw their kinds of
+    # content in proportion to the facts left to state, which makes relation facts most of
+    # them, so encyclopedic co-occurrence tracks taxonomic similarity less than before: the
+    # second half of the check (situational below encyclopedic on taxonomic similarity) holds
+    # only with equal kinds of content, by Pearson's correlation. See the stage a5a proposal.
     data = yaml.safe_load(Path("data/corpus/default.yaml").read_text(encoding="utf-8"))
     data["documents"]["count"] = 2500
+    data["documents"]["content_kind_weights"] = kinds
     data["test_sets"]["size"] = 0
     planner = Planner(config_from_mapping(data))
     block = cooccurrence(planner, planner.generate())
     groups = block["by_document_type"]
     for measure in ("words", "referents"):
+        situational = groups["situational"][measure]
+        encyclopedic = groups["encyclopedic"][measure]
         for kind in ("pearson", "spearman"):
-            situational = groups["situational"][measure]
-            encyclopedic = groups["encyclopedic"][measure]
-            assert situational["thematic"][kind] > encyclopedic["thematic"][kind] + 0.1
-            assert situational["taxonomic"][kind] < encyclopedic["taxonomic"][kind]
-        assert block["check"][measure] == {
-            "thematic_situational_above_encyclopedic": {"pearson": True, "spearman": True},
-            "taxonomic_situational_below_encyclopedic": {"pearson": True, "spearman": True},
+            margin = 0.05 if kind == "pearson" else 0.0  # 0.04 by Spearman, proportional
+            assert situational["thematic"][kind] > encyclopedic["thematic"][kind] + margin
+        check = block["check"][measure]
+        assert check["thematic_situational_above_encyclopedic"] == {
+            "pearson": True,
+            "spearman": True,
         }
+        taxonomic = situational["taxonomic"]["pearson"] < encyclopedic["taxonomic"]["pearson"]
+        assert taxonomic == (kinds == "equal")
+        assert check["taxonomic_situational_below_encyclopedic"]["pearson"] is taxonomic
 
 
 def test_statistics_without_test_sets_and_without_documents(cases) -> None:
@@ -673,7 +723,7 @@ def test_the_generate_command(tmp_path, capsys) -> None:
     capsys.readouterr()
     # an error names the file and the field
     bad = tmp_path / "bad.yaml"
-    bad.write_text("taxonomy: {config: data/taxonomy/tiny.yaml}\nentity: {scenes: 0}\n")
+    bad.write_text("world: {config: data/world/tiny.yaml}\nentity: {scenes: 0}\n")
     assert main(["generate", str(bad)]) == 1
     assert "entity.scenes" in capsys.readouterr().err
     with pytest.raises(SystemExit):

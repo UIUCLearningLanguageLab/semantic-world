@@ -162,9 +162,10 @@ def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
         assert set(entry["lexemes"]) == found[gloss]
         assert entry["lexemes"] == sorted(entry["lexemes"], key=lambda x: int(x.split(".")[1]))
         assert all(gloss in request["takes"][pos[label]] for label in entry["lexemes"])
-    # the meanings: the taxonomy's categories_generative.csv, beside the request
+    # the meanings: the taxonomy's categories_generative.csv with the labels of the world,
+    # beside the request
     assert request["meanings"] == MEANINGS_FILE
-    assert before[MEANINGS_FILE] == (cases(name).folder / "categories_generative.csv").read_bytes()
+    assert before[MEANINGS_FILE] == cases(name).world.meanings_csv().encode("utf-8")
 
 
 def test_the_request_of_a_language_without_inflection(chains) -> None:
@@ -257,7 +258,7 @@ def test_generate_make_word_forms_and_render(chains, name, mode, sections) -> No
         assert words[form_of[lexeme.label]]["gloss"] == lexeme.gloss
     # category lexemes follow the assignment mode
     by_lexeme = {row["lexeme"]: row for row in assigned.iter_rows(named=True)}
-    categories = {c.label for c in corpus.planner.result.tree.categories}
+    categories = set(corpus.planner.world.categories)
     for lexeme in lexicon.content_lexemes:
         row = by_lexeme[lexeme.label]
         assert row["meaning"] == lexeme.concept and row["word"] == form_of[lexeme.label]
@@ -354,7 +355,7 @@ def test_marked_forms_are_inflected(chains) -> None:
     corpus, _, folder, forms, _ = chains("tiny", mode="branch_markers", **NUMBER)
     words = {row["label"]: row for row in pl.read_csv(forms / "words.csv").iter_rows(named=True)}
     lexicon = {row["label"]: row for row in pl.read_csv(folder / "lexicon.csv").iter_rows(named=True)}  # fmt: skip
-    categories = {c.label for c in corpus.planner.result.tree.categories}
+    categories = set(corpus.planner.world.categories)
     markers = pl.read_csv(forms / "assignment" / "markers.csv")
     assert markers.height == 2  # one for each top-level branch
     # the two markers differ in both phonemes, so the branches can be told apart when spoken
@@ -366,7 +367,7 @@ def test_marked_forms_are_inflected(chains) -> None:
         form = words[row["word"]]
         if row["concept"] in categories:
             assert form["kind"] == "marked" and words[form["stem"]]["kind"] == "content"
-            assert form["affix"] == marker_of[row["concept"].split(".")[0]]
+            assert form["affix"] == marker_of[".".join(row["concept"].split(".")[:2])]
         else:
             assert form["kind"] in ("content", "function")
     plurals = marked_plurals = 0
@@ -451,7 +452,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     printed = capsys.readouterr().out
     assert "rendered" in printed and "the word forms of corpus_tiny (seed 1)" in printed
     text = (out / "corpus.txt").read_text(encoding="utf-8")
-    assert "/L." not in text and len(text.split()) == 870
+    assert "/LEXEME." not in text and len(text.split()) == 974
     spellings = set(pl.read_csv(forms / "words.csv")["spelling"].to_list())
     assert set(text.split()) <= spellings
     # the word forms of tiny.yaml are too few for the tiny corpus, as the specification says
@@ -464,7 +465,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
 def test_the_word_form_configuration_for_the_default_corpus() -> None:
     """``data/wordforms/corpus_default.yaml`` has the default word-form settings, and its 500
     words are enough for the default corpus's lexemes."""
-    from semantic_world.corpus import Streams, build_lexicon, load_config, load_taxonomy
+    from semantic_world.corpus import Streams, build_lexicon, load_config, load_world
 
     data = yaml.safe_load(Path("data/wordforms/corpus_default.yaml").read_text(encoding="utf-8"))
     assert data["request"] == "runs/corpus/default_seed1/wordform_request.yaml"
@@ -476,7 +477,7 @@ def test_the_word_form_configuration_for_the_default_corpus() -> None:
     assert len(config.embeddings) == 5 and config.assignment == defaults.assignment
     corpus = load_config("data/corpus/default.yaml")
     assert (corpus.name, corpus.seed) == ("default", 1)  # the run folder that the request is in
-    lexicon = build_lexicon(corpus, load_taxonomy(corpus), Streams(corpus.seed))
+    lexicon = build_lexicon(corpus, load_world(corpus), Streams(corpus.seed))
     content = lexicon.content_lexemes
     assert len(content) == 173 <= config.wordforms.count
     assert sum(x.same_form_as is None for x in content) == 173

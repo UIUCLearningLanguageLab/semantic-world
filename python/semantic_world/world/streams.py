@@ -3,7 +3,8 @@
 The scheme is the taxonomy's (``semantic_world.taxonomy.streams``): a stream's seed is SHA-256
 of the master seed and the stream's full name. The world's streams are ``world:fluents``
 (fluent rules and initial rates), ``world:initial`` (initial values), ``world:preconditions``,
-``world:effects``, and ``world:stats``. Event types draw their requirements from the taxonomy's
+``world:effects``, ``world:stats`` (the statistics episodes), and ``world:episodes`` (``simulate``).
+Event types draw their requirements from the taxonomy's
 streams, through the embedded taxonomy run, so a world with fluents off reproduces the
 taxonomy's CAN rules and verbs for the same seed.
 """
@@ -15,7 +16,7 @@ import numpy as np
 from semantic_world.taxonomy.streams import stream_generator, stream_seed
 
 STREAM_PREFIX = "world:"
-STREAM_NAMES = ("fluents", "initial", "preconditions", "effects", "stats")
+STREAM_NAMES = ("fluents", "initial", "preconditions", "effects", "stats", "episodes")
 
 
 class WorldStreams:
@@ -26,6 +27,7 @@ class WorldStreams:
     preconditions: np.random.Generator
     effects: np.random.Generator
     stats: np.random.Generator
+    episodes: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed
