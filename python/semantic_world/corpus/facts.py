@@ -86,7 +86,13 @@ SKIP_REASONS = (
 
 _POSITIVE_OPTIONS = tuple((q, True) for q in POSITIVE_ORDER)
 _NEGATIVE_OPTIONS = tuple((q, q in (NEC_NO, NO)) for q in NEGATIVE_ORDER)
-CONCEPT_KIND = {"is": IS, "has": HAS, "event_unary": CAN, "event": VERB, "event_category": VERB}
+CONCEPT_KIND = {
+    "property": IS,
+    "part": HAS,
+    "event_unary": CAN,
+    "event": VERB,
+    "event_category": VERB,
+}
 
 
 class Facts:
@@ -113,8 +119,8 @@ class Facts:
 
         self.categories = of_type("category")
         self.features = {
-            IS: of_type("is"),
-            HAS: of_type("has"),
+            IS: of_type("property"),
+            HAS: of_type("part"),
             CAN: of_type("event_unary"),
         }
         self.projections = of_type("patient_projection")

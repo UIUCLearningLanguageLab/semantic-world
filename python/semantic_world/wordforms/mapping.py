@@ -38,7 +38,8 @@ import numpy as np
 
 from semantic_world.wordforms.augment import MISS_LEVELS, _achieved
 from semantic_world.wordforms.config import AcousticMappingConfig, Config
-from semantic_world.wordforms.synth import CACHE_VERSION, MAPPED_SUFFIX, Synthesis, Token
+from semantic_world.wordforms.labels import mapped_label
+from semantic_world.wordforms.synth import CACHE_VERSION, Synthesis, Token
 from semantic_world.wordforms.synth import audio as audio_tools
 
 MAPPING_VERSION = 2
@@ -151,7 +152,7 @@ def map_tokens(
                 mapped.append(
                     replace(
                         token,
-                        label=f"{token.label}{MAPPED_SUFFIX}",
+                        label=mapped_label(token.label),
                         duration=round(len(clip) / rate, 6),
                         cache_path=relative.as_posix(),
                         sha256=audio_tools.sha256_file(path),

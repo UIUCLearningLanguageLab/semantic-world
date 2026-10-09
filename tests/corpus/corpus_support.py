@@ -70,8 +70,8 @@ DEEP_TAXONOMY = """\
 name: deep
 seed: 3
 features:
-  is: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
-  has: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
+  property: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
+  part: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
   base_rate_heterogeneity: null
 rules: {max_chain_depth: 2}
 taxonomy: {superordinates: 3, depth: 2, branching: [2, 3]}
@@ -93,10 +93,10 @@ STILL_TAXONOMY = """\
 name: still
 seed: 2
 features:
-  is: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
-  has: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
+  property: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
+  part: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
   base_rate_heterogeneity: null
-rules: {input_type_weights: {is: 1, has: 1, scalar: 3}}
+rules: {input_type_weights: {property: 1, part: 1, scalar: 3}}
 taxonomy: {superordinates: 3, depth: 2, branching: 2}
 instances: {per_leaf: 4}
 scalars: {count: 1, drift: 0, instance_drift: 0}

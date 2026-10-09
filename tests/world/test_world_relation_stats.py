@@ -299,11 +299,15 @@ def test_thematic_relatedness(default: StaticWorld) -> None:
 
 
 def test_estimated_proportions_are_close_to_exact(default: StaticWorld) -> None:
+    # The same world as the default fixture (the default file's event-type tree), with the pair
+    # settings changed.
+    binary = load_config(DATA / "default.yaml").resolved()["event_types"]["binary"]
     estimated = statics_of(
         world_config(
             event_types={
                 "binary": {
-                    "pairs": {"sampled_true": 50, "sampled_false": 50, "max_exact_pairs": 20000}
+                    "taxonomy": binary["taxonomy"],
+                    "pairs": {"sampled_true": 50, "sampled_false": 50, "max_exact_pairs": 20000},
                 }
             }
         )

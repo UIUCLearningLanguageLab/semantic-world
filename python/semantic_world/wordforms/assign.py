@@ -33,6 +33,7 @@ import polars as pl
 import yaml
 
 from semantic_world.wordforms.generate import WordForm
+from semantic_world.wordforms.labels import marker_label
 
 NULL_SAMPLES = 1000
 """The number of random reassignments in the null distribution."""
@@ -594,7 +595,7 @@ def assign_branch_markers(
             if any(plain == r or same_after_schwa(plain, r) for r in reserved):
                 continue
             ipa = "".join(tables[0].phone(p) for p in phones)
-            marker = Affix(f"M.{number}", branch, position, phones, ipa)
+            marker = Affix(marker_label(number), branch, position, phones, ipa)
             fitting = []
             reserved_now: set[tuple[str, ...]] = set()
             for word in pool:

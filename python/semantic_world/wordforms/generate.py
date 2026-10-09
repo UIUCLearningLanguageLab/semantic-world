@@ -31,6 +31,7 @@ from semantic_world.wordforms.english import (
     rime_position_of,
     strip_stress,
 )
+from semantic_world.wordforms.labels import word_label
 from semantic_world.wordforms.phonemes import PhonemeTable, load_tables
 from semantic_world.wordforms.spelling import Speller
 
@@ -288,7 +289,7 @@ def generate_lexicon(
     accepted: list[tuple[str, ...]] = []
     rejections = Rejections()
     for index in range(settings.count):
-        label = f"W.{index + 1}"
+        label = word_label(index + 1)
         # The syllable count and the stress pattern are drawn once per word, so that rejections
         # do not skew their distributions.
         count = draw_syllable_count(rng, settings.syllables)

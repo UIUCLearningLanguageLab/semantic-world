@@ -20,6 +20,7 @@ import numpy as np
 from semantic_world.wordforms.config import Config
 from semantic_world.wordforms.english import English, load_english, strip_stress, zipf_frequencies
 from semantic_world.wordforms.generate import WordForm
+from semantic_world.wordforms.labels import word_label
 from semantic_world.wordforms.phonemes import load_tables
 from semantic_world.wordforms.streams import Streams
 
@@ -53,7 +54,7 @@ def real_word_forms(words: list[str], english: English) -> list[WordForm]:
         syllables = english.syllables[english.words[word][0]]
         forms.append(
             WordForm(
-                label=f"W.{i + 1}",
+                label=word_label(i + 1),
                 syllables=syllables,
                 real_word=True,
                 english_word=word,

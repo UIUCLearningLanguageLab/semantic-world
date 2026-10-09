@@ -36,8 +36,8 @@ DATA = REPO / "data" / "taxonomy"
 CATEGORY = "CATEGORY."
 CHAINED = {
     "features": {
-        "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-        "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+        "property": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+        "part": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
     },
     "rules": {"max_chain_depth": 3},
     "inheritance": {"proportion_defining": 0.3, "proportion_characteristic": 0.4},
@@ -280,8 +280,8 @@ def test_fixed_by_rule_matches_brute_force_on_tiny(seed: int) -> None:
         {
             **{
                 "features": {
-                    "is": {"count": 8, "expected_true_free": 2},
-                    "has": {"count": 8, "expected_true_free": 2},
+                    "property": {"count": 8, "expected_true_free": 2},
+                    "part": {"count": 8, "expected_true_free": 2},
                 }
             },
             "taxonomy": {"superordinates": 2, "depth": 2, "branching": 2},

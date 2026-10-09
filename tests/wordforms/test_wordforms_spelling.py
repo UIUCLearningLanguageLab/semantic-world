@@ -147,10 +147,10 @@ def test_colliding_spellings_get_numeric_suffixes(common_english, speller):
 
     # TH and DH are both written "th", so these three forms collide
     forms = [
-        WordForm("W.1", (Syllable(("TH",), ("IH1", "V")),), real_word=False),
-        WordForm("W.2", (Syllable(("DH",), ("IH1", "V")),), real_word=False),
-        WordForm("W.3", (Syllable(("B",), ("IH1", "V")),), real_word=False),
-        WordForm("W.4", (Syllable(("DH",), ("IH1", "V")),), real_word=False),
+        WordForm("WORD.1", (Syllable(("TH",), ("IH1", "V")),), real_word=False),
+        WordForm("WORD.2", (Syllable(("DH",), ("IH1", "V")),), real_word=False),
+        WordForm("WORD.3", (Syllable(("B",), ("IH1", "V")),), real_word=False),
+        WordForm("WORD.4", (Syllable(("DH",), ("IH1", "V")),), real_word=False),
     ]
     _add_statistics(forms, common_english, *load_tables(), speller)
     assert [w.spelling for w in forms] == ["thiv", "thiv2", "biv", "thiv3"]

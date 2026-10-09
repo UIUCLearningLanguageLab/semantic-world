@@ -159,7 +159,7 @@ def test_all_superordinate_pairs_lie_within_the_bound(seed: int) -> None:
 
 
 @pytest.mark.parametrize("metric", ["phi", "cosine", "jaccard"])
-@pytest.mark.parametrize("scope", ["free", "is_has", "all"])
+@pytest.mark.parametrize("scope", ["free", "property_part", "all"])
 def test_bound_holds_on_every_metric_and_scope(metric: str, scope: str) -> None:
     low, high = {"phi": (-0.2, 0.25), "cosine": (0.2, 0.6), "jaccard": (0.1, 0.4)}[metric]
     bound = {
@@ -177,10 +177,12 @@ def test_bound_holds_on_every_metric_and_scope(metric: str, scope: str) -> None:
     # Without CAN features, the is_has scope equals the all scope.
     columns = {
         "free": features.free_positions,
-        "is_has": np.array([f.position for f in features.features if f.type in ("is", "has")]),
+        "property_part": np.array(
+            [f.position for f in features.features if f.type in ("property", "part")]
+        ),
         "all": np.arange(len(features)),
     }[scope]
-    if scope == "is_has":
+    if scope == "property_part":
         assert np.array_equal(columns, np.arange(len(features)))
     rows = np.stack([c.values[columns] for c in tree.superordinates])
     sims = similarity_matrix(rows, metric)[np.triu_indices(4, k=1)]
@@ -356,10 +358,10 @@ def test_no_two_leaves_share_a_vector() -> None:
 
 FEW_FEATURES = {
     "features": {
-        "is": {"count": 2, "proportion_determined": 0, "expected_true_free": 1},
-        "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
+        "property": {"count": 2, "proportion_determined": 0, "expected_true_free": 1},
+        "part": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
     },
-    "rules": {"arity": {1: 1}, "input_type_weights": {"is": 1, "has": 0}},
+    "rules": {"arity": {1: 1}, "input_type_weights": {"property": 1, "part": 0}},
     "taxonomy": {"superordinates": 1, "depth": 2, "branching": 8},
     "superordinates": {"similarity_bound": None},
     "inheritance": {

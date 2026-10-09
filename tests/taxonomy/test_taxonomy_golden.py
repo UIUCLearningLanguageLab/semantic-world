@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from semantic_world.taxonomy import config_from_mapping, generate, load_config
+from semantic_world.taxonomy.config import RENAMED_TYPES, RENAMED_VALUES
 
 REPO = Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "taxonomy"
@@ -77,6 +78,17 @@ def old_settings(name: str, tmp_path: Path) -> dict[str, Any]:
     data["features"].pop("can", None)
     data["rules"].get("overrides", {}).pop("can", None)
     data.pop("verbs", None)
+    # The type names followed the labels in stage a6 (is -> property, has -> part).
+    data["features"] = {RENAMED_TYPES.get(k, k): v for k, v in data["features"].items()}
+    data["rules"]["input_type_weights"] = {
+        RENAMED_TYPES.get(k, k): v for k, v in data["rules"]["input_type_weights"].items()
+    }
+    data["rules"]["overrides"] = {
+        RENAMED_TYPES.get(k, k): v for k, v in data["rules"].get("overrides", {}).items()
+    }
+    bound = data["taxonomy"].get("similarity_bound")
+    if isinstance(bound, dict) and bound.get("scope") in RENAMED_VALUES:
+        bound["scope"] = RENAMED_VALUES[bound["scope"]]
     if data["rules"]["file"] is not None:
         rules = yaml.safe_load((DATA / "rules" / "example.yaml").read_text(encoding="utf-8"))
         # The committed example changed with the stage; the golden run used the old file.
@@ -118,6 +130,8 @@ def _relabeled(frame: pl.DataFrame, label_columns: tuple[str, ...]) -> pl.DataFr
     keep = [c for c in frame.columns if not is_can(c)]
     frame = frame.select(keep)
     frame.columns = [new_label(c) for c in frame.columns]
+    if "type" in frame.columns:  # the type names followed the labels in stage a6
+        frame = frame.with_columns(pl.col("type").replace(RENAMED_TYPES))
     return frame
 
 
@@ -219,9 +233,9 @@ def test_relabeled_outputs_equal_the_a5a_outputs_label_for_label(name: str, tmp_
         "superordinates",
     ):
         assert expected_summary[key] == summary[key], key
-    for key in ("is", "has"):
-        assert expected_summary["mean_true_features_per_instance"][key] == pytest.approx(
-            summary["mean_true_features_per_instance"][key]
+    for old, new in RENAMED_TYPES.items():
+        assert expected_summary["mean_true_features_per_instance"][old] == pytest.approx(
+            summary["mean_true_features_per_instance"][new]
         )
 
 

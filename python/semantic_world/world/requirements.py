@@ -24,7 +24,7 @@ from semantic_world.world.constraints import (
 from semantic_world.world.dynamics import ROLES
 from semantic_world.world.event_file import ExplicitEventType
 
-STATIC_TYPES = ("is", "has")
+STATIC_TYPES = ("property", "part")
 
 
 def _split_role(name: str, source: str, field: str) -> tuple[str, str]:

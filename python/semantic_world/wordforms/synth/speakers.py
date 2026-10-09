@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from semantic_world.wordforms.config import Config, _round_half_up
+from semantic_world.wordforms.labels import speaker_label
 from semantic_world.wordforms.streams import Streams
 
 
@@ -58,8 +59,8 @@ def held_out_count(count: int, proportion: float) -> int:
 def draw_speakers(
     config: Config, streams: Streams, piper_voice_speakers: int | None = None
 ) -> list[Speaker]:
-    """The speakers of a run, Piper's first and then espeak-ng's, labeled ``S.1``, ``S.2``, ...
-    ``piper_voice_speakers`` is the number of speakers in the Piper voice."""
+    """The speakers of a run, Piper's first and then espeak-ng's, labeled ``SPEAKER.1``,
+    ``SPEAKER.2``, ... ``piper_voice_speakers`` is the number of speakers in the Piper voice."""
     synthesis = config.synthesis
     drawn: list[dict[str, Any]] = []
     if synthesis.piper is not None:
@@ -100,7 +101,7 @@ def draw_speakers(
         held = _held_out(rng, settings.speakers, synthesis.held_out_speaker_proportion)
         for i, voice in enumerate(voices):
             drawn.append({**voice, "held_out": i in held})
-    return [Speaker(label=f"S.{i + 1}", **fields) for i, fields in enumerate(drawn)]
+    return [Speaker(label=speaker_label(i + 1), **fields) for i, fields in enumerate(drawn)]
 
 
 def _held_out(rng, count: int, proportion: float) -> set[int]:

@@ -40,11 +40,11 @@ def test_default_values() -> None:
     config = load_config(DATA / "default.yaml")
     assert config.seed == 1
     features = config.features
-    assert (features.is_.count, features.has.count) == (40, 40)
-    assert features.is_.determined_count == 10
-    assert features.is_.free_count == 30
-    assert features.base_rate("is") == pytest.approx(6 / 30)
-    assert features.base_rate("has") == pytest.approx(6 / 30)
+    assert (features.property.count, features.part.count) == (40, 40)
+    assert features.property.determined_count == 10
+    assert features.property.free_count == 30
+    assert features.base_rate("property") == pytest.approx(6 / 30)
+    assert features.base_rate("part") == pytest.approx(6 / 30)
     assert features.base_rate_override is None
     assert features.base_rate_heterogeneity == 2.0
     rules = config.rules
@@ -66,9 +66,9 @@ def test_default_values() -> None:
         "compositional",
     }
     assert rules.sampling.nesting_depth == {1: 0.5, 2: 0.5}
-    assert rules.sampling.input_types == ("is", "has")
+    assert rules.sampling.input_types == ("property", "part")
     assert rules.overrides == {}
-    assert rules.sampling_for("has") is rules.sampling
+    assert rules.sampling_for("part") is rules.sampling
     with pytest.raises(ValueError, match="not a feature type"):
         rules.sampling_for("can")
     assert rules.allow_duplicate_rules is False
@@ -96,10 +96,10 @@ def test_default_values() -> None:
 def test_tiny_values() -> None:
     config = load_config(DATA / "tiny.yaml")
     features = config.features
-    assert (features.is_.count, features.has.count) == (8, 8)
-    assert features.is_.determined_count == 2
-    assert features.is_.free_count == 6
-    assert features.base_rate("is") == pytest.approx(2 / 6)
+    assert (features.property.count, features.part.count) == (8, 8)
+    assert features.property.determined_count == 2
+    assert features.property.free_count == 6
+    assert features.base_rate("property") == pytest.approx(2 / 6)
     assert features.base_rate_heterogeneity is None  # set explicitly; the default is 2
     assert config.taxonomy.superordinates == 2
     assert config.taxonomy.depth == 2
@@ -175,13 +175,13 @@ def test_rule_file_path_is_relative_to_the_configuration_file(tmp_path: Path) ->
 
 def test_overrides_merge_over_the_base_settings() -> None:
     config = config_from_mapping(
-        {"rules": {"negation_probability": 0.5, "overrides": {"has": {"arity": {2: 1, 3: 1}}}}}
+        {"rules": {"negation_probability": 0.5, "overrides": {"part": {"arity": {2: 1, 3: 1}}}}}
     )
-    has = config.rules.sampling_for("has")
+    has = config.rules.sampling_for("part")
     assert has.arity == {2: 1, 3: 1}
     assert has.negation_probability == 0.5  # inherited from the base settings
-    assert config.rules.sampling_for("is").arity == {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
-    assert config.resolved()["rules"]["overrides"]["has"]["negation_probability"] == 0.5
+    assert config.rules.sampling_for("property").arity == {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
+    assert config.resolved()["rules"]["overrides"]["part"]["negation_probability"] == 0.5
 
 
 @pytest.mark.parametrize(
@@ -210,35 +210,63 @@ def test_keys_that_moved_to_the_world_name_their_new_place(
     assert str(info.value).startswith(f"old.yaml: {field}: ")
 
 
+@pytest.mark.parametrize(
+    ("data", "field", "new_name"),
+    [
+        ({"features": {"is": {"count": 4}}}, "features.is", "property"),
+        ({"features": {"has": {"count": 4}}}, "features.has", "part"),
+        ({"rules": {"input_type_weights": {"is": 1}}}, "rules.input_type_weights.is", "property"),
+        ({"rules": {"input_type_weights": {"has": 1}}}, "rules.input_type_weights.has", "part"),
+        ({"rules": {"overrides": {"is": {}}}}, "rules.overrides.is", "property"),
+        ({"rules": {"overrides": {"has": {}}}}, "rules.overrides.has", "part"),
+        (
+            {"superordinates": {"similarity_bound": {"scope": "is_has"}}},
+            "superordinates.similarity_bound.scope",
+            "property_part",
+        ),
+    ],
+)
+def test_the_old_type_names_fail_and_name_the_new_ones(
+    data: dict, field: str, new_name: str
+) -> None:
+    """Stage a6: the type names followed the labels (``is`` became ``property`` and ``has``
+    became ``part``) in the configuration keys and in the similarity-bound scope."""
+    with pytest.raises(ConfigError) as info:
+        config_from_mapping(data, source="old.yaml")
+    assert info.value.field == field
+    assert new_name in str(info.value) and "stage a6" in str(info.value)
+    assert str(info.value).startswith(f"old.yaml: {field}: ")
+
+
 def test_base_rate_override_replaces_expected_true_free() -> None:
     config = config_from_mapping(
-        {"features": {"is": {"expected_true_free": 100}, "base_rate_override": 0.4}}
+        {"features": {"property": {"expected_true_free": 100}, "base_rate_override": 0.4}}
     )
-    assert config.features.base_rate("is") == 0.4
-    assert config.features.base_rate("has") == 0.4
+    assert config.features.base_rate("property") == 0.4
+    assert config.features.base_rate("part") == 0.4
 
 
 def test_no_free_features_has_no_base_rate() -> None:
     config = config_from_mapping(
         {
             "features": {
-                "is": {"count": 4, "proportion_determined": 1.0},
-                "has": {"count": 4, "proportion_determined": 0.0, "expected_true_free": 2},
+                "property": {"count": 4, "proportion_determined": 1.0},
+                "part": {"count": 4, "proportion_determined": 0.0, "expected_true_free": 2},
             },
             "rules": {"arity": {1: 1, 2: 1, 3: 1, 4: 1}},
         }
     )
-    assert config.features.free_count("is") == 0
-    assert config.features.base_rate("is") is None
-    assert config.features.base_rate("has") == pytest.approx(0.5)
+    assert config.features.free_count("property") == 0
+    assert config.features.base_rate("property") is None
+    assert config.features.base_rate("part") == pytest.approx(0.5)
 
 
 def test_no_determined_features_allows_zero_chain_depth() -> None:
     config = config_from_mapping(
         {
             "features": {
-                "is": {"proportion_determined": 0},
-                "has": {"proportion_determined": 0},
+                "property": {"proportion_determined": 0},
+                "part": {"proportion_determined": 0},
             },
             "rules": {"max_chain_depth": 0},
         }
@@ -291,27 +319,27 @@ def _many(*patches: Callable[[dict], None]) -> Callable[[dict], None]:
 
 BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
     ("unknown top-level key", _set("colour", 1), "colour"),
-    ("unknown nested key", _set("features.is.colour", 1), "features.is.colour"),
+    ("unknown nested key", _set("features.property.colour", 1), "features.property.colour"),
     ("null section", _set("features", None), "features"),
     ("section is a list", _set("features", []), "features"),
     ("empty name", _set("name", ""), "name"),
     ("negative seed", _set("seed", -1), "seed"),
     ("seed too large", _set("seed", 2**64), "seed"),
     ("fractional seed", _set("seed", 1.5), "seed"),
-    ("negative count", _set("features.is.count", -1), "features.is.count"),
-    ("fractional count", _set("features.is.count", 2.5), "features.is.count"),
-    ("boolean count", _set("features.is.count", True), "features.is.count"),
-    ("string count", _set("features.is.count", "40"), "features.is.count"),
+    ("negative count", _set("features.property.count", -1), "features.property.count"),
+    ("fractional count", _set("features.property.count", 2.5), "features.property.count"),
+    ("boolean count", _set("features.property.count", True), "features.property.count"),
+    ("string count", _set("features.property.count", "40"), "features.property.count"),
     ("CAN features moved to the world", _set("features.can", {"count": 4}), "features.can"),
     (
         "proportion above 1",
-        _set("features.is.proportion_determined", 1.5),
-        "features.is.proportion_determined",
+        _set("features.property.proportion_determined", 1.5),
+        "features.property.proportion_determined",
     ),
     (
         "expected true above free count",
-        _set("features.has.expected_true_free", 31),
-        "features.has.expected_true_free",
+        _set("features.part.expected_true_free", 31),
+        "features.part.expected_true_free",
     ),
     (
         "base rate override above 1",
@@ -349,7 +377,7 @@ BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
     ("unknown SHJ type", _set("rules.arity_3_families", {"VII": 1}), "rules.arity_3_families.VII"),
     (
         "no input types",
-        _set("rules.input_type_weights", {"is": 0, "has": 0}),
+        _set("rules.input_type_weights", {"property": 0, "part": 0}),
         "rules.input_type_weights",
     ),
     (
@@ -359,13 +387,13 @@ BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
     ),
     (
         "override arity larger than the free pool",
-        _set("rules.overrides", {"has": {"arity": {61: 1}}}),
-        "rules.overrides.has.arity",
+        _set("rules.overrides", {"part": {"arity": {61: 1}}}),
+        "rules.overrides.part.arity",
     ),
     (
         "unknown override key",
-        _set("rules.overrides", {"has": {"colour": 1}}),
-        "rules.overrides.has.colour",
+        _set("rules.overrides", {"part": {"colour": 1}}),
+        "rules.overrides.part.colour",
     ),
     (
         "CAN overrides moved to the world",

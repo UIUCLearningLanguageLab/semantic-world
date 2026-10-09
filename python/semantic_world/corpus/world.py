@@ -68,7 +68,11 @@ EVENT_TYPE1_KIND = "event_type1"
 FEATURE_KINDS = (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND)
 """The kinds of the world's feature table: a PROPERTY feature, a PART feature, and a one-place
 event type (whose column is the capacity to be its agent)."""
-_KIND_OF_TYPE = {"is": PROPERTY_KIND, "has": PART_KIND, EVENT_TYPE1_TYPE: EVENT_TYPE1_KIND}
+_KIND_OF_TYPE = {
+    "property": PROPERTY_KIND,
+    "part": PART_KIND,
+    EVENT_TYPE1_TYPE: EVENT_TYPE1_KIND,
+}
 
 EXACT = "exact"
 """The fixed test, by enumerating the cone: exact."""

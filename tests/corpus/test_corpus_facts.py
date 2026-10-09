@@ -296,7 +296,7 @@ def test_event_type_categories_are_stated_in_capacity_sentences(cases) -> None:
     facts = case.facts()
     event_types = case.world.event_types
     general = [v for v in facts.verbs if event_types[v].category]
-    assert len(general) == 3 and len(facts.verbs) == 10
+    assert len(general) == 5 and len(facts.verbs) == 25
     for category in ("CATEGORY.1", "CATEGORY.2.1"):
         stated = {
             f.predicate.label for f in facts.class_facts(category) if f.predicate.kind == VERB
@@ -339,7 +339,7 @@ def test_instance_predicates(cases) -> None:
 def test_only_named_concepts_take_part(cases) -> None:
     case = cases("default")
     proportions = dict.fromkeys(
-        ("category", "is", "has", "event_unary", "event", "event_category", "scalar"), 0.5
+        ("category", "property", "part", "event_unary", "event", "event_category", "scalar"), 0.5
     )
     facts = case.facts(lexicon={"named_proportion": proportions})
     everything = case.facts()

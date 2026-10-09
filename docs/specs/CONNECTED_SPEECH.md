@@ -136,6 +136,8 @@ The levers that act on vowels, stressed syllables, and phrase ends need phoneme 
 
 ## Labels
 
+**Note (stage a6 of `WORLD_AND_LANGUAGE.md`, October 9, 2026).** The labels below predate the world-and-language refactor. When this layer is built, it takes the labels of that specification's "Labels" section: `UTTERANCE.<n>.SPEAKER.<m>` for `U.<n>.S.<m>`, `DOC.<n>.SENT.<k>.SPEAKER.<m>` for `D.<n>.<k>.S.<m>`, and the word-form labels of stage a6 (`WORD.<n>`, `SPEAKER.<n>`, `FUNCWORD.<n>`, `AFFIX.<n>`) wherever this document names a word form or a speaker. The word occurrence's label is not in that table and takes the same style when the layer is built. The table below keeps the old labels, as the record of the plan.
+
 | Object | Label | Example |
 | --- | --- | --- |
 | Utterance from random sequences | `U.<n>.S.<m>` | `U.40.S.3` |

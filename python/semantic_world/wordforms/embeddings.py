@@ -38,7 +38,8 @@ from semantic_world.wordforms.config import (
 from semantic_world.wordforms.encoders.fixed import FixedEncoder, Projection, fit_pca
 from semantic_world.wordforms.frontends import FrontendStore, make_frontends
 from semantic_world.wordforms.generate import WordForm
-from semantic_world.wordforms.synth import MAPPED_SUFFIX, Synthesis
+from semantic_world.wordforms.labels import token_number
+from semantic_world.wordforms.synth import Synthesis
 from semantic_world.wordforms.synth import audio as audio_tools
 from semantic_world.wordforms.synth.speakers import Speaker
 
@@ -496,7 +497,7 @@ class SoundEmbeddings:
         # source's number); augmented tokens are not a form's own recording, so ``embed`` never
         # returns them
         self._stored = {
-            (word, speaker, int(label.removesuffix(MAPPED_SUFFIX).rsplit(".", 1)[1])): i
+            (word, speaker, token_number(label)): i
             for i, (label, word, speaker) in enumerate(
                 self.token_table.select("label", "word", "speaker").iter_rows()
             )

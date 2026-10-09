@@ -27,6 +27,8 @@ Out of scope:
 
 ## Labels
 
+**Note (stage a6 of `WORLD_AND_LANGUAGE.md`, October 9, 2026).** The labels below are the ones this pipeline was built with. Stage a6 of the world-and-language refactor replaced them with the readable labels of that specification's "Labels" section: `WORD.<n>` for `W.<n>`, `SPEAKER.<n>` for `S.<n>`, `WORD.<n>.SPEAKER.<m>.TOKEN.<k>` for `W.<n>.S.<m>.<k>`, `FUNCWORD.<n>` for `F.<n>`, `AFFIX.<n>` for `AF.<n>`, `WORD.<n>.AFFIX.<m>` for `W.<n>.AF.<m>`, `MARKER.<k>` for `M.<k>`, `WORD.<n>.MARKER.<k>` for `W.<n>.M.<k>`, and `WORD.<n>.MARKER.<k>.AFFIX.<m>` for `W.<n>.M.<k>.AF.<m>`. The tokens of function words and inflected forms extend their labels the same way (`FUNCWORD.2.SPEAKER.3.TOKEN.1`). An augmented token is `<source token>.AUGMENTED.<recipe number>` in place of `.A.<recipe number>`, and a mapped token `<source token>.MAPPED` in place of `.M`. The rest of this document keeps the old labels, as the record of what was built.
+
 Labels follow the taxonomy generator's convention: formal labels, indices starting at 1, and periods between indices.
 
 | Object | Label | Example |

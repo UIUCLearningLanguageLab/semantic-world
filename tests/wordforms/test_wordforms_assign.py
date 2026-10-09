@@ -468,12 +468,12 @@ def test_branch_marker_run_writes_the_marked_forms_and_synthesizes_them(tmp_path
     run.synthesis = synthesize_lexicon(
         config, run.streams, run.lexicon.words, engines={"espeak": ToneEngine()}, check=False
     )
-    marked = [t for t in run.synthesis.tokens if ".M." in t.word]
-    assert len(marked) == 12 * 3 and run.synthesis.tokens[0].word == "W.1"
+    marked = [t for t in run.synthesis.tokens if ".MARKER." in t.word]
+    assert len(marked) == 12 * 3 and run.synthesis.tokens[0].word == "WORD.1"
     folder = run.write(tmp_path / "run")
     words = pl.read_csv(folder / "words.csv")
     assert words.filter(pl.col("kind") == "marked").height == 12
-    assert words.filter(pl.col("kind") == "marked")["stem"].str.starts_with("W.").all()
+    assert words.filter(pl.col("kind") == "marked")["stem"].str.starts_with("WORD.").all()
     lexicon = pl.read_csv(folder / "assignment" / "lexicon.csv")
     assert lexicon.columns == [
         "meaning",
@@ -484,9 +484,9 @@ def test_branch_marker_run_writes_the_marked_forms_and_synthesizes_them(tmp_path
         "branch",
         "marker",
     ]
-    assert lexicon["word"].str.contains(".M.", literal=True).all()
+    assert lexicon["word"].str.contains(".MARKER.", literal=True).all()
     markers = pl.read_csv(folder / "assignment" / "markers.csv")
-    assert markers["label"].to_list() == ["M.1", "M.2", "M.3"]
+    assert markers["label"].to_list() == ["MARKER.1", "MARKER.2", "MARKER.3"]
     assert (
         markers["branch"].to_list() == ["CATEGORY.1", "CATEGORY.2", "CATEGORY.3"]
         and markers["position"].to_list() == ["prefix"] * 3
@@ -650,7 +650,7 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
         record = json.loads(token.mapping)
         achieved = json.loads(token.achieved)
         source = originals[record["source"]]
-        assert token.label == f"{source.label}.M" and set(record) == {
+        assert token.label == f"{source.label}.MAPPED" and set(record) == {
             "source",
             "meaning",
             "mappings",
@@ -744,8 +744,8 @@ def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(
     by_label = {t.label: t for t in tokens}
     sources = [by_label[json.loads(t.augmentation)["source"]] for t in tokens if t.augmentation]
     assert len(sources) == 90 and all(source.clean for source in sources)
-    assert sum(source.label.endswith(".M") for source in sources) == 36
-    assert sum(t.label.endswith(".M.A.1") for t in tokens) == 36
+    assert sum(source.label.endswith(".MAPPED") for source in sources) == 36
+    assert sum(t.label.endswith(".MAPPED.AUGMENTED.1") for t in tokens) == 36
 
     # word embeddings: the mapped tokens make a mapped word's embedding
     run.frontends = compute_frontends(config, synthesis, tmp_path / "run")
@@ -810,7 +810,7 @@ def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(
     embedded = sounds.embed([word.arpabet], speakers)
     for j, speaker in enumerate(speakers):
         stored = sounds._stored[(word.label, speaker, 1)]
-        assert sounds.token_table["label"][stored] == f"{word.label}.{speaker}.1.M"
+        assert sounds.token_table["label"][stored] == f"{word.label}.{speaker}.TOKEN.1.MAPPED"
         assert np.allclose(embedded[0, j], sounds.tokens[stored], atol=1e-5)
     # the run folder labels both sets
     table = pl.read_csv(folder / "tokens.csv")
@@ -818,7 +818,7 @@ def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(
         table["control"].sum() == 36
         and table.filter(pl.col("mapping").fill_null("") != "").height == 72
     )
-    assert table.filter(pl.col("control"))["label"].str.ends_with(".M").sum() == 0
+    assert table.filter(pl.col("control"))["label"].str.ends_with(".MAPPED").sum() == 0
     summary = yaml.safe_load((folder / "summary.yaml").read_text())["synthesis"]
     assert summary["mapped_tokens"] == summary["control_tokens"] == 36
 
@@ -897,7 +897,7 @@ def test_all_with_acoustic_mapping_on_the_tiny_configuration(tmp_path, capsys):
     assert by["pitch"]["feature_correlation"] > 0.99
     assert "72 mapped tokens are their words' tokens; their 72 unmapped originals" in text
     tokens = pl.read_csv(out / "tokens.csv")
-    mapped = tokens.filter(pl.col("label").str.ends_with(".M"))
+    mapped = tokens.filter(pl.col("label").str.ends_with(".MAPPED"))
     assert mapped.height == summary["acoustic_mapping"]["mapped_tokens"] == 72
     assert json.loads(mapped["achieved"][0]) and json.loads(mapped["mapping"][0])["source"]
     assert not mapped["control"].any() and tokens["control"].sum() == 72

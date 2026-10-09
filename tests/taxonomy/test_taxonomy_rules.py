@@ -34,8 +34,8 @@ DATA = REPO / "data" / "taxonomy"
 EQUAL_RATES = {"base_rate_heterogeneity": None}
 CHAINED = {
     "features": {
-        "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-        "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+        "property": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+        "part": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
     },
     "rules": {"max_chain_depth": 3},
 }
@@ -87,7 +87,9 @@ def test_layers_are_split_evenly_lowest_first() -> None:
         features = build_features(config, Streams(seed))
         sizes = tuple(len(features.layer(k)) for k in (1, 2, 3))
         sizes_seen.add(sizes)
-        type_splits.add(tuple(sum(f.type == "is" for f in features.layer(k)) for k in (1, 2, 3)))
+        type_splits.add(
+            tuple(sum(f.type == "property" for f in features.layer(k)) for k in (1, 2, 3))
+        )
         # Determined features are numbered in layer order within each type.
         for t in ("PROPERTY", "PART"):
             layers = [features[f"{t}.{i}"].layer for i in range(11, 21)]
@@ -103,8 +105,8 @@ def test_empty_layers_warn() -> None:
     config = config_from_mapping(
         {
             "features": {
-                "is": {"count": 4, "proportion_determined": 0.25, "expected_true_free": 1},
-                "has": {"count": 4, "proportion_determined": 0.0, "expected_true_free": 1},
+                "property": {"count": 4, "proportion_determined": 0.25, "expected_true_free": 1},
+                "part": {"count": 4, "proportion_determined": 0.0, "expected_true_free": 1},
             },
             "rules": {"max_chain_depth": 3},
         }
@@ -155,10 +157,10 @@ def _check_graph(rules: RuleSet) -> None:
     for rule in rules.rules:
         for f in rule.inputs:
             assert f.label in known, f"{rule.output.label} reads {f.label} before it is computed"
-            assert f.type in ("is", "has")
+            assert f.type in ("property", "part")
             assert f.label.startswith(("PROPERTY.", "PART."))
         assert len(set(rule.inputs)) == rule.arity
-        assert rule.output.type in ("is", "has")
+        assert rule.output.type in ("property", "part")
         k = rule.output.layer
         assert all(f.layer < k for f in rule.inputs)
         assert any(f.layer == k - 1 for f in rule.inputs)
@@ -192,11 +194,11 @@ def test_chain_depth_is_real() -> None:
 TINY_POOL = {
     # Three free PROPERTY features feed six determined ones, with literal rules only.
     "features": {
-        "is": {"count": 9, "proportion_determined": 6 / 9, "expected_true_free": 1},
-        "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
+        "property": {"count": 9, "proportion_determined": 6 / 9, "expected_true_free": 1},
+        "part": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
         **EQUAL_RATES,
     },
-    "rules": {"arity": {1: 1}, "input_type_weights": {"is": 1, "has": 0}},
+    "rules": {"arity": {1: 1}, "input_type_weights": {"property": 1, "part": 0}},
 }
 
 
@@ -216,7 +218,7 @@ def test_duplicates_exhaust_the_pool_or_are_allowed() -> None:
         TINY_POOL,
         features={
             **TINY_POOL["features"],
-            "is": {"count": 10, "proportion_determined": 0.7, "expected_true_free": 1},
+            "property": {"count": 10, "proportion_determined": 0.7, "expected_true_free": 1},
         },
     )
     with pytest.raises(GenerationError, match=r"PROPERTY\.10.*duplicated"):
@@ -362,8 +364,8 @@ def test_rules_are_deterministic_and_use_only_the_rules_stream() -> None:
 AND_OF_FOUR = {
     # Ten free PROPERTY features at rate 0.5 feed twenty determined ones, each an AND of four.
     "features": {
-        "is": {"count": 30, "proportion_determined": 2 / 3, "expected_true_free": 5},
-        "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
+        "property": {"count": 30, "proportion_determined": 2 / 3, "expected_true_free": 5},
+        "part": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
         "base_rate_override": 0.5,
         **EQUAL_RATES,
     },
@@ -372,7 +374,7 @@ AND_OF_FOUR = {
         "operator_mix": {"AND": 1},
         "nesting_depth": {1: 1},
         "negation_probability": 0,
-        "input_type_weights": {"is": 1, "has": 0},
+        "input_type_weights": {"property": 1, "part": 0},
     },
 }
 
@@ -428,8 +430,8 @@ def test_example_rule_file_loads() -> None:
         "compositional",
     ]
     assert rule_file.templates[1].operator == "XOR" and rule_file.templates[1].arity == 2
-    assert rule_file.templates[3].applies_to == ("has",)
-    assert rule_file.templates[2].applies_to == ("is", "has")
+    assert rule_file.templates[3].applies_to == ("part",)
+    assert rule_file.templates[2].applies_to == ("property", "part")
     assert rule_file.templates[4].operators == {"AND": 1, "OR": 1}
     assert rule_file.templates[4].nesting_depth == {2: 1.0}
     assert len(rule_file.explicit) == 1
@@ -454,7 +456,7 @@ def test_rules_from_the_example_rule_file(seed: int) -> None:
         elif rule.family == "shj":
             assert rule.shj_type in ("IV", "VI")
             if rule.shj_type == "VI":
-                assert rule.output.type == "has"
+                assert rule.output.type == "part"
         elif rule.family == "compositional":
             assert rule.arity == 4 and 1 <= rule.nesting_depth <= 2
             assert "XOR" not in str(rule.expression)
@@ -570,7 +572,7 @@ def test_duplicate_explicit_rules_are_rejected(tmp_path: Path) -> None:
             "templates[0].applies_to",
         ),
         (
-            {"templates": [{"family": "literal", "weight": 1, "applies_to": ["is", "can"]}]},
+            {"templates": [{"family": "literal", "weight": 1, "applies_to": ["property", "can"]}]},
             "templates[0].applies_to",
         ),
         (
@@ -598,6 +600,20 @@ def test_can_rules_in_a_rule_file_name_the_event_file(
     assert error.value.field == field
     assert "event_types.event_file" in str(error.value)
     assert str(error.value).startswith(f"{path}: {field}: ")
+
+
+@pytest.mark.parametrize(
+    ("value", "new_name"), [("is", "property"), ("has", "part"), (["property", "has"], "part")]
+)
+def test_old_type_names_in_applies_to_name_the_new_ones(value, new_name: str, tmp_path: Path):
+    """Stage a6: ``applies_to`` takes ``property`` and ``part``; the old names are errors."""
+    path = tmp_path / "rules.yaml"
+    rule_file = {"templates": [{"family": "literal", "weight": 1, "applies_to": value}]}
+    path.write_text(yaml.safe_dump(rule_file, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ConfigError) as error:
+        load_rule_file(path)
+    assert error.value.field == "templates[0].applies_to"
+    assert new_name in str(error.value) and "stage a6" in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -670,7 +686,7 @@ def test_every_output_type_needs_a_template_or_an_explicit_rule(tmp_path: Path) 
     config = _rule_file_config(
         tmp_path,
         {},
-        {"templates": [{"family": "literal", "weight": 1, "applies_to": "is"}]},
+        {"templates": [{"family": "literal", "weight": 1, "applies_to": "property"}]},
     )
     with pytest.raises(ConfigError, match="PART features") as error:
         make(config)

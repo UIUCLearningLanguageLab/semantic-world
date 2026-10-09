@@ -46,8 +46,8 @@ def test_scalar_defaults_keep_scalars_off() -> None:
     assert config.scalars.threshold_quantiles == (0.2, 0.8)
     assert config.scalars.thermometer_bins == 0
     assert config.scalars.labels == ()
-    assert config.rules.sampling.input_type_weights == {"is": 1, "has": 1, "scalar": 1}
-    assert config.rules.sampling.input_types == ("is", "has")
+    assert config.rules.sampling.input_type_weights == {"property": 1, "part": 1, "scalar": 1}
+    assert config.rules.sampling.input_types == ("property", "part")
     assert config.rules.sampling.scalar_weight == 1
     resolved = config.resolved()
     assert resolved["scalars"] == {
@@ -84,10 +84,10 @@ def test_scalar_settings_load_and_resolve() -> None:
 
 
 def test_scalar_input_type_weight_defaults_to_one() -> None:
-    config = config_from_mapping({"rules": {"input_type_weights": {"is": 1, "has": 0}}})
-    assert config.rules.sampling.input_type_weights == {"is": 1, "has": 0, "scalar": 1}
+    config = config_from_mapping({"rules": {"input_type_weights": {"property": 1, "part": 0}}})
+    assert config.rules.sampling.input_type_weights == {"property": 1, "part": 0, "scalar": 1}
     config = config_from_mapping(
-        {"rules": {"input_type_weights": {"is": 2, "has": 1, "scalar": 0}}}
+        {"rules": {"input_type_weights": {"property": 2, "part": 1, "scalar": 0}}}
     )
     assert config.rules.sampling.scalar_weight == 0
 
@@ -107,10 +107,13 @@ def test_scalar_input_type_weight_defaults_to_one() -> None:
         ({"scalars": {"thermometer_bins": -2}}, "scalars.thermometer_bins"),
         ({"scalars": {"colour": 1}}, "scalars.colour"),
         (
-            {"rules": {"input_type_weights": {"is": 0, "has": 0, "scalar": 1}}},
+            {"rules": {"input_type_weights": {"property": 0, "part": 0, "scalar": 1}}},
             "rules.input_type_weights",
         ),
-        ({"rules": {"input_type_weights": {"is": 1, "isa": 1}}}, "rules.input_type_weights.isa"),
+        (
+            {"rules": {"input_type_weights": {"property": 1, "isa": 1}}},
+            "rules.input_type_weights.isa",
+        ),
     ],
 )
 def test_broken_scalar_settings_name_the_field(overrides: dict, field: str) -> None:
@@ -232,7 +235,7 @@ def _full_snapshot(result) -> tuple:
     )
 
 
-NO_THRESHOLDS = {"input_type_weights": {"is": 1, "has": 1, "scalar": 0}}
+NO_THRESHOLDS = {"input_type_weights": {"property": 1, "part": 1, "scalar": 0}}
 
 
 def test_free_binary_features_are_unchanged_when_only_scalar_settings_change() -> None:

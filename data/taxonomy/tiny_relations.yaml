@@ -5,8 +5,8 @@ name: tiny_relations
 seed: 1
 
 features:
-  is:  {count: 8, proportion_determined: 0.25, expected_true_free: 2}
-  has: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  property:  {count: 8, proportion_determined: 0.25, expected_true_free: 2}
+  part: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
   base_rate_heterogeneity: null  # equal base rates: with 6 free features of a type, heterogeneous rates can leave a
                                  # superordinate with no true feature, which the similarity bound cannot place
 

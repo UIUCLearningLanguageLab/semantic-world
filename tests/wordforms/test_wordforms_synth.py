@@ -241,7 +241,7 @@ def test_flac_round_trip(tmp_path):
 
 def test_default_speakers(default_config):
     speakers = draw_speakers(default_config, Streams(1), piper_voice_speakers=904)
-    assert [s.label for s in speakers] == [f"S.{i}" for i in range(1, 46)]
+    assert [s.label for s in speakers] == [f"SPEAKER.{i}" for i in range(1, 46)]
     piper = [s for s in speakers if s.engine == "piper"]
     espeak = [s for s in speakers if s.engine == "espeak"]
     assert speakers == piper + espeak and len(piper) == 40 and len(espeak) == 5
@@ -268,7 +268,7 @@ def test_speakers_are_seeded_and_engines_are_independent(default_config):
     no_piper = parse_config({"synthesis": {"engines": {"piper": None, "espeak": {}}}}, "x")
     c = draw_speakers(no_piper, Streams(1))
     assert [s.identity for s in c] == [s.identity for s in a if s.engine == "espeak"]
-    assert [s.label for s in c] == ["S.1", "S.2", "S.3", "S.4", "S.5"]
+    assert [s.label for s in c] == ["SPEAKER.1", "SPEAKER.2", "SPEAKER.3", "SPEAKER.4", "SPEAKER.5"]
 
 
 def test_speaker_errors_and_held_out_counts(default_config):
@@ -308,7 +308,7 @@ def test_token_perturbations_are_small_seeded_and_stable(tmp_path):
     assert again == token_perturbation(config, streams, words[2], speakers[1], 2)
     assert again != token_perturbation(config, Streams(9), words[2], speakers[1], 2)
     # the label of a speaker does not matter, only the voice
-    relabeled = Speaker(**{**speakers[1].__dict__, "label": "S.99"})
+    relabeled = Speaker(**{**speakers[1].__dict__, "label": "SPEAKER.99"})
     assert token_perturbation(config, streams, words[2], relabeled, 2) == again
     still = parse_config(
         {"synthesis": {"token_perturbation": {"rate": 0, "pitch_semitones": 0}}}, "x"
@@ -360,7 +360,11 @@ def test_run_with_a_stand_in_engine(tmp_path):
     assert len(synthesis.tokens) == 6 * 3 * 2
     assert synthesis.synthesized == 36 and synthesis.cached == 0
     labels = [t.label for t in synthesis.tokens]
-    assert labels[:3] == ["W.1.S.1.1", "W.1.S.1.2", "W.1.S.2.1"] and labels[-1] == "W.6.S.3.2"
+    assert (
+        labels[:3]
+        == ["WORD.1.SPEAKER.1.TOKEN.1", "WORD.1.SPEAKER.1.TOKEN.2", "WORD.1.SPEAKER.2.TOKEN.1"]
+        and labels[-1] == "WORD.6.SPEAKER.3.TOKEN.2"
+    )
     assert len({t.cache_path for t in synthesis.tokens}) == 36
     check_clips(synthesis, config)
     # the rate perturbation changes the duration
@@ -479,7 +483,7 @@ def stretch_run(tmp_path, long_tries, **duration_check):
     synthesis = synthesize_lexicon(
         config, run.streams, run.lexicon.words, engines={"espeak": engine}, check=False
     )
-    target = [t for t in synthesis.tokens if t.word == word.label and t.speaker == "S.1"]
+    target = [t for t in synthesis.tokens if t.word == word.label and t.speaker == "SPEAKER.1"]
     others = [t for t in synthesis.tokens if t not in target]
     return config, run, engine, synthesis, target, others
 
@@ -499,7 +503,11 @@ def test_a_long_clip_is_synthesized_again(tmp_path):
     assert check == {"retried": 2, "still_over_limit": 0, "tries": {"1": 34, "2": 2}}
     check_clips(synthesis, config)
     # the labels and the order of the tokens are unchanged
-    assert [t.label for t in synthesis.tokens][:3] == ["W.1.S.1.1", "W.1.S.1.2", "W.1.S.2.1"]
+    assert [t.label for t in synthesis.tokens][:3] == [
+        "WORD.1.SPEAKER.1.TOKEN.1",
+        "WORD.1.SPEAKER.1.TOKEN.2",
+        "WORD.1.SPEAKER.2.TOKEN.1",
+    ]
     # a second run takes every try from the cache and makes the same choices
     again = synthesize_lexicon(
         config, Streams(config.seed), run.lexicon.words, engines={"espeak": engine}, check=False
@@ -563,23 +571,23 @@ def test_long_synthesis_flags_words_that_piper_stretches(tmp_path):
     def tokens(engine, long_word):
         result = []
         for i, word in enumerate(words):
-            for k, speaker in enumerate(("S.1", "S.2", "S.3")):
+            for k, speaker in enumerate(("SPEAKER.1", "SPEAKER.2", "SPEAKER.3")):
                 duration = 0.5 + 0.01 * i + 0.02 * k
                 if word.label == long_word:
-                    duration *= 2 if speaker != "S.3" else 1  # long for most speakers
+                    duration *= 2 if speaker != "SPEAKER.3" else 1  # long for most speakers
                 result.append(
                     Token(f"{word.label}.{speaker}.1", word.label, speaker, engine, "", {}, 1.0,
                           0.0, duration, "", "")
                 )  # fmt: skip
         return result
 
-    synthesis = Synthesis(Path("."), RATE, [], tokens("piper", "W.4"))
+    synthesis = Synthesis(Path("."), RATE, [], tokens("piper", "WORD.4"))
     flag_long_synthesis(config, words, synthesis)
-    assert [w.label for w in words if w.long_synthesis] == ["W.4"]
-    assert all(w.long_synthesis is False for w in words if w.label != "W.4")
+    assert [w.label for w in words if w.long_synthesis] == ["WORD.4"]
+    assert all(w.long_synthesis is False for w in words if w.label != "WORD.4")
     record = synthesis.long_synthesis
-    assert record["ratio"] == 1.6 and list(record["flagged"]) == ["W.4"]
-    assert record["flagged"]["W.4"]["ratio"] > 1.6
+    assert record["ratio"] == 1.6 and list(record["flagged"]) == ["WORD.4"]
+    assert record["flagged"]["WORD.4"]["ratio"] > 1.6
     assert list(record["median_seconds_by_syllables"]) == [2]
     assert synthesis.summary()["long_synthesis"] == record
     # a looser rule flags nothing
@@ -592,7 +600,7 @@ def test_long_synthesis_flags_words_that_piper_stretches(tmp_path):
     # without Piper tokens, or without a ratio, the flag stays unset
     for word in words:
         word.long_synthesis = None
-    flag_long_synthesis(config, words, Synthesis(Path("."), RATE, [], tokens("espeak", "W.4")))
+    flag_long_synthesis(config, words, Synthesis(Path("."), RATE, [], tokens("espeak", "WORD.4")))
     assert all(w.long_synthesis is None for w in words)
     data["synthesis"]["long_synthesis_ratio"] = None
     flag_long_synthesis(parse_config(data, "x"), words, synthesis)
@@ -609,7 +617,7 @@ def test_a_silent_clip_is_an_error_that_names_the_token(tmp_path):
 
     config = espeak_only(tmp_path)
     run = run_forms(config)
-    with pytest.raises(audio_tools.AudioError, match=r"W\.1\.S\.1\.1 .*silent"):
+    with pytest.raises(audio_tools.AudioError, match=r"WORD\.1\.SPEAKER\.1\.TOKEN\.1 .*silent"):
         synthesize_lexicon(
             config, run.streams, run.lexicon.words, engines={"espeak": SilentEngine()}, check=False
         )
@@ -640,10 +648,10 @@ def test_run_folder_with_synthesis(tmp_path):
     assert pl.read_csv(folder / "words.csv")["long_synthesis"].null_count() == 6
     tokens = pl.read_csv(folder / "tokens.csv")
     assert tokens.columns == list(TOKEN_COLUMNS) and tokens.height == 36
-    assert tokens["label"][0] == "W.1.S.1.1"
+    assert tokens["label"][0] == "WORD.1.SPEAKER.1.TOKEN.1"
     assert tokens["tries"].to_list() == [1] * 36
     assert tokens["rms_db"].max() <= -23.9 and tokens["peak"].max() <= 0.9
-    assert set(tokens["word"]) == {f"W.{i}" for i in range(1, 7)}
+    assert set(tokens["word"]) == {f"WORD.{i}" for i in range(1, 7)}
     assert yaml.safe_load(tokens["settings"][0])["voice"].startswith("espeak/en-us+m1")
     assert all((tmp_path / "cache" / p).exists() for p in tokens["cache_path"])
     assert all(len(h) == 64 for h in tokens["sha256"])

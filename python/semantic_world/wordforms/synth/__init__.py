@@ -30,6 +30,7 @@ import numpy as np
 
 from semantic_world.wordforms.config import Config
 from semantic_world.wordforms.generate import WordForm
+from semantic_world.wordforms.labels import token_label
 from semantic_world.wordforms.streams import Streams
 from semantic_world.wordforms.synth import audio as audio_tools
 from semantic_world.wordforms.synth.speakers import Speaker, draw_speakers
@@ -50,10 +51,6 @@ class Engine(Protocol):
     def reset(self, seed: int) -> None: ...
 
     def provenance(self) -> dict[str, Any]: ...
-
-
-MAPPED_SUFFIX = ".M"
-"""The end of the label of a token changed by acoustic mapping (``W.12.S.3.2.M``)."""
 
 
 @dataclass(frozen=True)
@@ -414,7 +411,7 @@ def synthesize_lexicon(
         key = cache_key(config, engine.name, phonemes, clip_settings, pitch, k, attempt)
         relative = Path(f"v{CACHE_VERSION}") / engine.name / key[:2] / f"{key}.flac"
         path = cache_dir / relative
-        label = f"{word.label}.{speaker.label}.{k}"
+        label = token_label(word.label, speaker.label, k)
         if path.exists():
             result.cached += 1
         else:

@@ -654,7 +654,9 @@ def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
     for scene in scenes:
         happened = {e.key for e in scene_events(scene)}
         record = scene.to_json()
-        for verb in facts.verbs[:3]:
+        # ten event types: the first three of the default world hold for under 1% of the
+        # pairs, too few able claims for the counts below
+        for verb in facts.verbs[:10]:
             for agent in scene.participants:
                 for patient in scene.participants:
                     if agent == patient:

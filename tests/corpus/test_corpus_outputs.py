@@ -658,8 +658,10 @@ def test_cooccurrence_on_the_default_configuration(kinds) -> None:
     # encyclopedic documents' does, and less with taxonomic similarity. With the option
     # ``proportional``, category documents draw their kinds of content in proportion to the
     # facts left to state, which makes relation facts most of them, so encyclopedic
-    # co-occurrence tracks taxonomic similarity less: the second half of the check holds only
-    # under the default, ``equal``, by Pearson's correlation (Jon's ruling 3 on stage a5a).
+    # co-occurrence tracks taxonomic similarity less, and in the default world of stage a6 (20
+    # two-place event types) also more thematic. So the property is asserted under the default,
+    # ``equal``, by Pearson's correlation (Jon's ruling 3 on stage a5a); under ``proportional``
+    # the test checks only that the ``check`` block agrees with the correlations.
     data = yaml.safe_load(Path("data/corpus/default.yaml").read_text(encoding="utf-8"))
     data["documents"]["count"] = 2500
     data["documents"]["content_kind_weights"] = kinds
@@ -670,14 +672,15 @@ def test_cooccurrence_on_the_default_configuration(kinds) -> None:
     for measure in ("words", "referents"):
         situational = groups["situational"][measure]
         encyclopedic = groups["encyclopedic"][measure]
-        for kind in ("pearson", "spearman"):
-            margin = 0.05 if kind == "pearson" else 0.0  # 0.04 by Spearman, proportional
-            assert situational["thematic"][kind] > encyclopedic["thematic"][kind] + margin
-        check = block["check"][measure]
-        assert check["thematic_situational_above_encyclopedic"] == {
-            "pearson": True,
-            "spearman": True,
+        thematic = {
+            kind: situational["thematic"][kind] > encyclopedic["thematic"][kind]
+            for kind in ("pearson", "spearman")
         }
+        check = block["check"][measure]
+        assert check["thematic_situational_above_encyclopedic"] == thematic
+        if kinds == "equal":
+            assert situational["thematic"]["pearson"] > encyclopedic["thematic"]["pearson"] + 0.05
+            assert thematic == {"pearson": True, "spearman": True}
         taxonomic = {
             kind: situational["taxonomic"][kind] < encyclopedic["taxonomic"][kind]
             for kind in ("pearson", "spearman")

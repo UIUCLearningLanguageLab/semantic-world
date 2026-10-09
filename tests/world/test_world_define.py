@@ -107,10 +107,16 @@ def test_default_configuration_lists_every_default() -> None:
         "max_tries": 200,
     }
     assert config.event_types.binary.constraint_min_density is None
-    assert config_from_mapping({}).resolved() == {
-        **config.resolved(),
-        "taxonomy": {**config.resolved()["taxonomy"]},
-    }
+    # The file shows every default but the event-type tree (stage a6: the default world has 20
+    # two-place event types, as many as its one-place ones; the code's default is 3 superordinates
+    # with 2 to 3 each).
+    resolved = config.resolved()
+    assert resolved["event_types"]["binary"]["taxonomy"]["superordinates"] == 5
+    assert config.event_types.binary.taxonomy.depth == 2
+    defaults = config_from_mapping({}).resolved()
+    assert defaults["event_types"]["binary"]["taxonomy"]["superordinates"] == 3
+    resolved["event_types"]["binary"]["taxonomy"] = defaults["event_types"]["binary"]["taxonomy"]
+    assert defaults == {**resolved, "taxonomy": {**resolved["taxonomy"]}}
 
 
 def test_unknown_keys_and_bad_values_name_the_file_and_field(tmp_path: Path) -> None:
@@ -336,6 +342,37 @@ def test_never_legal_event_types_have_their_preconditions_redrawn(tiny: WorldRes
         ]
         for literal in inherited:
             assert literal in again.event_type(label).precondition
+
+
+def test_a_redraw_never_reintroduces_an_unachievable_inherited_literal() -> None:
+    """Stage a6: the generator's fix-ups drop an inherited literal from an event type when the
+    effect that produced its value goes, and a later redraw of the event type's preconditions
+    (``define``, for an event type never legal in the statistics episodes) rebuilds the inherited
+    literals from the feature literals, so it must leave such a literal out. On the default world
+    of seed 1 the redraw of EVENTTYPE2.3.1 reintroduced ``NOT patient.BOOLFL.3`` before the fix."""
+    from semantic_world.world.event_types import (
+        check_dynamics,
+        generate_event_types,
+        redraw_preconditions,
+    )
+    from semantic_world.world.fluents import derived_initial_values, generate_fluents
+    from semantic_world.world.generate import _initial_present
+    from semantic_world.world.statics import build_statics
+    from semantic_world.world.streams import WorldStreams
+
+    config = load_config(DATA / "default.yaml")
+    taxonomy = generate_taxonomy(config.taxonomy_config())
+    streams = WorldStreams(config.seed)
+    statics = build_statics(taxonomy, config, streams, None)
+    fluents = generate_fluents(config, taxonomy, streams)
+    derived_initial = derived_initial_values(fluents, taxonomy)
+    event_types = generate_event_types(statics, fluents, config, streams, None, derived_initial)
+    initial_present = _initial_present(fluents, derived_initial)
+    check_dynamics(event_types, fluents, initial_present)
+    labels = [et.label for et in event_types.event_types]
+    parts = {label: streams.part("preconditions", label) for label in labels}
+    redrawn = redraw_preconditions(event_types, labels, fluents, config, parts, derived_initial)
+    check_dynamics(redrawn, fluents, initial_present)
 
 
 def test_never_legal_reports_a_reason(default: WorldResult, chain: WorldResult) -> None:
@@ -907,6 +944,22 @@ def test_world_stats_report_the_structure(tiny_folder: Path) -> None:
     assert isinstance(episodes["precondition_redraws"], dict)
     assert isinstance(episodes["never_legal"], dict)
     assert stats["warnings"] == []
+    # Stage a6 (ruling 6 on the a5b questions): the relations block of the old summary.yaml.
+    relations = stats["relations"]
+    assert relations["event_type_features"] == 4 and relations["event_type_categories"] == 2
+    assert relations["event_types"] == 4
+    assert relations["constraints"] == sum(relations["constraint_families"].values()) > 0
+    assert set(relations["constraint_families"]) <= {
+        "agent",
+        "patient",
+        "cross",
+        "key_lock",
+        "comparison",
+    }
+    assert 0.0 <= relations["approximate_projections"] <= 1.0
+    assert relations["proportions_estimated"] is False
+    assert isinstance(relations["pairs_short"], dict)
+    assert relations["outside_density"] == len(relations["outside_density_labels"])
 
 
 def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> None:

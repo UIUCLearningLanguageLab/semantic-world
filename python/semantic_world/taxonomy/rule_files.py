@@ -32,6 +32,7 @@ from semantic_world.taxonomy.config import (
     _MISSING,
     FEATURE_TYPES,
     OPERATORS,
+    RENAMED_TYPES,
     SHJ_TYPES,
     ConfigError,
     _is_int,
@@ -49,7 +50,7 @@ class Template:
     family: str
     weight: float
     applies_to: tuple[str, ...]
-    """The output types the template applies to, in ``(is, has)`` order."""
+    """The output types the template applies to, in ``(property, part)`` order."""
     arity: int | None = None
     operator: str | None = None
     """The operator of a ``fixed`` template."""
@@ -147,7 +148,7 @@ def _read_applies_to(node: _Node) -> tuple[str, ...]:
         return FEATURE_TYPES
     values = [value] if isinstance(value, str) else value
     if not isinstance(values, list) or not values:
-        raise node.error("applies_to", "expected one of is, has, or a list of them")
+        raise node.error("applies_to", "expected one of property, part, or a list of them")
     for v in values:
         if v == "can":
             raise node.error(
@@ -156,9 +157,15 @@ def _read_applies_to(node: _Node) -> tuple[str, ...]:
                 "types are sampled with event_types.unary.rules of the world configuration, and "
                 "given by hand in its event file (event_types.event_file)",
             )
+        if v in RENAMED_TYPES:
+            raise node.error(
+                "applies_to",
+                f"the type {v!r} was renamed in stage a6 of the world model: it is called "
+                f"{RENAMED_TYPES[v]} now; use that in its place",
+            )
         if v not in FEATURE_TYPES:
             raise node.error(
-                "applies_to", f"expected one of is, has, or a list of them, found {v!r}"
+                "applies_to", f"expected one of property, part, or a list of them, found {v!r}"
             )
     return tuple(t for t in FEATURE_TYPES if t in values)
 

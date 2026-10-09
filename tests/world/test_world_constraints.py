@@ -382,7 +382,7 @@ def test_constraint_expressions_parse_back_and_records_are_consistent() -> None:
         )
         for item in constraint.literals:
             if isinstance(item, RoleFeature):
-                assert item.feature.type in ("is", "has")
+                assert item.feature.type in ("property", "part")
                 assert item.key == f"{item.role}.{item.feature.label}"
             elif isinstance(item, RoleThreshold):
                 assert item.threshold.threshold == round(item.threshold.threshold, 4)

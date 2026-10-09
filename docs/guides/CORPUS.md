@@ -30,7 +30,7 @@ The default corpus is 10,000 documents about the default world, `data/world/defa
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints `10000 documents, 89439 sentences, 384300 tokens, 10068 scenes, 16 test sets with 7431 pairs`, and takes about a minute and a half on a laptop.
+It prints `10000 documents, 89434 sentences, 389275 tokens, 10064 scenes, 16 test sets with 7790 pairs`, and takes about a minute and a half on a laptop.
 
 Two options change a run without editing the configuration:
 
@@ -101,7 +101,7 @@ Every concept of the world gets a word:
 
 The language also has 15 function words: `a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that`, and `it`. Grammar settings can add more (see "Grammar").
 
-The default world gives 188 lexemes: 173 content words and the 15 function words. One patient capacity in four gets a word (`lexicon.named_proportion.patient_projection: 0.25`). A two-place event type that is able for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such event types under `lexicon.event_types_without_word`. The concept type `state` is listed for stage a7, and names nothing yet.
+The default world gives 206 lexemes: 191 content words and the 15 function words. One patient capacity in four gets a word (`lexicon.named_proportion.patient_projection: 0.25`). A two-place event type that is able for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such event types under `lexicon.event_types_without_word`. The concept type `state` is listed for stage a7, and names nothing yet.
 
 Two settings, both 0 by default, add lexical ambiguity. `lexicon.synonym_rate` gives a concept a second word. `lexicon.homonym_rate` makes two words of different concepts share one word form. `lexicon.named_proportion` leaves some concepts without a word, so propositions that need them are never stated.
 
@@ -152,7 +152,7 @@ The corpus mixes four document types (`documents.mix`):
 | Entity narrative | 20% | An instance | The instance's features, and the events it takes part in, across 2 to 5 scenes |
 | Situational narrative | 30% | A scene | The scene's events in time order, with descriptions of the participants |
 
-Narratives often end early. In the default corpus, about 74% of entity narratives and 62% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
+Narratives often end early. In the default corpus, about 74% of entity narratives and 63% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
 
 A category document draws the kind of each sentence (membership, a fact about the topic, a fact about a subcategory, or a relation fact) with the same chance for each kind (`documents.content_kind_weights: equal`). With `proportional`, it draws the kind in proportion to the number of facts of that kind that it can still state; a category has far more relation facts to state than facts about itself, so most sentences of a category document are then relation facts. How a document divides its sentences among kinds of content is a choice of discourse, not a frequency of the world, so the balanced form is the default. Part of an encyclopedic document about category `CATEGORY.1`, in the conceptual rendering:
 
@@ -183,11 +183,11 @@ In narratives, an instance is introduced with "a" and mentioned later with "the"
 
 | Documents | Co-occurrence with thematic relatedness | Co-occurrence with taxonomic similarity |
 | --- | --- | --- |
-| Entity narratives | 0.55 | 0.05 |
-| Situational narratives | 0.52 | 0.14 |
-| Category documents | 0.13 | 0.48 |
-| Category documents, `relation_fact_share: 0` | 0.09 | 0.50 |
-| Feature documents | 0.10 | 0.22 |
+| Entity narratives | 0.46 | 0.21 |
+| Situational narratives | 0.39 | 0.17 |
+| Category documents | 0.22 | 0.50 |
+| Category documents, `relation_fact_share: 0` | 0.15 | 0.47 |
+| Feature documents | 0.17 | 0.26 |
 
 The numbers are Pearson's correlations over the 741 pairs of leaf categories, counting a leaf when its own noun appears (the last row comes from a run of 2,500 documents). Narratives carry the thematic signal and category documents the taxonomic one. The relation facts of a category document carry its small thematic signal, which `documents.relation_fact_share: 0` removes; `content_kind_weights: proportional` makes most of a category document's sentences relation facts, and moves its two correlations toward each other. `stats.yaml` also gives Spearman's correlations, the same correlations counted by referents, partial correlations that control each measure for the other, and a `check` block that says whether situational documents' co-occurrence tracks thematic relatedness more than encyclopedic documents' does, and taxonomic similarity less. In the default corpus, both hold, by both correlations and both counts.
 
@@ -277,9 +277,9 @@ Three kinds of item have sets of their own:
 
 Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, and `seen`. An event item's aspect is drawn for the item, and its false item keeps it. True and false items never differ in the format of `input`, so the format never gives the answer away.
 
-**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 4% (`instance_role`) to over 99% (`event_predicate_possible`). `stats.yaml` gives the share for each set.
+**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 2% (`instance_role`) to about 99% (`event_predicate_possible`). `stats.yaml` gives the share for each set.
 
-The default corpus has 500 pairs in each set, except three: the default world runs out of law-like false items at 428 pairs (`class_predicate_lawlike`) and 347 pairs (`class_subject_lawlike`), and out of possible false role changes at 156 pairs (`event_role_possible`), because two-place events are few. `test_sets.size` sets the size, and `test_sets.changes` chooses the changes. Test-set settings never change the documents.
+The default corpus has 500 pairs in each set, except two: the default world runs out of law-like false items at 432 pairs (`class_predicate_lawlike`) and 358 pairs (`class_subject_lawlike`). `test_sets.size` sets the size, and `test_sets.changes` chooses the changes. Test-set settings never change the documents.
 
 ## Spoken word forms
 
@@ -385,7 +385,7 @@ corpus = generate(config_from_mapping(settings))
 - **A document shorter than its range.** Narratives end when their events run out, and encyclopedic documents end when they have nothing more to say. `stats.yaml` reports drawn and achieved lengths for each type.
 - **A small test set.** A world can run out of true items for a set. `stats.yaml` reports the number of pairs in each set.
 - **"the run was not made from this corpus's request".** `render` needs a word-form run made from this corpus's own `wordform_request.yaml`. A corpus generated again with other settings needs a new word-form run.
-- **Too few words.** The word-form pipeline stops when its configuration makes fewer content words than the corpus has content lexemes. The default corpus has 173 content lexemes.
+- **Too few words.** The word-form pipeline stops when its configuration makes fewer content words than the corpus has content lexemes. The default corpus has 191 content lexemes.
 - **Relative paths.** Paths in a configuration are read from the folder the command runs in. Run from the root of the repository, as the examples do.
 
 ## Reference

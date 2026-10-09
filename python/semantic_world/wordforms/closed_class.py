@@ -46,6 +46,7 @@ from semantic_world.wordforms.english import (
     syllabify,
 )
 from semantic_world.wordforms.generate import GenerationError, Lexicon, WordForm, lexicon_distance
+from semantic_world.wordforms.labels import affix_label, function_word_label, joined_label
 from semantic_world.wordforms.phonemes import PhonemeTable, load_tables
 from semantic_world.wordforms.spelling import Speller
 from semantic_world.wordforms.streams import Streams
@@ -283,7 +284,7 @@ def generate_function_words(
     shapes: Counter[str] = Counter()
     redraws: Counter[str] = Counter()
     for index, gloss in enumerate(settings.glosses):
-        label = f"F.{index + 1}"
+        label = function_word_label(index + 1)
         used_up: set[str] = set()
         allowed = two_phoneme if index < short and two_phoneme else None
         while True:
@@ -340,7 +341,7 @@ def english_function_words(
         weak = tuple(" ".join(p) for p in prons if p != citation)
         words.append(
             WordForm(
-                f"F.{index + 1}",
+                function_word_label(index + 1),
                 english.syllables[citation],
                 real_word=True,
                 english_word=gloss,
@@ -459,7 +460,7 @@ def generate_affixes(
     redraws: Counter[str] = Counter()
     rejected: dict[str, int] = {}
     for index, item in enumerate(settings.affixes):
-        label = f"AF.{index + 1}"
+        label = affix_label(index + 1)
         used_up: set[str] = set()
         while True:
             shape = _draw_shape(rng, settings.affix_shapes, used_up)
@@ -520,7 +521,7 @@ def english_affixes(
             )
         affixes.append(
             Affix(
-                f"AF.{index + 1}",
+                affix_label(index + 1),
                 item.gloss,
                 item.position,
                 allomorphs[0],
@@ -585,7 +586,7 @@ def inflect(
             skip(stem, affix, f"the form is the common English word {word!r}")
             continue
         form = WordForm(
-            f"{stem.label}.{affix.label}",
+            joined_label(stem.label, affix.label),
             syllabify(phones, english.onsets),
             real_word=False,
             kind="inflected",
