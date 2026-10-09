@@ -1,27 +1,32 @@
-"""An independent recomputation of truth, from a taxonomy output folder.
+"""An independent recomputation of truth, from a world run folder.
 
-The oracle reads the files a taxonomy run writes (``instances.csv``, ``tree.csv``, ``roles.csv``,
-``categories_generative.csv``, ``features.csv``, ``rules.yaml``, ``relations.yaml``,
-``projections.csv``, and ``config.yaml``) and judges a logical form given as JSON. It shares no
-code with ``semantic_world.corpus``: subject sets are filtered rows of ``instances.csv``, the
-fixed test is a brute-force enumeration over the rules' truth tables, and relations are the
-expressions of ``relations.yaml`` evaluated over every pair of rows.
+The oracle reads the files a world run writes (``definition.json``, ``entities.csv``,
+``derived/capacities.csv``, the taxonomy's ``tree.csv``, ``roles.csv``,
+``categories_generative.csv``, and ``config.yaml`` under ``taxonomy/``) and judges a logical
+form given as JSON. It shares no code with ``semantic_world.corpus``: subject sets are filtered
+rows of ``entities.csv``, derived features and requirements are evaluated by the brute-force
+evaluator of ``semantic_world.world.fixtures`` (truth-table lookups over the definition record,
+never the runtime), the fixed test is a brute-force enumeration over the rules' truth tables,
+and the taxonomy's old labels are translated by a few lines of this file.
 
-A relative clause in a category term is restrictive: it keeps the rows that have the CAN feature,
-or that are related to at least one row of the other category. The oracle finds those rows with
-plain loops over the pairs.
+A relative clause in a category term is restrictive: it keeps the rows that are able to be the
+agent of the one-place event type, or that are related to at least one row of the other
+category. The oracle finds those rows with plain loops over the pairs.
 
 ``truth`` returns True or False, or None for a logical form that cannot be judged: a vacuous
 one (an empty subject set), or a quantifier that its predicate does not take.
 
-Events are judged against scenes as ``scenes.jsonl`` holds them (``event``, ``happened``), and
-``allows`` says whether the world allows an event. A verb category names the verbs below it, by
-``verb_tree.csv``.
+Events are judged against scenes as ``scenes.jsonl`` holds them (histories): ``event`` and
+``happened``; ``able`` says whether a binding's requirement holds, and ``legal`` whether it was
+legal at some time point of a scene, by replaying the history with the brute-force evaluator. A
+category of event types names the event types below it.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,38 +34,96 @@ import numpy as np
 import polars as pl
 import yaml
 
-from semantic_world.taxonomy.expressions import Cmp, Gt, Var, atom_key, parse_expression
+from semantic_world.world.fixtures import BruteEvent, BruteForce
 
 THING = "THING"
+NEC_ALL, ALL, MOST, SOME, NO, NEC_NO = "nec_all", "all", "most", "some", "no", "nec_no"
+
+
+def new_label(old: str) -> str:
+    """The world's label for a taxonomy label (the oracle's own translation)."""
+    for pattern, replacement in (
+        (r"^ISA\.C(\d.*)$", r"ISA.CATEGORY.\1"),
+        (r"^CAN\.V(\d.*)$", r"CAN.EVENTTYPE2.\1"),
+        (r"^CANBE\.V(\d.*)$", r"CANBE.EVENTTYPE2.\1"),
+        (r"^CAN\.(\d+)$", r"CAN.EVENTTYPE1.\1"),
+        (r"^IS\.(\d+)$", r"PROPERTY.\1"),
+        (r"^HAS\.(\d+)$", r"PART.\1"),
+        (r"^SC\.(\d+)$", r"SCALARDIM.\1"),
+        (r"^C(\d.*)$", r"CATEGORY.\1"),
+        (r"^I(\d.*)$", r"INSTANCE.\1"),
+        (r"^V(\d.*)$", r"EVENTTYPE2.\1"),
+    ):
+        if re.match(pattern, old):
+            return re.sub(pattern, replacement, old)
+    return old
 
 
 class Oracle:
-    def __init__(
-        self,
-        folder: Path,
-        *,
-        z: float = 1.0,
-        most: float = 0.7,
-        all_grounding: str = "fixed",
-        generic: str = "most",
-    ) -> None:
-        self.z, self.most, self.all_grounding, self.generic = z, most, all_grounding, generic
-        instances = pl.read_csv(folder / "instances.csv", infer_schema_length=None)
-        self.labels = instances["label"].to_list()
+    def __init__(self, folder: Path, *, z: float = 1.0) -> None:
+        self.z = z
+        folder = Path(folder)
+        self.record = json.loads((folder / "definition.json").read_text(encoding="utf-8"))
+        entities = pl.read_csv(folder / "entities.csv", infer_schema_length=None)
+        self.rows = entities.to_dicts()
+        self.brute = BruteForce(self.record, self.rows)
+        self.labels = entities["label"].to_list()
         self.row = {label: i for i, label in enumerate(self.labels)}
         self.n = len(self.labels)
-        self.column = {name: instances[name].to_numpy() for name in instances.columns[2:]}
-        if (folder / "projections.csv").exists():
-            projections = pl.read_csv(folder / "projections.csv", infer_schema_length=None)
-            for name in projections.columns:
-                if name.startswith("CANBE."):
-                    self.column[name] = projections[name].to_numpy()
-        tree = pl.read_csv(folder / "tree.csv", infer_schema_length=None)
-        self.parent = dict(zip(tree["label"].to_list(), tree["parent"].to_list(), strict=True))
-        self.level = dict(zip(tree["label"].to_list(), tree["level"].to_list(), strict=True))
-        features = pl.read_csv(folder / "features.csv", infer_schema_length=None)
-        self.kind = dict(zip(features["label"].to_list(), features["kind"].to_list(), strict=True))
-        roles = pl.read_csv(folder / "roles.csv", infer_schema_length=None)
+        self.symbols = {s["label"]: s for s in self.record["symbols"]}
+        self.rules = {r["output"]: r for r in self.record["rules"]}
+        self.literals = self.record["literals"]
+        self.event_types = {e["label"]: e for e in self.record["event_types"]}
+        self.base_fluents = [
+            s["label"] for s in self.record["symbols"] if s["kind"] == "fluent" and not s["derived"]
+        ]
+        self.free = {
+            s["label"]
+            for s in self.record["symbols"]
+            if s["kind"] in ("property", "part") and not s["derived"]
+        }
+        self.derived = {
+            s["label"]
+            for s in self.record["symbols"]
+            if s["kind"] in ("property", "part") and s["derived"]
+        }
+        self.scalars = [s["label"] for s in self.record["symbols"] if s["kind"] == "scalar"]
+        # Columns: free features and scalars from entities.csv; derived features and one-place
+        # capacities by the brute-force evaluator; patient capacities from capacities.csv.
+        self.column: dict[str, np.ndarray] = {}
+        for name in entities.columns[2:]:
+            self.column[name] = entities[name].to_numpy()
+        for label in self.derived:
+            self.column[label] = np.array(
+                [self.brute.feature(label, e) for e in self.labels], dtype=np.int64
+            )
+        for label, et in self.event_types.items():
+            if et["arity"] == 1:
+                self.column[label] = np.array(
+                    [int(self.brute.able(BruteEvent(label, {"agent": e}))) for e in self.labels],
+                    dtype=np.int64,
+                )
+        capacities = pl.read_csv(folder / "derived" / "capacities.csv", infer_schema_length=None)
+        assert capacities["label"].to_list() == self.labels
+        for name in capacities.columns:
+            if name.startswith("CANBE."):
+                self.column[name] = capacities[name].to_numpy()
+        # The tree, and the leaf of every entity.
+        tree = pl.read_csv(folder / "taxonomy" / "tree.csv", infer_schema_length=None)
+        self.parent = {
+            new_label(label): None if parent is None else new_label(parent)
+            for label, parent in zip(tree["label"].to_list(), tree["parent"].to_list(), strict=True)
+        }
+        self.level = {
+            new_label(label): level
+            for label, level in zip(tree["label"].to_list(), tree["level"].to_list(), strict=True)
+        }
+        self.leaf = entities["leaf"].to_list()
+        self.path = {
+            label: [leaf] + self.ancestors(leaf)
+            for label, leaf in zip(self.labels, self.leaf, strict=True)
+        }
+        roles = pl.read_csv(folder / "taxonomy" / "roles.csv", infer_schema_length=None)
         self.defining: dict[str, list[str]] = {c: [] for c in self.parent}
         for category, feature, role in zip(
             roles["category"].to_list(),
@@ -69,32 +132,26 @@ class Oracle:
             strict=True,
         ):
             if role.startswith("defining"):
-                self.defining[category].append(feature)
-        generative = pl.read_csv(folder / "categories_generative.csv", infer_schema_length=None)
-        self.generative = {row["label"]: row for row in generative.iter_rows(named=True)}
-        rules = yaml.safe_load((folder / "rules.yaml").read_text(encoding="utf-8")) or []
-        self.rules = {rule["output"]: rule for rule in rules}
-        config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8"))
+                self.defining[new_label(category)].append(new_label(feature))
+        generative = pl.read_csv(
+            folder / "taxonomy" / "categories_generative.csv", infer_schema_length=None
+        )
+        self.generative = {
+            new_label(row["label"]): {new_label(k): v for k, v in row.items()}
+            for row in generative.iter_rows(named=True)
+        }
+        config = yaml.safe_load((folder / "taxonomy" / "config.yaml").read_text(encoding="utf-8"))
         self.drift = config["scalars"]["drift"]["values"]
         self.instance_drift = config["scalars"]["instance_drift"]
-        self.relations: dict[str, str] = {}
-        if (folder / "relations.yaml").exists():
-            records = yaml.safe_load((folder / "relations.yaml").read_text(encoding="utf-8"))
-            self.relations = {record["label"]: record["expression"] for record in records}
         self._matrices: dict[str, np.ndarray] = {}
-        self.verb_parent: dict[str, str | None] = {}
-        if (folder / "verb_tree.csv").exists():
-            verbs = pl.read_csv(folder / "verb_tree.csv", infer_schema_length=None)
-            self.verb_parent = dict(
-                zip(verbs["label"].to_list(), verbs["parent"].to_list(), strict=True)
-            )
+        self._states: dict[str, list[dict[str, frozenset[str]]]] = {}
 
     # Sets of rows ----------------------------------------------------------------------------
 
     def below(self, category: str) -> np.ndarray:
         if category == THING:
             return np.ones(self.n, dtype=bool)
-        return self.column[f"ISA.{category}"] == 1
+        return np.array([category in self.path[label] for label in self.labels], dtype=bool)
 
     def pole(self, pole: str, comparison: np.ndarray) -> np.ndarray:
         scalar, side = pole.rsplit(".", 1)
@@ -110,7 +167,7 @@ class Oracle:
         for literal in term["restriction"]:
             positive = not literal.startswith("not ")
             name = literal.removeprefix("not ")
-            if name.startswith("SC."):
+            if name.startswith("SCALARDIM."):
                 keep &= self.pole(name, below)
             else:
                 keep &= self.column[name] == int(positive)
@@ -141,33 +198,68 @@ class Oracle:
 
     # The fixed test, by brute force ----------------------------------------------------------
 
-    def _inputs(self, feature: str) -> list[tuple[str, float | None]]:
-        """A rule's inputs: feature labels, and scalars with their thresholds."""
-        rule = self.rules[feature]
-        thresholds = rule.get("thresholds", {})
-        return [(name, thresholds.get(name)) for name in rule["inputs"]]
+    def _rule_of(self, feature: str) -> dict[str, Any]:
+        """The rule that computes a derived feature, or the requirement of a one-place event
+        type (a binding rule over the agent's features)."""
+        if feature in self.event_types:
+            return self.rules[self.event_types[feature]["requirement"]["output"]]
+        return self.rules[feature]
+
+    def _inputs(self, feature: str) -> list[tuple]:
+        """A rule's inputs: ``("feature", label)``, ``("threshold", scalar, threshold)``, or
+        ``("constraint", output)``."""
+        found = []
+        for index in self._rule_of(feature)["inputs"]:
+            literal = self.literals[index]
+            if literal["kind"] == "feature":
+                found.append(("feature", literal["feature"]))
+            elif literal["kind"] == "threshold":
+                found.append(("threshold", literal["scalar"], literal["threshold"]))
+            elif literal["kind"] == "constraint":
+                found.append(("constraint", literal["constraint"]))
+            else:
+                raise AssertionError(f"a static rule reads {literal['kind']}")
+        return found
 
     def _cone(self, feature: str, free: set[str], thresholds: set[tuple[str, float]]) -> None:
-        if self.kind[feature] == "free":
+        if feature in self.free:
             free.add(feature)
             return
-        for name, threshold in self._inputs(feature):
-            if threshold is not None:
-                thresholds.add((name, threshold))
+        for item in self._inputs(feature):
+            if item[0] == "feature":
+                self._cone(item[1], free, thresholds)
+            elif item[0] == "threshold":
+                thresholds.add((item[1], item[2]))
             else:
-                self._cone(name, free, thresholds)
+                self._cone_rule(item[1], free, thresholds)
+
+    def _cone_rule(self, output: str, free: set[str], thresholds: set[tuple[str, float]]) -> None:
+        for index in self.rules[output]["inputs"]:
+            literal = self.literals[index]
+            if literal["kind"] == "feature":
+                self._cone(literal["feature"], free, thresholds)
+            elif literal["kind"] == "threshold":
+                thresholds.add((literal["scalar"], literal["threshold"]))
+            else:
+                self._cone_rule(literal["constraint"], free, thresholds)
 
     def _value(self, feature: str, setting: dict[str, int], literals: dict) -> int:
         if feature in setting:
             return setting[feature]
+        return self._rule_value(self._rule_of(feature), setting, literals)
+
+    def _rule_value(self, rule: dict[str, Any], setting: dict[str, int], literals: dict) -> int:
         index = 0
-        for name, threshold in self._inputs(feature):
-            if threshold is not None:
-                bit = literals[(name, threshold)]
+        for i in rule["inputs"]:
+            literal = self.literals[i]
+            if literal["kind"] == "feature":
+                bit = self._value(literal["feature"], setting, literals)
+            elif literal["kind"] == "threshold":
+                bit = literals[(literal["scalar"], literal["threshold"])]
             else:
-                bit = self._value(name, setting, literals)
+                bit = self._rule_value(self.rules[literal["constraint"]], setting, literals)
             index = 2 * index + bit
-        return int(self.rules[feature]["truth_table"][index])
+        return int(rule["truth_table"][index])
 
     def fixed(self, term: dict[str, Any], feature: str) -> int | None:
         """The value that every possible member of a category term has on a feature, or None
@@ -181,9 +273,9 @@ class Oracle:
         for literal in term["restriction"]:
             value = int(not literal.startswith("not "))
             name = literal.removeprefix("not ")
-            if name.startswith("SC."):
+            if name.startswith("SCALARDIM."):
                 continue  # a pole fixes no binary feature
-            if self.kind[name] == "free":
+            if name in self.free:
                 if held.get(name, value) != value:
                     return None
                 held[name] = value
@@ -223,79 +315,112 @@ class Oracle:
                     seen.add(self._value(feature, memo, literals))
         return seen.pop() if len(seen) == 1 else None
 
-    # Relations -------------------------------------------------------------------------------
+    # Requirements ----------------------------------------------------------------------------
 
-    def matrix(self, verb: str) -> np.ndarray:
-        """A relation over every ordered pair of rows (agent, patient), false on the diagonal."""
-        if verb not in self._matrices:
-            expression = parse_expression(self.relations[verb])
-            env: dict[str, np.ndarray] = {}
+    def matrix(self, event_type: str) -> np.ndarray:
+        """A two-place event type's requirement (a category's base relation) over every ordered
+        pair of rows (agent, patient), false on the diagonal, by the brute-force evaluator."""
+        if event_type not in self._matrices:
+            holds = np.zeros((self.n, self.n), dtype=bool)
+            for a, agent in enumerate(self.labels):
+                for p, patient in enumerate(self.labels):
+                    if a != p:
+                        event = BruteEvent(event_type, {"agent": agent, "patient": patient})
+                        holds[a, p] = self.brute.able(event)
+            self._matrices[event_type] = holds
+        return self._matrices[event_type]
 
-            def side(name: str) -> np.ndarray:
-                role, label = name.split(".", 1)
-                values = self.column[label].astype(float)
-                return values[:, None] if role == "a" else values[None, :]
-
-            for atom in expression.atoms():
-                if isinstance(atom, Var):
-                    value = side(atom.name) == 1
-                elif isinstance(atom, Gt):
-                    value = side(atom.scalar) > atom.threshold
-                else:
-                    assert isinstance(atom, Cmp)
-                    difference = side(atom.agent) - side(atom.patient)
-                    value = difference > atom.low
-                    if atom.high is not None:
-                        value = value & (difference < atom.high)
-                env[atom_key(atom)] = np.broadcast_to(value, (self.n, self.n))
-            holds = np.broadcast_to(expression.evaluate(env), (self.n, self.n)).copy()
-            np.fill_diagonal(holds, False)
-            self._matrices[verb] = holds
-        return self._matrices[verb]
-
-    # Events ----------------------------------------------------------------------------------
-
-    def names(self, verb: str) -> list[str]:
-        """The labels that name an event of a verb: the verb, and the verb categories above."""
-        found = [verb]
-        while self.verb_parent.get(found[-1]) is not None:
-            found.append(self.verb_parent[found[-1]])
-        return found
-
-    def allows(self, label: str, agent: str, patient: str | None) -> bool:
-        """Whether the world allows an event: the agent has the CAN feature, or the relation
-        holds for the agent and the patient."""
+    def able(self, label: str, agent: str, patient: str | None) -> bool:
+        """Whether a binding's requirement holds: the one-place event type's for the agent, or
+        the two-place event type's (or category's) for the agent and the patient."""
         if patient is None:
             return bool(self.column[label][self.row[agent]] == 1)
         return bool(self.matrix(label)[self.row[agent], self.row[patient]])
 
-    def matching(self, form: dict[str, Any], scene: dict[str, Any], aspect: bool) -> list[dict]:
+    allows = able
+
+    # Events ----------------------------------------------------------------------------------
+
+    def names(self, event_type: str) -> list[str]:
+        """The labels that name an event of an event type: the event type, and the categories
+        above it."""
+        found = [event_type]
+        while self.event_types[found[-1]]["parent"] is not None:
+            found.append(self.event_types[found[-1]]["parent"])
+        return found
+
+    def leaves_below(self, label: str) -> list[str]:
+        if self.event_types[label]["kind"] == "event_type":
+            return [label]
+        return [
+            e
+            for e, record in self.event_types.items()
+            if record["kind"] == "event_type" and label in self.names(e)
+        ]
+
+    def states(self, scene: dict[str, Any]) -> list[dict[str, frozenset[str]]]:
+        """The state at every time point of a scene, replayed with the brute-force evaluator
+        from the entities' initial fluents and the history's initial fluents."""
+        if scene["label"] not in self._states:
+            state = {
+                label: frozenset(f for f in self.base_fluents if row[f])
+                for label, row in zip(self.labels, self.rows, strict=True)
+            }
+            for participant, fluents in scene["initial"].items():
+                state[participant] = frozenset(fluents)
+            states = [state]
+            for step in scene["steps"]:
+                events = [
+                    BruteEvent(
+                        e["type"],
+                        {
+                            "agent": e["agent"],
+                            **({"patient": e["patient"]} if "patient" in e else {}),
+                        },
+                    )
+                    for e in step["events"]
+                ]
+                for event in events:
+                    assert self.brute.legal(event, state), (scene["label"], step["step"], event)
+                state = self.brute.apply(state, events)
+                states.append(state)
+            self._states[scene["label"]] = states
+        return self._states[scene["label"]]
+
+    def legal(self, scene: dict[str, Any], label: str, agent: str, patient: str | None) -> bool:
+        """Whether the binding was legal at some time point of the scene, for the event type or
+        for some event type below the category."""
+        binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
+        return any(
+            self.brute.legal(BruteEvent(event_type, binding), state)
+            for event_type in self.leaves_below(label)
+            for state in self.states(scene)
+        )
+
+    def matching(self, form: dict[str, Any], scene: dict[str, Any]) -> list[dict]:
         """The events of a scene, as ``scenes.jsonl`` holds it, that an event-level form could
-        report: the same agent and patient, and a verb that the form's label names. With
-        ``aspect``, the same aspect too."""
+        report: the same agent and patient, and an event type that the form's label names."""
         predicate = form["predicate"]
         label = predicate["verb"] if predicate["kind"] == "verb" else predicate["feature"]
         patient = predicate["patient"]["instance"] if "patient" in predicate else None
         return [
             event
             for step in scene["steps"]
-            for event in step
+            for event in step["events"]
             if event["agent"] == form["subject"]["instance"]
-            and event["patient"] == patient
-            and label in self.names(event["verb"])
-            and (not aspect or event["aspect"] == form["aspect"])
+            and event.get("patient") == patient
+            and label in self.names(event["type"])
         ]
 
     def event(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
-        """Whether an event-level form that names no event is true of its scene: such an event,
-        of the form's aspect, is among the scene's events."""
+        """Whether an event-level form that names no event is true of its scene: such an event
+        is among the scene's events, whatever the aspect."""
         assert form["scene"] == scene["label"]
-        return bool(self.matching(form, scene, aspect=True))
+        return bool(self.matching(form, scene))
 
     def happened(self, form: dict[str, Any], scenes: list[dict[str, Any]]) -> bool:
-        """Whether some event of the scenes has the form's verb, agent, and patient, in either
-        aspect."""
-        return any(self.matching(form, scene, aspect=False) for scene in scenes)
+        """Whether some event of the scenes has the form's event type, agent, and patient."""
+        return any(self.matching(form, scene) for scene in scenes)
 
     # Truth -----------------------------------------------------------------------------------
 
@@ -303,16 +428,6 @@ class Oracle:
         if form["level"] == "class":
             return self._class(form)
         return self._instance(form)
-
-    def all_holds(self, form: dict[str, Any], value: int) -> bool | None:
-        """Whether every member of the subject set has ``value`` on the predicate: the reading
-        of ``all`` (1) and ``no`` (0) under the configured grounding."""
-        predicate = form["predicate"]
-        count, total = self._counts(form)
-        by_law = self.all_grounding == "fixed" and not form["subject"].get("clauses")
-        if predicate["kind"] in ("is", "has", "can") and by_law:
-            return self.fixed(form["subject"], predicate["feature"]) == value
-        return count == (total if value else 0)
 
     def _counts(self, form: dict[str, Any]) -> tuple[int, int]:
         """How many members of the subject set (or pairs) satisfy the predicate, and how many
@@ -332,17 +447,13 @@ class Oracle:
     def _class(self, form: dict[str, Any]) -> bool | None:
         subject, predicate = form["subject"], form["predicate"]
         quantifier, polarity, kind = form["quantifier"], form["polarity"], predicate["kind"]
-        if quantifier in ("all", "no") and not polarity:
-            return None
-        members = self.subject_set(subject)
-        if not members.any():
-            return None
-        if subject.get("clauses") and quantifier in ("all", "no") and self.all_grounding == "fixed":
-            return None  # a subject with a relative clause takes all and no only when observed
         category = subject["category"]
         if kind == "scalar":
-            if quantifier != "generic" or category == THING:
+            if quantifier is not None or category == THING:
                 return None
+            if subject["restriction"] or subject.get("clauses"):
+                return None  # a statement about the category, not about a restricted set
+            members = self.subject_set(subject)
             scalar, side = predicate["pole"].rsplit(".", 1)
             values = self.column[scalar].astype(float)
             parent = self.parent[category]
@@ -356,35 +467,45 @@ class Oracle:
             else:
                 has_pole = value <= mean - self.z * sd
             return bool(has_pole) == polarity
+        if quantifier not in (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO):
+            return None
+        if quantifier in (NEC_ALL, ALL, NO, NEC_NO) and not polarity:
+            return None
+        if quantifier in (NEC_ALL, NEC_NO):
+            if kind not in ("is", "has", "can", "member") or subject.get("clauses"):
+                return None
+        members = self.subject_set(subject)
+        if not members.any():
+            return None
         if kind == "member":
             other = predicate["category"]
-            if quantifier not in ("all", "no", "generic") or category in (THING, other):
+            if quantifier in (MOST, SOME) or category in (THING, other):
                 return None
-            if quantifier == "no" or not polarity:
+            if quantifier in (NO, NEC_NO):
                 return other not in self.ancestors(category) and category not in self.ancestors(
                     other
                 )
             return other in self.ancestors(category)
-        if kind == "projection" and quantifier in ("all", "no") and self.all_grounding == "fixed":
-            return None
         count, total = self._counts(form)
         if total == 0:
             return None
         asserted = count if polarity else total - count
-        means = self.generic if quantifier == "generic" else quantifier
-        if means == "no":
-            return self.all_holds(form, 0)
-        if means == "all":
-            return self.all_holds(form, 1 if polarity else 0)
-        if means == "most":
-            return asserted / total >= self.most - 1e-9
+        if quantifier == NEC_ALL:
+            return self.fixed(subject, predicate["feature"]) == 1
+        if quantifier == NEC_NO:
+            return self.fixed(subject, predicate["feature"]) == 0
+        if quantifier == ALL:
+            return count == total
+        if quantifier == NO:
+            return count == 0
+        if quantifier == MOST:
+            return asserted > total / 2
         return asserted > 0
 
     def _instance(self, form: dict[str, Any]) -> bool | None:
         subject, predicate = form["subject"]["instance"], form["predicate"]
         row, kind = self.row[subject], predicate["kind"]
-        leaf = self.labels[row].rsplit(".", 1)[0].replace("I", "C", 1)
-        path = [leaf] + self.ancestors(leaf)
+        path = self.path[subject]
         if kind in ("is", "has", "can"):
             value = self.column[predicate["feature"]][row] == 1
         elif kind == "projection":

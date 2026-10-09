@@ -14,9 +14,9 @@ from typing import Any
 import numpy as np
 import polars as pl
 import pytest
-from corpus_support import DEFAULT_TAXONOMY, PLAIN_TAXONOMY, TINY_TAXONOMY, corpus_config
+from corpus_support import DEFAULT_WORLD, TINY_WORLD, corpus_config
 
-from semantic_world.corpus import Lexicon, Streams, build_lexicon, load_taxonomy
+from semantic_world.corpus import Lexicon, Streams, build_lexicon, load_world
 from semantic_world.corpus.config import CONCEPT_TYPES
 from semantic_world.corpus.lexicon import (
     ADJECTIVE,
@@ -33,6 +33,7 @@ from semantic_world.corpus.lexicon import (
     PART_NOUN,
     THING,
     TRANSITIVE_VERB,
+    event_types_without_word,
     function_word_glosses,
     relation_extent,
     world_concepts,
@@ -41,8 +42,8 @@ from semantic_world.corpus.lexicon import (
 SEEDS = range(1, 21)
 
 
-def lexicon_of(world, taxonomy: str = DEFAULT_TAXONOMY, seed: int = 1, **sections: Any) -> Lexicon:
-    config = corpus_config(taxonomy, seed=seed, **sections)
+def lexicon_of(world, path: str = DEFAULT_WORLD, seed: int = 1, **sections: Any) -> Lexicon:
+    config = corpus_config(path, seed=seed, **sections)
     return build_lexicon(config, world, Streams(config.seed))
 
 
@@ -56,28 +57,32 @@ def round_half_up(x: float) -> int:
 
 
 def test_concepts_of_the_default_world(default_world) -> None:
-    frames = default_world.frames()
-    lexicon = lexicon_of(default_world)
+    world = default_world
+    lexicon = lexicon_of(world)
     labels = {t: [c.label for c in lexicon.of_type(t)] for t in CONCEPT_TYPES}
-    features = frames["features.csv"]
-
-    def of_type(feature_type: str) -> list[str]:
-        return features.filter(pl.col("type") == feature_type)["label"].to_list()
-
-    assert labels["category"] == frames["tree.csv"]["label"].to_list()
-    assert labels["is"] == of_type("is") and len(labels["is"]) == 40
-    assert labels["has"] == of_type("has") and len(labels["has"]) == 40
-    assert labels["can"] == of_type("can") and len(labels["can"]) == 20
-    verb_tree = frames["verb_tree.csv"]
-    assert labels["verb"] == verb_tree.filter(pl.col("children") == 0)["label"].to_list()
-    assert labels["verb_category"] == verb_tree.filter(pl.col("children") > 0)["label"].to_list()
-    # the exposed patient projections are the CANBE columns of instances.csv
-    exposed = [c for c in frames["instances.csv"].columns if c.startswith("CANBE.")]
-    assert labels["patient_projection"] == exposed and len(exposed) == 2
-    assert labels["scalar"] == ["SC.1.HIGH", "SC.1.LOW", "SC.2.HIGH", "SC.2.LOW"]
+    assert labels["category"] == list(world.categories) and len(labels["category"]) == 56
+    assert labels["is"] == list(world.features["is"]) and len(labels["is"]) == 40
+    assert labels["has"] == list(world.features["has"]) and len(labels["has"]) == 40
+    assert labels["state"] == []  # state adjectives come in stage a7
+    assert labels["event_unary"] == list(world.features["can"]) and len(labels["event_unary"]) == 20
+    assert labels["event"] == [
+        v for v in world.binary_leaves if v not in lexicon.event_types_without_word
+    ]
+    assert labels["event_category"] == [
+        v
+        for v in world.binary
+        if world.event_types[v].category and v not in lexicon.event_types_without_word
+    ]
+    # every two-place leaf event type has a patient capacity; a quarter get words
+    assert labels["patient_projection"] == list(world.patient_capacities)
+    assert len(labels["patient_projection"]) == 7
+    assert sum(lexicon.is_named(c) for c in labels["patient_projection"]) == 2
+    assert labels["scalar"] == [
+        "SCALARDIM.1.HIGH", "SCALARDIM.1.LOW", "SCALARDIM.2.HIGH", "SCALARDIM.2.LOW"
+    ]  # fmt: skip
     assert [c.label for c in lexicon.of_type(GENERIC)] == [THING]
-    # no agent projection is a concept: the verb itself is the word
-    assert not any(c.label.startswith("CAN.V") for c in lexicon.concepts)
+    # no agent capacity is a concept: the event type itself is the word
+    assert not any(c.label.startswith("CAN.") for c in lexicon.concepts)
 
 
 def test_parts_of_speech(default_world) -> None:
@@ -86,9 +91,10 @@ def test_parts_of_speech(default_world) -> None:
         "category": NOUN,
         "is": ADJECTIVE,
         "has": PART_NOUN,
-        "can": INTRANSITIVE_VERB,
-        "verb": TRANSITIVE_VERB,
-        "verb_category": TRANSITIVE_VERB,
+        "state": ADJECTIVE,
+        "event_unary": INTRANSITIVE_VERB,
+        "event": TRANSITIVE_VERB,
+        "event_category": TRANSITIVE_VERB,
         "patient_projection": ADJECTIVE,
         "scalar": ADJECTIVE,
         GENERIC: NOUN,
@@ -103,16 +109,16 @@ def test_parts_of_speech(default_world) -> None:
 def test_concept_order_follows_the_specification_table(default_world) -> None:
     lexicon = lexicon_of(default_world)
     types = [c.type for c in lexicon.concepts]
-    order = list(CONCEPT_TYPES) + [GENERIC, FUNCTION]
+    order = [t for t in CONCEPT_TYPES if t != "state"] + [GENERIC, FUNCTION]
     assert [t for i, t in enumerate(types) if i == 0 or types[i - 1] != t] == order
 
 
-def test_a_world_without_verbs_or_scalars() -> None:
-    world = load_taxonomy(corpus_config(PLAIN_TAXONOMY))
-    lexicon = lexicon_of(world, PLAIN_TAXONOMY)
-    for concept_type in ("verb", "verb_category", "patient_projection", "scalar"):
+def test_a_world_without_two_place_event_types_or_scalars(world_files) -> None:
+    world = load_world(corpus_config(world_files["plain"]))
+    lexicon = lexicon_of(world, world_files["plain"])
+    for concept_type in ("event", "event_category", "patient_projection", "scalar"):
         assert lexicon.of_type(concept_type) == ()
-    assert lexicon.verbs_without_word == {}
+    assert lexicon.event_types_without_word == {}
     assert len(lexicon.content_lexemes) == 6 + 8 + 8 + 4 + 1
     assert lexicon.stats()["lexemes_by_pos"][TRANSITIVE_VERB] == 0
 
@@ -122,68 +128,67 @@ def test_a_world_without_verbs_or_scalars() -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_a_verb_category_that_holds_for_every_pair_gets_no_lexeme(tiny_world) -> None:
-    lexicon = lexicon_of(tiny_world, TINY_TAXONOMY)
-    # V1 has no defining constraint, so its base relation holds for every pair of instances
-    assert tiny_world.relations.relation("V1").constraints == ()
-    assert lexicon.verbs_without_word == {"V1": EVERY_PAIR}
-    assert not lexicon.is_named("V1") and lexicon.lexemes_of("V1") == ()
-    assert "V1" not in {c.label for c in lexicon.concepts}
-    assert "V1" not in lexicon.unnamed  # left out as a concept, not by the named proportion
-    assert [c.label for c in lexicon.of_type("verb_category")] == ["V2"]
-    assert [c.label for c in lexicon.of_type("verb")] == ["V1.1", "V1.2", "V2.1", "V2.2"]
-    assert lexicon.stats()["verbs_without_word"] == {"V1": EVERY_PAIR}
+def test_an_event_type_category_that_holds_for_every_pair_gets_no_lexeme(tiny_world) -> None:
+    lexicon = lexicon_of(tiny_world, TINY_WORLD)
+    # EVENTTYPE2.1 has no defining constraint, so its base relation holds for every pair
+    n = tiny_world.count
+    assert tiny_world.able("EVENTTYPE2.1").sum() == n * (n - 1)
+    assert lexicon.event_types_without_word == {"EVENTTYPE2.1": EVERY_PAIR}
+    assert not lexicon.is_named("EVENTTYPE2.1") and lexicon.lexemes_of("EVENTTYPE2.1") == ()
+    assert "EVENTTYPE2.1" not in {c.label for c in lexicon.concepts}
+    assert "EVENTTYPE2.1" not in lexicon.unnamed  # left out as a concept, not by the proportion
+    assert [c.label for c in lexicon.of_type("event_category")] == ["EVENTTYPE2.2"]
+    assert [c.label for c in lexicon.of_type("event")] == [
+        "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.1", "EVENTTYPE2.2.2"
+    ]  # fmt: skip
+    assert lexicon.stats()["event_types_without_word"] == {"EVENTTYPE2.1": EVERY_PAIR}
 
 
 @pytest.mark.parametrize("world_name", ["tiny_world", "default_world"])
-def test_verbs_without_a_word_match_brute_force(world_name: str, request) -> None:
+def test_event_types_without_a_word_match_brute_force(world_name: str, request) -> None:
     world = request.getfixturevalue(world_name)
-    n = len(world.instances)
-    agents, patients = np.nonzero(~np.eye(n, dtype=bool))
-    concepts, without_word = world_concepts(world)
-    named = {c.label for c in concepts}
-    for category in world.verbs.categories:
-        holds = world.relations.holds(category.label, agents, patients)
+    named = {c.label for c in world_concepts(world)}
+    without_word = event_types_without_word(world)
+    for label in world.binary:
+        holds = world.able(label)[~np.eye(world.count, dtype=bool)]
         if holds.all():
-            assert without_word[category.label] == EVERY_PAIR
+            assert without_word[label] == EVERY_PAIR
         elif not holds.any():
-            assert without_word[category.label] == NO_PAIR
+            assert without_word[label] == NO_PAIR
         else:
-            assert category.label not in without_word
-        assert (category.label in named) != (category.label in without_word)
+            assert label not in without_word
+        assert (label in named) != (label in without_word)
 
 
 def test_relation_extent() -> None:
     def world(matrix: np.ndarray):
-        return SimpleNamespace(
-            instances=range(len(matrix)), relations=SimpleNamespace(matrix=lambda verb: matrix)
-        )
+        return SimpleNamespace(count=len(matrix), able=lambda label: matrix)
 
     every = ~np.eye(4, dtype=bool)
-    assert relation_extent(world(every), "V1") == EVERY_PAIR
-    assert relation_extent(world(np.zeros((4, 4), dtype=bool)), "V1") == NO_PAIR
+    assert relation_extent(world(every), "EVENTTYPE2.1") == EVERY_PAIR
+    assert relation_extent(world(np.zeros((4, 4), dtype=bool)), "EVENTTYPE2.1") == NO_PAIR
     some = every.copy()
     some[0, 1] = False
-    assert relation_extent(world(some), "V1") is None
+    assert relation_extent(world(some), "EVENTTYPE2.1") is None
     one = np.zeros((4, 4), dtype=bool)
     one[2, 3] = True
-    assert relation_extent(world(one), "V1") is None
+    assert relation_extent(world(one), "EVENTTYPE2.1") is None
     # a single instance has no pair
-    assert relation_extent(world(np.zeros((1, 1), dtype=bool)), "V1") == NO_PAIR
+    assert relation_extent(world(np.zeros((1, 1), dtype=bool)), "EVENTTYPE2.1") == NO_PAIR
 
 
-def test_a_verb_that_holds_for_no_pair_gets_no_lexeme(tiny_world, monkeypatch) -> None:
-    n = len(tiny_world.instances)
-    real = type(tiny_world.relations).matrix
-
-    def matrix(self, verb, *args, **kwargs):
-        label = verb if isinstance(verb, str) else verb.label
-        return np.zeros((n, n), dtype=bool) if label == "V2.1" else real(self, verb)
-
-    monkeypatch.setattr(type(tiny_world.relations), "matrix", matrix)
-    lexicon = lexicon_of(tiny_world, TINY_TAXONOMY)
-    assert lexicon.verbs_without_word == {"V1": EVERY_PAIR, "V2.1": NO_PAIR}
-    assert [c.label for c in lexicon.of_type("verb")] == ["V1.1", "V1.2", "V2.2"]
+def test_an_event_type_that_holds_for_no_pair_gets_no_lexeme(tiny_world, monkeypatch) -> None:
+    n = tiny_world.count
+    tiny_world.able("EVENTTYPE2.2.1")  # fill the table, then blank one event type
+    monkeypatch.setitem(tiny_world._able, "EVENTTYPE2.2.1", np.zeros((n, n), dtype=bool))
+    lexicon = lexicon_of(tiny_world, TINY_WORLD)
+    assert lexicon.event_types_without_word == {
+        "EVENTTYPE2.1": EVERY_PAIR,
+        "EVENTTYPE2.2.1": NO_PAIR,
+    }
+    assert [c.label for c in lexicon.of_type("event")] == [
+        "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.2"
+    ]  # fmt: skip
 
 
 # ---------------------------------------------------------------------------------------------
@@ -223,9 +228,9 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "category": 0.5,
         "is": 0.1,
         "has": 1.0,
-        "can": 0.75,
-        "verb": 0.4,
-        "verb_category": 0.0,
+        "event_unary": 0.75,
+        "event": 0.4,
+        "event_category": 0.0,
         "patient_projection": 0.5,
         "scalar": 0.5,
     }
@@ -235,10 +240,11 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "category": 56,
         "is": 40,
         "has": 40,
-        "can": 20,
-        "verb": 7,
-        "verb_category": 3,
-        "patient_projection": 2,
+        "state": 0,
+        "event_unary": 20,
+        "event": 7,
+        "event_category": 3,
+        "patient_projection": 7,
         "scalar": 4,
         GENERIC: 1,
         FUNCTION: 15,
@@ -247,10 +253,11 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "category": 28,
         "is": 4,
         "has": 40,
-        "can": 15,
-        "verb": 3,  # 2.8 rounds to 3
-        "verb_category": 0,
-        "patient_projection": 1,
+        "state": 0,
+        "event_unary": 15,
+        "event": 3,  # 2.8 rounds to 3
+        "event_category": 0,
+        "patient_projection": 4,  # 3.5 rounds to 4
         "scalar": 2,  # one of the two dimensions, with both of its poles
         GENERIC: 1,
         FUNCTION: 15,
@@ -264,7 +271,10 @@ def test_the_poles_of_a_scalar_dimension_are_named_together(default_world) -> No
             default_world, seed=seed, lexicon={"named_proportion": {"scalar": 0.5}}
         )
         named = [c.label for c in lexicon.of_type("scalar") if lexicon.is_named(c.label)]
-        assert named in (["SC.1.HIGH", "SC.1.LOW"], ["SC.2.HIGH", "SC.2.LOW"])
+        assert named in (
+            ["SCALARDIM.1.HIGH", "SCALARDIM.1.LOW"],
+            ["SCALARDIM.2.HIGH", "SCALARDIM.2.LOW"],
+        )
         seen.add(named[0])
     assert len(seen) == 2  # the dimension is drawn at random
 
@@ -301,8 +311,9 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
     world_name: str, request
 ) -> None:
     world = request.getfixturevalue(world_name)
-    taxonomy = TINY_TAXONOMY if world_name == "tiny_world" else DEFAULT_TAXONOMY
-    lexicon = lexicon_of(world, taxonomy)
+    path = TINY_WORLD if world_name == "tiny_world" else DEFAULT_WORLD
+    every = {"named_proportion": {"patient_projection": 1.0}}
+    lexicon = lexicon_of(world, path, lexicon=every)
     assert lexicon.unnamed == ()
     assert [x.concept for x in lexicon.lexemes] == [c.label for c in lexicon.concepts]
     for concept in lexicon.concepts:
@@ -321,17 +332,17 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
 
 def test_lexeme_labels(default_world) -> None:
     lexicon = lexicon_of(default_world)
-    assert [x.label for x in lexicon.lexemes] == [f"L.{i}" for i in range(1, 189)]
+    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 189)]
     assert len(lexicon.content_lexemes) == 173 and len(lexicon.function_lexemes) == 15
     # content lexemes come first, then the function words
     assert all(x.content for x in lexicon.lexemes[:173])
-    assert lexicon.lexeme("L.1").concept == "C1"
-    assert lexicon.lexeme("L.173").concept == THING
-    assert lexicon.lexeme("L.174").gloss == "a"
+    assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
+    assert lexicon.lexeme("LEXEME.173").concept == THING
+    assert lexicon.lexeme("LEXEME.174").gloss == "a"
     with pytest.raises(KeyError, match="unknown lexeme"):
-        lexicon.lexeme("L.189")
+        lexicon.lexeme("LEXEME.189")
     with pytest.raises(KeyError, match="unknown concept"):
-        lexicon.concept("C99")
+        lexicon.concept("CATEGORY.99")
 
 
 def test_the_same_seed_gives_the_same_lexicon(default_world) -> None:
@@ -353,7 +364,7 @@ def test_the_same_seed_gives_the_same_lexicon(default_world) -> None:
 
 
 def function_glosses(world, **morphology: Any) -> list[str]:
-    lexicon = lexicon_of(world, TINY_TAXONOMY, grammar={"morphology": morphology})
+    lexicon = lexicon_of(world, TINY_WORLD, grammar={"morphology": morphology})
     return [x.gloss for x in lexicon.function_lexemes]
 
 
@@ -397,7 +408,7 @@ def test_function_words(tiny_world) -> None:
 
 def test_function_words_are_ordinary_lexemes(tiny_world) -> None:
     lexicon = lexicon_of(
-        tiny_world, TINY_TAXONOMY, grammar={"morphology": {"aspect": {"enabled": True}}}
+        tiny_world, TINY_WORLD, grammar={"morphology": {"aspect": {"enabled": True}}}
     )
     the = lexicon.function_word("the")
     assert (the.pos, the.concept, the.gloss) == (FUNCTION_WORD, "THE", "the")
@@ -452,7 +463,9 @@ def test_synonyms(default_world) -> None:
     lexicon = lexicon_of(default_world, lexicon={"synonym_rate": 0.3})
     doubled = [c for c in lexicon.concepts if len(lexicon.lexemes_of(c.label)) == 2]
     assert 20 < len(doubled) < 90
-    assert all(len(lexicon.lexemes_of(c.label)) in (1, 2) for c in lexicon.concepts)
+    for concept in lexicon.concepts:
+        expected = (0,) if concept.label in lexicon.unnamed else (1, 2)
+        assert len(lexicon.lexemes_of(concept.label)) in expected
     assert len(lexicon.content_lexemes) == 173 + len(doubled)
     for concept in doubled:
         first, second = lexicon.lexemes_of(concept.label)
@@ -467,7 +480,7 @@ def test_synonyms(default_world) -> None:
         x.gloss for x in base.function_lexemes
     ]
     assert [x.label for x in lexicon.lexemes] == [
-        f"L.{i}" for i in range(1, len(lexicon.lexemes) + 1)
+        f"LEXEME.{i}" for i in range(1, len(lexicon.lexemes) + 1)
     ]
 
 
@@ -534,7 +547,7 @@ def test_homonym_pairs(default_world) -> None:
         assert earlier.concept != later.concept
         assert earlier.content and later.content  # function words are never homonyms
         assert earlier.same_form_as is None and later.same_form_as == earlier.label
-        assert int(earlier.label[2:]) < int(later.label[2:])
+        assert int(earlier.label[7:]) < int(later.label[7:])
         in_a_pair += [earlier.label, later.label]
     assert len(set(in_a_pair)) == len(in_a_pair)  # no lexeme is in two pairs
     assert not any(x.same_form_as for x in lexicon.function_lexemes)
@@ -548,22 +561,22 @@ def test_homonym_pairs(default_world) -> None:
 def test_a_homonym_never_pairs_a_concept_with_its_own_synonym(tiny_world) -> None:
     for seed in SEEDS:
         knobs = {"homonym_rate": 1.0, "synonym_rate": 1.0}
-        lexicon = lexicon_of(tiny_world, TINY_TAXONOMY, seed=seed, lexicon=knobs)
+        lexicon = lexicon_of(tiny_world, TINY_WORLD, seed=seed, lexicon=knobs)
         assert len(lexicon.content_lexemes) == 70
         pairs = lexicon.homonym_pairs()
         assert len(pairs) >= 33
         assert all(a.concept != b.concept for a, b in pairs)
 
 
-def test_a_missing_kind_of_partner_falls_back_to_the_other_kind() -> None:
+def test_a_missing_kind_of_partner_falls_back_to_the_other_kind(world_files) -> None:
     # A world of categories only has one part of speech: every pair is within it.
-    world = load_taxonomy(corpus_config(PLAIN_TAXONOMY))
+    world = load_world(corpus_config(world_files["plain"]))
     only_nouns = {
-        "named_proportion": {"is": 0.0, "has": 0.0, "can": 0.0},
+        "named_proportion": {"is": 0.0, "has": 0.0, "event_unary": 0.0},
         "homonym_rate": 1.0,
         "homonym_same_pos": 0.0,
     }
-    lexicon = lexicon_of(world, PLAIN_TAXONOMY, lexicon=only_nouns)
+    lexicon = lexicon_of(world, world_files["plain"], lexicon=only_nouns)
     assert {x.pos for x in lexicon.content_lexemes} == {NOUN}
     pairs = lexicon.homonym_pairs()
     assert len(pairs) == 3 and all(a.pos == b.pos for a, b in pairs)

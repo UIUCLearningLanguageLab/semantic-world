@@ -18,17 +18,18 @@ import numpy as np
 import pytest
 
 from semantic_world.corpus import Streams, parse_propositional, proposition_of, propositional
-from semantic_world.corpus.config import ConfigError
+from semantic_world.corpus.config import CONCEPT_TYPES, ConfigError
 from semantic_world.corpus.errors import CorpusError
+from semantic_world.corpus.histories import happened_in, scene_events, scene_of
 from semantic_world.corpus.planner import Planner
 from semantic_world.corpus.propositions import (
-    ALL,
     CAN,
     CLASS,
     EVENT,
-    GENERIC,
     INSTANCE,
-    NO,
+    NEC_ALL,
+    NEC_NO,
+    SIMPLE,
     VERB,
     Predicate,
     Proposition,
@@ -273,7 +274,7 @@ def shape(value, key: str = ""):
         return "text"
     if not re.search(r"\d", value):
         return "word"
-    if value.startswith("SN."):
+    if value.startswith("SCENE."):
         return re.sub(r"\d+", "#", value)
     return re.sub(r"\.(HIGH|LOW)$", "", re.sub(r"\d+(\.\d+)*", "#", value))
 
@@ -298,7 +299,7 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
                 form = record["logical_form"]
                 assert "id" not in form and "grounding" not in form and "rule" not in form
                 # no item names an event: an event label is never written
-                assert not re.search(r"SN\.\d+\.\d+", json.dumps(record))
+                assert not re.search(r"SCENE\.\d+\.EVENTINSTANCE\.\d+", json.dumps(record))
                 assert record["words"] is None and record["text"] is None
                 assert leaves(record["tree"]) == record["tokens"]
                 # the renderings are made from the tokens and from the logical form alone
@@ -334,19 +335,21 @@ def test_the_format_check_finds_planted_differences(runs) -> None:
         return format_differences(other, b), input_problems(other)
 
     # an event label where the other item has a scene label
-    label = a["logical_form"]["scene"] + ".3"
+    label = a["logical_form"]["scene"] + ".EVENTINSTANCE.3"
     found, problems = planted(lambda x: x["logical_form"].update(event=label))
     assert any("logical_form.event" in f for f in found) and "names an event" in " ".join(problems)
     found, problems = planted(lambda x: x.update(events=[label]))
     assert "not a scene" in " ".join(problems)
     found, problems = planted(
-        lambda x: x.update(propositional=x["propositional"].replace("EVENT(SN.", "EVENT(SN.1."))
+        lambda x: x.update(
+            propositional=x["propositional"].replace("EVENT(SCENE.", "EVENT(SCENE.1.EVENTINSTANCE.")
+        )
     )
     assert "names an event" in " ".join(problems)
     # a field of the answer in the model-facing part
     found, problems = planted(lambda x: x["logical_form"].update(grounding={"step": 2}))
     assert found and "'grounding', which is metadata" in " ".join(problems)
-    found, problems = planted(lambda x: x["logical_form"].update(id="PR.7"))
+    found, problems = planted(lambda x: x["logical_form"].update(id="PROP.7"))
     assert found and "'id', which is metadata" in " ".join(problems)
     # a missing field, a field that is null in one item only, and another notation
     found, _ = planted(lambda x: x["logical_form"]["subject"].pop("noun"))
@@ -355,19 +358,22 @@ def test_the_format_check_finds_planted_differences(runs) -> None:
     assert any("not of one type" in f for f in found)
     found, _ = planted(lambda x: x.update(text="the dog ran"))
     assert any("input.text" in f for f in found)
-    found, _ = planted(lambda x: x["logical_form"]["subject"].update(referent="I1.2.3"))
+    found, _ = planted(lambda x: x["logical_form"]["subject"].update(referent="INSTANCE.1.2.3"))
     assert any("not in one notation" in f for f in found)
     found, problems = planted(lambda x: x.pop("readings"))
     assert found and problems
     found, problems = planted(lambda x: x.update(document=None))
     assert found and "names a document" in " ".join(problems)
     # one more relative clause than the other item has
-    clause = {"kind": "can", "feature": "CAN.1"}
+    clause = {"kind": "can", "feature": "EVENTTYPE1.1"}
     found, _ = planted(lambda x: x["logical_form"]["subject"].update(clauses=[clause]))
     assert any("relative clauses" in f for f in found)
-    assert notation("C1.3") == notation("C1.3.2") == "C#" and notation("most") is None
-    assert notation("SN.8") != notation("SN.8.5") and notation("V1") == notation("V1.2")
-    assert notation("SC.1.HIGH") == notation("SC.2.LOW")
+    assert notation("CATEGORY.1.3") == notation("CATEGORY.1.3.2") == "CATEGORY.#"
+    assert notation("most") is None
+    assert notation("SCENE.8") != notation("SCENE.8.EVENTINSTANCE.5") and notation(
+        "EVENTTYPE2.1"
+    ) == notation("EVENTTYPE2.1.2")
+    assert notation("SCALARDIM.1.HIGH") == notation("SCALARDIM.2.LOW")
 
 
 def test_a_pair_that_differs_in_format_stops_the_run(runs, monkeypatch) -> None:
@@ -375,10 +381,10 @@ def test_a_pair_that_differs_in_format_stops_the_run(runs, monkeypatch) -> None:
     builder = TestSetBuilder(corpus.planner, corpus.documents)
     real = builder._input
 
-    def leaky(name, number, document, proposition):
-        record = real(name, number, document, proposition)
+    def leaky(name, number, document, proposition, bare):
+        record = real(name, number, document, proposition, bare)
         if record is not None and proposition.grounding.get("step") is not None:
-            record["logical_form"]["event"] = f"{proposition.scene}.1"  # only a true item has it
+            record["logical_form"]["event"] = f"{proposition.scene}.EVENTINSTANCE.1"  # a true item
         return record
 
     monkeypatch.setattr(builder, "_input", leaky)
@@ -438,10 +444,7 @@ def test_instance_and_event_items_continue_a_document(runs, name) -> None:
 def test_an_item_without_a_noun_for_its_referent_is_left_out(cases) -> None:
     # with no word for any category, a referent can only be "it", which picks out no one
     case = cases("tiny")
-    proportions = dict.fromkeys(
-        ("category", "is", "has", "can", "verb", "verb_category", "patient_projection", "scalar"),
-        1.0,
-    )
+    proportions = dict.fromkeys(CONCEPT_TYPES, 1.0)
     proportions["category"] = 0.0
     config = case.config(
         lexicon={"named_proportion": proportions}, test_sets={"size": 5}, documents={"count": 30}
@@ -478,11 +481,12 @@ def test_event_items(cases, runs, name) -> None:
         # the true item is an event that the document reports, in a main clause or a relative
         # clause, with the same aspect
         form = true.input["logical_form"]
-        matching = oracle.matching(form, scenes[form["scene"]], aspect=True)
+        matching = oracle.matching(form, scenes[form["scene"]])
         assert any(event["label"] in reported for event in matching)
         assert true.meta["possible"] is True and "step" in true.meta["grounding"]
-        # the false item did not happen in any scene of the document, in either aspect, under
-        # any verb that its label names
+        assert true.meta["grounding"]["able"] and true.meta["grounding"]["legal"]
+        # the false item did not happen in any scene of the document, under any verb that its
+        # label names (the aspect is the report's choice, and does not count)
         other = false.input["logical_form"]
         assert other["scene"] == form["scene"]
         assert (other["tense"], other["aspect"]) == (form["tense"], form["aspect"])
@@ -490,12 +494,16 @@ def test_event_items(cases, runs, name) -> None:
         predicate = other["predicate"]
         label = predicate["verb"] if predicate["kind"] == "verb" else predicate["feature"]
         patient = predicate["patient"]["instance"] if "patient" in predicate else None
-        allowed = oracle.allows(label, other["subject"]["instance"], patient)
-        assert false.meta["possible"] is allowed
-        assert test_set.kind == (POSSIBLE if allowed else IMPOSSIBLE)
+        able = oracle.able(label, other["subject"]["instance"], patient)
+        assert false.meta["possible"] is able is false.meta["grounding"]["able"]
+        assert test_set.kind == (POSSIBLE if able else IMPOSSIBLE)
         assert "step" not in false.meta["grounding"]
+        assert false.meta["grounding"]["legal"] is oracle.legal(
+            scenes[other["scene"]], label, other["subject"]["instance"], patient
+        )
         kinds[test_set.kind] += 1
-        category_names += label in oracle.verb_parent.values()
+        event_types = corpus.planner.world.event_types
+        category_names += label in event_types and event_types[label].category
         # the agent and the patient take part in the scene
         participants = scenes[other["scene"]]["participants"]
         assert other["subject"]["instance"] in participants
@@ -507,35 +515,39 @@ def test_event_items(cases, runs, name) -> None:
 
 def test_a_false_event_did_not_happen_in_any_scene_of_its_document(cases) -> None:
     case = cases("default")
+    facts = case.facts(scene={"events_per_step": 4.0})
     generator = case.scenes(scene={"events_per_step": 4.0})
-    truth = generator.truth
+    truth = facts.truth
     streams = Streams(3)
-    seed = case.result.instances.labels[0]
+    seed = case.world.instances[0]
     first, second = (generator.scene(streams, number, seed) for number in (900, 901))
+    truth.add_scene(first)
+    truth.add_scene(second)
     # an event of the second scene that did not happen in the first, with both participants in
     # the first: the truth test calls it false of the first scene, and the test sets do not
     # take it, because the words would be true of the document
     moved = None
-    for event in second.events:
-        claim = dataclasses.replace(
-            event.proposition(), scene=first.label, event=None, aspect="simple"
-        )
+    for event in scene_events(second):
+        report = facts.event_fact(event)
+        if report is None:
+            continue
+        claim = dataclasses.replace(report, scene=first.label, event=None, grounding=None)
         evaluation = truth.evaluate(claim)
-        if evaluation.valid and not evaluation.true and not first.happened(*event.key):
+        if evaluation.valid and not evaluation.true and not happened_in(first, *event.key):
             moved = claim
             break
     assert moved is not None
     assert not happened(truth, [first], moved) and happened(truth, [first, second], moved)
-    # the other aspect of an event that happened is false too, and is not taken either
-    event = first.events[0]
-    other = "progressive" if event.aspect == "simple" else "simple"
-    twin = dataclasses.replace(event.proposition(), event=None, aspect=other)
-    if not any(e.key == event.key and e.aspect == other for e in first.events):
-        assert not truth.is_true(twin)
-    assert happened(truth, [first], twin)
-    # a verb category names every verb below it
-    transitive = next(e for e in first.events if e.transitive)
-    names = truth.verb_names(transitive.verb)
+    # an event carries no aspect: a report of it is true in either aspect, and the test sets
+    # take neither as a false item
+    event = next(e for e in scene_events(first) if facts.event_fact(e) is not None)
+    for aspect in ("simple", "progressive"):
+        twin = dataclasses.replace(facts.event_fact(event, aspect=aspect), event=None)
+        assert truth.is_true(twin) and happened(truth, [first], twin)
+    # an event-type category names every event type below it
+    transitive = next(e for e in scene_events(first) if e.transitive)
+    names = truth.verb_names(transitive.type)
+    assert len(names) == 2
     for label in names:
         claim = Proposition(
             EVENT,
@@ -543,7 +555,7 @@ def test_a_false_event_did_not_happen_in_any_scene_of_its_document(cases) -> Non
             Predicate(VERB, label, transitive.patient),
             scene=first.label,
             tense="past",
-            aspect=transitive.aspect,
+            aspect="simple",
         )
         assert happened(truth, [first], claim)
 
@@ -552,14 +564,17 @@ def test_candidates_for_events(cases) -> None:
     case = cases("default")
     facts = case.facts()
     generator = case.scenes()
-    scene = next(
-        s
-        for s in (
-            generator.scene(Streams(1), n, case.result.instances.labels[n]) for n in range(1, 60)
-        )
-        if any(e.transitive for e in s.events) and len(s.participants) > 3
+    instances = case.world.instances
+    for n in range(1, 60):
+        scene = generator.scene(Streams(1), n, instances[n])
+        facts.truth.add_scene(scene)
+        if len(scene.participants) > 3 and any(
+            e.transitive and facts.event_fact(e) for e in scene_events(scene)
+        ):
+            break
+    report = next(
+        p for e in scene_events(scene) if e.transitive and (p := facts.event_fact(e)) is not None
     )
-    report = next(e for e in scene.events if e.transitive).proposition()
     by_predicate = candidates(facts, report, PREDICATE)
     assert {c.predicate.label for c in by_predicate} == set(facts.verbs) - {report.predicate.label}
     assert all(c.predicate.patient == report.predicate.patient for c in by_predicate)
@@ -576,7 +591,11 @@ def test_candidates_for_events(cases) -> None:
         report.subject,
     )
     assert candidates(facts, report, QUANTIFIER) == []
-    intransitive = next(e for e in scene.events if not e.transitive).proposition()
+    intransitive = next(
+        p
+        for e in scene_events(scene)
+        if not e.transitive and (p := facts.event_fact(e)) is not None
+    )
     assert candidates(facts, intransitive, ROLE) == []
     labels = {c.predicate.label for c in candidates(facts, intransitive, PREDICATE)}
     assert labels == set(facts.features[CAN]) - {intransitive.predicate.label}
@@ -594,22 +613,22 @@ def test_candidates_for_events(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def claimed_value(form: dict, generic: str) -> int | None:
-    """The value that a form claims for every member of its subject set, when it says ``all``
-    or ``no``; None for any other form."""
+def claimed_value(form: dict) -> int | None:
+    """The value that a form claims for every member of its subject set, when its quantifier is
+    ``nec_all`` or ``nec_no``; None for any other form."""
     quantifier = form["quantifier"]
-    means = generic if quantifier == GENERIC else quantifier
-    if means not in (ALL, NO):
+    if quantifier not in (NEC_ALL, NEC_NO):
         return None
-    return 0 if means == NO or not form["polarity"] else 1
+    return 0 if (quantifier == NEC_NO) != (not form["polarity"]) else 1
 
 
 @pytest.mark.parametrize("name", WORLDS)
 def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
+    """A law-like item is a false nec item whose extensional twin is true: every instance of the
+    subject set has the claimed value, and nothing fixes it."""
     case = cases(name)
     corpus = runs(name, **RICH)
     oracle = case.oracle()
-    generic = corpus.config.quantifiers.generic_means
     law_like_pairs = decidable = 0
     for test_set, true, false in pairs_of(corpus):
         if test_set.level != CLASS:
@@ -618,7 +637,7 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
         assert true.meta["law_like"] is False
         form = false.input["logical_form"]
         kind = form["predicate"]["kind"]
-        claimed = claimed_value(form, generic)
+        claimed = claimed_value(form)
         uncontradicted = False
         if claimed is not None and kind in ("is", "has", "can"):
             count, total = oracle._counts(form)
@@ -631,6 +650,9 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
             # false by the fixed test alone: nothing fixes the value that every instance has
             assert oracle.fixed(form["subject"], form["predicate"]["feature"]) != claimed
             assert false.meta["grounding"]["test"] in ("exact", "local")
+            # the extensional twin is true, by the engine and by the oracle
+            twin = {**form, "quantifier": "all" if form["quantifier"] == NEC_ALL else "no"}
+            assert oracle.truth(twin) is True
         elif claimed is not None and kind in ("is", "has", "can"):
             decidable += 1  # some instance contradicts the item
     assert decidable > 0
@@ -638,11 +660,22 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
         assert law_like_pairs > 10
 
 
-def test_the_observed_reading_has_no_law_like_items(runs) -> None:
-    corpus = runs("default", quantifiers={"all_grounding": "observed"})
-    sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
-    assert all(sizes[name] == 0 for name in ALL_SETS if LAWLIKE in name), sizes
-    assert sizes["class_quantifier"] > 0
+def test_law_like_items_are_nec_items(runs) -> None:
+    # relation facts and patient capacities are never nec, so they are never law-like, and with
+    # the extensional words, "all" and "no" make no nec item apart from membership and rules
+    corpus = runs("default", **RICH)
+    for test_set, _, false in pairs_of(corpus):
+        if test_set.kind == LAWLIKE:
+            assert false.proposition.quantifier in (NEC_ALL, NEC_NO)
+            assert false.proposition.predicate.kind in ("is", "has", "can")
+    extensional = runs("default", quantifiers={"universal_words": "extensional"})
+    for test_set, _, false in pairs_of(extensional):
+        if test_set.level == CLASS and false.proposition.quantifier in (NEC_ALL, NEC_NO):
+            assert (
+                false.proposition.rule is not None or false.proposition.predicate.kind == "member"
+            )
+    sizes = {s.name: len(s.pairs) for s in extensional.test_sets}
+    assert sizes["class_quantifier"] > 0 and sizes["class_predicate"] > 0
 
 
 # ---------------------------------------------------------------------------------------------
@@ -651,12 +684,20 @@ def test_the_observed_reading_has_no_law_like_items(runs) -> None:
 
 
 def bare(form: dict) -> dict:
-    """A logical form of ``documents.jsonl`` without its label, its grounding, and its event
-    label: what a test item's logical form holds."""
+    """A logical form of ``documents.jsonl`` without its label, its grounding, its event label,
+    and the aspect of its report: what a test item's logical form holds, up to the aspect."""
     kept = {k: v for k, v in form.items() if k not in ("id", "grounding", "rule")}
     if kept["level"] == EVENT:
         kept["event"] = None
+        kept["aspect"] = SIMPLE
     return kept
+
+
+def stated_form(proposition: Proposition) -> Proposition:
+    """A proposition as :func:`stated_propositions` holds it."""
+    if proposition.level == EVENT:
+        return dataclasses.replace(proposition, event=None, aspect=SIMPLE)
+    return proposition
 
 
 def plain(form: dict) -> str:
@@ -682,7 +723,7 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
     for test_set, true, false in pairs_of(corpus):
         # a false item is never seen: the documents state true propositions only
         assert false.meta["seen"] is False
-        assert dataclasses.replace(false.proposition, event=None) not in stated
+        assert stated_form(false.proposition) not in stated
         assert plain(false.input["logical_form"]) not in main_clauses
         in_main_clause = plain(true.input["logical_form"]) in main_clauses
         if test_set.level == CLASS:
@@ -709,12 +750,14 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
 def test_what_the_documents_state(runs) -> None:
     corpus = runs("default", **RICH)
     stated = stated_propositions(corpus.documents)
+    world = corpus.planner.world
     assert all(p.event is None for p in stated)
+    assert all(p.aspect == SIMPLE for p in stated if p.level == EVENT)
     relative = modifiers = 0
     for document in corpus.documents:
         for sentence in document.sentences:
             proposition = sentence.proposition
-            assert dataclasses.replace(proposition, event=None) in stated
+            assert stated_form(proposition) in stated
             if proposition.level == CLASS:
                 continue
             form = sentence.logical_form
@@ -731,10 +774,10 @@ def test_what_the_documents_state(runs) -> None:
                     modifiers += 1
                     positive = not literal.startswith("not ")
                     feature = literal.removeprefix("not ")
-                    if feature.startswith("SC."):
+                    if feature.startswith("SCALARDIM."):
                         predicate = Predicate("scalar", feature, comparison=mention["noun"])
                     else:
-                        predicate = Predicate(feature.split(".")[0].lower(), feature)
+                        predicate = Predicate(world.feature_kind[feature], feature)
                     assert Proposition(INSTANCE, instance, predicate, positive) in stated
                 for clause in mention.get("clauses", ()):
                     relative += 1
@@ -749,9 +792,9 @@ def test_what_the_documents_state(runs) -> None:
                             EVENT,
                             agent,
                             predicate,
-                            scene=clause["event"].rsplit(".", 1)[0],
+                            scene=scene_of(clause["event"]),
                             tense=clause["tense"],
-                            aspect=clause["aspect"],
+                            aspect=SIMPLE,
                         )
                     else:
                         expected = Proposition(

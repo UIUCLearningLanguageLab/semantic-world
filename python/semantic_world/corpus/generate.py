@@ -15,7 +15,7 @@ from semantic_world.corpus.config import Config
 from semantic_world.corpus.planner import Document, Planner
 from semantic_world.corpus.stats import corpus_stats
 from semantic_world.corpus.testsets import ItemSet, build_test_sets
-from semantic_world.taxonomy.generate import TaxonomyResult
+from semantic_world.corpus.world import World
 
 
 @dataclass(frozen=True)
@@ -24,8 +24,8 @@ class Corpus:
 
     config: Config
     planner: Planner
-    """The planner that made the documents. It holds the taxonomy (``result``), the lexicon,
-    the scenes, and the streams."""
+    """The planner that made the documents. It holds the world, the lexicon, the scenes, and
+    the streams."""
     documents: tuple[Document, ...]
     test_sets: tuple[ItemSet, ...]
     stats: dict[str, Any]
@@ -39,10 +39,10 @@ class Corpus:
         return write_corpus(self, path)
 
 
-def generate(config: Config, result: TaxonomyResult | None = None) -> Corpus:
+def generate(config: Config, world: World | None = None) -> Corpus:
     """Run the generator: the lexicon, the documents with their scenes, the test sets, and the
-    statistics. ``result`` is the taxonomy, when it is already made."""
-    planner = Planner(config, result)
+    statistics. ``world`` is the world, when it is already made."""
+    planner = Planner(config, world)
     documents = planner.generate()
     test_sets = build_test_sets(planner, documents)
     stats = corpus_stats(planner, documents, test_sets)

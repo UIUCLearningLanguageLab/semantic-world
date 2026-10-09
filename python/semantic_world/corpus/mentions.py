@@ -5,11 +5,13 @@ decisions: the sentence plan of a proposition, relative clauses, and, for the in
 document, the noun's level, first and later mentions, pronouns, and modifiers.
 
 **The plan of a proposition.** A class-level proposition names its categories with their own
-nouns, and its quantifier is the subject's determiner. An instance is mentioned by default with
-the noun of its leaf and the determiner ``the``, and a caller can give any other mention. The
-subject of an instance-level scalar pole is named by its comparison class, because "the mouse is
-big" means big for a mouse. The subject of "is a penguin" is named by the category above the
-leaf ("the bird is a penguin"), or by a pronoun when the leaf has none above it.
+nouns, and its subject's determiner is the word that states its quantifier ("all", "most",
+"some", "no"), or none for a bare plural; the plan keeps the quantifier itself. An instance is
+mentioned by default with the noun of its leaf and the determiner ``the``, and a caller can give
+any other mention. The subject of an instance-level scalar pole is named by its comparison
+class, because "the mouse is big" means big for a mouse. The subject of "is a penguin" is named
+by the category above the leaf ("the bird is a penguin"), or by a pronoun when the leaf has none
+above it.
 
 **Relative clauses on instances.** A noun phrase takes a relative clause at
 ``mention.relative_clauses.rate``. The clause is an object relative with probability
@@ -18,10 +20,10 @@ level as its sentence, about the same referent:
 
 - in an event-level sentence, another event of the same scene that the referent takes part in:
   as its agent (a subject relative, "the dog that chased the cat") or as its patient (an object
-  relative, "the cat that the dog chased");
-- in an instance-level sentence, a capacity of the referent: a CAN feature it has, or a verb's
-  relation with another instance of the document, as agent ("the owl that can eat the mouse") or
-  as patient ("the mouse that the owl can eat").
+  relative, "the cat that the dog chased"), with the aspect the document gives the report;
+- in an instance-level sentence, a capacity of the referent: a one-place event type it is able
+  to be the agent of, or a two-place event type with another instance of the document, as agent
+  ("the owl that can eat the mouse") or as patient ("the mouse that the owl can eat").
 
 When the drawn kind has no true proposition, the other kind is used, and when neither has one
 the noun phrase takes no relative clause. The noun phrases inside a relative clause can take
@@ -47,7 +49,6 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
@@ -55,30 +56,33 @@ from semantic_world.corpus.config import Config
 from semantic_world.corpus.facts import Facts
 from semantic_world.corpus.grammar import (
     INSTANCE_NP,
+    WORD_OF,
     NounPhrase,
     Predication,
     RelativeClause,
     SentencePlan,
     phrase_of,
 )
+from semantic_world.corpus.histories import SceneEvent, event_of, scene_of
 from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EVENT,
-    GENERIC,
     HAS,
     IS,
     MEMBER,
     SCALAR,
+    SIMPLE,
     VERB,
     CategoryTerm,
     Literal,
     Predicate,
     Proposition,
-    event_of,
-    scene_of,
 )
 from semantic_world.corpus.streams import Streams
+from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX
+
+REFERENT_PREFIX = "REF."
 
 
 def leaf_of(facts: Facts, instance: str) -> str:
@@ -100,10 +104,14 @@ def class_phrase(term: CategoryTerm, determiner: str | None = None) -> NounPhras
 
 
 def plan_for(
-    facts: Facts, proposition: Proposition, mentions: Mapping[str, NounPhrase] | None = None
+    facts: Facts,
+    proposition: Proposition,
+    mentions: Mapping[str, NounPhrase] | None = None,
+    bare: bool = False,
 ) -> SentencePlan:
     """The sentence plan of a proposition. ``mentions`` gives the noun phrase of an instance;
-    an instance without one is mentioned by the noun of its leaf, with ``the``."""
+    an instance without one is mentioned by the noun of its leaf, with ``the``. ``bare`` says a
+    class-level subject with a bare plural in place of its quantifier word."""
     mentions = mentions or {}
     predicate = proposition.predicate
 
@@ -112,13 +120,16 @@ def plan_for(
 
     if proposition.level == CLASS:
         assert isinstance(proposition.subject, CategoryTerm)
-        quantifier = None if proposition.quantifier == GENERIC else proposition.quantifier
-        subject = class_phrase(proposition.subject, quantifier)
+        quantifier = proposition.quantifier
+        determiner = None if bare or quantifier is None else WORD_OF[quantifier]
+        subject = class_phrase(proposition.subject, determiner)
         target = None
         if isinstance(predicate.patient, CategoryTerm):
             target = class_phrase(predicate.patient)
         return SentencePlan(
-            subject, Predication(predicate.kind, predicate.label, proposition.polarity, target)
+            subject,
+            Predication(predicate.kind, predicate.label, proposition.polarity, target),
+            quantifier,
         )
     assert isinstance(proposition.subject, str)
     noun = predicate.comparison
@@ -158,20 +169,22 @@ class ClauseContext:
     level: str
     others: Sequence[str] = ()
     """Instance level: the instances that a clause can relate the referent to."""
-    events: Sequence = ()
+    events: Sequence[SceneEvent] = ()
     """Event level: the events that a clause can report."""
     mention: Callable[[str], NounPhrase] | None = None
     """The noun phrase of an instance that a clause brings in."""
+    aspect: Callable[[SceneEvent], str] | None = None
+    """Event level: the aspect of a report of an event (``simple`` by default)."""
     used: set = field(default_factory=set)
     """What the sentence already says, so that no clause says it again. An event is held twice:
     by its label, and by what happened (:func:`happened`), because the same event can occur
     again at a later step."""
 
 
-def happened(event: Any) -> tuple:
-    """What an event reports, apart from when: its verb, its agent, and its patient. A clause
-    never reports an event with the same three as its sentence's own event, or as the event of
-    another clause of the sentence: "the dog chased the cat that the dog chased"."""
+def happened(event: SceneEvent) -> tuple:
+    """What an event reports, apart from when: its event type, its agent, and its patient. A
+    clause never reports an event with the same three as its sentence's own event, or as the
+    event of another clause of the sentence: "the dog chased the cat that the dog chased"."""
     return ("happened", *event.key)
 
 
@@ -192,19 +205,20 @@ class RelativeClauses:
         plan: SentencePlan,
         others: Sequence[str] = (),
         mention: Callable[[str], NounPhrase] | None = None,
-        events: Sequence | None = None,
+        events: Sequence[SceneEvent] | None = None,
+        aspect: Callable[[SceneEvent], str] | None = None,
     ) -> ClauseContext:
         """The context of a sentence's relative clauses. ``others`` are the instances that an
         instance-level clause can relate the referent to: the other referents of the document.
         ``events`` are the events that an event-level clause can report: by default, every event
-        of the sentence's own scene."""
+        of the sentence's own scene. ``aspect`` gives the aspect of a report."""
         if plan.level == EVENT and events is None:
             assert plan.predication.event is not None
-            events = self.facts.truth.scenes[scene_of(plan.predication.event)].events
+            events = self.facts.truth.events_of(scene_of(plan.predication.event))
         used = {self._key(plan.predication, plan.subject.referent)}
         own = plan.predication.event
         used |= {happened(event) for event in events or () if event.label == own}
-        return ClauseContext(plan.level, others, events or (), mention, used)
+        return ClauseContext(plan.level, others, events or (), mention, aspect, used)
 
     def attach(
         self,
@@ -212,13 +226,14 @@ class RelativeClauses:
         plan: SentencePlan,
         others: Sequence[str] = (),
         mention: Callable[[str], NounPhrase] | None = None,
-        events: Sequence | None = None,
+        events: Sequence[SceneEvent] | None = None,
+        aspect: Callable[[SceneEvent], str] | None = None,
     ) -> SentencePlan:
         """The plan with relative clauses drawn for its noun phrases: the subject first, then
         the object."""
         if plan.level == CLASS or not self.enabled:
             return plan
-        context = self.context(plan, others, mention, events)
+        context = self.context(plan, others, mention, events, aspect)
         subject = self.extend(rng, plan.subject, context)
         predication = plan.predication
         if predication.object is not None:
@@ -252,7 +267,7 @@ class RelativeClauses:
         mention_of = context.mention or (lambda instance: mention(self.facts, instance))
         as_object = rng.random() < self.settings.object_share
         if phrase.negated:
-            as_object = False  # the negated IS literals need a subject relative to join
+            as_object = False  # the negated PROPERTY literals need a subject relative to join
         for object_relative in (as_object, not as_object):
             if object_relative and phrase.negated:
                 continue
@@ -260,6 +275,9 @@ class RelativeClauses:
             if not options:
                 continue
             predication, other = options[int(rng.integers(len(options)))]
+            if context.aspect is not None and predication.event is not None:
+                event = next(e for e in context.events if e.label == predication.event)
+                predication = dataclasses.replace(predication, aspect=context.aspect(event))
             used.add(self._key(predication, other or referent, referent if other else None))
             used |= {happened(e) for e in context.events if e.label == predication.event}
             if object_relative:
@@ -290,7 +308,7 @@ class RelativeClauses:
                 if not names:
                     continue
                 kind = VERB if event.transitive else CAN
-                report = (event.label, self.tense, event.aspect)
+                report = (event.label, self.tense, SIMPLE)  # the aspect is drawn once chosen
                 if object_relative and event.patient == referent:
                     options.append((Predication(kind, names[0], True, None, *report), event.agent))
                 elif not object_relative and event.agent == referent:
@@ -377,11 +395,13 @@ class MentionRules:
         self.settings = config.mention
         self.facts = facts
         self.truth = facts.truth
+        self.world = facts.world
         scalars = tuple(dict.fromkeys(pole.rsplit(".", 1)[0] for pole in facts.poles))
         attributes = facts.features[IS] + facts.features[HAS] + scalars
         order = streams.substream("mentions", "preference").permutation(len(attributes))
         self.preference: tuple[str, ...] = tuple(attributes[int(i)] for i in order)
-        """IS features, HAS features, and scalar dimensions, in the order they are tried."""
+        """PROPERTY features, PART features, and scalar dimensions, in the order they are
+        tried."""
 
     def path(self, instance: str) -> tuple[str, ...]:
         """The categories an instance is below, from the top to its leaf."""
@@ -398,29 +418,27 @@ class MentionRules:
 
     def value(self, instance: str, attribute: str, noun: str) -> Literal | None:
         """The literal that states an instance's value on an attribute, in a noun phrase headed
-        by ``noun``: an adjective for an IS feature it has, a with-phrase or a without-phrase
-        for a HAS feature, and a pole adjective for a scalar on which it is at a pole of the
-        noun's category. None when no adjective or with-phrase states the value."""
-        truth = self.truth
-        row = truth.instance_index[instance]
-        if attribute.startswith("SC."):
+        by ``noun``: an adjective for a PROPERTY feature it has, a with-phrase or a
+        without-phrase for a PART feature, and a pole adjective for a scalar on which it is at a
+        pole of the noun's category. None when no adjective or with-phrase states the value."""
+        row = self.truth.instance_index[instance]
+        if attribute.startswith(SCALAR_PREFIX):
             for side in ("HIGH", "LOW"):
                 pole = f"{attribute}.{side}"
                 if pole in self.facts.named and self.fits(row, Literal(pole), noun):
                     return Literal(pole)
             return None
-        value = bool(truth.values[row, truth.features[attribute].position])
-        if attribute.startswith("IS."):
+        value = bool(self.world.column(attribute)[row])
+        if attribute.startswith(PROPERTY_PREFIX):
             return Literal(attribute) if value else None
         return Literal(attribute, value)
 
     def fits(self, row: int, literal: Literal, noun: str) -> bool:
         """Whether an instance satisfies a literal of a noun phrase headed by ``noun``. A pole
         is relative to the noun's category."""
-        truth = self.truth
         if literal.pole:
-            return bool(truth.pole_mask(literal.feature, truth._below[noun])[0][row])
-        value = bool(truth.values[row, truth.features[literal.feature].position])
+            return bool(self.truth.pole_mask(literal.feature, self.world.below(noun))[0][row])
+        value = bool(self.world.column(literal.feature)[row])
         return value == literal.positive
 
     def matches(self, phrase: NounPhrase, cast: Sequence[str]) -> list[str]:
@@ -456,7 +474,7 @@ class MentionRules:
             literal = self.value(instance, attribute, noun)
             if literal is None or literal.feature in avoid:
                 continue
-            is_with = literal.feature.startswith("HAS.")
+            is_with = literal.feature.startswith(PART_PREFIX)
             if is_with and with_phrases >= self.settings.max_with_phrases:
                 continue
             if not is_with and adjectives >= self.settings.max_adjectives:
@@ -486,7 +504,7 @@ class Mentions:
         """Whether mentions take modifiers at ``mention.modifier_rate``, beside the modifiers
         that tell referents apart."""
         self.referents: dict[str, str] = {}
-        """The referent label (``R.<n>``) of every instance mentioned so far, in the order of
+        """The referent label (``REF.<n>``) of every instance mentioned so far, in the order of
         first mention."""
         self._previous: tuple[str | None, frozenset[str]] | None = None
         self._current: list[str] = []
@@ -519,7 +537,7 @@ class Mentions:
         rules, settings = self.rules, self.rules.settings
         first = instance not in self.referents
         if first:
-            self.referents[instance] = f"R.{len(self.referents) + 1}"
+            self.referents[instance] = f"{REFERENT_PREFIX}{len(self.referents) + 1}"
         can_be_pronoun = pronoun and noun is None and not first and self.pronoun_allowed(instance)
         self._current.append(instance)
         if can_be_pronoun and rng.random() < settings.pronoun_rate:
@@ -555,17 +573,17 @@ class Mentions:
         avoid: Sequence[str],
     ) -> tuple[Literal, ...]:
         """The literals with one more modifier, chosen from the features true of the referent:
-        an adjective for an IS feature or a pole, or a with-phrase for a HAS feature."""
+        an adjective for a PROPERTY feature or a pole, or a with-phrase for a PART feature."""
         rules, settings = self.rules, self.rules.settings
         stated = {literal.feature for literal in literals} | set(avoid)
-        adjectives = sum(not x.feature.startswith("HAS.") for x in literals)
+        adjectives = sum(not x.feature.startswith(PART_PREFIX) for x in literals)
         with_phrases = len(literals) - adjectives
         options = []
         for attribute in rules.preference:
             literal = rules.value(instance, attribute, noun)
             if literal is None or not literal.positive or literal.feature in stated:
                 continue
-            is_with = literal.feature.startswith("HAS.")
+            is_with = literal.feature.startswith(PART_PREFIX)
             if (with_phrases if is_with else adjectives) >= (
                 settings.max_with_phrases if is_with else settings.max_adjectives
             ):

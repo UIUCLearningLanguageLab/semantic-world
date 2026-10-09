@@ -87,10 +87,14 @@ def default_output_dir(config: Config, base: str | Path = "runs/world") -> Path:
     return Path(base) / f"{config.name}_seed{config.seed}"
 
 
-def define(config: Config) -> WorldResult:
+def define(config: Config, *, episode_stats: bool = True) -> WorldResult:
     """Generate a world: the taxonomy run, the fluents, the event types, the definition, and the
     agreement test. A disagreement, or a broken invariant of the dynamics, raises
-    :class:`WorldError` and fails the run."""
+    :class:`WorldError` and fails the run.
+
+    With ``episode_stats`` false, the 1,000 statistics episodes of ``world_stats.yaml`` are not
+    run, and ``stats["episodes"]`` is None: for a world used in memory (the corpus, tests). A
+    written run always has them: ``write`` runs them when they are missing."""
     taxonomy_run = generate_taxonomy(config.taxonomy_config())
     event_file = None
     path = config.event_file_path()
@@ -124,7 +128,8 @@ def define(config: Config) -> WorldResult:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
     definition = build_definition(taxonomy, fluents, event_types)
     report = check_definition(definition)
-    stats = world_stats(fluents, event_types, statistics_episodes(definition, taxonomy, config))
+    episodes = statistics_episodes(definition, taxonomy, config) if episode_stats else None
+    stats = world_stats(fluents, event_types, episodes)
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     return WorldResult(
         config=config,
@@ -180,6 +185,8 @@ def write_result(result: WorldResult, path: str | Path | None = None) -> Path:
         frame.write_csv(derived / name, float_precision=6, null_value="")
     write_manifest(derived, {name: result.rule_set_id for name in frames})
     stats = dict(result.stats)
+    if stats.get("episodes") is None:
+        stats["episodes"] = statistics_episodes(result.definition, result.taxonomy, result.config)
     stats["warnings"] = list(result.warnings)
     (folder / STATS_FILE).write_text(_yaml(stats), encoding="utf-8")
     return folder

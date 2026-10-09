@@ -1,9 +1,12 @@
-"""Stage 2: the truth tests, against an independent recomputation from the taxonomy's files.
+"""Stage 2 and stage a5a: the truth tests, against an independent recomputation from the world
+run's files.
 
-``truth_oracle.Oracle`` reads a taxonomy output folder and judges a logical form without any of
-the corpus generator's code. Here every logical form of a whole grid (every subject, predicate,
-quantifier, and polarity of a small world) is judged both ways, under several truth settings.
-The other tests pin down single rules of "Truth grounding" in the specification.
+``truth_oracle.Oracle`` reads a world run folder and judges a logical form without any of the
+corpus generator's code, with the brute-force evaluator for the requirements. Here every logical
+form of a whole grid (every subject, predicate, quantifier, and polarity of a small world) is
+judged both ways. The other tests pin down single rules of "Quantifiers" in the specification:
+``nec_all`` and ``nec_no`` by the fixed test, ``all`` and ``no`` over the members, ``most`` as
+more than half, and the language's words as a matter of felicity, never of truth.
 """
 
 from __future__ import annotations
@@ -20,7 +23,6 @@ from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EXACT,
-    GENERIC,
     HAS,
     INSTANCE,
     IS,
@@ -28,6 +30,8 @@ from semantic_world.corpus.propositions import (
     MEAN,
     MEMBER,
     MOST,
+    NEC_ALL,
+    NEC_NO,
     NO,
     OBSERVED,
     PROJECTION,
@@ -44,17 +48,15 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
 )
+from semantic_world.world.labels import translate
 
 SMALL = ("tiny", "deep", "still")
 SETTINGS = {
     "default": {},
-    "observed": {"quantifiers": {"all_grounding": "observed"}},
-    "generic_all": {"quantifiers": {"generic": {"means": "all"}}},
-    "generic_some": {
-        "quantifiers": {"generic": {"means": "some"}, "most": {"min_proportion": 0.5}}
-    },
+    "extensional": {"quantifiers": {"universal_words": "extensional"}},
     "wide_poles": {"scalar_adjectives": {"z": 0.3}},
 }
+KIND_OF = {"PROPERTY": IS, "PART": HAS, "EVENTTYPE1": CAN}
 
 
 def agree(case, settings: dict, propositions) -> int:
@@ -76,16 +78,20 @@ def agree(case, settings: dict, propositions) -> int:
     return valid
 
 
+def quantifiers_of(predicate: Predicate) -> tuple:
+    return (None,) if predicate.kind == SCALAR else QUANTIFIERS
+
+
 def class_grid(facts, restrictions=((),)):
     subjects = [CategoryTerm(c, r) for c in facts.categories + (THING,) for r in restrictions]
     for subject in subjects:
         for predicate in facts.class_predicates(subject.category):
-            for quantifier, polarity in itertools.product(QUANTIFIERS, (True, False)):
+            for quantifier, polarity in itertools.product(quantifiers_of(predicate), (True, False)):
                 yield Proposition(CLASS, subject, predicate, polarity, quantifier)
 
 
 def instance_grid(facts):
-    for instance in facts.result.instances.labels:
+    for instance in facts.world.instances:
         for predicate in facts.instance_predicates(instance):
             for polarity in (True, False):
                 yield Proposition(INSTANCE, instance, predicate, polarity)
@@ -113,8 +119,8 @@ def test_every_instance_level_form_is_judged_as_the_output_files_say(cases, name
 
 
 def restrictions_of(facts, rng: np.random.Generator, count: int) -> list[tuple[Literal, ...]]:
-    """Random restrictions of one to three literals: IS and HAS features of both polarities,
-    free and determined, and scalar poles."""
+    """Random restrictions of one to three literals: PROPERTY and PART features of both
+    polarities, free and determined, and scalar poles."""
     features = facts.features[IS] + facts.features[HAS]
     drawn = []
     for _ in range(count):
@@ -130,12 +136,11 @@ def restrictions_of(facts, rng: np.random.Generator, count: int) -> list[tuple[L
 
 
 @pytest.mark.parametrize("name", SMALL)
-@pytest.mark.parametrize("setting", ["default", "observed"])
-def test_restricted_subjects_are_judged_as_the_output_files_say(cases, name, setting) -> None:
+def test_restricted_subjects_are_judged_as_the_output_files_say(cases, name) -> None:
     case = cases(name)
-    facts = case.facts(**SETTINGS[setting])
+    facts = case.facts()
     restrictions = restrictions_of(facts, np.random.default_rng(11), 12)
-    valid = agree(case, SETTINGS[setting], class_grid(facts, restrictions))
+    valid = agree(case, {}, class_grid(facts, restrictions))
     assert valid > 1000  # many restricted subject sets are empty, and so vacuous
 
 
@@ -160,9 +165,10 @@ def test_restricted_patients_are_judged_as_the_output_files_say(cases) -> None:
 
 
 def clauses_of(facts, rng: np.random.Generator, count: int) -> list[Clause]:
-    """Random relative clauses of the three kinds: a CAN feature, a verb with a patient category
-    (a subject relative), and a verb with an agent category (an object relative). The other
-    category sometimes has a restriction, or a relative clause of its own."""
+    """Random relative clauses of the three kinds: a one-place event type, a two-place event
+    type with a patient category (a subject relative), and one with an agent category (an object
+    relative). The other category sometimes has a restriction, or a relative clause of its
+    own."""
     cans, verbs, categories = facts.features[CAN], facts.verbs, facts.categories
     features = facts.features[IS] + facts.features[HAS]
 
@@ -188,12 +194,9 @@ def clauses_of(facts, rng: np.random.Generator, count: int) -> list[Clause]:
 
 
 @pytest.mark.parametrize("name", SMALL)
-@pytest.mark.parametrize("setting", ["default", "observed", "generic_all"])
-def test_subjects_with_relative_clauses_are_judged_as_the_output_files_say(
-    cases, name, setting
-) -> None:
+def test_subjects_with_relative_clauses_are_judged_as_the_output_files_say(cases, name) -> None:
     case = cases(name)
-    facts = case.facts(**SETTINGS[setting])
+    facts = case.facts()
     rng = np.random.default_rng(21)
     clauses = clauses_of(facts, rng, 10)
     assert {(c.kind, c.patient is None, c.agent is None) for c in clauses} == {
@@ -208,9 +211,11 @@ def test_subjects_with_relative_clauses_are_judged_as_the_output_files_say(
             restriction = restrictions[int(rng.integers(len(restrictions)))]
             subject = CategoryTerm(category, restriction, (clause,))
             for predicate in facts.class_predicates(category, patients=facts.categories[:3]):
-                for quantifier, polarity in itertools.product(QUANTIFIERS, (True, False)):
+                for quantifier, polarity in itertools.product(
+                    quantifiers_of(predicate), (True, False)
+                ):
                     forms.append(Proposition(CLASS, subject, predicate, polarity, quantifier))
-    assert agree(case, SETTINGS[setting], forms) > 1000
+    assert agree(case, {}, forms) > 1000
 
 
 def test_patients_with_relative_clauses_are_judged_as_the_output_files_say(cases) -> None:
@@ -232,7 +237,7 @@ def test_a_relative_clause_is_restrictive_and_means_at_least_one(cases) -> None:
     case = cases("default")
     facts = case.facts()
     truth = facts.truth
-    labels = case.result.instances.labels
+    labels = case.world.instances
     checked = 0
     for verb in facts.verbs:
         holds = truth.matrix(verb)
@@ -254,10 +259,10 @@ def test_a_relative_clause_is_restrictive_and_means_at_least_one(cases) -> None:
             ]
             checked += bool(expected)
     assert checked > 10
-    # "penguins that can swim": the members with the CAN feature
+    # "penguins that can swim": the members able to be the agent of the one-place event type
     category, feature = facts.categories[0], facts.features[CAN][0]
     swimmers = truth.members(CategoryTerm(category, (), (Clause(CAN, feature),)))
-    column = truth.values[:, truth.features[feature].position]
+    column = case.world.column(feature)
     assert [labels[i] for i in swimmers] == [
         labels[i] for i in truth.members(CategoryTerm(category)) if column[i]
     ]
@@ -265,8 +270,8 @@ def test_a_relative_clause_is_restrictive_and_means_at_least_one(cases) -> None:
 
 def restricted_subject(facts, minimum: int = 3):
     """A category term with a relative clause that some of its members satisfy, and not all,
-    and an IS, HAS, or CAN feature that every member of the restricted set has."""
-    truth = facts.truth
+    and a PROPERTY, PART, or one-place feature that every member of the restricted set has."""
+    truth, world = facts.truth, facts.world
     for category in facts.categories:
         for object_relative in (False, True):
             for clause in facts.clause_options(CategoryTerm(category), object_relative):
@@ -276,13 +281,13 @@ def restricted_subject(facts, minimum: int = 3):
                     continue
                 for kind in (IS, HAS, CAN):
                     for feature in facts.features[kind]:
-                        column = truth.values[members, truth.features[feature].position]
+                        column = world.column(feature)[members]
                         if column.all() and feature != clause.label:
                             return term, Predicate(kind, feature)
     raise AssertionError("no restricted subject with a feature that every member has")
 
 
-def test_a_subject_with_a_relative_clause_is_judged_by_proportion(cases) -> None:
+def test_a_subject_with_a_relative_clause_takes_the_extensional_quantifiers(cases) -> None:
     case = cases("default")
     facts = case.facts()
     subject, predicate = restricted_subject(facts)
@@ -291,26 +296,28 @@ def test_a_subject_with_a_relative_clause_is_judged_by_proportion(cases) -> None
     def judge(quantifier: str, polarity: bool = True, truth=truth):
         return truth.evaluate(Proposition(CLASS, subject, predicate, polarity, quantifier))
 
-    # most, some, and the generic are judged by the share of the subject set
+    # most, some, all, and no are judged by the share of the subject set
     most = judge(MOST)
     assert most.valid and most.true
     assert most.grounding["proportion"] == 1.0 and most.grounding["test"] == OBSERVED
     assert most.grounding["instances"] == len(truth.members(subject))
-    assert judge(GENERIC).true and not judge(MOST, False).true
-    # all and no are allowed only under the observed reading, as for patient projections
-    for quantifier in (ALL, NO):
+    assert "fixed" not in most.grounding
+    assert judge(ALL).true and not judge(NO).true and not judge(MOST, False).true
+    # nec_all and nec_no need a fixed test, which a subject with a relative clause has not
+    for quantifier in (NEC_ALL, NEC_NO):
         evaluation = judge(quantifier)
-        assert not evaluation.valid and "only under the observed reading" in evaluation.reason
-    observed = case.facts(quantifiers={"all_grounding": "observed"}).truth
-    assert judge(ALL, truth=observed).true and not judge(NO, truth=observed).true
-    # so a document states "most", the strongest quantifier that the law-like reading allows
+        assert not evaluation.valid and "fixed test" in evaluation.reason
+    # under the default words, "all" expresses nec_all only, so a document states "most"
     stated = facts.class_fact(subject, predicate)
     assert stated.quantifier == MOST and stated.subject == subject
-    # every member has the feature, so "some" is true and is not used
-    assert judge(SOME).true and not judge(SOME).felicitous
-    # the generic that means all is judged over the instances
-    generic_all = case.facts(quantifiers={"generic": {"means": "all"}}).truth
-    assert judge(GENERIC, truth=generic_all).true
+    # with extensional words, "all" can be said
+    extensional = case.facts(quantifiers={"universal_words": "extensional"})
+    assert extensional.class_fact(subject, predicate).quantifier == ALL
+    # every member has the feature, so "some" is true; under the default words it is still
+    # usable, because the language's "all" (nec_all) is false, and under extensional words it
+    # is left out by the implicature
+    assert judge(SOME).true and judge(SOME).felicitous
+    assert not judge(SOME, truth=extensional.truth).felicitous
     # a clause that no member satisfies makes a vacuous subject
     nobody = CategoryTerm(
         subject.category, (), (Clause(VERB, facts.verbs[0], patient=subject), subject.clauses[0])
@@ -320,53 +327,72 @@ def test_a_subject_with_a_relative_clause_is_judged_by_proportion(cases) -> None
 
 
 def test_relative_clauses_in_the_logical_form() -> None:
-    mice = CategoryTerm("C1.5", (Literal("IS.4"),))
-    owls = CategoryTerm("C1.2", (), (Clause(VERB, "V2.1", patient=mice), Clause(CAN, "CAN.3")))
+    mice = CategoryTerm("CATEGORY.1.5", (Literal("PROPERTY.4"),))
+    owls = CategoryTerm(
+        "CATEGORY.1.2",
+        (),
+        (Clause(VERB, "EVENTTYPE2.2.1", patient=mice), Clause(CAN, "EVENTTYPE1.3")),
+    )
     assert owls.to_json() == {
-        "category": "C1.2",
+        "category": "CATEGORY.1.2",
         "restriction": [],
         "clauses": [
             {
                 "kind": "verb",
-                "verb": "V2.1",
-                "patient": {"category": "C1.5", "restriction": ["IS.4"]},
+                "verb": "EVENTTYPE2.2.1",
+                "patient": {"category": "CATEGORY.1.5", "restriction": ["PROPERTY.4"]},
             },
-            {"kind": "can", "feature": "CAN.3"},
+            {"kind": "can", "feature": "EVENTTYPE1.3"},
         ],
     }
     assert CategoryTerm.from_json(owls.to_json()) == owls
-    eaten = CategoryTerm("C1.5", (), (Clause(VERB, "V2.1", agent=CategoryTerm("C1.2")),))
+    eaten = CategoryTerm(
+        "CATEGORY.1.5", (), (Clause(VERB, "EVENTTYPE2.2.1", agent=CategoryTerm("CATEGORY.1.2")),)
+    )
     assert eaten.to_json()["clauses"] == [
-        {"kind": "verb", "verb": "V2.1", "agent": {"category": "C1.2", "restriction": []}}
+        {
+            "kind": "verb",
+            "verb": "EVENTTYPE2.2.1",
+            "agent": {"category": "CATEGORY.1.2", "restriction": []},
+        }
     ]
     assert CategoryTerm.from_json(eaten.to_json()) == eaten
-    assert eaten != CategoryTerm("C1.5") and eaten.plain == CategoryTerm("C1.5")
+    assert eaten != CategoryTerm("CATEGORY.1.5") and eaten.plain == CategoryTerm("CATEGORY.1.5")
     # a term without clauses is written as before
     assert "clauses" not in mice.to_json()
-    proposition = Proposition(CLASS, owls, Predicate(SCALAR, "SC.1.HIGH"), True, GENERIC)
+    proposition = Proposition(CLASS, owls, Predicate(HAS, "PART.2"), True, MOST)
     assert Proposition.from_json(proposition.to_json()) == proposition
-    # the words a sentence needs: the clauses' verbs, features, and categories too
-    assert proposition.concepts() == ("C1.2", "V2.1", "C1.5", "IS.4", "CAN.3", "SC.1.HIGH")
+    # the words a sentence needs: the clauses' event types, features, and categories too
+    assert proposition.concepts() == (
+        "CATEGORY.1.2",
+        "EVENTTYPE2.2.1",
+        "CATEGORY.1.5",
+        "PROPERTY.4",
+        "EVENTTYPE1.3",
+        "PART.2",
+    )
 
 
 def test_relative_clauses_that_cannot_be_judged(tiny) -> None:
     truth = tiny.facts().truth
     bad = {
-        "is not a CAN feature": Clause(CAN, "IS.1"),
-        "has no other category": Clause(CAN, "CAN.1", patient=CategoryTerm("C1")),
-        "unknown verb": Clause(VERB, "V9", patient=CategoryTerm("C1")),
-        "a patient category or an agent category": Clause(VERB, "V1.1"),
-        "a patient category or an agent category ": Clause(
-            VERB, "V1.1", CategoryTerm("C1"), CategoryTerm("C2")
+        "is not a one-place event type": Clause(CAN, "PROPERTY.1"),
+        "has no other category": Clause(CAN, "EVENTTYPE1.1", patient=CategoryTerm("CATEGORY.1")),
+        "unknown two-place event type": Clause(
+            VERB, "EVENTTYPE2.9", patient=CategoryTerm("CATEGORY.1")
         ),
-        "unknown category": Clause(VERB, "V1.1", patient=CategoryTerm("C9")),
-        "not about the generic noun": Clause(VERB, "V1.1", agent=CategoryTerm(THING)),
-        "holds a CAN feature or a verb": Clause(IS, "IS.1"),
+        "a patient category or an agent category": Clause(VERB, "EVENTTYPE2.1.1"),
+        "a patient category or an agent category ": Clause(
+            VERB, "EVENTTYPE2.1.1", CategoryTerm("CATEGORY.1"), CategoryTerm("CATEGORY.2")
+        ),
+        "unknown category": Clause(VERB, "EVENTTYPE2.1.1", patient=CategoryTerm("CATEGORY.9")),
+        "not about the generic noun": Clause(VERB, "EVENTTYPE2.1.1", agent=CategoryTerm(THING)),
+        "holds a one-place or a two-place event type": Clause(IS, "PROPERTY.1"),
     }
     for reason, clause in bad.items():
-        subject = CategoryTerm("C1.1", (), (clause,))
+        subject = CategoryTerm("CATEGORY.1.1", (), (clause,))
         evaluation = truth.evaluate(
-            Proposition(CLASS, subject, Predicate(HAS, "HAS.1"), True, MOST)
+            Proposition(CLASS, subject, Predicate(HAS, "PART.1"), True, MOST)
         )
         assert not evaluation.valid and reason.strip() in evaluation.reason, reason
 
@@ -382,14 +408,14 @@ def test_the_fixed_test_matches_the_defining_vectors(cases, name) -> None:
     # categories_defining.csv holds the value of every fixed feature, and NaN elsewhere.
     case = cases(name)
     truth = case.facts().truth
-    vectors = case.result.vectors
-    labels = vectors.feature_labels[vectors.isa_count :]
-    for row, category in enumerate(case.result.tree.categories):
+    vectors = case.world.result.taxonomy.vectors
+    labels = [translate(x) for x in vectors.feature_labels[vectors.isa_count :]]
+    for row, category in enumerate(case.world.categories):
         defining = vectors.defining[row, vectors.isa_count :]
         for label, value in zip(labels, defining, strict=True):
-            fixed, test = truth.fixed(CategoryTerm(category.label), label)
+            fixed, test = truth.fixed(CategoryTerm(category), label)
             assert test == EXACT
-            assert fixed == (None if np.isnan(value) else int(value)), (category.label, label)
+            assert fixed == (None if np.isnan(value) else int(value)), (category, label)
 
 
 @pytest.mark.parametrize("name", ["tiny", "deep", "still"])
@@ -397,7 +423,7 @@ def test_the_local_test_never_marks_a_feature_fixed_when_it_is_not(cases, name) 
     case = cases(name)
     facts = case.facts()
     exact = facts.truth
-    local = Truth(case.config(), case.result, cone_limit=-1)  # nothing is small enough to enumerate
+    local = Truth(case.config(), case.world, cone_limit=-1)  # nothing is small enough to enumerate
     restrictions = [()] + restrictions_of(facts, np.random.default_rng(3), 15)
     features = facts.features[IS] + facts.features[HAS] + facts.features[CAN]
     found = missed = 0
@@ -423,17 +449,18 @@ def test_a_threshold_literal_is_held_when_the_scalar_never_drifts(cases) -> None
     # that reads a threshold can be fixed at a category and not for things in general.
     case = cases("still")
     truth = case.facts().truth
-    reading = [r.output.label for r in case.result.rules.rules if r.thresholds]
+    taxonomy = case.world.result.taxonomy
+    reading = [translate(r.output.label) for r in taxonomy.rules.rules if r.thresholds]
     assert reading
     fixed_somewhere = 0
     for feature in reading:
-        for category in case.result.tree.categories:
-            value, _ = truth.fixed(CategoryTerm(category.label), feature)
+        for category in case.world.categories:
+            value, _ = truth.fixed(CategoryTerm(category), feature)
             fixed_somewhere += value is not None
     assert fixed_somewhere > 0
     oracle = case.oracle()
     for feature in reading:
-        for category in [c.label for c in case.result.tree.categories] + [THING]:
+        for category in [*case.world.categories, THING]:
             term = CategoryTerm(category)
             assert truth.fixed(term, feature)[0] == oracle.fixed(term.to_json(), feature)
 
@@ -451,11 +478,11 @@ def tiny(cases):
 def proportion(case, category: str, feature: str) -> float:
     truth = case.facts().truth
     members = truth.members(CategoryTerm(category))
-    return float(truth.values[members, truth.features[feature].position].mean())
+    return float(case.world.column(feature)[members].mean())
 
 
 def find(case, low: float, high: float, fixed: bool | None = None) -> tuple[str, str]:
-    """A category and an IS or HAS feature whose proportion lies in a range."""
+    """A category and a PROPERTY or PART feature whose proportion lies in a range."""
     facts = case.facts()
     for category in facts.categories:
         for feature in facts.features[IS] + facts.features[HAS]:
@@ -466,46 +493,74 @@ def find(case, low: float, high: float, fixed: bool | None = None) -> tuple[str,
 
 
 def judge(case, category, feature, quantifier, polarity=True, **settings):
-    kind = feature.split(".")[0].lower()
+    kind = KIND_OF[feature.split(".")[0]]
     proposition = Proposition(
         CLASS, CategoryTerm(category), Predicate(kind, feature), polarity, quantifier
     )
     return case.facts(**settings).truth.evaluate(proposition)
 
 
-def test_all_and_no_are_laws_and_not_observations(tiny) -> None:
-    # every instance has the feature, but nothing fixes it: true as observed, not as a law
+def test_nec_all_is_a_law_and_all_an_observation(tiny) -> None:
+    # every instance has the feature, but nothing fixes it: true as all, false as nec_all
     category, feature = find(tiny, 1.0, 1.0, fixed=False)
-    law = judge(tiny, category, feature, ALL)
+    law = judge(tiny, category, feature, NEC_ALL)
     assert law.valid and not law.true
     assert law.grounding["proportion"] == 1.0 and law.grounding["fixed"] is False
     assert law.grounding["test"] == EXACT
-    seen = judge(tiny, category, feature, ALL, quantifiers={"all_grounding": "observed"})
+    seen = judge(tiny, category, feature, ALL)
     assert seen.true and seen.grounding["test"] == OBSERVED
-    # a fixed feature is true both ways
+    # a fixed feature is true both ways: nec_all implies all
     category, feature = find(tiny, 1.0, 1.0, fixed=True)
+    assert judge(tiny, category, feature, NEC_ALL).true
     assert judge(tiny, category, feature, ALL).true
-    assert judge(tiny, category, feature, ALL, quantifiers={"all_grounding": "observed"}).true
-    # and no is the same test at the value 0
+    # and nec_no is the same test at the value 0
     category, feature = find(tiny, 0.0, 0.0, fixed=True)
-    assert judge(tiny, category, feature, NO).true
-    assert not judge(tiny, category, feature, ALL).true
+    assert judge(tiny, category, feature, NEC_NO).true and judge(tiny, category, feature, NO).true
+    assert not judge(tiny, category, feature, NEC_ALL).true
     category, feature = find(tiny, 0.0, 0.0, fixed=False)
-    assert not judge(tiny, category, feature, NO).true
-    assert judge(tiny, category, feature, NO, quantifiers={"all_grounding": "observed"}).true
+    assert not judge(tiny, category, feature, NEC_NO).true
+    assert judge(tiny, category, feature, NO).true
 
 
-def test_most_uses_the_minimum_proportion(tiny) -> None:
+def test_the_words_change_felicity_and_never_truth(tiny) -> None:
+    category, feature = find(tiny, 1.0, 1.0, fixed=False)
+    for setting in ("nec", "extensional", "either"):
+        words = {"quantifiers": {"universal_words": setting}}
+        assert judge(tiny, category, feature, ALL, **words).true
+        assert not judge(tiny, category, feature, NEC_ALL, **words).true
+    # "all" expresses all under extensional and either words, and never under nec
+    assert not judge(tiny, category, feature, ALL).felicitous
+    extensional = {"quantifiers": {"universal_words": "extensional"}}
+    either = {"quantifiers": {"universal_words": "either"}}
+    assert judge(tiny, category, feature, ALL, **extensional).felicitous
+    assert judge(tiny, category, feature, ALL, **either).felicitous
+    category, feature = find(tiny, 1.0, 1.0, fixed=True)
+    assert judge(tiny, category, feature, NEC_ALL).felicitous
+    assert not judge(tiny, category, feature, NEC_ALL, **extensional).felicitous
+    assert judge(tiny, category, feature, NEC_ALL, **either).felicitous
+    # the bare plural can say what the words cannot
+    truth = tiny.facts(quantifiers={"bare_plural": {"expresses": ["all"]}}).truth
+    kind = KIND_OF[feature.split(".")[0]]
+    proposition = Proposition(CLASS, CategoryTerm(category), Predicate(kind, feature), True, ALL)
+    assert truth.evaluate(proposition).felicitous and truth.bare_plural_expresses(proposition)
+    assert ALL not in truth.sayable and truth.statable(proposition)
+
+
+def test_most_means_more_than_half_and_the_usage_rule_is_felicity(tiny) -> None:
     category, feature = find(tiny, 0.6, 0.69)  # 2 of 3 instances
-    assert not judge(tiny, category, feature, MOST).true
-    assert judge(tiny, category, feature, MOST, quantifiers={"most": {"min_proportion": 0.6}}).true
+    most = judge(tiny, category, feature, MOST)
+    assert most.true and not most.felicitous  # true above one half, said at or above 0.7
+    lower = judge(tiny, category, feature, MOST, quantifiers={"most": {"usage_min": 0.6}})
+    assert lower.true and lower.felicitous
+    category, feature = find(tiny, 0.4, 0.5)
+    assert not judge(tiny, category, feature, MOST).true  # exactly half is not most
     # most of the others lack it: the negative proposition is about the share without it
     category, feature = find(tiny, 0.1, 0.3)
     assert judge(tiny, category, feature, MOST, polarity=False).true
     assert not judge(tiny, category, feature, MOST).true
 
 
-def test_some_is_true_above_zero_and_used_only_when_all_is_false(tiny) -> None:
+def test_some_is_true_above_zero_and_used_only_when_the_languages_all_is_false(tiny) -> None:
     category, feature = find(tiny, 0.1, 0.9)
     some = judge(tiny, category, feature, SOME)
     assert some.true and some.felicitous
@@ -517,45 +572,57 @@ def test_some_is_true_above_zero_and_used_only_when_all_is_false(tiny) -> None:
     assert some.true and not some.felicitous
     kept = judge(tiny, category, feature, SOME, quantifiers={"some": {"exclude_all": False}})
     assert kept.true and kept.felicitous
-    # the implicature follows the law-like reading of "all": seen in all, but not fixed
+    # the implicature follows the language's "all": seen in all, but not fixed, "some" is
+    # usable under nec words and left out under extensional words
     category, feature = find(tiny, 1.0, 1.0, fixed=False)
     assert judge(tiny, category, feature, SOME).felicitous
-    observed = {"quantifiers": {"all_grounding": "observed"}}
-    assert not judge(tiny, category, feature, SOME, **observed).felicitous
+    extensional = {"quantifiers": {"universal_words": "extensional"}}
+    assert not judge(tiny, category, feature, SOME, **extensional).felicitous
     # "some ... not" is left out when none has the feature by law
     category, feature = find(tiny, 0.0, 0.0, fixed=True)
     lacking = judge(tiny, category, feature, SOME, polarity=False)
     assert lacking.true and not lacking.felicitous
 
 
-def test_the_generic_means_what_the_setting_says(tiny) -> None:
+def test_the_bare_plural_expresses_what_the_setting_says(tiny) -> None:
+    truth = tiny.facts().truth
     category, feature = find(tiny, 0.1, 0.5)
-    assert not judge(tiny, category, feature, GENERIC).true  # most, by default
-    assert judge(tiny, category, feature, GENERIC, quantifiers={"generic": {"means": "some"}}).true
-    assert not judge(
-        tiny, category, feature, GENERIC, quantifiers={"generic": {"means": "all"}}
-    ).true
-    assert judge(tiny, category, feature, GENERIC, polarity=False).true
-    category, feature = find(tiny, 1.0, 1.0, fixed=True)
-    for means in ("all", "most", "some"):
-        assert judge(
-            tiny, category, feature, GENERIC, quantifiers={"generic": {"means": means}}
-        ).true
-    # a negative generic that means all is the "no" test
-    category, feature = find(tiny, 0.0, 0.0, fixed=True)
-    means_all = {"quantifiers": {"generic": {"means": "all"}}}
-    assert judge(tiny, category, feature, GENERIC, polarity=False, **means_all).true
-    category, feature = find(tiny, 0.0, 0.0, fixed=False)
-    assert not judge(tiny, category, feature, GENERIC, polarity=False, **means_all).true
+    kind = KIND_OF[feature.split(".")[0]]
+
+    def proposition(quantifier, polarity=True, **extra):
+        return Proposition(
+            CLASS, CategoryTerm(category), Predicate(kind, feature), polarity, quantifier, **extra
+        )
+
+    assert truth.bare_plural_expresses(proposition(MOST))
+    assert truth.bare_plural_expresses(proposition(MOST, False))
+    assert not truth.bare_plural_expresses(proposition(SOME))
+    assert not truth.bare_plural_expresses(proposition(NEC_ALL))
+    assert not truth.bare_plural_expresses(proposition(NO))
+    wider = tiny.facts(quantifiers={"bare_plural": {"expresses": ["nec_all", "some"]}}).truth
+    assert wider.bare_plural_expresses(proposition(NEC_ALL))
+    assert wider.bare_plural_expresses(proposition(NEC_NO))
+    assert wider.bare_plural_expresses(proposition(SOME, False))
+    assert not wider.bare_plural_expresses(proposition(MOST))
+    # membership and rule statements may always use the bare plural, for nec_all
+    membership = Proposition(
+        CLASS, CategoryTerm("CATEGORY.1.1"), Predicate(MEMBER, "CATEGORY.1"), True, NEC_ALL
+    )
+    assert truth.bare_plural_expresses(membership)
+    assert truth.bare_plural_expresses(proposition(NEC_ALL, rule=(feature, 1)))
+    # a class-level scalar pole has no quantifier word
+    pole = Proposition(CLASS, CategoryTerm(category), Predicate(SCALAR, "SCALARDIM.1.HIGH"))
+    assert truth.bare_plural_expresses(pole)
 
 
-def test_no_replaces_sentence_negation(tiny) -> None:
+def test_no_and_nec_no_replace_sentence_negation(tiny) -> None:
     category, feature = find(tiny, 0.0, 0.0, fixed=True)
-    for quantifier in (ALL, NO):
+    for quantifier in (ALL, NEC_ALL, NO, NEC_NO):
         denied = judge(tiny, category, feature, quantifier, polarity=False)
         assert not denied.valid and "negative polarity" in denied.reason
-    proposition = Proposition(CLASS, CategoryTerm(category), Predicate(IS, "IS.1"), True, NO)
+    proposition = Proposition(CLASS, CategoryTerm(category), Predicate(IS, "PROPERTY.1"), True, NO)
     assert proposition.negative
+    assert dataclasses.replace(proposition, quantifier=NEC_NO).negative
     assert not dataclasses.replace(proposition, quantifier=ALL).negative
     assert dataclasses.replace(proposition, quantifier=MOST, polarity=False).negative
 
@@ -568,6 +635,8 @@ def test_a_vacuous_proposition_is_never_valid(tiny) -> None:
     assert len(truth.members(empty)) == 0
     for quantifier, polarity in itertools.product(QUANTIFIERS, (True, False)):
         for predicate in facts.class_predicates(category):
+            if predicate.kind == SCALAR:
+                continue
             vacuous = Proposition(CLASS, empty, predicate, polarity, quantifier)
             evaluation = truth.evaluate(vacuous)
             assert not evaluation.valid and truth.grounded(vacuous) is None
@@ -587,25 +656,41 @@ def test_a_vacuous_proposition_is_never_valid(tiny) -> None:
 def test_membership(tiny) -> None:
     truth = tiny.facts().truth
 
-    def member(subject, category, quantifier=ALL, polarity=True):
+    def member(subject, category, quantifier=NEC_ALL, polarity=True):
         return truth.evaluate(
             Proposition(
                 CLASS, CategoryTerm(subject), Predicate(MEMBER, category), polarity, quantifier
             )
         )
 
-    assert member("C1.1", "C1").true and member("C1.1", "C1").grounding["test"] == TREE
-    assert member("C1.1", "C1", GENERIC).true  # the generic of a membership sentence means all
-    assert not member("C1.1", "C2").true and not member("C1", "C1.1").true
-    assert member("C1.1", "C2", NO).true and member("C1.1", "C2", GENERIC, False).true
-    assert member("C1.1", "C1.2", NO).true  # siblings share no instance
-    assert not member("C1.1", "C1", NO).true and not member("C1", "C1.1", NO).true
+    assert member("CATEGORY.1.1", "CATEGORY.1").true
+    assert member("CATEGORY.1.1", "CATEGORY.1").grounding["test"] == TREE
+    assert member("CATEGORY.1.1", "CATEGORY.1", ALL).true  # nec_all implies all
+    assert not member("CATEGORY.1.1", "CATEGORY.2").true
+    assert not member("CATEGORY.1", "CATEGORY.1.1").true
+    assert member("CATEGORY.1.1", "CATEGORY.2", NEC_NO).true
+    assert member("CATEGORY.1.1", "CATEGORY.2", NO).true
+    assert member("CATEGORY.1.1", "CATEGORY.1.2", NEC_NO).true  # siblings share no instance
+    assert not member("CATEGORY.1.1", "CATEGORY.1", NEC_NO).true
+    assert not member("CATEGORY.1", "CATEGORY.1.1", NO).true
     for quantifier in (MOST, SOME):
-        assert not member("C1.1", "C1", quantifier).valid
-    assert not member("C1", "C1").valid and not member(THING, "C1").valid
+        assert not member("CATEGORY.1.1", "CATEGORY.1", quantifier).valid
+    assert not member("CATEGORY.1", "CATEGORY.1").valid
+    assert not member(THING, "CATEGORY.1").valid
+    # a document states membership as nec_all; with extensional words, the bare plural still can
+    facts = tiny.facts()
+    fact = facts.class_fact(CategoryTerm("CATEGORY.1.1"), Predicate(MEMBER, "CATEGORY.1"))
+    assert fact.quantifier == NEC_ALL
+    extensional = tiny.facts(quantifiers={"universal_words": "extensional"})
+    stated = extensional.class_fact(CategoryTerm("CATEGORY.1.1"), Predicate(MEMBER, "CATEGORY.1"))
+    assert stated.quantifier == NEC_ALL and extensional.truth.bare_plural_expresses(stated)
     # a restriction does not change membership
     restricted = Proposition(
-        CLASS, CategoryTerm("C1.1", (Literal("IS.2"),)), Predicate(MEMBER, "C1"), True, ALL
+        CLASS,
+        CategoryTerm("CATEGORY.1.1", (Literal("PROPERTY.2"),)),
+        Predicate(MEMBER, "CATEGORY.1"),
+        True,
+        NEC_ALL,
     )
     assert truth.evaluate(restricted).true == (len(truth.members(restricted.subject)) > 0)
 
@@ -614,28 +699,33 @@ def test_class_level_scalar_poles(cases) -> None:
     case = cases("default")
     facts = case.facts()
     truth = facts.truth
-    scalars = case.result.instances.scalars
+    world = case.world
+    scalars = world.scalar_values
 
-    def pole(category, label, quantifier=GENERIC, polarity=True, **settings):
+    def pole(category, label, quantifier=None, polarity=True, restriction=(), **settings):
         proposition = Proposition(
-            CLASS, CategoryTerm(category), Predicate(SCALAR, label), polarity, quantifier
+            CLASS,
+            CategoryTerm(category, restriction),
+            Predicate(SCALAR, label),
+            polarity,
+            quantifier,
         )
         return case.facts(**settings).truth.evaluate(proposition)
 
-    # only the generic
-    for quantifier in (ALL, MOST, SOME, NO):
-        assert not pole("C1.1", "SC.1.HIGH", quantifier).valid
-    assert not pole(THING, "SC.1.HIGH").valid
+    # no quantifier, and a statement about the whole category
+    for quantifier in QUANTIFIERS:
+        assert not pole("CATEGORY.1.1", "SCALARDIM.1.HIGH", quantifier).valid
+    assert not pole(THING, "SCALARDIM.1.HIGH").valid
+    restricted = pole("CATEGORY.1.1", "SCALARDIM.1.HIGH", restriction=(Literal("PROPERTY.1"),))
+    assert not restricted.valid
     for category in facts.categories:
-        node = case.result.tree[category]
+        parent = world.category[category].parent
         members = truth.members(CategoryTerm(category))
         # a top-level category is compared with all instances in the world
         comparison = (
-            np.arange(len(scalars))
-            if node.parent is None
-            else truth.members(CategoryTerm(node.parent.label))
+            np.arange(len(scalars)) if parent is None else truth.members(CategoryTerm(parent))
         )
-        for index, scalar in enumerate(("SC.1", "SC.2")):
+        for index, scalar in enumerate(("SCALARDIM.1", "SCALARDIM.2")):
             mean, sd = scalars[comparison, index].mean(), scalars[comparison, index].std()
             value = scalars[members, index].mean()
             high = pole(category, f"{scalar}.HIGH")
@@ -643,15 +733,13 @@ def test_class_level_scalar_poles(cases) -> None:
             assert high.true == (value >= mean + sd) and low.true == (value <= mean - sd)
             assert not (high.true and low.true)
             assert high.grounding["test"] == MEAN
-            assert high.grounding["comparison"] == (
-                THING if node.parent is None else node.parent.label
-            )
+            assert high.grounding["comparison"] == (THING if parent is None else parent)
             assert pole(category, f"{scalar}.HIGH", polarity=False).true == (not high.true)
 
     # a smaller z makes more categories big or small
     def count(z: float) -> int:
         return sum(
-            pole(c, f"SC.1.{side}", scalar_adjectives={"z": z}).true
+            pole(c, f"SCALARDIM.1.{side}", scalar_adjectives={"z": z}).true
             for c in facts.categories
             for side in ("HIGH", "LOW")
         )
@@ -663,15 +751,15 @@ def test_class_level_scalar_poles(cases) -> None:
 def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> None:
     case = cases("default")
     truth = case.facts(scalar_adjectives={"z": 0.5}).truth
-    scalars = case.result.instances.scalars
+    scalars = case.world.scalar_values
     differ = 0
-    for instance in case.result.instances.labels[::7]:
+    for instance in case.world.instances[::7]:
         row = truth.instance_index[instance]
         path = truth.paths[row]
         verdicts = []
         for comparison in path:
             proposition = Proposition(
-                INSTANCE, instance, Predicate(SCALAR, "SC.1.HIGH", comparison=comparison)
+                INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=comparison)
             )
             evaluation = truth.evaluate(proposition)
             members = truth.members(CategoryTerm(comparison))
@@ -682,10 +770,12 @@ def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> N
         differ += len(set(verdicts)) > 1
         # the comparison class must be a category the instance is below
         other = next(c for c in truth.categories if c not in path)
-        outside = Proposition(INSTANCE, instance, Predicate(SCALAR, "SC.1.HIGH", comparison=other))
+        outside = Proposition(
+            INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=other)
+        )
         assert not truth.evaluate(outside).valid
         assert not truth.evaluate(
-            Proposition(INSTANCE, instance, Predicate(SCALAR, "SC.1.HIGH"))
+            Proposition(INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH"))
         ).valid
     assert differ > 0  # "the big mouse" can be "the small animal"
 
@@ -693,39 +783,45 @@ def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> N
 def test_a_pole_in_a_restriction_is_relative_to_the_category(cases) -> None:
     case = cases("default")
     truth = case.facts().truth
-    scalars = case.result.instances.scalars[:, 0]
-    for category in ("C1", "C2.1", "C3.2.1"):
+    scalars = case.world.scalar_values[:, 0]
+    for category in ("CATEGORY.1", "CATEGORY.2.1", "CATEGORY.3.2.1"):
         members = truth.members(CategoryTerm(category))
-        big = truth.members(CategoryTerm(category, (Literal("SC.1.HIGH"),)))
+        big = truth.members(CategoryTerm(category, (Literal("SCALARDIM.1.HIGH"),)))
         cut = scalars[members].mean() + scalars[members].std()
         assert set(big) == {int(i) for i in members if scalars[i] >= cut}
     negated = Proposition(
-        CLASS, CategoryTerm("C1", (Literal("SC.1.HIGH", False),)), Predicate(IS, "IS.1"), True, SOME
+        CLASS,
+        CategoryTerm("CATEGORY.1", (Literal("SCALARDIM.1.HIGH", False),)),
+        Predicate(IS, "PROPERTY.1"),
+        True,
+        SOME,
     )
     assert "never negated" in truth.evaluate(negated).reason
 
 
-def test_patient_projections_at_the_class_level(tiny) -> None:
-    facts = tiny.facts()
-    (projection,) = facts.projections
-    values = tiny.result.projections.patient[:, tiny.result.projections.verb_labels.index("V2.2")]
+def test_patient_capacities_at_the_class_level(tiny) -> None:
+    facts = tiny.facts(lexicon={"named_proportion": {"patient_projection": 1.0}})
+    world = tiny.world
+    assert len(facts.projections) == 4
+    projection = facts.projections[-1]
+    values = world.capacity(projection)
 
-    def judge_projection(category, quantifier, polarity=True, **settings):
+    def judge_projection(category, quantifier, polarity=True):
         proposition = Proposition(
             CLASS, CategoryTerm(category), Predicate(PROJECTION, projection), polarity, quantifier
         )
-        return tiny.facts(**settings).truth.evaluate(proposition)
+        return facts.truth.evaluate(proposition)
 
-    observed = {"quantifiers": {"all_grounding": "observed"}}
     for category in facts.categories:
         members = facts.truth.members(CategoryTerm(category))
         share = values[members].mean()
-        # most, some, and the generic come from the share of instances with the projection:
-        # the same values that the instance-level sentences read
-        assert judge_projection(category, MOST).true == (share >= 0.7)
+        # most, some, all, and no come from the share of instances with the capacity: the same
+        # values that the instance-level sentences read
+        assert judge_projection(category, MOST).true == (share > 0.5)
         assert judge_projection(category, SOME).true == (share > 0)
-        assert judge_projection(category, GENERIC).true == (share >= 0.7)
-        assert judge_projection(category, MOST, False).true == (1 - share >= 0.7)
+        assert judge_projection(category, ALL).true == (share == 1)
+        assert judge_projection(category, NO).true == (share == 0)
+        assert judge_projection(category, MOST, False).true == (1 - share > 0.5)
         assert judge_projection(category, MOST).grounding == {
             "proportion": round(float(share), 6),
             "instances": len(members),
@@ -733,32 +829,30 @@ def test_patient_projections_at_the_class_level(tiny) -> None:
         }
         for index in members:
             instance = Proposition(
-                INSTANCE, tiny.result.instances.labels[index], Predicate(PROJECTION, projection)
+                INSTANCE, world.instances[index], Predicate(PROJECTION, projection)
             )
             assert facts.truth.evaluate(instance).true == bool(values[index])
-        # all and no are allowed only under the observed reading
-        for quantifier in (ALL, NO):
+        # a patient capacity is never nec: no fixed test exists for it
+        for quantifier in (NEC_ALL, NEC_NO):
             assert not judge_projection(category, quantifier).valid
-            assert "observed reading" in judge_projection(category, quantifier).reason
-        assert judge_projection(category, ALL, **observed).true == (share == 1)
-        assert judge_projection(category, NO, **observed).true == (share == 0)
+            assert "extensional" in judge_projection(category, quantifier).reason
 
 
-def test_verbs_use_the_relation_matrices_for_any_pair_of_categories(cases) -> None:
+def test_relation_facts_use_the_able_tables_for_any_pair_of_categories(cases) -> None:
     case = cases("default")
     facts = case.facts()
     truth = facts.truth
-    relations = case.result.relations
-    proportions = case.result.relation_stats.proportions
+    world = case.world
+    proportions = world.result.derived_frames()["relation_proportions.csv"]
     # where relation_proportions.csv has a row, the proportion is the same
     checked = 0
     for row in proportions.sample(300, seed=1).iter_rows(named=True):
-        if row["verb"] not in facts.verbs:
+        if row["event_type"] not in facts.verbs:
             continue
         proposition = Proposition(
             CLASS,
             CategoryTerm(row["agent"]),
-            Predicate(VERB, row["verb"], CategoryTerm(row["patient"])),
+            Predicate(VERB, row["event_type"], CategoryTerm(row["patient"])),
             True,
             SOME,
         )
@@ -771,34 +865,40 @@ def test_verbs_use_the_relation_matrices_for_any_pair_of_categories(cases) -> No
         }
         checked += 1
     assert checked > 100
-    # mixed levels and verb categories are not in the file, and are computed all the same
-    verb_category = next(v for v in facts.verbs if not case.result.verbs.tree[v].is_leaf)
-    agents = truth.members(CategoryTerm("C1"))
-    patients = truth.members(CategoryTerm("C2.1.1"))
-    grid_a, grid_p = np.meshgrid(agents, patients, indexing="ij")
-    holds = relations.holds(verb_category, grid_a.ravel(), grid_p.ravel())
-    predicate = Predicate(VERB, verb_category, CategoryTerm("C2.1.1"))
-    evaluation = truth.evaluate(Proposition(CLASS, CategoryTerm("C1"), predicate, True, MOST))
+    # mixed levels and categories of event types are not in the file, and are computed all the
+    # same, from the category's base relation
+    category = next(v for v in facts.verbs if world.event_types[v].category)
+    agents = truth.members(CategoryTerm("CATEGORY.1"))
+    patients = truth.members(CategoryTerm("CATEGORY.2.1.1"))
+    holds = world.able(category)[np.ix_(agents, patients)]
+    predicate = Predicate(VERB, category, CategoryTerm("CATEGORY.2.1.1"))
+    evaluation = truth.evaluate(
+        Proposition(CLASS, CategoryTerm("CATEGORY.1"), predicate, True, MOST)
+    )
     assert evaluation.grounding["proportion"] == round(float(holds.mean()), 6)
     assert evaluation.grounding["pairs"] == len(agents) * len(patients)
-    assert evaluation.true == (holds.mean() >= 0.7)
+    assert evaluation.true == (holds.mean() > 0.5)
     # within one category, an instance is not paired with itself
-    same = Predicate(VERB, verb_category, CategoryTerm("C1"))
-    within = truth.evaluate(Proposition(CLASS, CategoryTerm("C1"), same, True, SOME))
+    same = Predicate(VERB, category, CategoryTerm("CATEGORY.1"))
+    within = truth.evaluate(Proposition(CLASS, CategoryTerm("CATEGORY.1"), same, True, SOME))
     assert within.grounding["pairs"] == len(agents) * (len(agents) - 1)
-    # "all" for a verb is over the existing pairs, whatever the grounding of "all"
-    everything = truth.evaluate(Proposition(CLASS, CategoryTerm("C1"), predicate, True, ALL))
+    # "all" for a relation fact is over the existing pairs, and never nec
+    everything = truth.evaluate(
+        Proposition(CLASS, CategoryTerm("CATEGORY.1"), predicate, True, ALL)
+    )
     assert everything.true == bool(holds.all())
+    nec = truth.evaluate(Proposition(CLASS, CategoryTerm("CATEGORY.1"), predicate, True, NEC_ALL))
+    assert not nec.valid and "extensional" in nec.reason
 
 
 def test_instance_level_truth_is_read_from_the_values(tiny) -> None:
     facts = tiny.facts()
     truth = facts.truth
-    instances = tiny.result.instances
-    for row, instance in enumerate(instances.labels):
+    world = tiny.world
+    for row, instance in enumerate(world.instances):
         for kind in (IS, HAS, CAN):
             for feature in facts.features[kind]:
-                value = bool(instances.values[row, truth.features[feature].position])
+                value = bool(world.column(feature)[row])
                 for polarity in (True, False):
                     evaluation = truth.evaluate(
                         Proposition(INSTANCE, instance, Predicate(kind, feature), polarity)
@@ -806,17 +906,17 @@ def test_instance_level_truth_is_read_from_the_values(tiny) -> None:
                     assert evaluation.true == (value == polarity)
                     assert evaluation.grounding == {"value": int(value), "test": VALUE}
         for verb in facts.verbs:
-            others = [i for i in range(len(instances)) if i != row]
-            holds = tiny.result.relations.holds(verb, np.full(len(others), row), np.array(others))
-            for other, value in zip(others, holds, strict=True):
-                predicate = Predicate(VERB, verb, instances.labels[other])
+            for other in range(world.count):
+                if other == row:
+                    continue
+                predicate = Predicate(VERB, verb, world.instances[other])
                 assert truth.evaluate(Proposition(INSTANCE, instance, predicate)).true == bool(
-                    value
+                    world.able(verb)[row, other]
                 )
         own = Predicate(VERB, facts.verbs[0], instance)
         assert not truth.evaluate(Proposition(INSTANCE, instance, own)).valid
         # membership: every category on the instance's path, the leaf included
-        leaf = instances.leaf_labels[row]
+        leaf = world.instance_leaf[row]
         for category in truth.categories:
             on_path = category == leaf or category in truth.ancestors(leaf)
             member = Proposition(INSTANCE, instance, Predicate(MEMBER, category))
@@ -826,35 +926,47 @@ def test_instance_level_truth_is_read_from_the_values(tiny) -> None:
 
 def test_logical_forms_that_cannot_be_judged(tiny) -> None:
     truth = tiny.facts().truth
-    subject = CategoryTerm("C1")
+    subject = CategoryTerm("CATEGORY.1")
+    one = CategoryTerm("CATEGORY.1", (Literal("EVENTTYPE1.1"),))
+    unknown = CategoryTerm("CATEGORY.1", (Literal("PROPERTY.77"),))
     bad = [
-        Proposition(CLASS, CategoryTerm("C9"), Predicate(IS, "IS.1"), True, ALL),
-        Proposition(CLASS, subject, Predicate(IS, "IS.99"), True, ALL),
-        Proposition(CLASS, subject, Predicate(IS, "HAS.1"), True, ALL),
-        Proposition(CLASS, subject, Predicate(CAN, "CAN.V1.1"), True, ALL),
-        Proposition(CLASS, subject, Predicate(SCALAR, "SC.2.HIGH"), True, GENERIC),
-        Proposition(CLASS, subject, Predicate(SCALAR, "SC.1.MIDDLE"), True, GENERIC),
-        Proposition(CLASS, subject, Predicate(MEMBER, "C7"), True, ALL),
-        Proposition(CLASS, subject, Predicate(PROJECTION, "CANBE.V9"), True, MOST),
-        Proposition(CLASS, subject, Predicate(VERB, "V9", CategoryTerm("C2")), True, MOST),
-        Proposition(CLASS, subject, Predicate(VERB, "V1.1"), True, MOST),
-        Proposition(CLASS, subject, Predicate(IS, "IS.1", CategoryTerm("C2")), True, MOST),
-        Proposition(CLASS, subject, Predicate(VERB, "V1.1", "I1.1.1"), True, MOST),
-        Proposition(CLASS, subject, Predicate("eats", "V1.1"), True, MOST),
-        Proposition(CLASS, subject, Predicate(IS, "IS.1"), True, "few"),
-        Proposition(CLASS, subject, Predicate(IS, "IS.1"), True, None),
-        Proposition(CLASS, "I1.1.1", Predicate(IS, "IS.1"), True, ALL),
+        Proposition(CLASS, CategoryTerm("CATEGORY.9"), Predicate(IS, "PROPERTY.1"), True, NEC_ALL),
+        Proposition(CLASS, subject, Predicate(IS, "PROPERTY.99"), True, NEC_ALL),
+        Proposition(CLASS, subject, Predicate(IS, "PART.1"), True, NEC_ALL),
+        Proposition(CLASS, subject, Predicate(CAN, "EVENTTYPE2.1.1"), True, NEC_ALL),
+        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.2.HIGH")),
+        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.MIDDLE")),
+        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.HIGH"), True, MOST),
+        Proposition(CLASS, subject, Predicate(MEMBER, "CATEGORY.7"), True, NEC_ALL),
+        Proposition(CLASS, subject, Predicate(PROJECTION, "CANBE.EVENTTYPE2.9"), True, MOST),
         Proposition(
-            CLASS, CategoryTerm("C1", (Literal("CAN.1"),)), Predicate(IS, "IS.1"), True, ALL
+            CLASS, subject, Predicate(VERB, "EVENTTYPE2.9", CategoryTerm("CATEGORY.2")), True, MOST
+        ),
+        Proposition(CLASS, subject, Predicate(VERB, "EVENTTYPE2.1.1"), True, MOST),
+        Proposition(
+            CLASS, subject, Predicate(IS, "PROPERTY.1", CategoryTerm("CATEGORY.2")), True, MOST
         ),
         Proposition(
-            CLASS, CategoryTerm("C1", (Literal("IS.77"),)), Predicate(IS, "IS.1"), True, ALL
+            CLASS, subject, Predicate(VERB, "EVENTTYPE2.1.1", "INSTANCE.1.1.1"), True, MOST
         ),
-        Proposition(INSTANCE, "I9.9.9", Predicate(IS, "IS.1")),
-        Proposition(INSTANCE, "I1.1.1", Predicate(IS, "IS.1"), True, ALL),
-        Proposition(INSTANCE, "I1.1.1", Predicate(VERB, "V1.1", "I9.9.9")),
-        Proposition(INSTANCE, "I1.1.1", Predicate(VERB, "V1.1", CategoryTerm("C1"))),
-        Proposition("event", "I1.1.1", Predicate(IS, "IS.1")),
+        Proposition(CLASS, subject, Predicate("eats", "EVENTTYPE2.1.1"), True, MOST),
+        Proposition(CLASS, subject, Predicate(IS, "PROPERTY.1"), True, "few"),
+        Proposition(CLASS, subject, Predicate(IS, "PROPERTY.1"), True, "generic"),
+        Proposition(CLASS, subject, Predicate(IS, "PROPERTY.1"), True, None),
+        Proposition(CLASS, "INSTANCE.1.1.1", Predicate(IS, "PROPERTY.1"), True, NEC_ALL),
+        Proposition(CLASS, one, Predicate(IS, "PROPERTY.1"), True, NEC_ALL),
+        Proposition(CLASS, unknown, Predicate(IS, "PROPERTY.1"), True, NEC_ALL),
+        Proposition(INSTANCE, "INSTANCE.9.9.9", Predicate(IS, "PROPERTY.1")),
+        Proposition(INSTANCE, "INSTANCE.1.1.1", Predicate(IS, "PROPERTY.1"), True, NEC_ALL),
+        Proposition(
+            INSTANCE, "INSTANCE.1.1.1", Predicate(VERB, "EVENTTYPE2.1.1", "INSTANCE.9.9.9")
+        ),
+        Proposition(
+            INSTANCE,
+            "INSTANCE.1.1.1",
+            Predicate(VERB, "EVENTTYPE2.1.1", CategoryTerm("CATEGORY.1")),
+        ),
+        Proposition("event", "INSTANCE.1.1.1", Predicate(IS, "PROPERTY.1")),
     ]
     for proposition in bad:
         evaluation = truth.evaluate(proposition)
@@ -870,107 +982,158 @@ def test_logical_forms_that_cannot_be_judged(tiny) -> None:
 def test_the_logical_form_of_the_specification() -> None:
     proposition = Proposition(
         CLASS,
-        CategoryTerm("C1.3", (Literal("HAS.2", False), Literal("IS.4"))),
-        Predicate(CAN, "CAN.3"),
+        CategoryTerm("CATEGORY.1.3", (Literal("PART.2", False), Literal("PROPERTY.4"))),
+        Predicate(CAN, "EVENTTYPE1.3"),
         True,
         MOST,
         {"proportion": 0.93, "fixed": False, "test": "observed"},
-        "PR.310",
+        "PROP.310",
     )
     assert proposition.to_json() == {
-        "id": "PR.310",
+        "id": "PROP.310",
         "level": "class",
         "quantifier": "most",
         "polarity": True,
-        "subject": {"category": "C1.3", "restriction": ["IS.4", "not HAS.2"]},
-        "predicate": {"kind": "can", "feature": "CAN.3"},
+        "subject": {"category": "CATEGORY.1.3", "restriction": ["PROPERTY.4", "not PART.2"]},
+        "predicate": {"kind": "can", "feature": "EVENTTYPE1.3"},
         "grounding": {"proportion": 0.93, "fixed": False, "test": "observed"},
     }
 
 
 def test_json_forms_of_every_predicate_kind() -> None:
-    subject = CategoryTerm("C1")
+    subject = CategoryTerm("CATEGORY.1")
     forms = {
-        Predicate(IS, "IS.1"): {"kind": "is", "feature": "IS.1"},
-        Predicate(HAS, "HAS.1"): {"kind": "has", "feature": "HAS.1"},
-        Predicate(SCALAR, "SC.1.LOW"): {"kind": "scalar", "pole": "SC.1.LOW"},
-        Predicate(MEMBER, "C2"): {"kind": "member", "category": "C2"},
-        Predicate(PROJECTION, "CANBE.V1.1"): {"kind": "projection", "projection": "CANBE.V1.1"},
-        Predicate(VERB, "V1", CategoryTerm("C2", (Literal("IS.3"),))): {
+        Predicate(IS, "PROPERTY.1"): {"kind": "is", "feature": "PROPERTY.1"},
+        Predicate(HAS, "PART.1"): {"kind": "has", "feature": "PART.1"},
+        Predicate(CAN, "EVENTTYPE1.2"): {"kind": "can", "feature": "EVENTTYPE1.2"},
+        Predicate(MEMBER, "CATEGORY.2"): {"kind": "member", "category": "CATEGORY.2"},
+        Predicate(PROJECTION, "CANBE.EVENTTYPE2.1.1"): {
+            "kind": "projection",
+            "projection": "CANBE.EVENTTYPE2.1.1",
+        },
+        Predicate(VERB, "EVENTTYPE2.1", CategoryTerm("CATEGORY.2", (Literal("PROPERTY.3"),))): {
             "kind": "verb",
-            "verb": "V1",
-            "patient": {"category": "C2", "restriction": ["IS.3"]},
+            "verb": "EVENTTYPE2.1",
+            "patient": {"category": "CATEGORY.2", "restriction": ["PROPERTY.3"]},
         },
     }
     for predicate, form in forms.items():
         proposition = Proposition(CLASS, subject, predicate, False, SOME)
         assert proposition.to_json()["predicate"] == form
         assert Proposition.from_json(proposition.to_json()) == proposition
-    instance = Proposition(INSTANCE, "I1.1.1", Predicate(VERB, "V1.1", "I2.1.2"), False)
+    pole = Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.LOW"))
+    assert pole.to_json()["predicate"] == {"kind": "scalar", "pole": "SCALARDIM.1.LOW"}
+    assert pole.to_json()["quantifier"] is None
+    assert Proposition.from_json(pole.to_json()) == pole
+    instance = Proposition(
+        INSTANCE, "INSTANCE.1.1.1", Predicate(VERB, "EVENTTYPE2.1.1", "INSTANCE.2.1.2"), False
+    )
     assert instance.to_json() == {
         "id": None,
         "level": "instance",
         "polarity": False,
-        "subject": {"instance": "I1.1.1"},
-        "predicate": {"kind": "verb", "verb": "V1.1", "patient": {"instance": "I2.1.2"}},
+        "subject": {"instance": "INSTANCE.1.1.1"},
+        "predicate": {
+            "kind": "verb",
+            "verb": "EVENTTYPE2.1.1",
+            "patient": {"instance": "INSTANCE.2.1.2"},
+        },
         "grounding": None,
     }
     assert Proposition.from_json(instance.to_json()) == instance
-    scalar = Proposition(INSTANCE, "I1.1.1", Predicate(SCALAR, "SC.1.HIGH", comparison="C1"))
-    assert scalar.to_json()["predicate"] == {"kind": "scalar", "pole": "SC.1.HIGH", "class": "C1"}
+    scalar = Proposition(
+        INSTANCE, "INSTANCE.1.1.1", Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison="CATEGORY.1")
+    )
+    assert scalar.to_json()["predicate"] == {
+        "kind": "scalar",
+        "pole": "SCALARDIM.1.HIGH",
+        "class": "CATEGORY.1",
+    }
     assert Proposition.from_json(scalar.to_json()) == scalar
 
 
 def test_a_restriction_is_a_set_in_one_order() -> None:
     a = CategoryTerm(
-        "C1", (Literal("HAS.3"), Literal("SC.1.HIGH"), Literal("IS.10"), Literal("IS.2", False))
+        "CATEGORY.1",
+        (
+            Literal("PART.3"),
+            Literal("SCALARDIM.1.HIGH"),
+            Literal("PROPERTY.10"),
+            Literal("PROPERTY.2", False),
+        ),
     )
     b = CategoryTerm(
-        "C1",
+        "CATEGORY.1",
         (
-            Literal("IS.2", False),
-            Literal("IS.10"),
-            Literal("HAS.3"),
-            Literal("SC.1.HIGH"),
-            Literal("HAS.3"),
+            Literal("PROPERTY.2", False),
+            Literal("PROPERTY.10"),
+            Literal("PART.3"),
+            Literal("SCALARDIM.1.HIGH"),
+            Literal("PART.3"),
         ),
     )
     assert a == b and hash(a) == hash(b)
-    assert [str(x) for x in a.restriction] == ["not IS.2", "IS.10", "HAS.3", "SC.1.HIGH"]
-    assert Literal.parse("not HAS.3") == Literal("HAS.3", False)
+    assert [str(x) for x in a.restriction] == [
+        "not PROPERTY.2",
+        "PROPERTY.10",
+        "PART.3",
+        "SCALARDIM.1.HIGH",
+    ]
+    assert Literal.parse("not PART.3") == Literal("PART.3", False)
     assert CategoryTerm.from_json(a.to_json()) == a
 
 
 def test_equality_ignores_the_label_the_grounding_and_the_rule() -> None:
     plain = Proposition(
-        CLASS, CategoryTerm(THING, (Literal("HAS.1"),)), Predicate(CAN, "CAN.1"), True, ALL
+        CLASS,
+        CategoryTerm(THING, (Literal("PART.1"),)),
+        Predicate(CAN, "EVENTTYPE1.1"),
+        True,
+        NEC_ALL,
     )
-    dressed = dataclasses.replace(plain, id="PR.4", grounding={"test": "exact"}, rule=("CAN.1", 2))
+    dressed = dataclasses.replace(
+        plain, id="PROP.4", grounding={"test": "exact"}, rule=("EVENTTYPE1.1", 2)
+    )
     assert plain == dressed and hash(plain) == hash(dressed)
-    assert dressed.to_json()["rule"] == {"feature": "CAN.1", "term": 2}
+    assert dressed.to_json()["rule"] == {"feature": "EVENTTYPE1.1", "term": 2}
     restored = Proposition.from_json(dressed.to_json())
     assert (restored.id, restored.grounding, restored.rule) == (
-        "PR.4",
+        "PROP.4",
         {"test": "exact"},
-        ("CAN.1", 2),
+        ("EVENTTYPE1.1", 2),
     )
-    assert plain != dataclasses.replace(plain, quantifier=GENERIC)
+    assert plain != dataclasses.replace(plain, quantifier=ALL)
 
 
 def test_concepts_a_sentence_needs_words_for() -> None:
     proposition = Proposition(
         CLASS,
-        CategoryTerm("C1", (Literal("IS.2", False), Literal("SC.1.HIGH"))),
-        Predicate(VERB, "V1.2", CategoryTerm("C2", (Literal("HAS.4"),))),
+        CategoryTerm("CATEGORY.1", (Literal("PROPERTY.2", False), Literal("SCALARDIM.1.HIGH"))),
+        Predicate(VERB, "EVENTTYPE2.1.2", CategoryTerm("CATEGORY.2", (Literal("PART.4"),))),
         True,
         MOST,
     )
-    assert proposition.concepts() == ("C1", "IS.2", "SC.1.HIGH", "C2", "HAS.4", "V1.2")
-    rule = Proposition(
-        CLASS, CategoryTerm(THING, (Literal("HAS.1"),)), Predicate(CAN, "CAN.1"), True, ALL
+    assert proposition.concepts() == (
+        "CATEGORY.1",
+        "PROPERTY.2",
+        "SCALARDIM.1.HIGH",
+        "CATEGORY.2",
+        "PART.4",
+        "EVENTTYPE2.1.2",
     )
-    assert rule.concepts() == (THING, "HAS.1", "CAN.1")
+    rule = Proposition(
+        CLASS,
+        CategoryTerm(THING, (Literal("PART.1"),)),
+        Predicate(CAN, "EVENTTYPE1.1"),
+        True,
+        NEC_ALL,
+    )
+    assert rule.concepts() == (THING, "PART.1", "EVENTTYPE1.1")
     # an instance's noun is chosen when it is mentioned, except for a scalar pole's class
-    assert Proposition(INSTANCE, "I1.1.1", Predicate(IS, "IS.3")).concepts() == ("IS.3",)
-    scalar = Proposition(INSTANCE, "I1.1.1", Predicate(SCALAR, "SC.1.LOW", comparison="C1"))
-    assert scalar.concepts() == ("SC.1.LOW", "C1")
+    assert Proposition(INSTANCE, "INSTANCE.1.1.1", Predicate(IS, "PROPERTY.3")).concepts() == (
+        "PROPERTY.3",
+    )
+    scalar = Proposition(
+        INSTANCE, "INSTANCE.1.1.1", Predicate(SCALAR, "SCALARDIM.1.LOW", comparison="CATEGORY.1")
+    )
+    assert scalar.concepts() == ("SCALARDIM.1.LOW", "CATEGORY.1")

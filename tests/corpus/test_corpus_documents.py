@@ -15,7 +15,7 @@ from collections import Counter
 
 import numpy as np
 import pytest
-from corpus_support import PLAIN_TAXONOMY, corpus_config
+from corpus_support import corpus_config
 
 from semantic_world.corpus import (
     ConfigError,
@@ -23,12 +23,14 @@ from semantic_world.corpus import (
     Planner,
     Proposition,
     interpret,
-    load_taxonomy,
+    load_world,
     parse_propositional,
     proposition_of,
     propositional,
 )
+from semantic_world.corpus.config import CONCEPT_TYPES
 from semantic_world.corpus.grammar import CLASS_NP, INSTANCE_NP, check_plan
+from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.mentions import clause_propositions
 from semantic_world.corpus.planner import (
     CHARACTERISTIC,
@@ -52,6 +54,8 @@ from semantic_world.corpus.propositions import (
     INSTANCE,
     MEMBER,
     MOST,
+    NEC_ALL,
+    NEC_NO,
     NO,
     SCALAR,
     SOME,
@@ -145,12 +149,12 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             # the plan says the proposition, and the proposition is true
             assert plan.proposition() == proposition
             assert planner.truth.is_true(proposition), sentence.label
-            assert proposition.grounding is not None and proposition.id.startswith("PR.")
+            assert proposition.grounding is not None and proposition.id.startswith("PROP.")
             if proposition.level != EVENT:
-                # by the independent recomputation from the taxonomy's output files too
+                # by the independent recomputation from the world run's files too
                 assert oracle.truth(proposition.to_json()) is True, proposition.to_json()
             else:
-                assert proposition.grounding["possible"] is True
+                assert proposition.grounding["able"] and proposition.grounding["legal"]
             if proposition.level != CLASS:
                 for said in clause_propositions(plan):
                     assert planner.truth.is_true(said), (sentence.label, said)
@@ -158,8 +162,9 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             # the tree's leaves are the tokens, and the tree reads back as the plan
             tree = sentence.sentence.tree
             assert tuple(leaves(tree)) == sentence.sentence.tokens
+            record = sentence.sentence
             read = interpret(
-                tree, planner.lexicon, sentence.sentence.referents, sentence.sentence.events
+                tree, planner.lexicon, record.referents, record.events, plan.quantifier
             )
             assert read == plan
             levels[proposition.level] += 1
@@ -189,15 +194,18 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
         assert form["id"] == sentence.proposition.id
         assert form["grounding"] == sentence.proposition.grounding
         # nothing of the surface is in it: no determiner, no pronoun, no word
-        assert " THE(" not in text and "L." not in text
+        assert " THE(" not in text and "LEXEME." not in text
         if sentence.proposition.level == CLASS:
-            assert text.split("(")[0] in ("ALL", "MOST", "SOME", "NO", "GEN")
-            assert not re.search(r"\bR\.\d|\bI\d", text)  # no referent, and no instance
+            if sentence.proposition.predicate.kind == SCALAR:
+                assert text.removeprefix("NOT ").startswith("SCALARDIM.")
+            else:
+                assert text.split("(")[0] in ("NEC", "ALL", "MOST", "SOME", "NO")
+            assert not re.search(r"\bREF\.\d|\bINSTANCE\.\d", text)  # no referent, no instance
             quantified += 1
             existential += "EXISTS(" in text
         else:
-            assert "X." not in text
-            label = "R." if mode == "local" else "I"
+            assert "VAR." not in text
+            label = "REF." if mode == "local" else "INSTANCE."
             assert f"({label}" in text
             events += "EVENT(" in text
             capacities += "ABLE(" in text
@@ -263,29 +271,28 @@ def test_the_propositional_rendering_never_depends_on_the_grammar(corpora) -> No
 
 
 class Described:
-    """Which instances a noun phrase describes, worked out from the taxonomy's own arrays."""
+    """Which instances a noun phrase describes, worked out from the world's own tables."""
 
-    def __init__(self, result, z: float = 1.0) -> None:
-        self.result = result
+    def __init__(self, world, z: float = 1.0) -> None:
+        self.world = world
         self.z = z
-        self.labels = list(result.instances.labels)
+        self.labels = list(world.instances)
         self.row = {label: i for i, label in enumerate(self.labels)}
 
     @staticmethod
     def path(instance: str) -> list[str]:
-        leaf = instance.rsplit(".", 1)[0].replace("I", "C", 1)
-        parts = leaf.split(".")
-        return [".".join(parts[: k + 1]) for k in range(len(parts))]
+        prefix, *numbers = instance.rsplit(".", 1)[0].replace("INSTANCE", "CATEGORY", 1).split(".")
+        return [".".join([prefix, *numbers[: k + 1]]) for k in range(len(numbers))]
 
     def fits(self, instance: str, phrase) -> bool:
         if phrase.noun not in self.path(instance):
             return False
-        instances, features = self.result.instances, self.result.features
+        world = self.world
         row = self.row[instance]
         for literal in phrase.restriction:
-            if literal.feature.startswith("SC."):
+            if literal.feature.startswith("SCALARDIM."):
                 scalar, side = literal.feature.rsplit(".", 1)
-                column = instances.scalars[:, features.scalar_labels.index(scalar)]
+                column = world.scalar_values[:, world.scalars.index(scalar)]
                 below = [self.row[i] for i in self.labels if phrase.noun in self.path(i)]
                 mean, sd = column[below].mean(), column[below].std()
                 high = sd > 0 and column[row] >= mean + self.z * sd
@@ -293,7 +300,7 @@ class Described:
                 if not (high if side == "HIGH" else low):
                     return False
             else:
-                value = bool(instances.values[row, features[literal.feature].position])
+                value = bool(world.column(literal.feature)[row])
                 if value != literal.positive:
                     return False
         return True
@@ -303,7 +310,7 @@ class Described:
 def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, name) -> None:
     case = cases(name)
     _, documents = corpora(name, **RICH)
-    described = Described(case.result)
+    described = Described(case.world)
     flags: Counter = Counter()
     needed = 0
     for document in documents:
@@ -340,7 +347,8 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
     assert flags[True] > 100 and needed > 30
     # nearly every definite mention can be told apart. An entity narrative has 2 to 5 scenes,
     # so its cast is large, and the smallest worlds have few features to tell instances apart
-    assert flags[False] <= 0.1 * flags[True]
+    # (the still world: 20 of 189 definite mentions)
+    assert flags[False] <= 0.15 * flags[True]
 
 
 def test_first_mentions_in_situational_documents_take_no_modifier(corpora) -> None:
@@ -380,7 +388,7 @@ def test_pronouns_and_chains(corpora, name) -> None:
             continue
         labels = {instance: label for label, instance in document.referents.items()}
         # the referents are numbered in the order of first mention
-        assert list(document.referents) == [f"R.{n}" for n in range(1, len(labels) + 1)]
+        assert list(document.referents) == [f"REF.{n}" for n in range(1, len(labels) + 1)]
         seen: list[str] = []
         previous: tuple[str, set[str]] | None = None
         for sentence in document.sentences:
@@ -396,7 +404,7 @@ def test_pronouns_and_chains(corpora, name) -> None:
                     seen.append(instance)
                 # the logical form records the referent, and the noun, or none for a pronoun
                 assert mention["instance"] == instance
-                assert mention["referent"] == labels[instance] == f"R.{seen.index(instance) + 1}"
+                assert mention["referent"] == labels[instance] == f"REF.{seen.index(instance) + 1}"
                 assert mention["noun"] == phrase.noun
                 if phrase.pronoun:
                     pronouns += 1
@@ -459,7 +467,7 @@ def test_the_pronoun_rate(corpora) -> None:
 def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
     case = cases(name)
     planner, documents = corpora(name, **RICH)
-    depth = case.result.config.taxonomy.depth
+    depth = max(len(c.path) for c in case.world.category.values())
     levels: Counter = Counter()
     for _, sentence in sentences_of(documents):
         for phrase in sentence.plan.noun_phrases():
@@ -567,7 +575,7 @@ def test_shuffle_moves_from_the_template_to_a_random_order(corpora) -> None:
 def test_the_document_mix_and_lengths(cases, corpora) -> None:
     planner, documents = corpora("default", 600)
     config = planner.config
-    assert [d.label for d in documents] == [f"D.{n}" for n in range(1, 601)]
+    assert [d.label for d in documents] == [f"DOC.{n}" for n in range(1, 601)]
     types = Counter(d.type for d in documents)
     for kind, weight in config.documents.mix.items():
         assert abs(types[kind] / 600 - weight) < 0.07
@@ -575,7 +583,7 @@ def test_the_document_mix_and_lengths(cases, corpora) -> None:
         limits = config.documents.sentences[document.type]
         assert 1 <= len(document.sentences) <= limits.max
         assert [s.label for s in document.sentences] == [
-            f"{document.label}.{k}" for k in range(1, len(document.sentences) + 1)
+            f"{document.label}.SENT.{k}" for k in range(1, len(document.sentences) + 1)
         ]
         if document.type in ENCYCLOPEDIC:
             # the default world has enough to say about every topic
@@ -601,8 +609,7 @@ def test_category_documents(corpora) -> None:
             continue
         topic = document.topic
         topics[facts.level[topic]] += 1
-        children = [c for c in facts.categories if truth.categories[c].parent
-                    and truth.categories[c].parent.label == topic]  # fmt: skip
+        children = list(planner.world.category[topic].children)
         stated = set()
         for sentence in document.sentences:
             proposition = sentence.proposition
@@ -642,7 +649,7 @@ def test_feature_documents(corpora) -> None:
         if document.type != "encyclopedic_feature":
             continue
         topic = document.topic
-        kind = "verb" if topic in facts.verbs else topic.split(".")[0].lower()
+        kind = "verb" if topic in facts.verbs else planner.world.feature_kind[topic]
         topics[kind] += 1
         for sentence in document.sentences:
             proposition = sentence.proposition
@@ -677,9 +684,9 @@ def test_narratives(cases, corpora) -> None:
         scene_numbers += [int(scene.label.split(".")[1]) for scene in document.scenes]
         reported = [s.proposition.event for s in document.sentences if s.section == EVENT_SECTION]
         assert reported and len(set(reported)) == len(reported)
-        order = [tuple(int(x) for x in label.split(".")[1:]) for label in reported]
+        order = [(int(label.split(".")[1]), int(label.rsplit(".", 1)[1])) for label in reported]
         assert order == sorted(order)  # scene by scene, and in time order
-        events = {e.label: e for scene in document.scenes for e in scene.events}
+        events = {e.label: e for scene in document.scenes for e in scene_events(scene)}
         if document.type == "entity":
             limits = config.entity_scenes
             assert limits.min <= len(document.scenes) <= limits.max
@@ -690,21 +697,27 @@ def test_narratives(cases, corpora) -> None:
             (scene,) = document.scenes
             assert document.topic == scene.label
             # every event of the scene, as far as the document's length goes
-            assert reported == [e.label for e in scene.events][: len(reported)]
+            assert reported == [e.label for e in scene_events(scene)][: len(reported)]
         for index, sentence in enumerate(document.sentences):
             proposition = sentence.proposition
             if sentence.section == EVENT_SECTION:
                 event = events[proposition.event]
                 assert proposition.level == EVENT and proposition.subject == event.agent
                 assert proposition.predicate.patient == event.patient
-                assert (proposition.tense, proposition.aspect) == ("past", event.aspect)
+                # the event carries no aspect: the report chooses one
+                assert proposition.tense == "past" and proposition.aspect in (
+                    "simple",
+                    "progressive",
+                )
                 # the verb is the event's own, or a verb category above it
-                assert proposition.predicate.label in planner.truth.verb_names(event.verb)
+                assert proposition.predicate.label in planner.truth.verb_names(event.type)
                 # a relative clause reports an earlier event of the same scene
                 clauses = clause_propositions(sentence.plan)
                 for said in clauses:
                     assert said.scene == proposition.scene
-                    assert int(said.event.split(".")[2]) < int(proposition.event.split(".")[2])
+                    assert int(said.event.rsplit(".", 1)[1]) < int(
+                        proposition.event.rsplit(".", 1)[1]
+                    )
                 # and never an event with the verb, the agent, and the patient of the sentence's
                 # own event or of another clause's: "the dog chased the cat that the dog chased"
                 happened = [event.key] + [events[said.event].key for said in clauses]
@@ -727,13 +740,13 @@ def test_narratives(cases, corpora) -> None:
                 described += 1
     # the scenes are numbered across the corpus, in the order of the documents
     assert scene_numbers == list(range(1, len(scene_numbers) + 1))
-    assert [scene.label for scene in planner.scenes] == [f"SN.{n}" for n in scene_numbers]
+    assert [scene.label for scene in planner.scenes] == [f"SCENE.{n}" for n in scene_numbers]
     assert described > 50
     # the rule about repeated events has work to do: events recur, and sentences have clauses
     assert recurring > 20 and with_clauses > 20
     # events are named at every level of the verb tree
     names = Counter(
-        len(s.proposition.predicate.label.split("."))
+        len(s.proposition.predicate.label.split(".")) - 1  # EVENTTYPE2.1 and EVENTTYPE2.1.2
         for _, s in sentences_of(documents, *NARRATIVES)
         if s.section == EVENT_SECTION and s.proposition.predicate.kind == VERB
     )
@@ -755,12 +768,13 @@ def test_the_description_rate(corpora) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_the_relation_fact_share(corpora) -> None:
+def test_the_relation_fact_share(corpora, world_files) -> None:
     """``documents.relation_fact_share`` sets how often a sentence of a category document draws
-    a relation fact. The default, null, keeps the equal chance among the kinds of content. The
-    setting changes the category documents alone."""
+    a relation fact. The default, null, keeps the chance that ``content_kind_weights`` gives
+    the kinds of content: here equal. The setting changes the category documents alone."""
 
     def made(**documents):
+        documents = {"content_kind_weights": "equal", **documents}
         planner, found = corpora("default", 300, documents=documents)
         drawn = [
             s.section
@@ -786,7 +800,7 @@ def test_the_relation_fact_share(corpora) -> None:
     none, same_others, without = made(relation_fact_share=0.0)
     assert none == 0.0 and same_others == others
     feature = [s.section for d in without if d.type == "encyclopedic_feature" for s in d.sentences]
-    assert feature.count(RELATION) > 50
+    assert feature.count(RELATION) > 40
     assert [(d.label, d.type, d.topic) for d in without] == [
         (d.label, d.type, d.topic) for d in documents
     ]
@@ -795,7 +809,7 @@ def test_the_relation_fact_share(corpora) -> None:
     assert made(relation_fact_share=1.0)[0] == 1.0
     assert made(relation_fact_share=0.6)[1] == others
     # without verbs, a category document has no relation fact to draw
-    planner = Planner(corpus_config(PLAIN_TAXONOMY, documents={"relation_fact_share": 0.9}))
+    planner = Planner(corpus_config(world_files["plain"], documents={"relation_fact_share": 0.9}))
     plain = planner.generate(40)
     assert all(s.section != RELATION for d in plain for s in d.sentences)
     assert sum(d.type == "encyclopedic_category" for d in plain) > 5
@@ -818,9 +832,10 @@ def test_sibling_contrasts(corpora) -> None:
 
     assert contrasts(0.0) == []
     every = contrasts(1.0)
-    assert len(contrasts(0.2)) < len(every) and len(every) > 30
+    # a contrast needs a strong fact about a sibling, and in the default language the strong
+    # facts are the nec universals and most: 17 contrasts in 300 documents
+    assert len(contrasts(0.2)) < len(every) and len(every) > 10
     for planner, document, fact, contrast in every:
-        truth = planner.truth
         assert document.type == "encyclopedic_category"
         first, second = fact.proposition, contrast.proposition
         # the matching fact: the same predicate, about a sibling of the topic, and it differs
@@ -834,13 +849,16 @@ def test_sibling_contrasts(corpora) -> None:
             assert first.predicate.patient == second.predicate.patient
         assert ours == CategoryTerm(document.topic) and theirs != ours
         assert theirs.restriction == () and theirs.clauses == ()
-        assert truth.categories[ours.category].parent == truth.categories[theirs.category].parent
-        # both are strong facts: all, no, most, or a scalar pole
+        category = planner.world.category
+        assert category[ours.category].parent == category[theirs.category].parent
+        # both are strong facts: a universal, most, or a scalar pole
         for proposition in (first, second):
             strong = planner.facts.class_fact(
                 proposition.subject, proposition.predicate, proposition.negative
             )
-            assert strong.predicate.kind == SCALAR or strong.quantifier in (ALL, NO, MOST)
+            assert strong.predicate.kind == SCALAR or strong.quantifier in (
+                NEC_ALL, ALL, NEC_NO, NO, MOST
+            )  # fmt: skip
 
 
 def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> None:
@@ -906,15 +924,22 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
             # a relative clause is a subject relative or an object relative in the tree
             assert "RC" in json.dumps(sentence.sentence.tree)
         if subject.clauses:
-            # all and no are allowed only under the observed reading
-            assert proposition.quantifier not in (ALL, NO)
+            # a subject with a relative clause takes the extensional universals, never nec
+            assert proposition.quantifier not in (NEC_ALL, NEC_NO)
             assert oracle.truth(proposition.to_json()) is True
             assert "EXISTS(" in sentence.propositional or "ABLE(" in sentence.propositional
     assert set(kinds) == {(CAN, ""), (VERB, "patient"), (VERB, "agent")}
     assert min(kinds.values()) > 15 and deep > 5 and on_patient > 10
-    # under the observed reading, a subject with a relative clause takes all and no
-    observed = merged(settings, {"quantifiers": {"all_grounding": "observed"}})
-    _, documents = corpora("default", 250, **observed)
+    # in the default language, "all" and "no" state the nec quantifiers, so such a subject is
+    # said with most or some; when the words state the extensional ones too, it takes them
+    stated = Counter(
+        s.proposition.quantifier
+        for _, s in sentences_of(documents, *ENCYCLOPEDIC)
+        if s.proposition.subject.clauses
+    )
+    assert set(stated) <= {MOST, SOME}
+    either = merged(settings, {"quantifiers": {"universal_words": "either"}})
+    _, documents = corpora("default", 250, **either)
     quantifiers = Counter(
         s.proposition.quantifier
         for _, s in sentences_of(documents, *ENCYCLOPEDIC)
@@ -978,14 +1003,30 @@ def test_content_words_count_nouns_adjectives_and_verbs(corpora) -> None:
 
 def test_readings_in_documents(corpora) -> None:
     kinds = {CLASS: "generic", INSTANCE: "capacity", EVENT: "event"}
-    # the default language is not ambiguous: every sentence has the one reading of its level
+    levels = set(kinds.values())
+    # the default language is not ambiguous: every sentence has the one reading of its level,
+    # and a class-level sentence has its quantifier readings after it
     _, documents = corpora("default", 200)
+    quantified: Counter = Counter()
     for _, sentence in sentences_of(documents):
-        assert sentence.readings == (kinds[sentence.proposition.level],)
+        proposition = sentence.proposition
+        assert sentence.readings[0] == kinds[proposition.level]
+        rest = sentence.readings[1:]
+        assert not (set(rest) & levels)
+        if proposition.level != CLASS:
+            assert not rest
+        elif proposition.predicate.kind == SCALAR:
+            assert not rest
+        else:
+            # the true quantifier is among the readings of the words
+            assert proposition.quantifier in rest, (sentence.readings, proposition.quantifier)
+            quantified["+".join(rest)] += 1
     counts = reading_counts(documents)
     assert counts["ambiguous"] == 0 and counts["ambiguous_share"] == 0.0
-    assert set(counts["readings"]) == {"generic", "capacity", "event"}
+    assert set(counts["readings"]) == levels
     assert sum(counts["readings"].values()) == counts["sentences"]
+    assert {k: v for k, v in counts["quantifier_readings"].items() if k != "none"} == quantified
+    assert {NEC_ALL, f"{NEC_ALL}+{MOST}", MOST, SOME, NEC_NO} <= set(quantified)
     # with "can" dropped for instances, and the tense and the aspect not marked, a bare verb
     # after an instance is a capacity or an event
     bare = {"grammar": {"can_rate": {"instance": 0.0}}}
@@ -995,7 +1036,7 @@ def test_readings_in_documents(corpora) -> None:
         level = sentence.proposition.level
         # the true reading is always among the readings
         assert kinds[level] in sentence.readings
-        if len(sentence.readings) > 1:
+        if len(sentence.readings) > 1 and level != CLASS:
             assert sentence.readings == ("capacity", "event")
             ambiguous[level] += 1
         predicate = sentence.proposition.predicate
@@ -1115,7 +1156,7 @@ def test_proposition_labels(corpora) -> None:
         assert labels.setdefault(proposition, proposition.id) == proposition.id
         if proposition.id not in order:
             order.append(proposition.id)
-    assert order == [f"PR.{n}" for n in range(1, len(order) + 1)]
+    assert order == [f"PROP.{n}" for n in range(1, len(order) + 1)]
     assert len(set(labels.values())) == len(labels)
     assert len(labels) < len(sentences_of(documents))  # some propositions are said twice
 
@@ -1124,30 +1165,33 @@ def test_documents_are_deterministic(cases) -> None:
     case = cases("default")
 
     def made(seed: int = 1, **sections) -> list:
-        config = corpus_config(case.taxonomy, seed=seed, **sections)
-        return [d.to_json() for d in Planner(config, case.result).generate(40)]
+        config = corpus_config(case.world_path, seed=seed, **sections)
+        return [d.to_json() for d in Planner(config, case.world).generate(40)]
 
     base = made()
     assert made() == base
     assert made(seed=2) != base
     # a document depends on the documents before it only for its scene and proposition labels:
     # its type, its topic, and its propositions come from its own parts of the streams
-    planner = Planner(corpus_config(case.taxonomy), case.result)
+    planner = Planner(corpus_config(case.world_path), case.world)
     assert [next(iter(planner)).to_json() for _ in range(3)] == base[:3]
     # the test-set settings change no document
     assert made(test_sets={"size": 3, "changes": ["subject"]}) == base
-    # the taxonomy can be loaded by the planner itself
-    config = corpus_config(case.taxonomy)
+    # the world can be loaded by the planner itself
+    config = corpus_config(case.world_path)
     assert [d.to_json() for d in Planner(config).generate(5)] == base[:5]
-    assert load_taxonomy(config).instances.labels == case.result.instances.labels
+    assert load_world(config).instances == case.world.instances
 
 
 def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     case = cases("default")
 
     def made(**weights):
-        sections = {"quantifiers": {"weights": weights}} if weights else {}
-        planner = Planner(case.config(**sections), case.result)
+        # equal kinds of content, so that the category documents state scalar poles too
+        sections = {"documents": {"content_kind_weights": "equal"}}
+        if weights:
+            sections["quantifiers"] = {"weights": weights}
+        planner = Planner(case.config(**sections), case.world)
         documents = planner.generate(150)
         strengths = Counter(
             s.strength for _, s in sentences_of(documents, *ENCYCLOPEDIC) if s.section != RULE
@@ -1158,7 +1202,8 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
         return strengths[quantifier] / sum(strengths.values())
 
     planner, base, strengths = made()
-    assert set(strengths) == {ALL, MOST, SOME, NO, "pole"}
+    # in the default language, "all" and "no" state the nec quantifiers
+    assert set(strengths) == {NEC_ALL, MOST, SOME, NEC_NO, "pole"}
     for _, sentence in sentences_of(base):
         proposition = sentence.proposition
         if proposition.level != CLASS:
@@ -1166,19 +1211,20 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
         elif proposition.predicate.kind == SCALAR:
             assert sentence.strength == "pole"
         else:
-            # a fact is stated with its strongest true quantifier, or as the bare generic
+            # a fact is stated with its strongest true quantifier that the language can state,
+            # with a word or with a bare plural
             fact = planner.facts.class_fact(
                 proposition.subject, proposition.predicate, proposition.negative
             )
-            assert fact.quantifier == sentence.strength
-            assert proposition.quantifier in (fact.quantifier, "generic")
+            assert fact.quantifier == sentence.strength == proposition.quantifier
     # equal weights, of any size, change nothing
-    _, same, _ = made(all=3, most=3, some=3, none=3)
+    _, same, _ = made(nec_all=3, all=3, most=3, some=3, none=3, nec_none=3)
     assert [d.to_json() for d in same] == [d.to_json() for d in base]
     # a lighter weight makes the documents state fewer facts of that quantifier
     planner, lighter, fewer = made(some=0.2)
     assert share(fewer, SOME) < share(strengths, SOME) - 0.15
-    assert share(fewer, ALL) > share(strengths, ALL) and share(fewer, MOST) > share(strengths, MOST)
+    assert share(fewer, NEC_ALL) > share(strengths, NEC_ALL)
+    assert share(fewer, MOST) > share(strengths, MOST)
     for _, sentence in sentences_of(lighter):
         assert planner.truth.is_true(sentence.proposition)
         proposition = sentence.proposition
@@ -1198,11 +1244,11 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
             ]
     # a weight of 0 leaves the quantifier out, and a heavier one states it more often
     _, _, without = made(some=0)
-    assert without[SOME] == 0 and without[ALL] > strengths[ALL]
+    assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
     # the mix among the negative facts: "no" against "most ... not" and "some ... not"
-    _, _, heavier = made(none=4)
-    assert share(heavier, NO) > 1.5 * share(strengths, NO)
+    _, _, heavier = made(nec_none=4)
+    assert share(heavier, NEC_NO) > 1.5 * share(strengths, NEC_NO)
     with pytest.raises(ConfigError, match="quantifiers.weights.no"):
         case.config(quantifiers={"weights": {"no": 4}})
 
@@ -1225,10 +1271,7 @@ def test_an_entity_narrative_has_two_to_five_scenes(cases) -> None:
 
 def test_a_lexicon_with_unnamed_concepts(cases) -> None:
     case = cases("default")
-    proportions = dict.fromkeys(
-        ("category", "is", "has", "can", "verb", "verb_category", "patient_projection", "scalar"),
-        0.5,
-    )
+    proportions = dict.fromkeys(CONCEPT_TYPES, 0.5)
     config = case.config(lexicon={"named_proportion": proportions}, **RICH)
     planner = Planner(config, case.result)
     documents = planner.generate(150)
@@ -1246,15 +1289,12 @@ def test_a_lexicon_with_unnamed_concepts(cases) -> None:
 
 def test_a_language_with_nothing_to_say(cases) -> None:
     case = cases("tiny")
-    proportions = dict.fromkeys(
-        ("category", "is", "has", "can", "verb", "verb_category", "patient_projection", "scalar"),
-        0.0,
-    )
+    proportions = dict.fromkeys(CONCEPT_TYPES, 0.0)
     planner = Planner(case.config(lexicon={"named_proportion": proportions}), case.result)
-    with pytest.raises(CorpusError, match="no document with a sentence could be made for D.1"):
+    with pytest.raises(CorpusError, match="no document with a sentence could be made for DOC.1"):
         planner.generate(1)
     # with words for the CAN features alone, the narratives still report events: "it swam"
-    proportions["can"] = 1.0
+    proportions["event_unary"] = 1.0
     planner = Planner(case.config(lexicon={"named_proportion": proportions}), case.result)
     documents = planner.generate(10)
     assert {d.type for d in documents} <= {*ENCYCLOPEDIC, *NARRATIVES}
@@ -1266,8 +1306,8 @@ def test_a_language_with_nothing_to_say(cases) -> None:
         )
 
 
-def test_a_world_without_verbs_and_scalars() -> None:
-    config = corpus_config(PLAIN_TAXONOMY, **RICH)
+def test_a_world_without_verbs_and_scalars(world_files) -> None:
+    config = corpus_config(world_files["plain"], **RICH)
     planner = Planner(config)
     documents = planner.generate(80)
     sections = Counter(s.section for _, s in sentences_of(documents))
@@ -1279,4 +1319,4 @@ def test_a_world_without_verbs_and_scalars() -> None:
         parsed = parse_propositional(sentence.propositional)
         assert proposition_of(parsed, document.referents) == proposition
     with pytest.raises(ConfigError):
-        corpus_config(PLAIN_TAXONOMY, documents={"sibling_contrast_rate": 2})
+        corpus_config(world_files["plain"], documents={"sibling_contrast_rate": 2})

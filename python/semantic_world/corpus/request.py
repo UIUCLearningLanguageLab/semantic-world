@@ -20,8 +20,8 @@ that the word-form pipeline reads (``request:`` in its configuration). The reque
   embedded;
 - ``meanings``: the file of the categories' meaning vectors, ``wordform_meanings.csv``, which
   ``generate`` writes beside the request. The file is the taxonomy's
-  ``categories_generative.csv``. The path is relative to the request file, so the output folder
-  can be moved.
+  ``categories_generative.csv`` with the world's labels. The path is relative to the request
+  file, so the output folder can be moved.
 """
 
 from __future__ import annotations
@@ -32,16 +32,13 @@ from typing import TYPE_CHECKING, Any
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import INTRANSITIVE_VERB, NOUN, TRANSITIVE_VERB
 from semantic_world.corpus.realize import PAST, PLURAL, PROGRESSIVE, token_parts
-from semantic_world.taxonomy.generate import TaxonomyResult
-from semantic_world.taxonomy.io import result_frames
+from semantic_world.corpus.world import World
 
 if TYPE_CHECKING:
     from semantic_world.corpus.generate import Corpus
 
 REQUEST_FILE = "wordform_request.yaml"
 MEANINGS_FILE = "wordform_meanings.csv"
-MEANINGS_TABLE = "categories_generative.csv"
-"""The taxonomy table that holds the categories' meaning vectors."""
 VERBS = (INTRANSITIVE_VERB, TRANSITIVE_VERB)
 
 
@@ -123,8 +120,7 @@ def wordform_request(corpus: Corpus) -> dict[str, Any]:
     }
 
 
-def meanings_csv(result: TaxonomyResult) -> str:
+def meanings_csv(world: World) -> str:
     """The categories' meaning vectors, as the taxonomy generator writes them to
-    ``categories_generative.csv``."""
-    frame = result_frames(result)[MEANINGS_TABLE]
-    return frame.write_csv(None, float_precision=6, null_value="")
+    ``categories_generative.csv``, with the world's labels."""
+    return world.meanings_csv()

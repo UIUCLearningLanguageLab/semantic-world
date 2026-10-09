@@ -1,8 +1,11 @@
-"""Stage 3 acceptance tests: scenes and events.
+"""Stage 3 and stage a5a acceptance tests: scenes and events.
 
-Every event is possible: its CAN feature or its relation holds, by the taxonomy's output files.
-No event repeats within a time step. With the thematic weight above 0, participants are more
-thematically related than with the weight at 0, on average.
+Scenes are the world's episodes, recorded as histories. Every event was legal in its step's
+starting state, by the brute-force evaluator of the world run's files; no event repeats within a
+step; every history replays on the run's definition; with the thematic weight above 0,
+participants are more thematically related than with the weight at 0, on average; and on a
+world without fluents, under the balanced policy, scenes have the participants the old scene
+generator drew for the same seeds.
 """
 
 from __future__ import annotations
@@ -12,29 +15,39 @@ import json
 from collections import Counter
 
 import numpy as np
-import polars as pl
 import pytest
-from corpus_support import PLAIN_TAXONOMY, corpus_config
+from corpus_support import corpus_config, old_scene_participants
 
-from semantic_world.corpus import ConfigError, Streams, load_taxonomy
+from semantic_world.corpus import ConfigError, Streams, load_world
+from semantic_world.corpus.histories import (
+    SceneGenerator,
+    events_at,
+    happened_in,
+    involving,
+    scene_events,
+)
 from semantic_world.corpus.propositions import (
     CAN,
     EVENT,
     INSTANCE,
     IS,
+    PROGRESSIVE,
+    SIMPLE,
     VERB,
     Predicate,
     Proposition,
 )
-from semantic_world.corpus.scenes import Event, Scene, SceneGenerator
+from semantic_world.world.history import History, replay
+from semantic_world.world.runtime import legal
 
 WORLDS = ("tiny", "default", "deep", "still")
+BALANCED = {"policy": "uniform_event_type"}
 
 
-def make(generator: SceneGenerator, count: int, seed: int = 1, first: int = 1) -> list[Scene]:
-    """Scenes ``SN.<first>`` onward, each seeded at an instance drawn from a fixed order."""
+def make(generator: SceneGenerator, count: int, seed: int = 1, first: int = 1) -> list[History]:
+    """Scenes ``SCENE.<first>`` onward, each seeded at an instance drawn from a fixed order."""
     streams = Streams(seed)
-    labels = generator.labels
+    labels = generator.world.instances
     return [
         generator.scene(streams, number, labels[(number * 7) % len(labels)])
         for number in range(first, first + count)
@@ -45,11 +58,15 @@ def scene_settings(**scene) -> dict:
     return {"scene": scene}
 
 
-def knowing(facts, scenes: list[Scene]):
+def knowing(facts, scenes: list[History]):
     """Facts of other settings have truth tests of their own: make the scenes known to them."""
     for scene in scenes:
         facts.truth.add_scene(scene)
     return facts
+
+
+def event_keys(scene: History) -> list[tuple]:
+    return [e.key for e in scene_events(scene)]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -58,37 +75,53 @@ def knowing(facts, scenes: list[Scene]):
 
 
 @pytest.mark.parametrize("name", WORLDS)
-def test_every_event_is_possible_by_the_output_files(cases, name) -> None:
+def test_every_event_was_legal_by_the_output_files(cases, name) -> None:
     case = cases(name)
     oracle = case.oracle()
     scenes = make(case.scenes(), 300)
-    events = [e for scene in scenes for e in scene.events]
+    events = [e for scene in scenes for e in scene_events(scene)]
     assert len(events) > 1000
-    for event in events:
-        agent = oracle.row[event.agent]
-        if event.patient is None:
-            # an intransitive event: the agent has the CAN feature
-            assert event.verb.startswith("CAN.") and oracle.column[event.verb][agent] == 1, event
-        else:
-            # a transitive event: the verb's relation holds for the agent and the patient
+    for scene in scenes:
+        states = oracle.states(scene.to_json())  # replays with the brute-force evaluator
+        assert len(states) == len(scene.steps) + 1
+        for event in scene_events(scene):
             assert event.agent != event.patient
-            assert oracle.matrix(event.verb)[agent, oracle.row[event.patient]], event
+            assert oracle.able(event.type, event.agent, event.patient), event
+            assert oracle.legal(scene.to_json(), event.type, event.agent, event.patient)
     kinds = Counter(e.transitive for e in events)
     assert kinds[True] > 100 and kinds[False] > 100
 
 
 @pytest.mark.parametrize("name", WORLDS)
-def test_no_event_repeats_within_a_time_step(cases, name) -> None:
+def test_every_scene_replays_on_the_runs_definition(cases, name) -> None:
+    case = cases(name)
+    definition = case.world.definition
+    for scene in make(case.scenes(), 100):
+        states = replay(definition, scene)
+        assert scene.rule_set_id == definition.rule_set_id
+        assert scene.final == f"TIME.{len(states)}"
+        participants = tuple(definition.entity_index(p) for p in scene.participants)
+        for step, state in zip(scene.steps, states[:-1], strict=True):
+            for event in step.events:
+                binding = tuple(
+                    definition.entity_index(x) for x in (event.agent, event.patient) if x
+                )
+                assert legal(definition, state, event.type, [binding])[0]
+                assert set(binding) <= set(participants)
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_no_event_repeats_within_a_step(cases, name) -> None:
     case = cases(name)
     # many events at every step, so that a repeat would show
     scenes = make(case.scenes(**scene_settings(events_per_step=6.0)), 200)
     steps = repeats_across_steps = 0
     for scene in scenes:
-        for step in range(1, scene.steps + 1):
-            keys = [e.key for e in scene.at(step)]
-            assert len(set(keys)) == len(keys), (scene.label, step)
+        for step in scene.steps:
+            keys = [e.key for e in events_at(scene, step.step)]
+            assert len(set(keys)) == len(keys), (scene.label, step.step)
             steps += 1
-        keys = [e.key for e in scene.events]
+        keys = event_keys(scene)
         repeats_across_steps += len(keys) - len(set(keys))
     assert steps > 500
     assert repeats_across_steps > 0  # the same event can happen again at a later step
@@ -112,7 +145,28 @@ def test_the_thematic_weight_draws_thematically_related_participants(cases) -> N
     similar = mean_relatedness(thematic=0, taxonomic=3.0, constant=0.1)
     assert similar[1] > plain[1] + 0.03
     # with every weight but the constant at 0, participants are a uniform draw
-    assert abs(plain[0] - case.scenes().thematic.mean()) < 0.1
+    assert abs(plain[0] - case.world.thematic.mean()) < 0.1
+
+
+def test_participants_are_the_old_scene_generators_on_a_static_world(world_files) -> None:
+    """With no fluents and the balanced policy, a scene draws the participants the corpus's
+    scene generator drew before stage a5a for the same seed instance and part of the stream.
+    The events need not agree: an episode draws its number of steps and its initial state from
+    the part before the first step, where the old generator drew the participants and then the
+    steps, so the later draws diverge."""
+    world = load_world(corpus_config(world_files["static"]))
+    assert world.definition.base_fluents == ()
+    generator = SceneGenerator(corpus_config(world_files["static"], scene=BALANCED), world)
+    weights, draw = old_scene_participants(world, generator.generator.settings)
+    streams = Streams(1)
+    for number, seed in enumerate(world.instances, start=1):
+        label = f"SCENE.{number}"
+        assert np.allclose(generator.participant_weights(seed), weights(number - 1))
+        rng = streams.substream("scenes", label)
+        expected = draw(rng, number - 1)
+        scene = generator.scene(streams, number, seed)
+        assert scene.participants == tuple(world.instances[i] for i in expected)
+        assert scene.policy == "uniform_event_type"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -126,10 +180,10 @@ def test_participants(cases, name) -> None:
     scenes = make(case.scenes(), 300)
     sizes = Counter()
     for number, scene in enumerate(scenes, start=1):
-        assert scene.label == f"SN.{number}"
+        assert scene.label == f"SCENE.{number}"
         assert scene.participants[0] == scene.seed
         assert len(set(scene.participants)) == len(scene.participants)
-        assert set(scene.participants) <= set(case.result.instances.labels)
+        assert set(scene.participants) <= set(case.world.instances)
         sizes[len(scene.participants) - 1] += 1
     # scene.size other instances, drawn from the range
     assert set(sizes) == {2, 3, 4, 5, 6}
@@ -140,8 +194,8 @@ def test_participant_weights_are_the_weighted_sum(cases) -> None:
     case = cases("default")
     weights = {"thematic": 2.0, "taxonomic": 0.7, "constant": 0.05}
     generator = case.scenes(**scene_settings(participant_weights=weights))
-    instances = case.result.instances
-    thematic = pl.read_csv(case.folder / "thematic.csv")
+    world = case.world
+    thematic = world.result.derived_frames()["thematic.csv"]
     # thematic.csv gives both numbers for every pair of leaves with a thematic score above 0
     score = {}
     for row in thematic.iter_rows(named=True):
@@ -150,14 +204,14 @@ def test_participant_weights_are_the_weighted_sum(cases) -> None:
             row["similarity"],
         )
     assert len(score) > 100
-    for seed in instances.labels[::37]:
+    for seed in world.instances[::37]:
         values = generator.participant_weights(seed)
-        seed_leaf = instances.leaf_labels[instances.labels.index(seed)]
-        assert values[instances.labels.index(seed)] == 0  # the seed is not drawn again
-        for row in range(0, len(instances), 5):
-            if instances.labels[row] == seed:
+        seed_leaf = world.instance_leaf[world.instance_index[seed]]
+        assert values[world.instance_index[seed]] == 0  # the seed is not drawn again
+        for row in range(0, world.count, 5):
+            if world.instances[row] == seed:
                 continue
-            pair = (instances.leaf_labels[row], seed_leaf)
+            pair = (world.instance_leaf[row], seed_leaf)
             if pair in score:
                 expected = 2.0 * score[pair][0] + 0.7 * score[pair][1] + 0.05
                 assert values[row] == pytest.approx(expected, abs=2e-6)
@@ -174,7 +228,7 @@ def test_an_instance_with_no_weight_is_never_drawn(cases) -> None:
     for scene in make(generator, 60):
         drawn = generator.participant_weights(scene.seed)
         for participant in scene.participants[1:]:
-            assert drawn[generator.index[participant]] > 0
+            assert drawn[case.world.instance_index[participant]] > 0
         related = int(np.count_nonzero(drawn))
         assert len(scene.participants) - 1 == related  # every related instance, and no other
         smaller += related < 283
@@ -185,11 +239,11 @@ def test_a_scene_never_has_more_participants_than_the_world(cases) -> None:
     case = cases("tiny")
     generator = case.scenes(**scene_settings(size=[30, 30]))
     for scene in make(generator, 20):
-        assert sorted(scene.participants) == sorted(case.result.instances.labels)
+        assert sorted(scene.participants) == sorted(case.world.instances)
     alone = case.scenes(**scene_settings(size=0))
     for scene in make(alone, 20):
         assert scene.participants == (scene.seed,)
-        assert all(not e.transitive and e.agent == scene.seed for e in scene.events)
+        assert all(not e.transitive and e.agent == scene.seed for e in scene_events(scene))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -197,144 +251,230 @@ def test_a_scene_never_has_more_participants_than_the_world(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", WORLDS)
-def test_the_timeline(cases, name) -> None:
-    case = cases(name)
-    scenes = make(case.scenes(), 400)
-    steps = Counter(scene.steps for scene in scenes)
+def test_the_timeline_on_a_static_world(world_files) -> None:
+    # Without fluents every able binding is legal at every step, so the timeline is the old
+    # one: a drawn number of steps, and a Poisson number of events at each step.
+    world = load_world(corpus_config(world_files["static"]))
+    generator = SceneGenerator(corpus_config(world_files["static"], scene=BALANCED), world)
+    scenes = make(generator, 400)
+    steps = Counter(len(scene.steps) for scene in scenes)
     assert set(steps) == {3, 4, 5, 6, 7, 8}
+    assert not any(scene.quiescent for scene in scenes)
     per_step = []
     for scene in scenes:
+        events = scene_events(scene)
         # events are labeled in time order, and a step can be empty
-        assert [e.label for e in scene.events] == [
-            f"{scene.label}.{k}" for k in range(1, len(scene.events) + 1)
+        assert [e.label for e in events] == [
+            f"{scene.label}.EVENTINSTANCE.{k}" for k in range(1, len(events) + 1)
         ]
-        assert [e.step for e in scene.events] == sorted(e.step for e in scene.events)
-        assert all(1 <= e.step <= scene.steps and e.scene == scene.label for e in scene.events)
+        assert [e.step for e in events] == sorted(e.step for e in events)
+        assert all(1 <= e.step <= len(scene.steps) and e.scene == scene.label for e in events)
         assert all(
             e.involves(e.agent)
             and set(filter(None, (e.agent, e.patient))) <= set(scene.participants)
-            for e in scene.events
+            for e in events
         )
-        per_step += [len(scene.at(step)) for step in range(1, scene.steps + 1)]
+        assert scene.final == f"TIME.{len(scene.steps) + 1}"
+        per_step += [len(step.events) for step in scene.steps]
     # a Poisson number of events at each step, with the configured mean
     assert abs(np.mean(per_step) - 1.5) < 0.1
     assert abs(np.var(per_step) - 1.5) < 0.3
     assert 0 in per_step and max(per_step) >= 5
 
 
-def test_the_pool_of_possible_events(cases) -> None:
+@pytest.mark.parametrize("name", WORLDS)
+def test_the_timeline_with_fluents(cases, name) -> None:
+    # With fluents, a step holds only events that are legal and do not interfere, and a scene
+    # ends early, quiescent, when nothing is legal.
+    case = cases(name)
+    scenes = make(case.scenes(), 400)
+    steps = Counter(len(scene.steps) for scene in scenes)
+    assert max(steps) == 8 and min(steps) >= 0
+    quiescent = [scene for scene in scenes if scene.quiescent]
+    for scene in scenes:
+        if not scene.quiescent:
+            assert 3 <= len(scene.steps) <= 8
+        for event in scene_events(scene):
+            assert event.scene == scene.label
+    per_step = [len(step.events) for scene in scenes for step in scene.steps]
+    assert np.mean(per_step) <= 1.5 + 0.1  # never more than the Poisson draw asks for
+    assert 0 in per_step
+    assert len(quiescent) < len(scenes)
+    # events change state: some event records a change to a base fluent
+    changes = [c for scene in scenes for e in scene.events for c in e.changes]
+    assert changes and all(c.fluent.startswith("BOOLFL.") for c in changes)
+
+
+def test_the_able_bindings(cases) -> None:
     case = cases("tiny")
-    generator = case.scenes()
-    result = case.result
-    participants = ("I1.1.1", "I1.2.2", "I2.1.3", "I2.2.1")
-    intransitive, transitive = generator.possible_events(participants)
-    features = result.features
-    rows = [result.instances.labels.index(p) for p in participants]
-    expected = [
-        (f.label, p, None)
-        for p, row in zip(participants, rows, strict=True)
-        for f in features.of_type("can")
-        if result.instances.values[row, f.position]
-    ]
-    assert intransitive == expected and len(expected) > 0
-    # every ordered pair of distinct participants, and every verb whose relation holds: the
-    # verbs are the leaves of the verb tree, with a word or without one
-    expected_pairs = []
-    for verb in ("V1.1", "V1.2", "V2.1", "V2.2"):
+    world = case.world
+    participants = ("INSTANCE.1.1.1", "INSTANCE.1.2.2", "INSTANCE.2.1.3", "INSTANCE.2.2.1")
+    rows = [world.instance_index[p] for p in participants]
+    # every participant and every one-place event type it is able to be the agent of
+    for event_type in world.unary:
+        able = world.able(event_type)
+        for row in rows:
+            assert able[row] == bool(world.column(event_type)[row])
+    # every ordered pair of distinct participants and every two-place leaf event type whose
+    # requirement holds; a category names no event of its own
+    taxonomy = world.result.taxonomy
+    for label in world.binary_leaves:
+        old = label.replace("EVENTTYPE2.", "V")
         for a, row_a in zip(participants, rows, strict=True):
             for p, row_p in zip(participants, rows, strict=True):
-                if a != p and result.relations.holds(verb, [row_a], [row_p])[0]:
-                    expected_pairs.append((verb, a, p))
-    assert transitive == expected_pairs and len(expected_pairs) > 0
-    assert not any(verb in ("V1", "V2") for verb, _, _ in transitive)
+                if a != p:
+                    expected = taxonomy.relations.holds(old, [row_a], [row_p])[0]
+                    assert world.able(label)[row_a, row_p] == expected
+    assert set(world.event_types_below("EVENTTYPE2.1")) == {"EVENTTYPE2.1.1", "EVENTTYPE2.1.2"}
 
 
-def test_the_transitive_share(cases) -> None:
-    case = cases("default")
+def test_the_transitive_share_under_the_balanced_policy(world_files) -> None:
+    # The balanced policy draws the kind of event by the share when both kinds have an available
+    # event, and draws the other kind otherwise. The share is measured over the scenes whose
+    # participants have both an able agent and an able pair.
+    world = load_world(corpus_config(world_files["static"]))
+    index = world.instance_index
 
-    def share(value: float) -> float:
-        scenes = make(case.scenes(**scene_settings(transitive_share=value)), 300)
-        return float(np.mean([e.transitive for s in scenes for e in s.events]))
+    def both_kinds(scene: History) -> bool:
+        rows = [index[p] for p in scene.participants]
+        one = any(world.able(u)[r] for u in world.unary for r in rows)
+        two = any(
+            world.able(v)[a, b] for v in world.binary_leaves for a in rows for b in rows if a != b
+        )
+        return one and two
+
+    def share(value: float, **extra) -> float:
+        settings = {"transitive_share": value, **BALANCED, **extra}
+        generator = SceneGenerator(corpus_config(world_files["static"], scene=settings), world)
+        scenes = [s for s in make(generator, 300) if extra or both_kinds(s)]
+        return float(np.mean([e.transitive for s in scenes for e in scene_events(s)]))
 
     assert share(0.0) == 0.0 and share(1.0) == 1.0
-    assert abs(share(0.5) - 0.5) < 0.04
-    assert abs(share(0.8) - 0.8) < 0.04
+    assert abs(share(0.5) - 0.5) < 0.05
+    assert abs(share(0.8) - 0.8) < 0.05
     # a scene with one participant has no transitive event, whatever the share
-    alone = case.scenes(**scene_settings(size=0, transitive_share=1.0))
-    assert all(not scene.events for scene in make(alone, 30))
-    mostly = case.scenes(**scene_settings(size=0, transitive_share=0.9))
-    assert any(scene.events for scene in make(mostly, 30))
+    assert share(0.9, size=0) == 0.0
+    # the default policy draws uniformly among all legal events, so the share follows the
+    # numbers of able agents and able pairs among the participants of each scene
+    plain = SceneGenerator(corpus_config(world_files["static"]), world)
+    scenes = make(plain, 300)
+    uniform = float(np.mean([e.transitive for s in scenes for e in scene_events(s)]))
+    agents = pairs = 0
+    for scene in scenes:
+        rows = [index[p] for p in scene.participants]
+        agents += sum(int(world.able(u)[rows].sum()) for u in world.unary)
+        pairs += sum(int(world.able(v)[np.ix_(rows, rows)].sum()) for v in world.binary_leaves)
+    expected = pairs / (pairs + agents)
+    assert abs(uniform - expected) < 0.05 and 0.3 < expected < 0.6
 
 
-def test_events_are_drawn_verb_first(cases) -> None:
-    # With every instance of the tiny world in the scene, the pool is the same in every scene,
-    # and the verbs differ widely in how many pairs they hold for.
-    case = cases("tiny")
-    generator = case.scenes(**scene_settings(size=[11, 11], events_per_step=1.0, steps=[4, 4]))
-    intransitive, transitive = generator.possible_events(case.result.instances.labels)
-    pairs = Counter(verb for verb, _, _ in transitive)
-    agents = Counter(verb for verb, _, _ in intransitive)
+def test_the_balanced_policy_draws_the_event_type_first(world_files) -> None:
+    # With every instance of the tiny world in the scene, the able pool is the same in every
+    # scene, and the event types differ widely in how many pairs they hold for.
+    world = load_world(corpus_config(world_files["static"]))
+    settings = {"size": [11, 11], "events_per_step": 1.0, "steps": [4, 4], **BALANCED}
+    generator = SceneGenerator(corpus_config(world_files["static"], scene=settings), world)
+    off_diagonal = ~np.eye(world.count, dtype=bool)
+    pairs = {label: int(world.able(label)[off_diagonal].sum()) for label in world.binary_leaves}
+    agents = {label: int(world.able(label).sum()) for label in world.unary}
+    agents = {label: count for label, count in agents.items() if count}  # one is able for nobody
     assert max(pairs.values()) > 3 * min(pairs.values())
-    events = [e for s in make(generator, 1500) for e in s.events]
-    drawn = Counter(e.verb for e in events)
-    # each verb with a possible event is equally likely, however many pairs it holds for
+    events = [e for s in make(generator, 1500) for e in scene_events(s)]
+    drawn = Counter(e.type for e in events)
+    # each event type with an able event is equally likely, however many pairs it holds for
     for counts in (pairs, agents):
-        share = np.array([drawn[verb] for verb in counts], dtype=float)
+        share = np.array([drawn[label] for label in counts], dtype=float)
         share /= share.sum()
         assert np.abs(share - 1 / len(counts)).max() < 0.03, dict(zip(counts, share, strict=True))
-    # and within a verb, each possible pair is equally likely
-    verb = max(pairs, key=pairs.get)
-    by_pair = Counter(e.key for e in events if e.verb == verb)
-    assert set(by_pair) == {key for key in transitive if key[0] == verb}
-    expected = drawn[verb] / pairs[verb]
+    # and within an event type, each able pair is equally likely
+    label = max(pairs, key=pairs.get)
+    by_pair = Counter(e.key for e in events if e.type == label)
+    assert len(by_pair) == pairs[label]
+    expected = drawn[label] / pairs[label]
     assert all(abs(count - expected) < 5 * np.sqrt(expected) for count in by_pair.values())
-    # the weights are weights of verbs, not of events
-    weighted = case.scenes(
-        **scene_settings(size=[11, 11], events_per_step=1.0, verb_weights={"V1.1": 3})
+    # the weights are weights of event types, not of events
+    weighted = SceneGenerator(
+        corpus_config(
+            world_files["static"],
+            scene={**settings, "event_type_weights": {"EVENTTYPE2.1.1": 3}},
+        ),
+        world,
     )
-    counts = Counter(e.verb for s in make(weighted, 1500) for e in s.events if e.transitive)
-    assert abs(counts["V1.1"] / counts["V2.1"] - 3) < 0.5
+    counts = Counter(e.type for s in make(weighted, 1500) for e in scene_events(s) if e.transitive)
+    assert abs(counts["EVENTTYPE2.1.1"] / counts["EVENTTYPE2.2.1"] - 3) < 0.5
+    # under the default policy, an event type legal for many bindings is drawn more often
+    plain = SceneGenerator(
+        corpus_config(
+            world_files["static"], scene={k: v for k, v in settings.items() if k != "policy"}
+        ),
+        world,
+    )
+    uniform = Counter(e.type for s in make(plain, 1500) for e in scene_events(s))
+    assert uniform[max(pairs, key=pairs.get)] > 2 * uniform[min(pairs, key=pairs.get)]
 
 
-def test_verb_weights(cases) -> None:
-    case = cases("tiny")
-    uniform = Counter(e.verb for s in make(case.scenes(), 300) for e in s.events)
-    assert set(uniform) == {"CAN.1", "CAN.3", "CAN.4", "V1.1", "V1.2", "V2.1", "V2.2"}
-    weighted = case.scenes(**scene_settings(verb_weights={"CAN.1": 0, "V1.2": 20, "V2.1": 0}))
-    counts = Counter(e.verb for s in make(weighted, 300) for e in s.events)
-    # a weight of 0 keeps a verb out, and a large weight brings it in more often
-    assert counts["CAN.1"] == 0 and counts["V2.1"] == 0
-    assert counts["V1.2"] > 2 * uniform["V1.2"]
-    assert counts["CAN.3"] > 0  # a label that is left out keeps the weight 1
-    # the labels are checked against the world: a verb category names no event of its own
-    for label in ("V2", "CAN.9", "IS.1", "V9.1"):
+def test_event_type_weights(world_files) -> None:
+    # In the static world, every able binding is legal. (In the tiny world, the preconditions
+    # of some event types are never met, so those event types never occur.)
+    world = load_world(corpus_config(world_files["static"]))
+
+    def scenes(**scene) -> SceneGenerator:
+        return SceneGenerator(corpus_config(world_files["static"], scene=scene), world)
+
+    uniform = Counter(e.type for s in make(scenes(), 300) for e in scene_events(s))
+    assert {"EVENTTYPE1.1", "EVENTTYPE1.3", "EVENTTYPE2.1.2", "EVENTTYPE2.2.1"} <= set(uniform)
+    weights = {"EVENTTYPE1.1": 0, "EVENTTYPE2.1.2": 20, "EVENTTYPE2.2.1": 0}
+    weighted = scenes(event_type_weights=weights)
+    counts = Counter(e.type for s in make(weighted, 300) for e in scene_events(s))
+    # a weight of 0 keeps an event type out, and a large weight brings it in more often
+    assert counts["EVENTTYPE1.1"] == 0 and counts["EVENTTYPE2.2.1"] == 0
+    assert counts["EVENTTYPE2.1.2"] > 2 * uniform["EVENTTYPE2.1.2"]
+    assert counts["EVENTTYPE1.3"] > 0  # a label that is left out keeps the weight 1
+    # the labels are checked against the world: a category names no event of its own
+    for label in ("EVENTTYPE2.2", "EVENTTYPE1.9", "PROPERTY.1", "EVENTTYPE2.9.1", "CAN.1"):
         with pytest.raises(ConfigError) as info:
-            case.scenes(**scene_settings(verb_weights={label: 1}))
-        assert info.value.field == f"scene.verb_weights.{label}"
-        assert "not a CAN feature or a verb" in info.value.message
+            scenes(event_type_weights={label: 1})
+        assert info.value.field == f"scene.event_type_weights.{label}"
+        assert "not an event type" in info.value.message
 
 
 def test_events_per_step(cases) -> None:
     case = cases("default")
-    assert all(not s.events for s in make(case.scenes(**scene_settings(events_per_step=0)), 30))
+    assert all(
+        not scene_events(s) for s in make(case.scenes(**scene_settings(events_per_step=0)), 30)
+    )
     busy = make(case.scenes(**scene_settings(events_per_step=4.0, steps=[5, 5])), 200)
-    assert all(scene.steps == 5 for scene in busy)
-    assert abs(np.mean([len(s.events) for s in busy]) - 20) < 1.0
+    assert all(len(scene.steps) == 5 or scene.quiescent for scene in busy)
+    assert np.mean([len(scene_events(s)) for s in busy]) > 5
 
 
-def test_a_world_without_verbs_has_intransitive_events_only() -> None:
-    config = corpus_config(PLAIN_TAXONOMY)
-    result = load_taxonomy(config)
-    generator = SceneGenerator(config, result)
+def test_initial_states(cases) -> None:
+    case = cases("tiny")
+    world = case.world
+    kept = make(case.scenes(), 60)
+    initial = world.definition.initial_values
+    for scene in kept:
+        for participant, fluents in scene.initial.items():
+            row = world.instance_index[participant]
+            expected = [f for j, f in enumerate(world.definition.base_fluents) if initial[row, j]]
+            assert list(fluents) == expected
+    redrawn = make(case.scenes(**scene_settings(initial="redraw")), 60)
+    assert [s.participants for s in redrawn] == [s.participants for s in kept]
+    assert any(a.initial != b.initial for a, b in zip(kept, redrawn, strict=True))
+
+
+def test_a_world_without_two_place_event_types_has_one_place_events_only(world_files) -> None:
+    config = corpus_config(world_files["plain"])
+    world = load_world(config)
+    generator = SceneGenerator(config, world)
     scenes = make(generator, 100)
-    events = [e for s in scenes for e in s.events]
+    events = [e for s in scenes for e in scene_events(s)]
     assert events and not any(e.transitive for e in events)
-    assert generator.verbs == () and not generator.thematic.any()
-    # with verbs off, the thematic weight has no effect
+    assert world.binary == () and not world.thematic.any()
+    # with two-place event types off, the thematic weight has no effect
     weights = {"thematic": 9.0, "taxonomic": 0.5, "constant": 0.1}
     other = SceneGenerator(
-        corpus_config(PLAIN_TAXONOMY, scene={"participant_weights": weights}), result
+        corpus_config(world_files["plain"], scene={"participant_weights": weights}), world
     )
     assert make(other, 100) == scenes
 
@@ -357,22 +497,23 @@ def test_the_same_seed_gives_the_same_scenes(cases) -> None:
     assert alone == first[16]
     # another seed instance gives another scene with the same label
     other = generator.scene(streams, 17, first[0].seed)
-    assert other.label == "SN.17" and other != first[16]
+    assert other.label == "SCENE.17" and other != first[16]
     with pytest.raises(KeyError, match="unknown instance"):
-        generator.scene(streams, 1, "I9.9.9")
+        generator.scene(streams, 1, "INSTANCE.9.9.9")
 
 
 def test_only_the_scene_settings_change_a_scene(cases) -> None:
     case = cases("default")
     base = make(case.scenes(), 40)
     # the lexicon, the grammar, and the other sections leave every scene as it is: scenes are a
-    # fact about the world, and use every verb, with a word or without one
-    half = dict.fromkeys(("category", "can", "verb", "verb_category"), 0.5)
+    # fact about the world, and use every event type, with a word or without one
+    half = dict.fromkeys(("category", "event_unary", "event", "event_category"), 0.5)
     others = {
         "lexicon": {"named_proportion": half, "synonym_rate": 0.4},
         "grammar": {"word_order": {"clause": "SOV"}, "morphology": {"tense": {"enabled": True}}},
-        "mention": {"pronoun_rate": 0.9, "verb_level_weights": 1},
+        "mention": {"pronoun_rate": 0.9, "event_level_weights": 1},
         "propositions": {"negation_rate": {"class": 0.5}},
+        "documents": {"progressive_rate": 0.9, "one_aspect_per_event": False},
         "test_sets": {"size": 3},
     }
     assert make(case.scenes(**others), 40) == base
@@ -384,33 +525,40 @@ def test_only_the_scene_settings_change_a_scene(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_scene_json_round_trips(cases) -> None:
+def test_scene_json_is_a_history(cases) -> None:
     case = cases("tiny")
     for scene in make(case.scenes(), 50):
         form = scene.to_json()
-        assert list(form) == ["label", "seed", "participants", "steps"]
-        # the events, by time step
-        assert len(form["steps"]) == scene.steps
-        assert sum(len(step) for step in form["steps"]) == len(scene.events)
-        for event in (e for step in form["steps"] for e in step):
-            assert list(event) == ["label", "verb", "agent", "patient", "aspect"]
-            assert event["aspect"] in ("simple", "progressive")
-        assert Scene.from_json(json.loads(json.dumps(form))) == scene
+        assert list(form) == [
+            "label", "seed", "participants", "policy", "rule_set_id", "initial", "steps",
+            "final", "quiescent",
+        ]  # fmt: skip
+        assert form["policy"] == "uniform_event"
+        assert form["rule_set_id"] == case.world.rule_set_id
+        assert list(form["initial"]) == list(form["participants"])
+        for k, step in enumerate(form["steps"], start=1):
+            assert step["step"] == k and "legal" not in step
+            for event in step["events"]:
+                assert list(event)[:3] == ["label", "type", "agent"]
+                assert list(event)[-1] == "changes"
+                assert "aspect" not in event
+        assert History.from_json(json.loads(json.dumps(form))) == scene
 
 
-def test_scene_lookups() -> None:
-    events = (
-        Event("SN.2.1", "SN.2", 1, "CAN.1", "I1.1.1"),
-        Event("SN.2.2", "SN.2", 1, "V1.1", "I1.1.1", "I2.1.1"),
-        Event("SN.2.3", "SN.2", 3, "V1.1", "I2.1.1", "I1.1.2"),
+def test_scene_lookups(cases) -> None:
+    scene = next(
+        s for s in make(cases("tiny").scenes(), 50) if any(e.transitive for e in scene_events(s))
     )
-    scene = Scene("SN.2", "I1.1.1", ("I1.1.1", "I2.1.1", "I1.1.2"), 3, events)
-    assert scene.at(1) == events[:2] and scene.at(2) == () and scene.at(3) == events[2:]
-    assert scene.involving("I2.1.1") == events[1:] and scene.involving("I1.1.2") == events[2:]
-    assert scene.happened("V1.1", "I1.1.1", "I2.1.1") and scene.happened("CAN.1", "I1.1.1")
-    assert not scene.happened("V1.1", "I2.1.1", "I1.1.1")
-    assert [e.transitive for e in events] == [False, True, True]
-    assert events[1].key == ("V1.1", "I1.1.1", "I2.1.1")
+    events = scene_events(scene)
+    assert all(e.scene == scene.label for e in events)
+    for step in scene.steps:
+        assert [e.label for e in events_at(scene, step.step)] == [e.label for e in step.events]
+    event = next(e for e in events if e.transitive)
+    assert happened_in(scene, event.type, event.agent, event.patient)
+    assert not happened_in(scene, event.type, event.agent, "INSTANCE.9.9.9")
+    assert event in involving(scene, event.agent) and event in involving(scene, event.patient)
+    assert event.key == (event.type, event.agent, event.patient)
+    assert all(e.involves(e.agent) for e in events)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -421,99 +569,121 @@ def test_scene_lookups() -> None:
 @pytest.mark.parametrize("name", WORLDS)
 def test_every_event_is_reported_by_a_true_proposition(cases, name) -> None:
     case = cases(name)
-    generator = case.scenes()
-    truth = generator.truth
-    for scene in make(generator, 100):
+    facts = case.facts()
+    truth = facts.truth
+    for scene in make(case.scenes(), 100):
+        truth.add_scene(scene)
         assert truth.scenes[scene.label] is scene
-        for event in scene.events:
-            proposition = event.proposition()
-            assert proposition.level == EVENT and proposition.polarity
-            assert (proposition.scene, proposition.event) == (scene.label, event.label)
-            assert proposition.subject == event.agent
-            assert proposition.predicate == Predicate(
-                VERB if event.transitive else CAN, event.verb, event.patient
-            )
-            evaluation = truth.evaluate(proposition)
-            assert evaluation.valid and evaluation.true
-            assert evaluation.grounding == {
-                "scene": scene.label,
-                "step": event.step,
-                "possible": True,
-                "test": "event",
-            }
+        for event in scene_events(scene):
+            for aspect in (SIMPLE, PROGRESSIVE):
+                proposition = facts.event_fact(event, aspect=aspect)
+                if proposition is None:
+                    continue  # no word
+                assert proposition.level == EVENT and proposition.polarity
+                assert (proposition.scene, proposition.event) == (scene.label, event.label)
+                assert proposition.subject == event.agent and proposition.aspect == aspect
+                assert proposition.predicate == Predicate(
+                    VERB if event.transitive else CAN, event.type, event.patient
+                )
+                assert proposition.grounding == {
+                    "scene": scene.label,
+                    "step": event.step,
+                    "able": True,
+                    "legal": True,
+                    "test": "event",
+                }
 
 
 def test_event_logical_forms(cases) -> None:
     case = cases("tiny")
-    generator = case.scenes()
-    scene = next(s for s in make(generator, 50) if any(e.transitive for e in s.events))
-    event = next(e for e in scene.events if e.transitive)
-    proposition = generator.truth.grounded(event.proposition())
+    facts = case.facts()
+    truth = facts.truth
+    scenes = make(case.scenes(), 50)
+    for scene in scenes:
+        truth.add_scene(scene)
+    scene = next(s for s in scenes if any(e.transitive for e in scene_events(s)))
+    event = next(e for e in scene_events(scene) if e.transitive)
+    proposition = facts.event_fact(event, aspect=PROGRESSIVE)
     assert proposition.to_json() == {
         "id": None,
         "level": "event",
         "scene": scene.label,
         "event": event.label,
         "tense": "past",
-        "aspect": event.aspect,
+        "aspect": "progressive",
         "polarity": True,
         "subject": {"instance": event.agent},
-        "predicate": {"kind": "verb", "verb": event.verb, "patient": {"instance": event.patient}},
-        "grounding": {"scene": scene.label, "step": event.step, "possible": True, "test": "event"},
+        "predicate": {"kind": "verb", "verb": event.type, "patient": {"instance": event.patient}},
+        "grounding": {
+            "scene": scene.label,
+            "step": event.step,
+            "able": True,
+            "legal": True,
+            "test": "event",
+        },
     }
     restored = Proposition.from_json(json.loads(json.dumps(proposition.to_json())))
     assert restored == proposition and restored.grounding == proposition.grounding
     # the event is part of what the proposition says: two reports of two events differ
-    assert proposition != dataclasses.replace(proposition, event=f"{scene.label}.999")
-    assert proposition.concepts() == (event.verb,)
-    intransitive = next(e for s in make(generator, 50) for e in s.events if not e.transitive)
-    assert intransitive.proposition().to_json()["predicate"] == {
+    assert proposition != dataclasses.replace(proposition, event=f"{scene.label}.EVENTINSTANCE.999")
+    assert proposition.concepts() == (event.type,)
+    intransitive = next(e for s in scenes for e in scene_events(s) if not e.transitive)
+    assert facts.event_fact(intransitive).to_json()["predicate"] == {
         "kind": "can",
-        "feature": intransitive.verb,
+        "feature": intransitive.type,
     }
 
 
 def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
     case = cases("default")
-    generator = case.scenes()
-    truth = generator.truth
-    scenes = make(generator, 60)
+    facts = case.facts()
+    truth = facts.truth
+    oracle = case.oracle()
+    scenes = make(case.scenes(), 60)
+    for scene in scenes:
+        truth.add_scene(scene)
     not_happened = {True: 0, False: 0}
     for scene in scenes:
-        happened = {e.key for e in scene.events}
-        # a claim names an aspect, and is true when an event of that aspect happened
-        simple = {e.key for e in scene.events if e.aspect == "simple"}
-        progressive = {e.key for e in scene.events if e.aspect == "progressive"}
-        intransitive, transitive = generator.possible_events(scene.participants)
-        possible = set(intransitive) | set(transitive)
-        for verb in generator.verbs[:3]:
+        happened = {e.key for e in scene_events(scene)}
+        record = scene.to_json()
+        for verb in facts.verbs[:3]:
             for agent in scene.participants:
                 for patient in scene.participants:
                     if agent == patient:
                         continue
                     key = (verb, agent, patient)
-                    ongoing = Proposition(
+                    claim = Proposition(
                         EVENT,
                         agent,
                         Predicate(VERB, verb, patient),
                         scene=scene.label,
                         tense="past",
-                        aspect="progressive",
+                        aspect="simple",
                     )
-                    assert truth.evaluate(ongoing).valid
-                    assert truth.evaluate(ongoing).true == (key in progressive)
-                    claim = dataclasses.replace(ongoing, aspect="simple")
                     evaluation = truth.evaluate(claim)
-                    assert evaluation.valid and evaluation.true == (key in simple)
-                    if key not in happened:
-                        assert not evaluation.true and not truth.evaluate(ongoing).true
-                    # the grounding says whether the world allows the event: what tells an
-                    # impossible false item from one that merely did not happen
-                    assert evaluation.grounding["possible"] == (key in possible)
+                    assert evaluation.valid
+                    expected = any(
+                        e.agent == agent
+                        and e.patient == patient
+                        and verb in truth.verb_names(e.type)
+                        for e in scene_events(scene)
+                    )
+                    assert evaluation.true == expected
+                    # both aspects are true of any event that occurred
+                    ongoing = dataclasses.replace(claim, aspect="progressive")
+                    assert truth.evaluate(ongoing).true == expected
+                    # the grounding says whether the binding is able, and whether it was legal
+                    # at some time point of the scene, by the world run's files too
+                    assert evaluation.grounding["able"] == oracle.able(verb, agent, patient)
+                    assert evaluation.grounding["legal"] == oracle.legal(
+                        record, verb, agent, patient
+                    )
+                    if evaluation.true:
+                        assert evaluation.grounding["able"] and evaluation.grounding["legal"]
                     assert ("step" in evaluation.grounding) == evaluation.true
                     if key not in happened:
-                        not_happened[key in possible] += 1
-        for feature in generator.can_features[:4]:
+                        not_happened[evaluation.grounding["able"]] += 1
+        for feature in facts.features[CAN][:4]:
             for agent in scene.participants:
                 claim = Proposition(
                     EVENT,
@@ -524,84 +694,99 @@ def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
                     aspect="simple",
                 )
                 evaluation = truth.evaluate(claim)
-                assert evaluation.true == ((feature, agent, None) in simple)
-                assert evaluation.grounding["possible"] == ((feature, agent, None) in possible)
+                assert evaluation.true == ((feature, agent, None) in happened)
+                assert evaluation.grounding["able"] == oracle.able(feature, agent, None)
+                assert evaluation.grounding["legal"] == oracle.legal(record, feature, agent, None)
     assert not_happened[True] > 50 and not_happened[False] > 50
     # what happened in one scene did not happen in another
     moved = 0
     for scene in scenes:
-        for event in scene.events[:3]:
+        for event in scene_events(scene)[:3]:
             for other in scenes:
                 if (
                     other is not scene
                     and event.agent in other.participants
                     and event.patient in (None, *other.participants)
-                    and not other.happened(*event.key)
+                    and not happened_in(other, *event.key)
                 ):
-                    claim = dataclasses.replace(event.proposition(), scene=other.label, event=None)
+                    report = facts.event_fact(event)
+                    if report is None:
+                        continue
+                    claim = dataclasses.replace(report, scene=other.label, event=None)
                     evaluation = truth.evaluate(claim)
                     assert evaluation.valid and not evaluation.true
-                    assert evaluation.grounding["possible"] is True
+                    assert evaluation.grounding["able"] is True
                     moved += 1
     assert moved > 0
 
 
 def test_a_report_names_one_event(cases) -> None:
     case = cases("default")
+    facts = case.facts(scene={"events_per_step": 5.0})
+    truth = facts.truth
     generator = case.scenes(**scene_settings(events_per_step=5.0))
-    truth = generator.truth
-    scene = next(s for s in make(generator, 100) if len({e.key for e in s.events}) < len(s.events))
-    keys = Counter(e.key for e in scene.events)
+    scenes = make(generator, 100)
+    for scene in scenes:
+        truth.add_scene(scene)
+    scene = next(s for s in scenes if len({e.key for e in scene_events(s)}) < len(scene_events(s)))
+    keys = Counter(e.key for e in scene_events(scene))
     repeated = next(key for key, count in keys.items() if count > 1)
-    again = [e for e in scene.events if e.key == repeated]
-    other = next(e for e in scene.events if e.key != repeated)
-    report = again[1].proposition()
+    again = [e for e in scene_events(scene) if e.key == repeated]
+    other = next(e for e in scene_events(scene) if e.key != repeated)
+    report = facts.event_fact(again[1])
     assert truth.evaluate(report).grounding["step"] == again[1].step
-    # without an event label, the first such event of the same aspect grounds the proposition
+    # without an event label, the first such event grounds the proposition
     unlabeled = dataclasses.replace(report, event=None)
-    first = next(e for e in again if e.aspect == again[1].aspect)
-    assert truth.evaluate(unlabeled).grounding["step"] == first.step
+    assert truth.evaluate(unlabeled).grounding["step"] == again[0].step
     # a label of another event, or of no event, makes the report false
-    for label in (other.label, f"{scene.label}.999"):
+    for label in (other.label, f"{scene.label}.EVENTINSTANCE.999"):
         wrong = dataclasses.replace(report, event=label)
         assert truth.evaluate(wrong).valid and not truth.evaluate(wrong).true
 
 
 def test_event_forms_that_cannot_be_judged(cases) -> None:
     case = cases("tiny")
-    generator = case.scenes()
-    truth = generator.truth
-    scene = next(s for s in make(generator, 50) if any(e.transitive for e in s.events))
-    event = next(e for e in scene.events if e.transitive)
-    report = event.proposition()
-    outsider = next(i for i in case.result.instances.labels if i not in scene.participants)
+    facts = case.facts()
+    truth = facts.truth
+    scenes = make(case.scenes(), 50)
+    for scene in scenes:
+        truth.add_scene(scene)
+    scene = next(s for s in scenes if any(e.transitive for e in scene_events(s)))
+    event = next(e for e in scene_events(scene) if e.transitive)
+    report = facts.event_fact(event)
+    outsider = next(i for i in case.world.instances if i not in scene.participants)
     bad = {
         "never negated": dataclasses.replace(report, polarity=False),
-        "no quantifier": dataclasses.replace(report, quantifier="all"),
-        "unknown scene": dataclasses.replace(report, scene="SN.999"),
+        "no quantifier": dataclasses.replace(report, quantifier="nec_all"),
+        "unknown scene": dataclasses.replace(report, scene="SCENE.999"),
         "unknown scene ": dataclasses.replace(report, scene=None),
         "takes no part": dataclasses.replace(report, subject=outsider),
         "takes no part ": dataclasses.replace(
-            report, predicate=Predicate(VERB, event.verb, outsider)
+            report, predicate=Predicate(VERB, event.type, outsider)
         ),
         "never related to itself": dataclasses.replace(
-            report, predicate=Predicate(VERB, event.verb, event.agent)
+            report, predicate=Predicate(VERB, event.type, event.agent)
         ),
-        "CAN feature, or a verb": dataclasses.replace(report, predicate=Predicate(IS, "IS.1")),
-        "unknown verb": dataclasses.replace(report, predicate=Predicate(VERB, "V7", event.patient)),
-        "only a verb, has a patient": dataclasses.replace(
-            report, predicate=Predicate(VERB, event.verb)
+        "one-place event type, or a two-place": dataclasses.replace(
+            report, predicate=Predicate(IS, "PROPERTY.1")
+        ),
+        "unknown two-place event type": dataclasses.replace(
+            report, predicate=Predicate(VERB, "EVENTTYPE2.7", event.patient)
+        ),
+        "and only one, has a patient": dataclasses.replace(
+            report, predicate=Predicate(VERB, event.type)
         ),
         "events are in the past tense": dataclasses.replace(report, tense="present"),
         "events are in the past tense ": dataclasses.replace(report, tense=None),
         "simple or progressive": dataclasses.replace(report, aspect=None),
         "simple or progressive ": dataclasses.replace(report, aspect="perfect"),
+        "is not in the scene": dataclasses.replace(report, event="SCENE.999.EVENTINSTANCE.1"),
     }
     for reason, proposition in bad.items():
         evaluation = truth.evaluate(proposition)
         assert not evaluation.valid and reason.strip() in evaluation.reason, reason
     # a scene and an event belong to the event level only
-    instance = Proposition(INSTANCE, event.agent, Predicate(IS, "IS.1"), scene=scene.label)
+    instance = Proposition(INSTANCE, event.agent, Predicate(IS, "PROPERTY.1"), scene=scene.label)
     assert not truth.evaluate(instance).valid
 
 
@@ -610,140 +795,138 @@ def test_event_forms_that_cannot_be_judged(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def events_settings(**events) -> dict:
-    return {"propositions": {"events": events}}
-
-
-def test_every_event_has_an_aspect_drawn_at_the_rate(cases) -> None:
-    case = cases("default")
-    base = make(case.scenes(), 300)
-    events = [e for s in base for e in s.events]
-    share = np.mean([e.aspect == "progressive" for e in events])
-    assert abs(share - 0.3) < 0.03  # the default rate
-    # the aspect is part of the event's logical form, and a report with the other aspect is false
-    truth = case.scenes().truth
-    for scene in base[:20]:
-        truth.add_scene(scene)
-        for event in scene.events:
-            report = event.proposition()
-            assert (report.tense, report.aspect) == ("past", event.aspect)
-            assert truth.is_true(report)
-            other = "simple" if event.aspect == "progressive" else "progressive"
-            wrong = dataclasses.replace(report, aspect=other)
-            assert truth.evaluate(wrong).valid and not truth.is_true(wrong)
-    # the rate never changes what happens: the same participants and events, with other aspects
-    for rate, expected in ((0.0, {"simple"}), (1.0, {"progressive"})):
-        changed = make(case.scenes(**events_settings(progressive_rate=rate)), 300)
-        assert [s.participants for s in changed] == [s.participants for s in base]
-        assert [[e.key for e in s.events] for s in changed] == [
-            [e.key for e in s.events] for s in base
-        ]
-        assert {e.aspect for s in changed for e in s.events} == expected
-
-
 def test_the_tense_of_events_is_the_corpus_s(cases) -> None:
     case = cases("tiny")
-    settings = events_settings(tense="present")
+    settings = {"propositions": {"events": {"tense": "present"}}}
     generator = case.scenes(**settings)
     facts = case.facts(**settings)
-    scene = next(s for s in make(generator, 50) if s.events)
-    event = scene.events[0]
+    scene = next(s for s in make(generator, 50) if scene_events(s))
+    facts.truth.add_scene(scene)
+    event = scene_events(scene)[0]
     report = facts.event_fact(event)
     assert report.tense == "present" and report.to_json()["tense"] == "present"
-    assert generator.truth.is_true(report)
-    past = event.proposition()  # the default tense of a report is the past
-    assert past.tense == "past" and not generator.truth.evaluate(past).valid
+    assert facts.truth.is_true(report)
+    past = dataclasses.replace(report, tense="past")
+    assert not facts.truth.evaluate(past).valid
 
 
-# ---------------------------------------------------------------------------------------------
-# Naming an event's verb
-# ---------------------------------------------------------------------------------------------
-
-
-def test_an_event_can_be_named_by_a_verb_category_above_its_verb(cases) -> None:
+def test_a_report_chooses_its_aspect(cases) -> None:
     case = cases("default")
     facts = case.facts()
-    generator = case.scenes()
-    tree = case.result.verbs.tree
+    scenes = make(case.scenes(), 60)
+    for scene in scenes:
+        facts.truth.add_scene(scene)
+    for scene in scenes[:20]:
+        for event in scene_events(scene):
+            simple = facts.event_fact(event, aspect=SIMPLE)
+            ongoing = facts.event_fact(event, aspect=PROGRESSIVE)
+            if simple is None:
+                continue
+            # both aspects are true of any event that occurred, and the aspect is part of the
+            # report's logical form
+            assert facts.truth.is_true(simple) and facts.truth.is_true(ongoing)
+            assert simple != ongoing and simple.event == ongoing.event
+    # a scene records no aspect
+    for scene in scenes[:5]:
+        for step in scene.to_json()["steps"]:
+            assert not any("aspect" in e for e in step["events"])
+
+
+# ---------------------------------------------------------------------------------------------
+# Naming an event's event type
+# ---------------------------------------------------------------------------------------------
+
+
+def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None:
+    case = cases("default")
+    facts = case.facts()
+    world = case.world
+    scenes = make(case.scenes(), 200)  # two-place events are rare under the preconditions
+    for scene in scenes:
+        facts.truth.add_scene(scene)
     checked = 0
-    for scene in make(generator, 60):
-        for event in scene.events:
+    for scene in scenes:
+        for event in scene_events(scene):
             names = facts.event_names(event)
             if not event.transitive:
-                assert names == (event.verb,)
-                assert facts.event_fact(event).predicate == Predicate(CAN, event.verb)
+                assert names == (event.type,)
+                assert facts.event_fact(event).predicate == Predicate(CAN, event.type)
                 continue
-            parent = tree[event.verb].parent.label
-            assert names == (event.verb, parent)
+            parent = world.event_types[event.type].parent
+            assert names == (event.type, parent)
             general = facts.event_fact(event, parent)
             assert general.predicate.label == parent and general.event == event.label
-            assert general.grounding["possible"] is True  # the verb entails the base relation
-            # a verb category that is not above the verb does not name the event
-            other = next(c.label for c in tree.categories if not c.is_leaf and c.label != parent)
+            # an event type entails the base relation of its category
+            assert general.grounding["able"] is True and general.grounding["legal"] is True
+            # a category that is not above the event type does not name the event
+            other = next(c for c in world.binary if world.event_types[c].category and c != parent)
             assert facts.event_fact(event, other) is None
-            sibling = next(v.label for v in tree.leaves if v.label != event.verb)
-            if not scene.happened(sibling, event.agent, event.patient):
+            sibling = next(v for v in world.binary_leaves if v != event.type)
+            if not happened_in(scene, sibling, event.agent, event.patient):
                 assert facts.event_fact(event, sibling) is None
             checked += 1
-    assert checked > 100
+    assert checked > 60
 
 
-def test_the_verb_level_is_drawn_by_weight(cases) -> None:
+def test_the_event_level_is_drawn_by_weight(cases) -> None:
     case = cases("default")
     scenes = make(case.scenes(), 200)
-    events = [e for s in scenes for e in s.events]
+    events = [e for s in scenes for e in scene_events(s)]
     transitive = [e for e in events if e.transitive]
 
     def category_share(weights) -> float:
-        facts = knowing(case.facts(mention={"verb_level_weights": weights}), scenes)
+        facts = knowing(case.facts(mention={"event_level_weights": weights}), scenes)
         rng = Streams(1).mentions
         named = [facts.draw_event(rng, event) for event in transitive]
-        assert all(p is not None and case.facts().truth.is_true(p) for p in named)
+        assert all(p is not None and facts.truth.is_true(p) for p in named)
         return float(
-            np.mean([p.predicate.label != e.verb for p, e in zip(named, transitive, strict=True)])
+            np.mean([p.predicate.label != e.type for p, e in zip(named, transitive, strict=True)])
         )
 
-    # heaviest at the leaf by default: weights 1 and 4 over the two levels of the verb tree
-    assert case.config().mention.verb_level_weights == (1.0, 4.0)
+    # heaviest at the leaf by default: weights 1 and 4 over the two levels of the tree
+    assert case.config().mention.event_level_weights == (1.0, 4.0)
     assert abs(category_share({"schedule": "linear", "start": 1, "end": 4}) - 0.2) < 0.03
     assert category_share({"schedule": "list", "values": [0, 1]}) == 0.0
     assert category_share({"schedule": "list", "values": [1, 0]}) == 1.0
     assert abs(category_share(1) - 0.5) < 0.04
-    # an intransitive event has one name
-    facts = case.facts()
+    # a one-place event has one name
+    facts = knowing(case.facts(), scenes)
     rng = Streams(1).mentions
     for event in [e for e in events if not e.transitive][:50]:
-        assert facts.draw_event(rng, event).predicate == Predicate(CAN, event.verb)
+        assert facts.draw_event(rng, event).predicate == Predicate(CAN, event.type)
 
 
 def test_an_event_without_a_word_at_any_usable_level_is_not_reported(cases) -> None:
     case = cases("tiny")
     scenes = make(case.scenes(), 200)
-    events = [e for s in scenes for e in s.events]
-    facts = case.facts()
+    events = [e for s in scenes for e in scene_events(s)]
+    facts = knowing(case.facts(), scenes)
     rng = Streams(1).mentions
-    # V1 holds for every pair, so it has no word: an event of V1.1 has one name
+    # EVENTTYPE2.1 holds for every pair, so it has no word: an event of EVENTTYPE2.1.1 has one
+    # name
     for event in events:
-        if event.verb.startswith("V1."):
-            assert facts.event_names(event) == (event.verb,)
-            assert facts.draw_event(rng, event).predicate.label == event.verb
-        elif event.verb.startswith("V2."):
-            assert facts.event_names(event) == (event.verb, "V2")
-    # with only the top level usable, an event of V1.1 cannot be named, and an event of V2.1
-    # is always named by V2
-    levels = {"verb_level_weights": {"schedule": "list", "values": [1, 0]}}
+        if event.type.startswith("EVENTTYPE2.1."):
+            assert facts.event_names(event) == (event.type,)
+            assert facts.draw_event(rng, event).predicate.label == event.type
+        elif event.type.startswith("EVENTTYPE2.2."):
+            assert facts.event_names(event) == (event.type, "EVENTTYPE2.2")
+    # with only the top level usable, an event of EVENTTYPE2.1.1 cannot be named, and an event
+    # of EVENTTYPE2.2.1 is always named by EVENTTYPE2.2
+    levels = {"event_level_weights": {"schedule": "list", "values": [1, 0]}}
     top_only = knowing(case.facts(mention=levels), scenes)
     for event in events:
         named = top_only.draw_event(rng, event)
-        if event.verb.startswith("V1."):
+        if event.type.startswith("EVENTTYPE2.1."):
             assert named is None
-        elif event.verb.startswith("V2."):
-            assert named.predicate.label == "V2"
-    # a verb or a CAN feature without a word names nothing
-    no_words = knowing(case.facts(lexicon={"named_proportion": {"verb": 0.0, "can": 0.0}}), scenes)
+        elif event.type.startswith("EVENTTYPE2.2."):
+            assert named.predicate.label == "EVENTTYPE2.2"
+    # an event type without a word names nothing
+    no_words = knowing(
+        case.facts(lexicon={"named_proportion": {"event": 0.0, "event_unary": 0.0}}), scenes
+    )
     for event in events:
         named = no_words.draw_event(rng, event)
-        if event.verb.startswith("V2."):
-            assert named.predicate.label == "V2"
+        if event.type.startswith("EVENTTYPE2.2."):
+            assert named.predicate.label == "EVENTTYPE2.2"
         else:
             assert named is None and no_words.event_fact(event) is None

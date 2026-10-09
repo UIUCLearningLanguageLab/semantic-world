@@ -4,9 +4,9 @@ A :class:`SentencePlan` is the logical form of one sentence: a subject noun phra
 predication. It holds everything that the planner decides, and nothing that the grammar decides:
 
 - a :class:`NounPhrase` names a referent. A class-level noun phrase names a category, with a
-  quantifier or bare. An instance-level noun phrase names an instance, with the category its
-  noun names, the determiner ``a`` or ``the``, or as a pronoun. Either can carry a restriction
-  (adjectives, with-phrases, and negated IS literals) and one relative clause;
+  quantifier word or bare. An instance-level noun phrase names an instance, with the category
+  its noun names, the determiner ``a`` or ``the``, or as a pronoun. Either can carry a
+  restriction (adjectives, with-phrases, and negated PROPERTY literals) and one relative clause;
 - a :class:`Predication` is the content of one verb phrase: a predicate, a polarity, an object
   noun phrase for a verb, and, at the event level, the event it reports with its tense and
   aspect;
@@ -16,19 +16,22 @@ predication. It holds everything that the planner decides, and nothing that the 
 The grammar turns a plan into words and a tree (``realize``), and a tree back into the plan
 (``interpret``). Word order, morphology, adjective order, the choice between synonyms, and the
 optional ``can`` of a positive capacity are the grammar's own, and are not in the plan. The
-tense and the aspect of an event are part of the plan: the morphology only decides whether and
-how they are marked.
+tense and the aspect of a report are part of the plan: the morphology only decides whether and
+how they are marked. So is the quantifier of a class-level sentence: the plan holds the
+proposition's quantifier (``nec_all``, ``all``, ``most``, ``some``, ``no``, ``nec_no``, or none
+for a scalar pole) apart from the subject's determiner word ("all", "most", "some", "no", or
+none for a bare plural), because what a word expresses is a setting of the language.
 
-A relative clause on a class-level noun phrase is restrictive, and holds CAN features and verbs
-only: "penguins that can swim", "owls that eat mice", and "mice that owls eat". It is part of
-the category term that the truth tests judge (:func:`term_of`).
+A relative clause on a class-level noun phrase is restrictive, and holds one-place and two-place
+event types only: "penguins that can swim", "owls that eat mice", and "mice that owls eat". It is
+part of the category term that the truth tests judge (:func:`term_of`).
 
 How a restriction is realized is fixed, so that a tree has one reading:
 
 - a positive IS literal and a scalar pole are adjectives;
 - a HAS literal is a with-phrase or a without-phrase;
-- the negated IS literals share one relative clause, joined with "and" ("that are not red and
-  not big"), and the predications of a subject relative join the same clause.
+- the negated PROPERTY literals share one relative clause, joined with "and" ("that are not
+  red and not big"), and the predications of a subject relative join the same clause.
 """
 
 from __future__ import annotations
@@ -42,14 +45,16 @@ from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EVENT,
-    GENERIC,
     HAS,
     INSTANCE,
     IS,
     MEMBER,
     MOST,
+    NEC_ALL,
+    NEC_NO,
     NO,
     PROJECTION,
+    QUANTIFIERS,
     SCALAR,
     SOME,
     TENSES,
@@ -62,15 +67,20 @@ from semantic_world.corpus.propositions import (
     event_of,
     scene_of,
 )
+from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX
 
 CLASS_NP = "class"
 INSTANCE_NP = "instance"
 INSTANCE_DETERMINERS = ("a", "the")
-QUANTIFIER_WORDS = (ALL, MOST, SOME, NO)
+QUANTIFIER_WORDS = ("all", "most", "some", "no")
+"""The determiner words of a class-level subject. Which quantifiers "all" and "no" express is
+a language setting; "most" and "some" express ``most`` and ``some``."""
+WORD_OF = {NEC_ALL: "all", ALL: "all", MOST: "most", SOME: "some", NO: "no", NEC_NO: "no"}
+"""The determiner word that states each quantifier."""
 CLAUSE_KINDS = (CAN, VERB, PROJECTION, MEMBER)
-"""The predicates a relative clause can hold, apart from the negated IS literals of the
-restriction. A positive IS literal, a scalar pole, and a HAS literal are never in a relative
-clause: they are adjectives and with-phrases."""
+"""The predicates a relative clause can hold, apart from the negated PROPERTY literals of the
+restriction. A positive PROPERTY literal, a scalar pole, and a PART literal are never in a
+relative clause: they are adjectives and with-phrases."""
 
 
 class GrammarError(CorpusError):
@@ -87,8 +97,8 @@ class NounPhrase:
     """The category whose noun heads the phrase. For a class-level phrase it is the referent.
     None for a pronoun."""
     determiner: str | None = None
-    """``a`` or ``the`` (instance), a quantifier word (class), or None: a bare noun (the
-    generic), or a pronoun."""
+    """``a`` or ``the`` (instance), a quantifier word (class), or None: a bare noun (a bare
+    plural), or a pronoun."""
     restriction: tuple[Literal, ...] = ()
     clause: RelativeClause | None = None
 
@@ -102,17 +112,21 @@ class NounPhrase:
 
     @property
     def negated(self) -> tuple[Literal, ...]:
-        """The negated IS literals, which go into the relative clause."""
-        return tuple(x for x in self.restriction if not x.positive and x.feature.startswith("IS."))
+        """The negated PROPERTY literals, which go into the relative clause."""
+        return tuple(
+            x for x in self.restriction if not x.positive and x.feature.startswith(PROPERTY_PREFIX)
+        )
 
     @property
     def adjectives(self) -> tuple[Literal, ...]:
-        """The positive IS literals and the scalar poles."""
-        return tuple(x for x in self.restriction if x.positive and not x.feature.startswith("HAS."))
+        """The positive PROPERTY literals and the scalar poles."""
+        return tuple(
+            x for x in self.restriction if x.positive and not x.feature.startswith(PART_PREFIX)
+        )
 
     @property
     def with_phrases(self) -> tuple[Literal, ...]:
-        return tuple(x for x in self.restriction if x.feature.startswith("HAS."))
+        return tuple(x for x in self.restriction if x.feature.startswith(PART_PREFIX))
 
 
 @dataclass(frozen=True)
@@ -125,8 +139,9 @@ class Predication:
     """Verbs only: the patient. None in an object relative, where the head noun is the
     patient."""
     event: str | None = None
-    """Event level only: the label of the event that the verb phrase reports (``SN.8.5``). In a
-    test item it is the label of the scene (``SN.8``): some event of the scene."""
+    """Event level only: the label of the event that the verb phrase reports
+    (``SCENE.8.EVENTINSTANCE.5``). In a test item it is the label of the scene (``SCENE.8``):
+    some event of the scene."""
     tense: str | None = None
     """Event level only: ``past`` or ``present``."""
     aspect: str | None = None
@@ -149,12 +164,20 @@ class RelativeClause:
 class SentencePlan:
     subject: NounPhrase
     predication: Predication
+    quantifier: str | None = None
+    """Class level only: the proposition's quantifier. None for a class-level scalar pole, and
+    for a sentence about instances. The subject's determiner is the word that states it, or
+    None for a bare plural."""
 
     @property
     def level(self) -> str:
         if self.subject.kind == CLASS_NP:
             return CLASS
         return EVENT if self.predication.event is not None else INSTANCE
+
+    @property
+    def bare_plural(self) -> bool:
+        return self.subject.kind == CLASS_NP and self.subject.determiner is None
 
     def proposition(self) -> Proposition:
         """The proposition of the main clause, as the truth tests judge it: the subject, the
@@ -169,7 +192,7 @@ class SentencePlan:
                 term_of(self.subject),
                 Predicate(predication.kind, predication.label, patient),
                 predication.polarity,
-                self.subject.determiner or GENERIC,
+                self.quantifier,
             )
         patient = None if target is None else target.referent
         if predication.event is not None:
@@ -271,6 +294,19 @@ def check_plan(plan: SentencePlan) -> None:
     subject, predication = plan.subject, plan.predication
     if subject.kind == CLASS_NP and predication.event is not None:
         raise GrammarError("an event is about an instance, not about a category")
+    if subject.kind == CLASS_NP:
+        quantifier = plan.quantifier
+        if predication.kind == SCALAR:
+            if quantifier is not None or subject.determiner is not None:
+                raise GrammarError("a class-level scalar pole takes no quantifier")
+        elif quantifier not in QUANTIFIERS:
+            raise GrammarError(f"a class-level sentence has a quantifier, not {quantifier!r}")
+        elif subject.determiner is not None and subject.determiner != WORD_OF[quantifier]:
+            raise GrammarError(
+                f"the word {subject.determiner!r} does not state the quantifier {quantifier}"
+            )
+    elif plan.quantifier is not None:
+        raise GrammarError("only a class-level sentence has a quantifier")
     _check_phrase(subject, plan.level, top=True)
     _check_predication(predication, subject, plan.level, in_clause=False)
     if predication.kind == MEMBER and predication.label == subject.noun:
@@ -351,7 +387,8 @@ def _check_predication(
         raise GrammarError(f"unknown predicate kind {kind!r}")
     if in_clause and level == CLASS and (kind not in (CAN, VERB) or not predication.polarity):
         raise GrammarError(
-            "a class-level relative clause holds a CAN feature or a verb, and is never negated"
+            "a class-level relative clause holds a one-place or a two-place event type, and is "
+            "never negated"
         )
     if (kind == VERB) != (predication.object is not None or gap):
         raise GrammarError("a verb, and only a verb, has an object")
@@ -361,14 +398,16 @@ def _check_predication(
         )
     if predication.event is not None:
         if kind not in (CAN, VERB):
-            raise GrammarError("an event is a CAN feature, or a verb with a patient")
+            raise GrammarError(
+                "an event is a one-place event type, or a two-place event type with a patient"
+            )
         if not predication.polarity:
             raise GrammarError("an event-level proposition is never negated")
         if predication.tense not in TENSES or predication.aspect not in ASPECTS:
             raise GrammarError(
-                "an event has a tense (past or present) and an aspect (simple or progressive)"
+                "a report has a tense (past or present) and an aspect (simple or progressive)"
             )
     elif predication.tense is not None or predication.aspect is not None:
-        raise GrammarError("only an event has a tense and an aspect")
+        raise GrammarError("only a report of an event has a tense and an aspect")
     if predication.object is not None:
         _check_phrase(predication.object, level)

@@ -605,13 +605,15 @@ def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> N
     data = yaml.safe_load((tiny_folder / "config.yaml").read_text())
     assert data["taxonomy"]["resolved"]["name"] == "tiny_relations"
     seeds = data["provenance"]["stream_seeds"]
-    assert {
+    world_streams = [name for name in seeds if name.startswith("world:")]
+    assert world_streams == [
         "world:fluents",
         "world:initial",
         "world:preconditions",
         "world:effects",
         "world:stats",
-    } <= set(seeds)
+        "world:episodes",
+    ]
     assert "taxonomy:rules" in seeds
 
 

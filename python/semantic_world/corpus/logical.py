@@ -6,18 +6,19 @@ the propositional rendering is made from it alone (``renderings.propositional``)
 
 **Class level.** The form is the proposition's own: the subject and the patient are category
 terms, each with its restriction and, when it has them, its relative clauses (``clauses``). A
-clause is written like a predicate: ``{"kind": "can", "feature": "CAN.3"}``, or a verb with the
-other category, as ``patient`` when the head is the agent ("owls that eat mice") and as ``agent``
-when the head is the patient ("mice that owls eat"). The predicate of a scalar pole also holds
-its comparison class (``class``): the subject category's parent, or ``THING`` for a top-level
-category.
+clause is written like a predicate: ``{"kind": "can", "feature": "EVENTTYPE1.3"}``, or a
+two-place event type with the other category, as ``patient`` when the head is the agent ("owls
+that eat mice") and as ``agent`` when the head is the patient ("mice that owls eat"). The
+predicate of a scalar pole also holds its comparison class (``class``): the subject category's
+parent, or ``THING`` for a top-level category.
 
 **Instance and event level.** The subject, and the patient of a verb, are mentions:
 
 ```json
-{"instance": "I1.3.2.5", "referent": "R.1", "noun": "C1.3.2", "restriction": ["IS.12"],
- "clauses": [{"kind": "verb", "verb": "V1.2", "patient": {...},
-              "event": "SN.3.2", "tense": "past", "aspect": "simple"}]}
+{"instance": "INSTANCE.1.3.2.5", "referent": "REF.1", "noun": "CATEGORY.1.3.2",
+ "restriction": ["PROPERTY.12"],
+ "clauses": [{"kind": "verb", "verb": "EVENTTYPE2.1.2", "patient": {...},
+              "event": "SCENE.3.EVENTINSTANCE.2", "tense": "past", "aspect": "simple"}]}
 ```
 
 ``referent`` is the referent's label in its document. ``noun`` is the category that the noun

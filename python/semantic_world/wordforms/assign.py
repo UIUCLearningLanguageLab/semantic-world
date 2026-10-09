@@ -439,10 +439,14 @@ def assign_target_correlation(
 
 
 def branch_of(meaning: str, depth: int) -> str | None:
-    """The branch of a meaning at a depth: the first ``depth`` parts of its ID, which the
+    """The branch of a meaning at a depth: the first ``depth`` numbers of its ID, which the
     taxonomy generator separates with periods (``C1.2.3`` is in ``C1`` at depth 1 and in
-    ``C1.2`` at depth 2). None for a meaning above that depth."""
+    ``C1.2`` at depth 2). A label of the world package keeps its prefix as a part of its own
+    (``CATEGORY.1.2.3`` is in ``CATEGORY.1`` at depth 1). None for a meaning above that depth."""
     parts = meaning.split(".")
+    if parts[0] and not any(c.isdigit() for c in parts[0]):
+        prefix, numbers = parts[0], parts[1:]
+        return ".".join([prefix, *numbers[:depth]]) if len(numbers) >= depth else None
     return ".".join(parts[:depth]) if len(parts) >= depth else None
 
 

@@ -19,12 +19,13 @@ from semantic_world.corpus.config import ConfigError, load_config
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.generate import generate
 from semantic_world.taxonomy.errors import GenerationError
+from semantic_world.world.errors import WorldError
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m semantic_world.corpus",
-        description="Generate a corpus of documents about a taxonomy's world.",
+        description="Generate a corpus of documents about a world run.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser(
@@ -59,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config, seed=args.seed)
         corpus = generate(config)
         folder = corpus.write(args.out)
-    except (ConfigError, CorpusError, GenerationError) as error:
+    except (ConfigError, CorpusError, GenerationError, WorldError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     stats = corpus.stats

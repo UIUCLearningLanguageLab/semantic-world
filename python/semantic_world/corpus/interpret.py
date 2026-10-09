@@ -8,9 +8,10 @@ tree, a node before its children.
 
 The reading undoes the grammar's fixed choices:
 
-- an adjective is a positive IS literal or a scalar pole, a with-phrase a positive HAS literal,
-  and a without-phrase a negative one;
-- a verb phrase "is not A" in a relative clause is a negated IS literal of the restriction;
+- an adjective is a positive PROPERTY literal or a scalar pole, a with-phrase a positive PART
+  literal, and a without-phrase a negative one;
+- a verb phrase "is not A" in a relative clause is a negated PROPERTY literal of the
+  restriction;
 - a noun phrase with ``a`` or ``the``, or a pronoun, names an instance, and any other noun
   phrase names a category;
 - a verb states a capacity when its subject is a category, with ``can`` or without. With an
@@ -20,6 +21,10 @@ The reading undoes the grammar's fixed choices:
   record gives, and states a capacity when the record gives none;
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
+
+The quantifier of a class-level sentence is not in the words either: what "all" expresses is a
+setting of the language, and a bare plural says nothing of it. The record gives it
+(``quantifier``), as it gives the events.
 
 The inflections, the adjective order, and the choice between synonyms carry no part of the plan,
 and are ignored.
@@ -51,6 +56,7 @@ from semantic_world.corpus.propositions import (
     Literal,
 )
 from semantic_world.corpus.realize import NP_LABELS, Tree, preorder, token_parts
+from semantic_world.corpus.world import ONE_PLACE_PREFIX, PATIENT_CAPACITY_PREFIX, SCALAR_PREFIX
 
 
 def interpret(
@@ -58,17 +64,27 @@ def interpret(
     lexicon: Lexicon,
     referents: Sequence[tuple[str, str | None]] | Sequence[str],
     events: Sequence[tuple[str, str, str] | None] = (),
+    quantifier: str | None = None,
 ) -> SentencePlan:
     """The sentence plan that a tree realizes. ``referents`` gives the referent of every noun
-    phrase, and ``events`` the event of every verb phrase, as its label, its tense, and its
-    aspect, or None, in the order of the tree."""
-    return _Reader(tree, lexicon, referents, events).sentence()
+    phrase, ``events`` the event of every verb phrase, as its label, its tense, and its aspect,
+    or None, in the order of the tree, and ``quantifier`` the quantifier of a class-level
+    sentence."""
+    return _Reader(tree, lexicon, referents, events, quantifier).sentence()
 
 
 class _Reader:
-    def __init__(self, tree: Tree, lexicon: Lexicon, referents: Sequence, events: Sequence) -> None:
+    def __init__(
+        self,
+        tree: Tree,
+        lexicon: Lexicon,
+        referents: Sequence,
+        events: Sequence,
+        quantifier: str | None,
+    ) -> None:
         self.tree = tree
         self.lexicon = lexicon
+        self.quantifier = quantifier
         nodes = preorder(tree)
         phrases = [n for n in nodes if n[0] in NP_LABELS]
         verb_phrases = [n for n in nodes if n[0] == "VP"]
@@ -143,7 +159,8 @@ class _Reader:
         subject = self.noun_phrase(subject_node)
         target = self.child(self.tree, "NP-OBJ") or self.child(verb_phrase, "NP-OBJ")
         predication, _ = self.predication(verb_phrase, target, subject.kind, None)
-        return SentencePlan(subject, predication)
+        quantifier = self.quantifier if subject.kind == CLASS_NP else None
+        return SentencePlan(subject, predication, quantifier)
 
     def noun_phrase(self, node: Tree) -> NounPhrase:
         referent = self.referent[id(node)]
@@ -218,7 +235,7 @@ class _Reader:
                 auxiliary = previous
         if verb is not None:
             concept = self.concept(verb)
-            kind = CAN if concept.startswith("CAN.") else VERB
+            kind = CAN if concept.startswith(ONE_PLACE_PREFIX) else VERB
             patient = None if target is None else self.noun_phrase(target)
             report = self.event[id(node)]
             if report is None:
@@ -238,9 +255,9 @@ class _Reader:
             return Predication(kind, concept, polarity, patient, event, tense, aspect), auxiliary
         if adjective is not None:
             concept = self.concept(adjective)
-            if concept.startswith("SC."):
+            if concept.startswith(SCALAR_PREFIX):
                 kind = SCALAR
-            elif concept.startswith("CANBE."):
+            elif concept.startswith(PATIENT_CAPACITY_PREFIX):
                 kind = PROJECTION
             else:
                 kind = IS

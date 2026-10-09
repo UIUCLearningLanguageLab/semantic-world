@@ -16,6 +16,7 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
     check_plan,
 )
+from semantic_world.corpus.histories import scene_events, scene_of
 from semantic_world.corpus.mentions import (
     MentionRules,
     Mentions,
@@ -26,12 +27,12 @@ from semantic_world.corpus.mentions import (
     plan_for,
 )
 from semantic_world.corpus.propositions import (
-    ALL,
     CLASS,
     EVENT,
-    GENERIC,
     INSTANCE,
     MEMBER,
+    MOST,
+    NEC_ALL,
     SCALAR,
     VERB,
     CategoryTerm,
@@ -49,7 +50,7 @@ def rate_settings(**clauses) -> dict:
 
 def scenes_of(case, facts, count: int = 40):
     generator = case.scenes()
-    labels = case.result.instances.labels
+    labels = case.world.instances
     streams = Streams(1)
     made = [generator.scene(streams, n, labels[(n * 5) % len(labels)]) for n in range(1, count + 1)]
     for scene in made:
@@ -69,66 +70,83 @@ def test_the_plan_of_a_proposition_says_the_proposition(cases, name) -> None:
     propositions = []
     for category in facts.categories[:6]:
         for negative in (False, True):
-            stated = facts.class_facts(category, negative, patients=facts.categories[:4])
-            propositions += list(stated) + [g for g in map(facts.generic, stated) if g]
+            propositions += facts.class_facts(category, negative, patients=facts.categories[:4])
     propositions += list(facts.rule_statements())
-    labels = case.result.instances.labels
+    labels = case.world.instances
     for instance in labels[:4]:
         for negative in (False, True):
             propositions += facts.instance_facts(instance, negative, patients=labels[:8])
     for scene in scenes_of(case, facts, 10):
-        propositions += [facts.event_fact(e) for e in scene.events]
+        propositions += [facts.event_fact(e) for e in scene_events(scene)]
+    propositions = [p for p in propositions if p is not None]
     assert len(propositions) > 500
     for proposition in propositions:
-        plan = plan_for(facts, proposition)
-        check_plan(plan)
-        assert plan.proposition() == proposition
-        assert plan.level == proposition.level
+        for bare in (False, True):
+            plan = plan_for(facts, proposition, bare=bare)
+            check_plan(plan)
+            assert plan.proposition() == proposition
+            assert plan.level == proposition.level
+            if proposition.level == CLASS:
+                assert plan.bare_plural == (bare or proposition.quantifier is None)
     assert {p.level for p in propositions} == {CLASS, INSTANCE, EVENT}
 
 
 def test_class_level_plans(cases) -> None:
     facts = cases("tiny").facts()
-    subject = CategoryTerm("C1.1", (Literal("IS.2"), Literal("HAS.3", False)))
-    patient = CategoryTerm("C2", (Literal("IS.4"),))
-    proposition = Proposition(CLASS, subject, Predicate(VERB, "V1.1", patient), False, "most")
+    subject = CategoryTerm("CATEGORY.1.1", (Literal("PROPERTY.2"), Literal("PART.3", False)))
+    patient = CategoryTerm("CATEGORY.2", (Literal("PROPERTY.4"),))
+    proposition = Proposition(
+        CLASS, subject, Predicate(VERB, "EVENTTYPE2.1.1", patient), False, MOST
+    )
     plan = plan_for(facts, proposition)
     assert plan == SentencePlan(
-        NounPhrase(CLASS_NP, "C1.1", "C1.1", "most", subject.restriction),
+        NounPhrase(CLASS_NP, "CATEGORY.1.1", "CATEGORY.1.1", "most", subject.restriction),
         Predication(
-            VERB, "V1.1", False, NounPhrase(CLASS_NP, "C2", "C2", None, patient.restriction)
+            VERB,
+            "EVENTTYPE2.1.1",
+            False,
+            NounPhrase(CLASS_NP, "CATEGORY.2", "CATEGORY.2", None, patient.restriction),
         ),
+        MOST,
     )
-    # the quantifier is the subject's determiner, and the generic is a bare noun
-    generic = dataclasses.replace(proposition, quantifier=GENERIC)
-    assert plan_for(facts, generic).subject.determiner is None
-    assert plan_for(facts, generic).proposition().quantifier == GENERIC
+    # the subject's determiner is the quantifier's word, or none for a bare plural; the plan
+    # keeps the quantifier either way
+    bare = plan_for(facts, proposition, bare=True)
+    assert bare.subject.determiner is None and bare.quantifier == MOST
+    assert bare.proposition() == proposition and bare.bare_plural
     rule = facts.rule_statements()[0]
     assert plan_for(facts, rule).subject.noun == "THING"
-    assert plan_for(facts, rule).subject.determiner == ALL
+    assert plan_for(facts, rule).subject.determiner == "all"
+    assert plan_for(facts, rule).quantifier == NEC_ALL
+    nec_no = Proposition(CLASS, subject, Predicate(MEMBER, "CATEGORY.2"), True, "nec_no")
+    assert plan_for(facts, nec_no).subject.determiner == "no"
+    # a class-level scalar pole has no quantifier word
+    pole = Proposition(CLASS, CategoryTerm("CATEGORY.1.1"), Predicate(SCALAR, "SCALARDIM.1.HIGH"))
+    assert plan_for(facts, pole).subject.determiner is None
+    assert plan_for(facts, pole).quantifier is None and plan_for(facts, pole).bare_plural
 
 
 def test_instances_are_mentioned_by_their_leaf_unless_told_otherwise(cases) -> None:
     facts = cases("default").facts()
-    instance, other = "I1.2.1.3", "I2.1.1.1"
-    assert leaf_of(facts, instance) == "C1.2.1"
-    assert mention(facts, instance) == NounPhrase(INSTANCE_NP, instance, "C1.2.1", "the")
-    capacity = Proposition(INSTANCE, instance, Predicate(VERB, "V1.1", other))
+    instance, other = "INSTANCE.1.2.1.3", "INSTANCE.2.1.1.1"
+    assert leaf_of(facts, instance) == "CATEGORY.1.2.1"
+    assert mention(facts, instance) == NounPhrase(INSTANCE_NP, instance, "CATEGORY.1.2.1", "the")
+    capacity = Proposition(INSTANCE, instance, Predicate(VERB, "EVENTTYPE2.1.1", other))
     plan = plan_for(facts, capacity)
     assert plan.subject == mention(facts, instance)
     assert plan.predication.object == mention(facts, other)
     # a caller can give any other mention: a higher noun, "a", modifiers, or a pronoun
     given = {
-        instance: NounPhrase(INSTANCE_NP, instance, "C1", "a", (Literal("IS.3"),)),
+        instance: NounPhrase(INSTANCE_NP, instance, "CATEGORY.1", "a", (Literal("PROPERTY.3"),)),
         other: NounPhrase(INSTANCE_NP, other),
     }
     plan = plan_for(facts, capacity, given)
     assert plan.subject == given[instance] and plan.predication.object == given[other]
     assert plan.proposition() == capacity
     # a scalar pole's subject is named by the comparison class
-    for comparison in ("C1", "C1.2", "C1.2.1"):
+    for comparison in ("CATEGORY.1", "CATEGORY.1.2", "CATEGORY.1.2.1"):
         pole = Proposition(
-            INSTANCE, instance, Predicate(SCALAR, "SC.1.HIGH", comparison=comparison)
+            INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=comparison)
         )
         plan = plan_for(facts, pole)
         assert plan.subject.noun == comparison and plan.proposition() == pole
@@ -136,25 +154,27 @@ def test_instances_are_mentioned_by_their_leaf_unless_told_otherwise(cases) -> N
 
 def test_a_membership_sentence_never_names_the_subject_by_the_predicate(cases) -> None:
     facts = cases("default").facts()
-    instance = "I1.2.1.3"
+    instance = "INSTANCE.1.2.1.3"
     plans = {
         category: plan_for(facts, Proposition(INSTANCE, instance, Predicate(MEMBER, category)))
-        for category in ("C1", "C1.2", "C1.2.1")
+        for category in ("CATEGORY.1", "CATEGORY.1.2", "CATEGORY.1.2.1")
     }
-    assert plans["C1"].subject.noun == "C1.2.1"  # "the penguin is an animal"
-    assert plans["C1.2"].subject.noun == "C1.2.1"
-    assert plans["C1.2.1"].subject.noun == "C1.2"  # "the bird is a penguin"
+    assert plans["CATEGORY.1"].subject.noun == "CATEGORY.1.2.1"  # "the penguin is an animal"
+    assert plans["CATEGORY.1.2"].subject.noun == "CATEGORY.1.2.1"
+    assert plans["CATEGORY.1.2.1"].subject.noun == "CATEGORY.1.2"  # "the bird is a penguin"
     for plan in plans.values():
         check_plan(plan)
     # a world of one level has no category above the leaf: the subject is a pronoun
     flat = cases("tiny").facts()
     still = cases("still").facts()
     assert (
-        plan_for(flat, Proposition(INSTANCE, "I1.1.1", Predicate(MEMBER, "C1.1"))).subject.noun
-        == "C1"
+        plan_for(
+            flat, Proposition(INSTANCE, "INSTANCE.1.1.1", Predicate(MEMBER, "CATEGORY.1.1"))
+        ).subject.noun
+        == "CATEGORY.1"
     )
     for facts_of in (flat, still):
-        top = Proposition(INSTANCE, facts_of.result.instances.labels[0], Predicate(MEMBER, "C1"))
+        top = Proposition(INSTANCE, facts_of.world.instances[0], Predicate(MEMBER, "CATEGORY.1"))
         assert plan_for(facts_of, top).subject.noun is not None
 
 
@@ -168,7 +188,7 @@ def attach_all(case, settings: dict, level: str, seed: int = 0, count: int = 400
     facts = case.facts(**settings)
     clauses = RelativeClauses(case.config(**settings), facts)
     rng = Streams(seed).mentions
-    labels = case.result.instances.labels
+    labels = case.world.instances
     others = labels[:: max(1, len(labels) // 7)][:7]
     plans = []
     if level == INSTANCE:
@@ -176,9 +196,11 @@ def attach_all(case, settings: dict, level: str, seed: int = 0, count: int = 400
         for index in rng.choice(len(pool), size=count):
             plans.append(clauses.attach(rng, plan_for(facts, pool[int(index)]), others))
     else:
-        events = [e for scene in scenes_of(case, facts) for e in scene.events]
+        events = [e for scene in scenes_of(case, facts) for e in scene_events(scene)]
         for event in events[:count]:
-            plans.append(clauses.attach(rng, plan_for(facts, facts.event_fact(event))))
+            report = facts.event_fact(event)
+            if report is not None:
+                plans.append(clauses.attach(rng, plan_for(facts, report)))
     return plans, facts
 
 
@@ -209,8 +231,8 @@ def test_event_clauses_report_events_of_the_same_scene(cases) -> None:
     plans, facts = attach_all(case, rate_settings(rate=0.8, max_depth=2), EVENT)
     subject_relatives = object_relatives = 0
     for plan in plans:
-        scene = plan.predication.event.rsplit(".", 1)[0]
-        events = {e.label: e for e in facts.truth.scenes[scene].events}
+        scene = scene_of(plan.predication.event)
+        events = {e.label: e for e in facts.truth.events_of(scene)}
         # no clause reports an event with the verb, the agent, and the patient of the sentence's
         # own event, or of another clause's, even one that happened at another step
         reported = [events[plan.predication.event].key] + [
@@ -268,11 +290,11 @@ def test_what_takes_no_drawn_relative_clause(cases) -> None:
     rng = np.random.default_rng(0)
     # a class-level sentence: its relative clauses restrict the subject, so they are drawn with
     # the proposition (facts.draw_clause), and not for a finished plan
-    for fact in facts.class_facts("C1.1", patients=("C2",))[:40]:
+    for fact in facts.class_facts("CATEGORY.1.1", patients=("CATEGORY.2",))[:40]:
         plan = plan_for(facts, fact)
         assert clauses.attach(rng, plan) == plan
     # a pronoun, and a noun phrase that already has a clause
-    instance = case.result.instances.labels[0]
+    instance = case.world.instances[0]
     fact = facts.instance_facts(instance)[0]
     pronoun = plan_for(facts, fact, {instance: NounPhrase(INSTANCE_NP, instance)})
     assert clauses.attach(rng, pronoun) == pronoun
@@ -291,14 +313,10 @@ def test_negated_literals_keep_the_clause_a_subject_relative(cases) -> None:
     facts = case.facts(**settings)
     clauses = RelativeClauses(case.config(**settings), facts)
     rng = np.random.default_rng(0)
-    labels = case.result.instances.labels
+    labels = case.world.instances
     instance = labels[0]
     row = facts.truth.instance_index[instance]
-    lacking = next(
-        f
-        for f in facts.features["is"]
-        if not facts.truth.values[row, facts.truth.features[f].position]
-    )
+    lacking = next(f for f in facts.features["is"] if not facts.world.column(f)[row])
     phrase = dataclasses.replace(mention(facts, instance), restriction=(Literal(lacking, False),))
     fact = facts.instance_facts(instance)[0]
     for _ in range(30):
@@ -386,7 +404,7 @@ def test_the_preference_order_is_fixed_for_the_language(cases) -> None:
 def test_the_incremental_algorithm(cases) -> None:
     case = cases("default")
     rules = rules_of(case)
-    labels = case.result.instances.labels
+    labels = case.world.instances
     rank = {attribute: n for n, attribute in enumerate(rules.preference)}
     told_apart = 0
     for start in range(0, len(labels) - 6, 5):
@@ -417,10 +435,10 @@ def test_the_incremental_algorithm(cases) -> None:
                     assert len(kept) < len(left)
                     left = kept
                 assert alone == (not left)
-                # no negated IS literal: adjectives and with-phrases only
-                assert all(x.positive or x.feature.startswith("HAS.") for x in literals)
-                assert sum(not x.feature.startswith("HAS.") for x in literals) <= 3
-                assert sum(x.feature.startswith("HAS.") for x in literals) <= 2
+                # no negated PROPERTY literal: adjectives and with-phrases only
+                assert all(x.positive or x.feature.startswith("PART.") for x in literals)
+                assert sum(not x.feature.startswith("PART.") for x in literals) <= 3
+                assert sum(x.feature.startswith("PART.") for x in literals) <= 2
                 told_apart += alone
     assert told_apart > 50
     # the features that the sentence states are not said again
@@ -433,8 +451,8 @@ def test_the_incremental_algorithm(cases) -> None:
 
 def test_a_document_s_mentions(cases) -> None:
     case = cases("default")
-    labels = case.result.instances.labels
-    first, second, third = "I1.1.1.1", "I1.1.1.2", "I2.1.1.1"
+    labels = case.world.instances
+    first, second, third = "INSTANCE.1.1.1.1", "INSTANCE.1.1.1.2", "INSTANCE.2.1.1.1"
     assert {first, second, third} <= set(labels)
     cast = (first, second, third)
     rng = np.random.default_rng(0)
@@ -442,8 +460,8 @@ def test_a_document_s_mentions(cases) -> None:
     mentions = Mentions(rules_of(case, pronoun_rate=0.0), cast)
     opening = mentions.noun_phrase(rng, first)
     assert opening.determiner == "a" and opening.restriction == ()
-    assert opening.noun in ("C1", "C1.1", "C1.1.1")
-    assert mentions.referents == {first: "R.1"} and mentions.label(first) == "R.1"
+    assert opening.noun in ("CATEGORY.1", "CATEGORY.1.1", "CATEGORY.1.1.1")
+    assert mentions.referents == {first: "REF.1"} and mentions.label(first) == "REF.1"
     assert mentions.distinguished(opening) is None  # an indefinite mention picks out no one
     mentions.end_sentence(first)
     later = mentions.noun_phrase(rng, first)
@@ -452,12 +470,12 @@ def test_a_document_s_mentions(cases) -> None:
     assert later.restriction and mentions.distinguished(later) is True
     assert mentions.rules.matches(later, cast) == [first]
     other = mentions.noun_phrase(rng, third)
-    assert other.determiner == "a" and mentions.referents == {first: "R.1", third: "R.2"}
+    assert other.determiner == "a" and mentions.referents == {first: "REF.1", third: "REF.2"}
     mentions.end_sentence(first)
     # a noun that is given is used, and a noun that is excluded is not
     for _ in range(20):
-        assert mentions.noun_phrase(rng, first, noun="C1").noun == "C1"
-        assert mentions.noun_phrase(rng, first, exclude="C1.1.1").noun != "C1.1.1"
+        assert mentions.noun_phrase(rng, first, noun="CATEGORY.1").noun == "CATEGORY.1"
+        assert mentions.noun_phrase(rng, first, exclude="CATEGORY.1.1.1").noun != "CATEGORY.1.1.1"
     mentions.end_sentence(first)
     # a sentence that is dropped leaves no mention behind
     known = dict(mentions.referents)
@@ -470,7 +488,7 @@ def test_a_document_s_mentions(cases) -> None:
 
 def test_when_a_mention_can_be_a_pronoun(cases) -> None:
     case = cases("default")
-    first, second = "I1.1.1.1", "I2.1.1.1"
+    first, second = "INSTANCE.1.1.1.1", "INSTANCE.2.1.1.1"
     rng = np.random.default_rng(0)
     mentions = Mentions(rules_of(case, pronoun_rate=1.0), (first, second))
     # a first mention is never a pronoun
@@ -490,7 +508,7 @@ def test_when_a_mention_can_be_a_pronoun(cases) -> None:
     # the referent was not mentioned in the sentence before
     assert not mentions.pronoun_allowed(first) and mentions.pronoun_allowed(second)
     # a mention whose noun is given, or that must not be a pronoun, is a noun phrase
-    assert not mentions.noun_phrase(rng, second, noun="C2").pronoun
+    assert not mentions.noun_phrase(rng, second, noun="CATEGORY.2").pronoun
     mentions.end_sentence(second)
     assert not mentions.noun_phrase(rng, second, pronoun=False).pronoun
     mentions.end_sentence(second)
@@ -502,9 +520,9 @@ def test_a_referent_that_cannot_be_told_apart(cases) -> None:
     """With no adjective and no with-phrase allowed, two instances of one leaf cannot be told
     apart. The mention falls back to the noun of the leaf, is kept, and is marked."""
     case = cases("default")
-    first, second, third = "I1.1.1.1", "I1.1.1.2", "I1.1.2.1"
+    first, second, third = "INSTANCE.1.1.1.1", "INSTANCE.1.1.1.2", "INSTANCE.1.1.2.1"
     rules = rules_of(case, max_adjectives=0, max_with_phrases=0, pronoun_rate=0.0)
-    assert rules.distinguish(first, "C1.1.1", (first, second)) == ((), False)
+    assert rules.distinguish(first, "CATEGORY.1.1.1", (first, second)) == ((), False)
     rng = np.random.default_rng(3)
     mentions = Mentions(rules, (first, second, third))
     mentions.noun_phrase(rng, first)
@@ -513,7 +531,7 @@ def test_a_referent_that_cannot_be_told_apart(cases) -> None:
         later = mentions.noun_phrase(rng, first)
         mentions.end_sentence(first)
         # the noun of the leaf fits the fewest participants, and still fits two
-        assert later.noun == "C1.1.1" and later.restriction == ()
+        assert later.noun == "CATEGORY.1.1.1" and later.restriction == ()
         assert mentions.distinguished(later) is False
     # the other leaf's instance is alone under its leaf's noun
     mentions.noun_phrase(rng, third)
@@ -521,22 +539,22 @@ def test_a_referent_that_cannot_be_told_apart(cases) -> None:
     for _ in range(20):
         later = mentions.noun_phrase(rng, third)
         mentions.end_sentence(third)
-        assert later.noun == "C1.1.2" and mentions.distinguished(later) is True
+        assert later.noun == "CATEGORY.1.1.2" and mentions.distinguished(later) is True
     # a noun that is given is kept, whatever it fits
-    fixed = mentions.noun_phrase(rng, third, noun="C1")
-    assert fixed.noun == "C1" and mentions.distinguished(fixed) is False
+    fixed = mentions.noun_phrase(rng, third, noun="CATEGORY.1")
+    assert fixed.noun == "CATEGORY.1" and mentions.distinguished(fixed) is False
 
 
 def test_modifiers_at_the_modifier_rate(cases) -> None:
     case = cases("default")
-    instance = "I1.1.1.1"
+    instance = "INSTANCE.1.1.1.1"
     rng = np.random.default_rng(1)
 
     def first_mentions(modifiers: bool, **settings):
         rules = rules_of(case, **settings)
         return [
             Mentions(rules, (instance,), modifiers=modifiers).noun_phrase(
-                rng, instance, avoid=("IS.1",)
+                rng, instance, avoid=("PROPERTY.1",)
             )
             for _ in range(300)
         ]
@@ -553,9 +571,9 @@ def test_modifiers_at_the_modifier_rate(cases) -> None:
         for literal in phrase.restriction:
             # one modifier, true of the referent, positive, and not what the sentence says
             assert len(phrase.restriction) == 1 and literal.positive
-            assert rules.fits(row, literal, phrase.noun) and literal.feature != "IS.1"
+            assert rules.fits(row, literal, phrase.noun) and literal.feature != "PROPERTY.1"
             kinds.add(literal.feature.split(".")[0])
-    assert {"IS", "HAS"} <= kinds
+    assert {"PROPERTY", "PART"} <= kinds
     assert all(phrase.restriction for phrase in first_mentions(True, modifier_rate=1.0))
     assert all(
         not phrase.restriction

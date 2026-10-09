@@ -7,62 +7,99 @@ against the world and, for the event level, against the scenes.
 **Class level.** The subject is a :class:`CategoryTerm`: a category, or the generic ``THING``,
 with a restriction of literals. Its *subject set* is the set of instances below the category that
 satisfy the restriction. A proposition with an empty subject set is vacuous, and is never valid.
-The quantifier is ``all``, ``most``, ``some``, ``no``, or ``generic``.
+The quantifier is one of ``nec_all``, ``all``, ``most``, ``some``, ``no``, and ``nec_no``
+(``docs/specs/WORLD_AND_LANGUAGE.md``, "Quantifiers"):
+
+- ``all``: every member of the subject set has the predicate, and ``no``: none does. Both are
+  extensional, and both are available for every predicate;
+- ``nec_all``: the rules guarantee the predicate for the subject (the fixed test), and
+  ``nec_no`` the same with the predicate fixed at 0. ``nec_all`` implies ``all``, because a
+  subject set is never empty. The ``nec`` quantifiers apply to one-place predicates only:
+  PROPERTY and PART features, one-place capacities, and membership. Relation facts and patient
+  capacities take the extensional quantifiers only, because no fixed test exists for them;
+- ``most``: more than half of the subject set. ``some``: at least one member.
+
+Membership ("penguins are birds") is ``nec_all`` by construction, and a rule statement is always
+``nec_all``. A class-level scalar pole is a statement about the category's mean, not a
+quantification over its members, and has no quantifier.
 
 **Polarity.** A negative proposition denies its predicate: ``most`` with a negative polarity
-says that most members of the subject set lack the predicate. The quantifier ``no`` replaces
-sentence negation, so ``no`` always has a positive polarity in the logical form, and ``all``
-never has a negative one ("no fish have fur", never "all fish do not have fur").
+says that most members of the subject set lack the predicate. ``no`` and ``nec_no`` replace
+sentence negation, so they always have a positive polarity in the logical form, and ``all`` and
+``nec_all`` never have a negative one.
 
 **Instance level.** The subject is an instance, and truth is read from the instance's values.
 
 **Relative clauses.** A category term can also be restricted by relative clauses, which are
-restrictive: "penguins that can swim" are the penguins with the CAN feature, "owls that eat mice"
-are the owls that can eat at least one mouse, and "mice that owls eat" are the mice that at least
-one owl can eat. With such a subject, ``most``, ``some``, and the generic are judged by the share
-of the subject set, and ``all`` and ``no`` are allowed only under the observed reading.
+restrictive: "penguins that can swim" are the penguins able to swim, "owls that eat mice" are
+the owls that can eat at least one mouse, and "mice that owls eat" are the mice that at least
+one owl can eat. No fixed test exists for such a subject, so it takes the extensional
+quantifiers only.
 
 **Event level.** The proposition says that something happened in a scene: the subject is the
-agent, and the predicate is a CAN feature, or a verb with a patient instance. The verb can be the
-event's own verb or a verb category above it, as a noun can name a category above a leaf. The
-proposition is true when such an event occurred in the scene. An event-level proposition is
-never negated. Its tense and aspect are part of the logical form: the tense is the corpus's
-(``propositions.events.tense``), and the aspect is the event's own. Its grounding says whether
-the world allows the event (``possible``), which is what tells an impossible false test item from
-one that merely did not happen.
+agent, and the predicate is a one-place event type, or a two-place event type with a patient
+instance. The event type can be the event's own or a category above it, as a noun can name a
+category above a leaf. The proposition is true when such an event occurred in the scene. An
+event-level proposition is never negated. Its tense is the corpus's
+(``propositions.events.tense``). Its aspect belongs to the report, not to the event: both
+aspects are true of any event that occurred (CG.64). Its grounding says whether the binding is
+``able`` (the requirement holds) and ``legal`` (the binding was legal at some time point of the
+scene), which is what tells an impossible false test item from one that merely did not happen.
 
-The truth tests follow "Truth grounding" in ``docs/specs/CORPUS_GENERATOR.md``.
+**The language's words** decide what a proposition's words mean, never what the proposition
+means: which quantifiers "all" and "no" express (``quantifiers.universal_words``), the least
+share at which a speaker says "most" (``quantifiers.most.usage_min``), and the implicature of
+"some" (``quantifiers.some.exclude_all``). :class:`Truth` answers both questions: whether a
+proposition is true, and whether a document can state it (``felicitous``).
 """
 
 from __future__ import annotations
 
 import dataclasses
-import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
-from semantic_world.common.boolean import settings_array
 from semantic_world.corpus.config import Config
-from semantic_world.corpus.lexicon import SCALAR_POLES, THING
-from semantic_world.taxonomy.features import Feature
-from semantic_world.taxonomy.fixed import fixed_by_rule
-from semantic_world.taxonomy.generate import TaxonomyResult
-from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT, Threshold, evaluate_feature
-from semantic_world.taxonomy.tree import Category, Role
+from semantic_world.corpus.histories import (
+    SceneEvent,
+    event_of,
+    scene_events,
+    scene_of,
+)
+from semantic_world.corpus.world import (
+    PART_PREFIX,
+    PROPERTY_PREFIX,
+    SCALAR_PREFIX,
+    THING,
+    World,
+)
+from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT
+from semantic_world.world.history import History, replay
+from semantic_world.world.runtime import State, legal
 
 CLASS = "class"
 INSTANCE = "instance"
 EVENT = "event"
 LEVELS = (CLASS, INSTANCE, EVENT)
 
+NEC_ALL = "nec_all"
 ALL = "all"
 MOST = "most"
 SOME = "some"
 NO = "no"
-GENERIC = "generic"
-QUANTIFIERS = (ALL, MOST, SOME, NO, GENERIC)
+NEC_NO = "nec_no"
+QUANTIFIERS = (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO)
+POSITIVE_ORDER = (NEC_ALL, ALL, MOST, SOME)
+"""The quantifiers of a positive fact, strongest first."""
+NEGATIVE_ORDER = (NEC_NO, NO, MOST, SOME)
+"""The quantifiers of a negative fact, strongest first: ``no`` and ``nec_no`` with a positive
+polarity, ``most`` and ``some`` with a negative one."""
+NEC_QUANTIFIERS = (NEC_ALL, NEC_NO)
+UNIVERSALS = (NEC_ALL, ALL, NO, NEC_NO)
+COUNTERPART = {NEC_ALL: NEC_NO, NEC_NO: NEC_ALL, ALL: NO, NO: ALL, MOST: MOST, SOME: SOME}
+"""Each quantifier's counterpart for a fact of the other polarity."""
 
 IS = "is"
 HAS = "has"
@@ -73,6 +110,10 @@ PROJECTION = "projection"
 VERB = "verb"
 KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB)
 FEATURE_KINDS = (IS, HAS, CAN)
+"""The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
+PART feature, or a one-place event type (the capacity to be its agent)."""
+NEC_KINDS = FEATURE_KINDS + (MEMBER,)
+"""The kinds that the ``nec`` quantifiers apply to."""
 
 PAST = "past"
 PRESENT = "present"
@@ -107,18 +148,7 @@ _JSON_KEY = {
     PROJECTION: "projection",
     VERB: "verb",
 }
-_LITERAL_ORDER = {"IS": 0, "HAS": 1, "SC": 2}
-
-
-def scene_of(label: str) -> str:
-    """The scene that an event label (``SN.8.5``) or a scene label (``SN.8``) names."""
-    return ".".join(label.split(".")[:2])
-
-
-def event_of(label: str) -> str | None:
-    """The event that a label names: the label itself for an event label (``SN.8.5``), and None
-    for a scene label (``SN.8``), which stands for some event of the scene."""
-    return label if label.count(".") == 2 else None
+_LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2}
 
 
 def _number(value: float) -> float:
@@ -133,21 +163,25 @@ def _number(value: float) -> float:
 
 @dataclass(frozen=True)
 class Literal:
-    """One literal of a restriction: an IS or HAS feature, positive or negative, or a scalar
-    pole (``SC.1.HIGH``), which is always positive."""
+    """One literal of a restriction: a PROPERTY or PART feature, positive or negative, or a
+    scalar pole (``SCALARDIM.1.HIGH``), which is always positive."""
 
     feature: str
     positive: bool = True
 
     @property
     def pole(self) -> bool:
-        return self.feature.startswith("SC.")
+        return self.feature.startswith(SCALAR_PREFIX)
 
     @property
     def sort_key(self) -> tuple:
         prefix, _, rest = self.feature.partition(".")
         number, _, pole = rest.partition(".")
-        return (_LITERAL_ORDER.get(prefix, 3), int(number) if number.isdecimal() else 0, pole)
+        return (
+            _LITERAL_ORDER.get(prefix + ".", 3),
+            int(number) if number.isdecimal() else 0,
+            pole,
+        )
 
     def __str__(self) -> str:
         return self.feature if self.positive else f"not {self.feature}"
@@ -161,18 +195,21 @@ class Literal:
 
 @dataclass(frozen=True)
 class Clause:
-    """A relative clause that restricts a category term. It keeps the members that have a CAN
-    feature ("penguins that can swim"), the members that have a verb's relation with at least
-    one member of another category as its agent ("owls that eat mice", with ``patient``), or as
-    its patient ("mice that owls eat", with ``agent``)."""
+    """A relative clause that restricts a category term. It keeps the members that are able to
+    be the agent of a one-place event type ("penguins that can swim"), the members able to be
+    the agent of a two-place event type with at least one member of another category as its
+    patient ("owls that eat mice", with ``patient``), or the patient with at least one member
+    of another category as its agent ("mice that owls eat", with ``agent``)."""
 
     kind: str
     """``can`` or ``verb``."""
     label: str
     patient: CategoryTerm | None = None
-    """A verb in a subject relative: the other category, which the head acts on."""
+    """A two-place event type in a subject relative: the other category, which the head acts
+    on."""
     agent: CategoryTerm | None = None
-    """A verb in an object relative: the other category, which acts on the head."""
+    """A two-place event type in an object relative: the other category, which acts on the
+    head."""
 
     @property
     def other(self) -> CategoryTerm | None:
@@ -201,9 +238,9 @@ class Clause:
 @dataclass(frozen=True)
 class CategoryTerm:
     """A category with a restriction: the subject of a class-level proposition, or the patient
-    of a class-level verb. The category is a category label or ``THING``. The restriction is a
-    set, kept in one order: IS literals, HAS literals, then scalar poles, each by index. The
-    relative clauses restrict the category further, and are kept in the order given."""
+    of a class-level relation. The category is a category label or ``THING``. The restriction is
+    a set, kept in one order: PROPERTY literals, PART literals, then scalar poles, each by index.
+    The relative clauses restrict the category further, and are kept in the order given."""
 
     category: str
     restriction: tuple[Literal, ...] = ()
@@ -251,11 +288,12 @@ class Predicate:
     kind: str
     """``is``, ``has``, ``can``, ``scalar``, ``member``, ``projection``, or ``verb``."""
     label: str
-    """The predicate's concept: a feature, a scalar pole, a category, an exposed patient
-    projection, or a verb or verb category."""
+    """The predicate's concept: a PROPERTY or PART feature, a one-place event type (``can``), a
+    scalar pole, a category, a patient capacity (``projection``), or a two-place event type or a
+    category of them (``verb``)."""
     patient: CategoryTerm | str | None = None
-    """Verbs only: the patient category (class level) or the patient instance (instance
-    level)."""
+    """Two-place event types only: the patient category (class level) or the patient instance
+    (instance level)."""
     comparison: str | None = None
     """Instance-level scalar poles only: the comparison class, which is the category that the
     subject's noun names ("big for a mouse")."""
@@ -292,7 +330,7 @@ class Proposition:
     predicate: Predicate
     polarity: bool = True
     quantifier: str | None = None
-    """Class level only."""
+    """Class level only. None for a class-level scalar pole, which has no quantifier."""
     grounding: dict[str, Any] | None = field(default=None, compare=False)
     id: str | None = field(default=None, compare=False)
     rule: tuple[str, int] | None = field(default=None, compare=False)
@@ -301,18 +339,22 @@ class Proposition:
     scene: str | None = None
     """Event level only: the scene the event belongs to."""
     event: str | None = None
-    """Event level only: the event that the proposition reports (``SN.8.5``). A test item, true
-    or false, names only its scene, and has None: it says that some event of the scene was this
-    one."""
+    """Event level only: the event that the proposition reports
+    (``SCENE.8.EVENTINSTANCE.5``). A test item, true or false, names only its scene, and has
+    None: it says that some event of the scene was this one."""
     tense: str | None = None
     """Event level only: ``past`` or ``present``."""
     aspect: str | None = None
-    """Event level only: ``simple`` or ``progressive``."""
+    """Event level only: ``simple`` or ``progressive``, the report's choice."""
 
     @property
     def negative(self) -> bool:
         """Whether the proposition denies its predicate: a negative polarity, or ``no``."""
-        return not self.polarity or self.quantifier == NO
+        return not self.polarity or self.quantifier in (NO, NEC_NO)
+
+    @property
+    def nec(self) -> bool:
+        return self.quantifier in NEC_QUANTIFIERS
 
     def concepts(self) -> tuple[str, ...]:
         """The concepts that a sentence needs words for, apart from function words: the subject
@@ -386,8 +428,10 @@ class Evaluation:
     allowed for its predicate, and it is not vacuous."""
     true: bool = False
     felicitous: bool = False
-    """True, and usable in a document: with ``quantifiers.some.exclude_all`` on, ``some`` is
-    used only when ``all`` (for a negative proposition, ``no``) is false."""
+    """True, and usable in a document: its quantifier has a word in the language, "most" is said
+    only at or above ``quantifiers.most.usage_min``, and with ``quantifiers.some.exclude_all``
+    on, "some" is used only when the language's "all" (for a negative proposition, its "no") is
+    false."""
     grounding: dict[str, Any] | None = None
     reason: str = ""
     """Why the logical form is not valid."""
@@ -406,50 +450,57 @@ class Truth:
     """The truth tests of one world, under one corpus configuration."""
 
     def __init__(
-        self, config: Config, result: TaxonomyResult, cone_limit: int = CONE_ENUMERATION_LIMIT
+        self, config: Config, world: World, cone_limit: int = CONE_ENUMERATION_LIMIT
     ) -> None:
-        self.result = result
+        self.world = world
         self.quantifiers = config.quantifiers
         self.event_tense = config.propositions.event_tense
         self.z = config.scalar_z
         self.cone_limit = cone_limit
-        self.features = result.features
-        self.rules = result.rules
-        self.tree = result.tree
-        self.instances = result.instances
-        self.values = result.instances.values
-        self.scalars = result.instances.scalars
-        self.scalar_config = result.config.scalars
-        self.count = len(result.instances)
-        self.instance_index = {label: i for i, label in enumerate(result.instances.labels)}
-        self.categories = {c.label: c for c in result.tree.categories}
-        self._rules_by_output = {r.output.label: r for r in result.rules.rules}
-        self._free_index = {f.label: i for i, f in enumerate(result.features.free)}
-        # the instances below every category, and the categories on every instance's path
-        every = np.arange(self.count)
-        self._below: dict[str, np.ndarray] = {THING: every}
-        for category in result.tree.categories:
-            self._below[category.label] = result.instances.below(category, result.tree)
-        self.paths: list[tuple[str, ...]] = []
-        for leaf_index in result.instances.leaf_index:
-            leaf = result.tree.categories[int(leaf_index)]
-            self.paths.append(tuple(a.label for a in reversed(leaf.ancestors())) + (leaf.label,))
-        # verbs and verb categories, and the patient projections of every verb
-        self.verbs: tuple[str, ...] = ()
-        self._projection: dict[str, np.ndarray] = {}
-        if result.verbs is not None and result.projections is not None:
-            self.verbs = tuple(c.label for c in result.verbs.categories)
-            for i, verb in enumerate(result.projections.verb_labels):
-                self._projection[f"CANBE.{verb}"] = result.projections.patient[:, i].astype(bool)
-        self._verb_ancestors: dict[str, tuple[str, ...]] = {}
-        if result.verbs is not None:
-            for category in result.verbs.categories:
-                self._verb_ancestors[category.label] = tuple(a.label for a in category.ancestors())
-        self.scenes: dict[str, Any] = {}
+        self.count = world.count
+        self.instance_index = world.instance_index
+        self.paths = world.paths
+        self.categories = world.category
+        self.scenes: dict[str, History] = {}
         """The scenes that event-level propositions are judged against, by label."""
-        self._matrices: dict[str, np.ndarray] = {}
+        self._events: dict[str, tuple[SceneEvent, ...]] = {}
+        self._states: dict[str, list[State]] = {}
         self._members: dict[CategoryTerm, np.ndarray] = {}
         self._fixed: dict[tuple[CategoryTerm, str], tuple[int | None, str]] = {}
+        universal = self.quantifiers.universal_words
+        self.sayable: frozenset[str] = frozenset(
+            (MOST, SOME)
+            + ((NEC_ALL, NEC_NO) if universal in ("nec", "either") else ())
+            + ((ALL, NO) if universal in ("extensional", "either") else ())
+        )
+        """The quantifiers that the language has words for."""
+
+    # The language's words --------------------------------------------------------------------
+
+    def universal(self, negative: bool) -> str:
+        """The strongest quantifier that the language's "all" (or "no") can express."""
+        if self.quantifiers.universal_words == "extensional":
+            return NO if negative else ALL
+        return NEC_NO if negative else NEC_ALL
+
+    def statable(self, proposition: Proposition) -> bool:
+        """Whether the language can state a class-level proposition's quantifier: with a word,
+        or with a bare plural."""
+        return proposition.quantifier in self.sayable or self.bare_plural_expresses(proposition)
+
+    def bare_plural_expresses(self, proposition: Proposition) -> bool:
+        """Whether a bare plural can state a class-level proposition: its quantifier (or, for a
+        negative fact, its positive counterpart) is in ``quantifiers.bare_plural.expresses``, or
+        the proposition is a membership fact or a rule statement with a ``nec`` quantifier."""
+        quantifier = proposition.quantifier
+        if quantifier is None:
+            return True  # a class-level scalar pole takes no quantifier word
+        if quantifier in NEC_QUANTIFIERS and (
+            proposition.predicate.kind == MEMBER or proposition.rule is not None
+        ):
+            return True
+        positive = COUNTERPART[quantifier] if quantifier in (NO, NEC_NO) else quantifier
+        return positive in self.quantifiers.bare_plural_expresses
 
     # Sets of instances -----------------------------------------------------------------------
 
@@ -459,17 +510,17 @@ class Truth:
         is relative to the category: "big penguins" are big for a penguin. A relative clause
         about another category keeps the members related to at least one member of it."""
         if term not in self._members:
-            below = self._below[term.category]
+            world = self.world
+            below = world.below(term.category)
             keep = np.ones(len(below), dtype=bool)
             for literal in term.restriction:
                 if literal.pole:
                     keep &= self.pole_mask(literal.feature, below)[0][below]
                 else:
-                    column = self.values[below, self.features[literal.feature].position]
-                    keep &= column == int(literal.positive)
+                    keep &= world.column(literal.feature)[below] == int(literal.positive)
             for clause in term.clauses:
                 if clause.kind == CAN:
-                    keep &= self.values[below, self.features[clause.label].position] == 1
+                    keep &= world.column(clause.label)[below] == 1
                 elif clause.patient is not None:
                     others = self.members(clause.patient)
                     keep &= self.matrix(clause.label)[np.ix_(below, others)].any(axis=1)
@@ -485,8 +536,8 @@ class Truth:
         mean and standard deviation. An instance is ``HIGH`` when its value is at least ``z``
         standard deviations above the class's mean, and ``LOW`` when at least that far below.
         A class with no spread has no poles."""
-        scalar, side = self._pole(pole)
-        column = self.scalars[:, scalar]
+        scalar, side = self.world.pole_parts(pole)
+        column = self.world.scalar_column(scalar)
         mean = float(column[comparison].mean())
         sd = float(column[comparison].std())
         if sd == 0:
@@ -495,29 +546,21 @@ class Truth:
             return column >= mean + self.z * sd, mean, sd
         return column <= mean - self.z * sd, mean, sd
 
-    def _pole(self, pole: str) -> tuple[int, str]:
-        scalar, _, side = pole.rpartition(".")
-        return self.features.scalar_labels.index(scalar), side
-
     def is_pole(self, label: str) -> bool:
-        scalar, _, side = label.rpartition(".")
-        return side in SCALAR_POLES and scalar in self.features.scalar_labels
+        return self.world.is_pole(label)
 
-    def matrix(self, verb: str) -> np.ndarray:
-        """A verb's relation, or a verb category's base relation, over every ordered pair of
-        instances, with a false diagonal."""
-        if verb not in self._matrices:
-            assert self.result.relations is not None
-            self._matrices[verb] = self.result.relations.matrix(verb)
-        return self._matrices[verb]
+    def matrix(self, event_type: str) -> np.ndarray:
+        """A two-place event type's requirement, or a category's base relation, over every
+        ordered pair of instances, with a false diagonal."""
+        return self.world.able(event_type)
 
     def projection(self, label: str) -> np.ndarray:
-        """A patient projection (``CANBE.<verb>``) for every instance."""
-        return self._projection[label]
+        """A patient capacity (``CANBE.<event type>``) for every instance."""
+        return self.world.capacity(label)
 
     def ancestors(self, category: str) -> tuple[str, ...]:
         """The labels of a category's strict ancestors, from the top."""
-        return tuple(a.label for a in reversed(self.categories[category].ancestors()))
+        return self.categories[category].ancestors
 
     def disjoint(self, a: str, b: str) -> bool:
         """Whether two categories share no instance: neither is the other or above it."""
@@ -526,119 +569,21 @@ class Truth:
     # The fixed test --------------------------------------------------------------------------
 
     def fixed(self, term: CategoryTerm, feature: str) -> tuple[int | None, str]:
-        """Whether an IS, HAS, or CAN feature is fixed for a category term, and by which test:
-        ``(1, test)`` or ``(0, test)`` when every possible member has that value, and ``(None,
-        test)`` otherwise.
-
-        The test is the fixed-by-rule test of the taxonomy generator, with the restriction's
-        literals added as fixed. The free features that are defining at the category, and the
-        restriction's literals on free features, are held. The other free features in the cone
-        are enumerated, with the intervals between the thresholds of every scalar that is free
-        to vary. A restriction's literal on a determined feature keeps only the settings that
-        satisfy it. A scalar pole in the restriction holds nothing, because no rule reads a
-        pole. Above ``2 ** cone_limit`` settings, the local test is used instead.
-        """
+        """Whether a PROPERTY feature, a PART feature, or a one-place capacity is fixed for a
+        category term, and by which test: ``(1, test)`` or ``(0, test)`` when every possible
+        member has that value, and ``(None, test)`` otherwise. A scalar pole in the restriction
+        holds nothing, because no rule reads a pole."""
         key = (term.plain, feature)
         if key not in self._fixed:
-            self._fixed[key] = self._fixed_test(term.plain, self.features[feature])
+            restriction = tuple(
+                (literal.feature, literal.positive)
+                for literal in term.restriction
+                if not literal.pole
+            )
+            self._fixed[key] = self.world.fixed(
+                term.category, restriction, feature, self.cone_limit
+            )
         return self._fixed[key]
-
-    def _fixed_test(self, term: CategoryTerm, feature: Feature) -> tuple[int | None, str]:
-        category = None if term.category == THING else self.categories[term.category]
-        n_free = len(self.features.free)
-        if category is None:
-            base = np.zeros(n_free, dtype=np.uint8)
-            held = np.zeros(n_free, dtype=bool)
-        else:
-            base = category.free_values.astype(np.uint8).copy()
-            held = category.defining_mask().copy()
-        filters: list[tuple[Feature, int]] = []
-        for literal in term.restriction:
-            if literal.pole:
-                continue
-            restricted = self.features[literal.feature]
-            if restricted.free:
-                index = self._free_index[restricted.label]
-                if held[index] and base[index] != int(literal.positive):
-                    return None, EXACT  # no member can satisfy the restriction
-                base[index] = int(literal.positive)
-                held[index] = True
-            else:
-                filters.append((restricted, int(literal.positive)))
-
-        targets = [feature] + [f for f, _ in filters]
-        cone = sorted({self._free_index[f.label] for t in targets for f in self.rules.cone(t)})
-        open_features = [i for i in cone if not held[i]]
-        thresholds = {t.key: t for target in targets for t in self.rules.thresholds_of(target)}
-        scalars_fixed = category is not None and self.scalar_config.fixed_below(category.level)
-        literal_values: dict[str, np.ndarray] = {}
-        groups: dict[int, list[Threshold]] = {}
-        for threshold in thresholds.values():
-            if not scalars_fixed:
-                groups.setdefault(threshold.scalar, []).append(threshold)
-        open_groups = [sorted(groups[s], key=lambda t: t.threshold) for s in sorted(groups)]
-        rows = 2 ** len(open_features)
-        for group in open_groups:
-            rows *= len(group) + 1
-        if rows > 2**self.cone_limit:
-            return self._fixed_local(category, base, held, feature)
-
-        grid = settings_array(len(open_features))
-        if open_groups:
-            intervals = np.array(
-                list(itertools.product(*[range(len(g) + 1) for g in open_groups])), dtype=np.intp
-            )
-        else:
-            intervals = np.zeros((1, 0), dtype=np.intp)
-        binary_index = np.repeat(np.arange(grid.shape[0]), intervals.shape[0])
-        interval_index = np.tile(np.arange(intervals.shape[0]), grid.shape[0])
-        free_values = np.tile(base, (rows, 1))
-        free_values[:, open_features] = grid[binary_index]
-        if scalars_fixed:
-            assert category is not None
-            for key, threshold in thresholds.items():
-                value = int(category.scalars[threshold.scalar - 1] > threshold.threshold)
-                literal_values[key] = np.full(rows, value, dtype=np.uint8)
-        for g, group in enumerate(open_groups):
-            chosen = intervals[interval_index, g]
-            for j, threshold in enumerate(group):
-                # a scalar value in interval i makes the first i literals true
-                literal_values[threshold.key] = (chosen > j).astype(np.uint8)
-
-        cache: dict[str, np.ndarray] = {}
-
-        def column(target: Feature) -> np.ndarray:
-            return evaluate_feature(
-                target, free_values, self.features, self._rules_by_output, cache, literal_values
-            )
-
-        keep = np.ones(rows, dtype=bool)
-        for restricted, value in filters:
-            keep &= column(restricted) == value
-        outputs = column(feature)[keep]
-        if len(outputs) and outputs.min() == outputs.max():
-            return int(outputs[0]), EXACT
-        return None, EXACT
-
-    def _fixed_local(
-        self, category: Category | None, base: np.ndarray, held: np.ndarray, feature: Feature
-    ) -> tuple[int | None, str]:
-        """The local test, for a cone too large to enumerate: the taxonomy generator's test on a
-        copy of the category in which the held features are defining. Literals on determined
-        features are left out, which can only miss a fixed feature."""
-        if feature.free:
-            index = self._free_index[feature.label]
-            return (int(base[index]) if held[index] else None), LOCAL
-        roles = np.where(held, Role.DEFINING_NEW, Role.UNDIAGNOSTIC).astype(np.int8)
-        scalars = np.zeros(self.features.scalar_count) if category is None else category.scalars
-        values = self.rules.compute(base[None, :], scalars[None, :])[0]
-        if category is None:
-            stand_in = Category(THING, (), 0, None, base, values, roles, scalars=scalars)
-            fixed, _ = fixed_by_rule(self.rules, stand_in, self.cone_limit, scalars=None)
-        else:
-            stand_in = dataclasses.replace(category, free_values=base, values=values, roles=roles)
-            fixed, _ = fixed_by_rule(self.rules, stand_in, self.cone_limit, self.scalar_config)
-        return (int(values[feature.position]) if fixed[feature.position] else None), LOCAL
 
     # Evaluation ------------------------------------------------------------------------------
 
@@ -664,6 +609,7 @@ class Truth:
         return dataclasses.replace(proposition, grounding=evaluation.grounding)
 
     def _term_problem(self, term: Any, what: str) -> str:
+        world = self.world
         if not isinstance(term, CategoryTerm):
             return f"the {what} of a class-level proposition is a category term"
         if term.category != THING and term.category not in self.categories:
@@ -674,24 +620,22 @@ class Truth:
                     return f"unknown scalar pole {literal.feature!r}"
                 if not literal.positive:
                     return "a scalar pole in a restriction is never negated"
-            elif literal.feature not in self.features or self.features[
-                literal.feature
-            ].type not in (
-                IS,
-                HAS,
-            ):
-                return f"{literal.feature!r} is not an IS or HAS feature"
+            elif world.feature_kind.get(literal.feature) not in (IS, HAS):
+                return f"{literal.feature!r} is not a PROPERTY or PART feature"
         for clause in term.clauses:
             if clause.kind == CAN:
-                if clause.label not in self.features or self.features[clause.label].type != CAN:
-                    return f"{clause.label!r} is not a CAN feature"
+                if world.feature_kind.get(clause.label) != CAN:
+                    return f"{clause.label!r} is not a one-place event type"
                 if clause.other is not None:
-                    return "a CAN feature in a relative clause has no other category"
+                    return "a one-place event type in a relative clause has no other category"
             elif clause.kind == VERB:
-                if clause.label not in self.verbs:
-                    return f"unknown verb {clause.label!r}"
+                if clause.label not in world.binary:
+                    return f"unknown two-place event type {clause.label!r}"
                 if (clause.patient is None) == (clause.agent is None):
-                    return "a verb in a relative clause has a patient category or an agent category"
+                    return (
+                        "a two-place event type in a relative clause has a patient category or "
+                        "an agent category"
+                    )
                 problem = self._term_problem(clause.other, "category of a relative clause")
                 if problem:
                     return problem
@@ -699,16 +643,22 @@ class Truth:
                     return "a relative clause is about a category, not about the generic noun"
             else:
                 return (
-                    "a class-level relative clause holds a CAN feature or a verb, not "
-                    f"{clause.kind!r}"
+                    "a class-level relative clause holds a one-place or a two-place event type, "
+                    f"not {clause.kind!r}"
                 )
         return ""
 
     def _predicate_problem(self, predicate: Predicate) -> str:
+        world = self.world
         kind, label = predicate.kind, predicate.label
         if kind in FEATURE_KINDS:
-            if label not in self.features or self.features[label].type != kind:
-                return f"{label!r} is not {'an' if kind == IS else 'a'} {kind.upper()} feature"
+            if world.feature_kind.get(label) != kind:
+                what = {
+                    IS: "a PROPERTY feature",
+                    HAS: "a PART feature",
+                    CAN: "a one-place event type",
+                }
+                return f"{label!r} is not {what[kind]}"
         elif kind == SCALAR:
             if not self.is_pole(label):
                 return f"unknown scalar pole {label!r}"
@@ -716,15 +666,15 @@ class Truth:
             if label not in self.categories:
                 return f"unknown category {label!r}"
         elif kind == PROJECTION:
-            if label not in self._projection:
-                return f"unknown patient projection {label!r}"
+            if label not in world.patient_capacities:
+                return f"unknown patient capacity {label!r}"
         elif kind == VERB:
-            if label not in self.verbs:
-                return f"unknown verb {label!r}"
+            if label not in world.binary:
+                return f"unknown two-place event type {label!r}"
         else:
             return f"unknown predicate kind {kind!r}"
         if (kind == VERB) != (predicate.patient is not None):
-            return "a verb, and only a verb, has a patient"
+            return "a two-place event type, and only one, has a patient"
         return ""
 
     def _evaluate_class(self, proposition: Proposition) -> Evaluation:
@@ -735,32 +685,45 @@ class Truth:
         if problem:
             return _invalid(problem)
         assert isinstance(subject, CategoryTerm)
-        if quantifier not in QUANTIFIERS:
-            return _invalid(f"unknown quantifier {quantifier!r}")
-        if quantifier in (ALL, NO) and not polarity:
-            return _invalid(f"{quantifier} never has a negative polarity")
         if predicate.comparison is not None:
             return _invalid("a class-level scalar pole takes its comparison class from the tree")
+        if kind == SCALAR:
+            if quantifier is not None:
+                return _invalid("a class-level scalar pole has no quantifier")
+        elif quantifier not in QUANTIFIERS:
+            return _invalid(f"unknown quantifier {quantifier!r}")
+        if quantifier in UNIVERSALS and not polarity:
+            return _invalid(f"{quantifier} never has a negative polarity")
+        if quantifier in NEC_QUANTIFIERS:
+            if kind not in NEC_KINDS:
+                return _invalid(
+                    f"{quantifier} applies to one-place predicates only: relation facts and "
+                    f"patient capacities take the extensional quantifiers"
+                )
+            if subject.clauses:
+                return _invalid(
+                    f"{quantifier} needs a fixed test, and a subject with a relative clause has "
+                    f"none: it takes the extensional quantifiers"
+                )
         members = self.members(subject)
         if len(members) == 0:
             return _invalid("the subject set is empty")
-        observed = self.quantifiers.all_grounding == "observed"
-        if subject.clauses and quantifier in (ALL, NO) and not observed:
-            return _invalid(
-                "a subject with a relative clause takes all and no only under the observed reading"
-            )
 
         if kind == SCALAR:
-            if quantifier != GENERIC:
-                return _invalid("a class-level scalar pole takes the generic only")
+            if subject.restriction or subject.clauses:
+                return _invalid(
+                    "a class-level scalar pole is a statement about the category, not about a "
+                    "restricted set"
+                )
             return self._class_scalar(subject, members, predicate.label, polarity)
         if kind == MEMBER:
-            if quantifier not in (ALL, NO, GENERIC):
-                return _invalid("a membership sentence takes all, no, or the generic")
+            if quantifier not in UNIVERSALS:
+                return _invalid("a membership sentence takes all, nec_all, no, or nec_no")
             return self._class_member(subject, members, predicate.label, quantifier, polarity)
 
-        fixed_value: int | None = None
         grounding: dict[str, Any]
+        fixed_value: int | None = None
+        fixed_test = EXACT
         if kind == VERB:
             patient = predicate.patient
             problem = self._term_problem(patient, "patient")
@@ -774,46 +737,39 @@ class Truth:
             count = int(self.matrix(predicate.label)[np.ix_(members, patients)].sum())
             total = pairs
             grounding = {"proportion": _number(count / total), "pairs": total, "test": OBSERVED}
-            by_law = False
         else:
             if kind == PROJECTION:
-                if quantifier in (ALL, NO) and not observed:
-                    return _invalid(
-                        "a patient projection takes all and no only under the observed reading"
-                    )
                 column = self.projection(predicate.label)[members]
-                by_law = False
             else:
-                column = self.values[members, self.features[predicate.label].position]
-                by_law = not observed and not subject.clauses
+                column = self.world.column(predicate.label)[members]
             count, total = int(column.sum()), len(members)
             grounding = {"proportion": _number(count / total), "instances": total}
-            if kind in FEATURE_KINDS:
+            if kind in FEATURE_KINDS and not subject.clauses:
                 fixed_value, fixed_test = self.fixed(subject, predicate.label)
                 grounding["fixed"] = fixed_value is not None
             grounding["test"] = OBSERVED
 
-        def holds_for_all(value: int) -> bool:
-            """``all`` (value 1) or ``no`` (value 0): by the fixed test, or over the instances."""
-            if by_law:
-                return fixed_value == value
-            return count == (total if value else 0)
-
         asserted = count if polarity else total - count
-        means = self.quantifiers.generic_means if quantifier == GENERIC else quantifier
-        if means == NO:
-            true = holds_for_all(0)
-        elif means == ALL:
-            true = holds_for_all(1 if polarity else 0)
-        elif means == MOST:
-            true = asserted >= self.quantifiers.most_min_proportion * total - 1e-9
+        if quantifier in NEC_QUANTIFIERS:
+            true = fixed_value == (1 if quantifier == NEC_ALL else 0)
+            grounding["test"] = fixed_test
+        elif quantifier in (ALL, NO):
+            true = asserted == total if quantifier == ALL else count == 0
+        elif quantifier == MOST:
+            true = asserted > total / 2
         else:
             true = asserted > 0
-        if by_law and means in (ALL, NO):
-            grounding["test"] = fixed_test
-        felicitous = true
-        if quantifier == SOME and self.quantifiers.some_exclude_all:
-            felicitous = true and not holds_for_all(1 if polarity else 0)
+        felicitous = true and self.statable(proposition)
+        if quantifier == MOST:
+            felicitous = felicitous and asserted >= self.quantifiers.most_usage_min * total - 1e-9
+        if quantifier == SOME and self.quantifiers.some_exclude_all and felicitous:
+            # the implicature: "some" is left out when the language's "all" (or "no") is true
+            universal = self.universal(not polarity)
+            if universal in NEC_QUANTIFIERS:
+                universal_true = kind in FEATURE_KINDS and fixed_value == (1 if polarity else 0)
+            else:
+                universal_true = asserted == total
+            felicitous = not universal_true
         return Evaluation(True, true, felicitous, grounding)
 
     def _class_scalar(
@@ -822,9 +778,9 @@ class Truth:
         if subject.category == THING:
             return _invalid("the generic noun has no comparison class")
         parent = self.categories[subject.category].parent
-        comparison = self._below[THING if parent is None else parent.label]
-        scalar, side = self._pole(pole)
-        column = self.scalars[:, scalar]
+        comparison = self.world.below(THING if parent is None else parent)
+        scalar, side = self.world.pole_parts(pole)
+        column = self.world.scalar_column(scalar)
         value = float(column[members].mean())
         mean, sd = float(column[comparison].mean()), float(column[comparison].std())
         if sd == 0:
@@ -836,7 +792,7 @@ class Truth:
         true = has_pole == polarity
         grounding = {
             "value": _number(value),
-            "comparison": THING if parent is None else parent.label,
+            "comparison": THING if parent is None else parent,
             "mean": _number(mean),
             "sd": _number(sd),
             "instances": len(members),
@@ -858,16 +814,17 @@ class Truth:
             return _invalid("a category is not said to be a member of itself")
         above = category in self.ancestors(subject.category)
         apart = self.disjoint(subject.category, category)
-        if quantifier == NO or not polarity:
-            true = apart
-        else:
-            true = above
-        share = np.isin(members, self._below[category]).mean()
+        true = apart if quantifier in (NO, NEC_NO) else above
+        share = np.isin(members, self.world.below(category)).mean()
         grounding = {"proportion": _number(share), "instances": len(members), "test": TREE}
-        return Evaluation(True, true, true, grounding)
+        felicitous = true and self.statable(
+            Proposition(CLASS, subject, Predicate(MEMBER, category), polarity, quantifier)
+        )
+        return Evaluation(True, true, felicitous, grounding)
 
     def _evaluate_instance(self, proposition: Proposition) -> Evaluation:
         subject, predicate = proposition.subject, proposition.predicate
+        world = self.world
         if proposition.quantifier is not None:
             return _invalid("an instance-level proposition has no quantifier")
         if proposition.scene is not None or proposition.event is not None:
@@ -883,7 +840,7 @@ class Truth:
             return _invalid("a scalar pole, and only a scalar pole, has a comparison class")
         grounding: dict[str, Any]
         if kind in FEATURE_KINDS:
-            value = bool(self.values[index, self.features[label].position])
+            value = bool(world.column(label)[index])
             grounding = {"value": int(value), "test": VALUE}
         elif kind == PROJECTION:
             value = bool(self.projection(label)[index])
@@ -895,10 +852,10 @@ class Truth:
             comparison = predicate.comparison
             if comparison not in self.paths[index]:
                 return _invalid(f"{subject} is not below the comparison class {comparison!r}")
-            mask, mean, sd = self.pole_mask(label, self._below[comparison])
+            mask, mean, sd = self.pole_mask(label, world.below(comparison))
             value = bool(mask[index])
             grounding = {
-                "value": _number(self.scalars[index, self._pole(label)[0]]),
+                "value": _number(world.scalar_column(world.pole_parts(label)[0])[index]),
                 "mean": _number(mean),
                 "sd": _number(sd),
                 "test": VALUE,
@@ -916,22 +873,48 @@ class Truth:
 
     # Events ----------------------------------------------------------------------------------
 
-    def add_scene(self, scene: Any) -> None:
+    def add_scene(self, history: History) -> None:
         """Make a scene known, so that event-level propositions about it can be judged."""
-        self.scenes[scene.label] = scene
+        self.scenes[history.label] = history
+        self._events[history.label] = scene_events(history)
+        self._states.pop(history.label, None)
 
-    def verb_names(self, verb: str) -> tuple[str, ...]:
-        """The labels that can name an event of a verb: the verb, then the verb categories above
-        it, from the nearest. A CAN feature has only its own label."""
-        return (verb,) + self._verb_ancestors.get(verb, ())
+    def events_of(self, scene: str) -> tuple[SceneEvent, ...]:
+        return self._events[scene]
+
+    def verb_names(self, event_type: str) -> tuple[str, ...]:
+        """The labels that can name an event of an event type: the event type, then the
+        categories above it, from the nearest. A one-place event type has only its own label."""
+        return self.world.event_names(event_type)
 
     def allows(self, label: str, agent: str, patient: str | None) -> bool:
-        """Whether the world allows an event: the agent has the CAN feature, or the verb's
-        relation (a verb category's base relation) holds for the agent and the patient."""
+        """Whether the binding is able: the requirement of the event type (or the base relation
+        of the category) holds for the agent, or for the agent and the patient."""
         row = self.instance_index[agent]
         if patient is None:
-            return bool(self.values[row, self.features[label].position])
-        return bool(self.matrix(label)[row, self.instance_index[patient]])
+            return bool(self.world.able(label)[row])
+        return bool(self.world.able(label)[row, self.instance_index[patient]])
+
+    def states_of(self, scene: str) -> list[State]:
+        """The state at every time point of a scene, by replaying its history."""
+        if scene not in self._states:
+            self._states[scene] = replay(self.world.definition, self.scenes[scene])
+        return self._states[scene]
+
+    def legal_in(self, scene: str, label: str, agent: str, patient: str | None) -> bool:
+        """Whether the binding was legal at some time point of the scene for the event type, or
+        for some event type below the category."""
+        world = self.world
+        binding = tuple(world.instance_index[x] for x in (agent, patient) if x is not None)
+        if not self.allows(label, agent, patient):
+            return False
+        for event_type in world.event_types_below(label):
+            if not self.allows(event_type, agent, patient):
+                continue
+            for state in self.states_of(scene):
+                if legal(world.definition, state, event_type, [binding])[0]:
+                    return True
+        return False
 
     def _evaluate_event(self, proposition: Proposition) -> Evaluation:
         subject, predicate = proposition.subject, proposition.predicate
@@ -945,12 +928,15 @@ class Truth:
                 f"the proposition has {proposition.tense!r}"
             )
         if proposition.aspect not in ASPECTS:
-            return _invalid(f"an event is simple or progressive, not {proposition.aspect!r}")
+            return _invalid(f"a report is simple or progressive, not {proposition.aspect!r}")
         scene = self.scenes.get(proposition.scene)
         if scene is None:
             return _invalid(f"unknown scene {proposition.scene!r}")
         if predicate.kind not in (CAN, VERB):
-            return _invalid("an event is a CAN feature, or a verb with a patient instance")
+            return _invalid(
+                "an event is a one-place event type, or a two-place event type with a patient "
+                "instance"
+            )
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
@@ -963,18 +949,74 @@ class Truth:
         if patient == subject:
             return _invalid("an instance is never related to itself")
         assert isinstance(subject, str)
+        if proposition.event is not None and scene_of(proposition.event) != scene.label:
+            return _invalid(f"the event {proposition.event} is not in the scene {scene.label}")
         matching = [
             event
-            for event in scene.events
+            for event in self.events_of(scene.label)
             if event.agent == subject
             and event.patient == patient
-            and predicate.label in self.verb_names(event.verb)
+            and predicate.label in self.verb_names(event.type)
             and proposition.event in (None, event.label)
-            and proposition.aspect == event.aspect
         ]
         grounding: dict[str, Any] = {"scene": scene.label}
         if matching:
             grounding["step"] = matching[0].step
-        grounding["possible"] = self.allows(predicate.label, subject, patient)
+        grounding["able"] = self.allows(predicate.label, subject, patient)
+        grounding["legal"] = bool(matching) or self.legal_in(
+            scene.label, predicate.label, subject, patient
+        )
         grounding["test"] = OCCURRED
         return Evaluation(True, bool(matching), bool(matching), grounding)
+
+
+__all__ = [
+    "ALL",
+    "ASPECTS",
+    "CAN",
+    "CLASS",
+    "COUNTERPART",
+    "EVENT",
+    "EXACT",
+    "FEATURE_KINDS",
+    "HAS",
+    "INSTANCE",
+    "IS",
+    "KINDS",
+    "LEVELS",
+    "LOCAL",
+    "MEAN",
+    "MEMBER",
+    "MOST",
+    "NEC_ALL",
+    "NEC_KINDS",
+    "NEC_NO",
+    "NEC_QUANTIFIERS",
+    "NEGATIVE_ORDER",
+    "NO",
+    "OBSERVED",
+    "OCCURRED",
+    "PAST",
+    "POSITIVE_ORDER",
+    "PRESENT",
+    "PROGRESSIVE",
+    "PROJECTION",
+    "QUANTIFIERS",
+    "SCALAR",
+    "SIMPLE",
+    "SOME",
+    "TENSES",
+    "TREE",
+    "UNIVERSALS",
+    "VALUE",
+    "VERB",
+    "CategoryTerm",
+    "Clause",
+    "Evaluation",
+    "Literal",
+    "Predicate",
+    "Proposition",
+    "Truth",
+    "event_of",
+    "scene_of",
+]

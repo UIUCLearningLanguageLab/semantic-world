@@ -1,12 +1,12 @@
 # The corpus generator
 
-The corpus generator writes documents about the world that the taxonomy generator makes. The documents are in an artificial language. Every sentence states a proposition about the world, and every proposition is checked true against the world's data before it is written. Every sentence is stored with its words, its parse tree, and its logical form, so we always know what a sentence means and why it is true.
+The corpus generator writes documents about a world of the world package (`python/semantic_world/world/`), which embeds a taxonomy of the taxonomy generator and adds fluents, event types with preconditions and effects, and time. The documents are in an artificial language. Every sentence states a proposition about the world, and every proposition is checked true against the world's data before it is written. Every sentence is stored with its words, its parse tree, and its logical form, so we always know what a sentence means and why it is true.
 
 The corpus is a controlled source of language for models. Settings decide which kinds of documents the corpus holds, how the language orders and marks its words, and how ambiguous its surface is. Test sets of matched true and false sentences come with every corpus.
 
 This guide covers running the generator, the ideas behind it, the output files, the test sets, the configuration file, and the Python interface. The design is specified in `docs/specs/CORPUS_GENERATOR.md`, and every design decision is listed in `docs/DECISIONS.md`.
 
-**Status.** Complete: the lexicon, propositions and their truth, scenes and events, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline.
+**Status.** Complete on the world package (stage a5a of `docs/specs/WORLD_AND_LANGUAGE.md`): the lexicon, propositions and their truth, scenes as histories of the world, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline. States, changes, and causal statements in the documents come with stage a7.
 
 ## Quick start
 
@@ -19,22 +19,22 @@ PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/tiny.yaml
 The program prints one line:
 
 ```
-wrote runs/corpus/tiny_seed1: 20 documents, 152 sentences, 870 tokens, 16 scenes, 16 test sets with 258 pairs
+wrote runs/corpus/tiny_seed1: 20 documents, 193 sentences, 974 tokens, 14 scenes, 16 test sets with 262 pairs
 ```
 
-The tiny corpus is about the tiny relations world of the taxonomy generator: 6 categories, 12 instances, 1 scalar dimension, and a few verbs. It is small enough to read every file by eye. The generator makes the taxonomy in memory from `data/taxonomy/tiny_relations.yaml`, so no taxonomy run needs to exist first.
+The tiny corpus is about the tiny world, `data/world/tiny.yaml`: the tiny relations taxonomy (6 categories, 12 instances, 1 scalar dimension, 4 one-place and 4 two-place event types) with 4 fluents. It is small enough to read every file by eye. The generator defines the world in memory from its configuration file, so no world run needs to exist first.
 
-The default corpus is 10,000 documents about the default world with verbs:
+The default corpus is 10,000 documents about the default world, `data/world/default.yaml`:
 
 ```
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints `10000 documents, 92464 sentences, 455011 tokens, 10062 scenes, 16 test sets with 7368 pairs`, and takes under a minute on a laptop.
+It prints `10000 documents, 89439 sentences, 396438 tokens, 10055 scenes, 16 test sets with 7577 pairs`, and takes about a minute and a half on a laptop.
 
 Two options change a run without editing the configuration:
 
-- `--seed N` replaces the corpus's master seed. The corpus seed is independent of the taxonomy's seed, so the same world can get different corpora.
+- `--seed N` replaces the corpus's master seed. The corpus seed is independent of the world's seed, so the same world can get different corpora.
 - `--out DIR` writes the output folder somewhere else. The default is `runs/corpus/<name>_seed<seed>/`.
 
 The example configurations in `data/corpus/` are:
@@ -46,20 +46,20 @@ The example configurations in `data/corpus/` are:
 
 ## One sentence, four renderings
 
-Every sentence is written four ways. Here is the first sentence of the tiny corpus:
+Every sentence is written four ways. Here is a sentence from a situational narrative of the tiny corpus (`DOC.6.SENT.15`):
 
 | Rendering | The sentence |
 | --- | --- |
-| Conceptual | `A C1.2 THAT V1.1 A C2.2 V2 A C2.1` |
-| Formal | `a/L.36 C1.2/L.3 that/L.49 V1.1/L.27 a/L.36 C2.2/L.6 V2/L.31 a/L.36 C2.1/L.5` |
-| Propositional | `C1.2(R.1) AND C2.2(R.2) AND EVENT(SN.1.1, PAST, SIMPLE, V1.1(R.1, R.2)) AND C2.1(R.3) AND EVENT(SN.1.2, PAST, SIMPLE, V2(R.1, R.3))` |
-| Spelled | `gea stess lur tect gea spurtish lonseetet gea clonstanzive` |
+| Conceptual | `THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 EVENTTYPE1.3` |
+| Formal | `the/LEXEME.37 CATEGORY.1.2/LEXEME.3 with/LEXEME.46 PART.5/LEXEME.19 that/LEXEME.49 EVENTTYPE1.1/LEXEME.23 EVENTTYPE1.3/LEXEME.25` |
+| Propositional | `CATEGORY.1.2(REF.5) AND PART.5(REF.5) AND EVENT(SCENE.4.EVENTINSTANCE.5, PAST, PROGRESSIVE, EVENTTYPE1.1(REF.5)) AND EVENT(SCENE.4.EVENTINSTANCE.12, PAST, SIMPLE, EVENTTYPE1.3(REF.5))` |
+| Spelled | `gea stess fah yarsh urs nisitch frassus` |
 
-In English, with made-up glosses, the sentence says "a penguin that chased a fish hunted a seal". `C1.2`, `C2.2`, and `C2.1` are categories. `V1.1` is a verb, and `V2` is a verb category: a more general verb, like "hunt" above "chase".
+In English, with made-up glosses, the sentence says "the penguin with fins that was swimming dove". `CATEGORY.1.2` is a category, `PART.5` a part, and `EVENTTYPE1.1` and `EVENTTYPE1.3` are one-place event types. The relative clause reports an earlier event of the same scene, in the progressive; the main clause reports a later one.
 
 - **Conceptual.** The sentence's words in order, each replaced by its concept's label. The conceptual rendering is a perfectly tokenized version of the language: it has the same word order, morphology, and ambiguities as the spelled rendering, but every word is a symbol for its meaning.
-- **Formal.** Each word as its gloss and its lexeme label (`L.3`). It differs from the conceptual rendering only when synonyms are on, because two synonyms share a concept but are different lexemes.
-- **Propositional.** The logical form. Every noun, modifier, and clause becomes its own proposition, joined by `AND`. Referents are labeled `R.1`, `R.2`, and so on within each document, so the rendering shows which noun phrases refer to the same thing. The propositional rendering is never ambiguous.
+- **Formal.** Each word as its gloss and its lexeme label (`LEXEME.3`). It differs from the conceptual rendering only when synonyms are on, because two synonyms share a concept but are different lexemes.
+- **Propositional.** The logical form. Every noun, modifier, and clause becomes its own proposition, joined by `AND`. Referents are labeled `REF.1`, `REF.2`, and so on within each document, so the rendering shows which noun phrases refer to the same thing. The propositional rendering is never ambiguous.
 - **Spelled.** The readable spellings of the language's spoken word forms. These come from the word-form pipeline, after the corpus is made (see "Spoken word forms"). Before that, the spelled rendering is empty, and `corpus.txt` holds the formal rendering.
 
 A model can be trained on any of the four. Comparing the conceptual and the spelled renderings isolates the effect of lexical form: the structure is identical, and only the words differ. The propositional rendering removes the language altogether.
@@ -72,15 +72,16 @@ Labels follow the project's convention: formal labels, indices starting at 1, an
 
 | Object | Label | Example |
 | --- | --- | --- |
-| Lexeme (a word of the language) | `L.<n>` | `L.42` |
-| Document | `D.<n>` | `D.17` |
-| Sentence | `D.<n>.<k>` | `D.17.3` is sentence 3 of document 17 |
-| Scene | `SN.<n>` | `SN.8` |
-| Event | `SN.<n>.<k>` | `SN.8.5` is event 5 of scene 8 |
-| Referent, within one document | `R.<n>` | `R.2` is the second thing mentioned in its document |
-| Variable, within one sentence | `X.<n>` | `X.1` in a quantified proposition |
+| Lexeme (a word of the language) | `LEXEME.<n>` | `LEXEME.42` |
+| Document | `DOC.<n>` | `DOC.17` |
+| Sentence | `DOC.<n>.SENT.<k>` | `DOC.17.SENT.3` is sentence 3 of document 17 |
+| Scene | `SCENE.<n>` | `SCENE.8` |
+| Event | `SCENE.<n>.EVENTINSTANCE.<k>` | `SCENE.8.EVENTINSTANCE.5` is event 5 of scene 8, in time order |
+| Proposition | `PROP.<n>` | `PROP.120`, the same wherever the proposition is said |
+| Referent, within one document | `REF.<n>` | `REF.2` is the second thing mentioned in its document |
+| Variable, within one sentence | `VAR.<n>` | `VAR.1` in a quantified proposition |
 
-Categories, features, instances, and verbs keep their taxonomy labels (`C1.3.2`, `IS.12`, `I1.3.2.5`, `V1.2`). A scalar pole is its dimension with `HIGH` or `LOW` (`SC.1.HIGH`: "big"). The generic noun "thing" is `THING`, and a function word's concept is its gloss in capitals (`THE`).
+Categories, features, instances, and event types carry the world's labels (`CATEGORY.1.3.2`, `PROPERTY.12`, `PART.4`, `INSTANCE.1.3.2.5`, `EVENTTYPE1.3` for a one-place event type, `EVENTTYPE2.1.2` for a two-place one, and `EVENTTYPE2.1` for a category of two-place event types). A patient capacity is `CANBE.` before its event type (`CANBE.EVENTTYPE2.1.1`: "edible"). A scalar pole is its dimension with `HIGH` or `LOW` (`SCALARDIM.1.HIGH`: "big"). The generic noun "thing" is `THING`, and a function word's concept is its gloss in capitals (`THE`).
 
 ### The lexicon
 
@@ -89,18 +90,18 @@ Every concept of the world gets a word:
 | Concept | Part of speech | Example gloss |
 | --- | --- | --- |
 | Every category, at every level | noun | penguin, bird, animal |
-| IS feature | adjective | red |
-| HAS feature | part noun | fins |
-| CAN feature | intransitive verb | swim |
-| Verb | transitive verb | chase |
-| Verb category | transitive verb, more general | hunt |
-| Exposed patient projection | adjective | edible |
+| PROPERTY feature | adjective | red |
+| PART feature | part noun | fins |
+| One-place event type | intransitive verb | swim |
+| Two-place event type | transitive verb | chase |
+| Category of two-place event types | transitive verb, more general | hunt |
+| Patient capacity of a two-place event type | adjective | edible |
 | Scalar dimension | two adjectives, one per pole | big, small |
 | The generic noun | noun | thing |
 
 The language also has 15 function words: `a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that`, and `it`. Grammar settings can add more (see "Grammar").
 
-The default world gives 188 lexemes: 173 content words and the 15 function words. A verb whose relation holds for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such verbs.
+The default world gives 188 lexemes: 173 content words and the 15 function words. One patient capacity in four gets a word (`lexicon.named_proportion.patient_projection: 0.25`). A two-place event type that is able for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such event types under `lexicon.event_types_without_word`. The concept type `state` is listed for stage a7, and names nothing yet.
 
 Two settings, both 0 by default, add lexical ambiguity. `lexicon.synonym_rate` gives a concept a second word. `lexicon.homonym_rate` makes two words of different concepts share one word form. `lexicon.named_proportion` leaves some concepts without a word, so propositions that need them are never stated.
 
@@ -108,35 +109,37 @@ Two settings, both 0 by default, add lexical ambiguity. `lexicon.synonym_rate` g
 
 A proposition is a logical form that the generator checks against the world. There are three levels.
 
-**Class level.** A statement about a category: "most penguins can swim", "penguins are birds", "owls hunt mice". A class-level proposition has a subject category, a predicate, and a quantifier: `all`, `most`, `some`, `no`, or the bare generic ("penguins swim").
+**Class level.** A statement about a category: "most penguins can swim", "penguins are birds", "owls hunt mice". A class-level proposition has a subject category, a predicate, and one of six quantifiers: `nec_all`, `all`, `most`, `some`, `no`, and `nec_no`.
 
-- `most` and `some` are judged by the share of the category's instances with the predicate. `most` needs at least 70% (`quantifiers.most.min_proportion`).
-- `all` and `no` are law-like by default: "all penguins swim" is true only when the world's rules fix swimming for every penguin, not merely when every existing penguin happens to swim. `quantifiers.all_grounding: observed` switches to the plain reading.
-- The bare generic means `most` by default (`quantifiers.generic.means`).
-- A document always states the strongest true quantifier: `all` before `most` before `some`.
+- `nec_all` and `nec_no` are the law-like universals: "all penguins swim" is `nec_all` only when the world's rules fix swimming for every penguin, and "penguins are birds" is `nec_all` because the taxonomy says so. `all` and `no` are the extensional universals: every existing penguin happens to swim. A relation fact ("owls eat mice") and a fact about a subject with a relative clause take the extensional universals only.
+- `most` and `some` are judged by the share of the category's instances with the predicate. `most` needs more than half, and a document states it only from 70% (`quantifiers.most.usage_min`). `some` is not stated when the language's universal is true (`quantifiers.some.exclude_all`).
+- Which quantifiers the words "all" and "no" state is a setting of the language: `quantifiers.universal_words` is `nec` by default, so "all" means `nec_all`; `extensional` makes it mean `all`, and `either` lets it mean both.
+- A bare plural ("penguins swim") states `most` by default (`quantifiers.bare_plural.expresses`), and `nec_all` for a membership fact or a rule statement. The logical form always records the real quantifier, and a sentence's `readings` list the quantifiers that its words allow.
+- A document states the strongest true quantifier that the language can state: `nec_all` before `all` before `most` before `some`. In the default language the extensional `all` has no word, so a fact that holds of every penguin without a rule is stated as `most`.
+- A scalar pole of a category ("penguins are big") has no quantifier: it says that the category's mean stands out against its parent's.
 
 A subject can be restricted: "red penguins", "penguins with fins", "penguins that can swim", "owls that eat mice". A restriction narrows the set of instances that the quantifier counts. "Owls that eat mice" are the owls that can eat at least one mouse.
 
 **Rule statements.** The world's rules can be stated outright. Each term of a rule's minimal formula is a sufficient condition, stated with the generic noun "thing". From a feature document of the tiny corpus:
 
 ```
-ALL IS.4 THING WITHOUT HAS.2 AND WITHOUT HAS.3 AND WITH HAS.5 HAS HAS.7
-ALL THING WITH HAS.7 THAT IS NOT IS.6 CAN CAN.4
+ALL PROPERTY.2 THING WITH PART.1 HAS PART.8
+PROPERTY.7 THING THAT IS NOT PROPERTY.2 CAN EVENTTYPE1.1
 ```
 
-A negated IS feature becomes a relative clause ("that is not red"). Rule statements are exempt from the limits on sentence length, because rules of every complexity must be stateable. In the default world, 86 of the 103 rule terms are stated. The rest read a scalar threshold, which no adjective states exactly, or have no instance.
+A negated PROPERTY feature becomes a relative clause ("that is not red"). A rule statement's quantifier is `nec_all`, said with "all" or with a bare plural, as in the second line. Rule statements are exempt from the limits on sentence length, because rules of every complexity must be stateable. In the default world, 86 of the 103 rule terms are stated. The rest read a scalar threshold, which no adjective states exactly, or have no instance.
 
 **Instance level.** A statement about one instance: "the penguin can swim", "the penguin has stripes", "the penguin is a bird". Truth is read from the instance's own values.
 
-**Event level.** A report that something happened in a scene: "the owl chased the mouse". Every event has a tense and an aspect (simple or progressive), which the logical form always records, even when the language does not mark them.
+**Event level.** A report that something happened in a scene: "the owl chased the mouse". Every report has a tense and an aspect (simple or progressive), which the logical form always records, even when the language does not mark them. The event itself has no aspect: a document chooses the aspect of each report, at `documents.progressive_rate`, and both aspects are true of an event that happened. The report's grounding says whether the binding is `able` (the world allows it) and `legal` (its preconditions held at some time point of the scene).
 
 Class-level and instance-level propositions can be negative: "penguins can not fly", "no fish have fur". About 10% are, by default (`propositions.negation_rate`). Events are never negated.
 
 ### Scenes and events
 
-Narratives need things to happen, so the generator makes scenes. A scene starts with a seed instance and adds 2 to 6 other instances. Instances that are thematically related to the seed are more likely to join: a scene with an owl tends to have mice in it. Each scene then runs for 3 to 8 time steps. At each step, events are drawn among the things the participants can do: an intransitive event ("the penguin swam") for a CAN feature, and a transitive event ("the owl chased the mouse") for a verb whose relation holds for the pair.
+Narratives need things to happen, so the generator makes scenes. A scene is an episode of the world package. It starts with a seed instance and adds 2 to 6 other instances. Instances that are thematically related to the seed are more likely to join: a scene with an owl tends to have mice in it. Each scene then runs for 3 to 8 time steps. At each step, events are drawn among the events that are legal: the agent, or the agent and the patient, must be able to take part (the world's requirements), and the event type's preconditions on their fluents must hold. An event's effects change fluents, so later events depend on earlier ones, and the history records every change. `scenes.jsonl` holds the histories: each scene's seed, participants, initial fluent values, and the events of every step with their changes.
 
-Events never contradict the world: an event happens only where the world allows it. Events are drawn verb first, so a verb that holds for many pairs is no more frequent than one that holds for few. Events do not change anything, so a scene has no plot. Event schemas with changing states are a future addition. Across scenes, a verb that is possible in nearly every scene is still drawn more often than others: in the default world, two verbs get 62% of transitive events. `scene.verb_weights` can rebalance the verbs.
+Events never contradict the world. The selection policy is `scene.policy`: `uniform_event` (the default) draws uniformly among the legal events, so an event type that is legal for many bindings is drawn more often; `uniform_event_type` draws the kind of event by `scene.transitive_share`, then the event type, then the binding, as the old scene generator did. `scene.event_type_weights` rebalances the event types under either policy. In the default world, two-place events are rare under the preconditions: about 6% of the events of a scene have a patient.
 
 ### Documents
 
@@ -149,44 +152,44 @@ The corpus mixes four document types (`documents.mix`):
 | Entity narrative | 20% | An instance | The instance's features, and the events it takes part in, across 2 to 5 scenes |
 | Situational narrative | 30% | A scene | The scene's events in time order, with descriptions of the participants |
 
-Narratives often end early. In the default corpus, about 57% of entity narratives and 63% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
+Narratives often end early. In the default corpus, about 72% of entity narratives and 64% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
 
-Part of an encyclopedic document about category `C1.2`, in the conceptual rendering:
+A category document draws the kind of each sentence (membership, a fact about the topic, a fact about a subcategory, or a relation fact) in proportion to the number of facts of that kind that it can still state (`documents.content_kind_weights: proportional`). A category has far more relation facts to state than facts about itself, so most sentences of a category document in the default world are relation facts. With `equal`, each kind has the same chance. Part of an encyclopedic document about category `CATEGORY.1.1`, in the conceptual rendering:
 
 ```
-C1.2 IS A C1
-MOST C1.2 HAS HAS.6
-SOME C1.2 THAT CAN.1 HAS HAS.4
-C1.2 HAS HAS.8
-MOST C1.1 HAS NO HAS.8
-C1 V2 C1.2
+CATEGORY.1.1 IS A CATEGORY.1
+ALL CATEGORY.1.1 HAS PART.4
+ALL CATEGORY.1.1 IS PROPERTY.7
+SOME CATEGORY.1.1 HAS PART.5
+SOME CATEGORY.1.1 CAN NOT EVENTTYPE1.4
+MOST CATEGORY.1.1 CAN EVENTTYPE2.2 CATEGORY.1.2
 ```
 
-The fifth sentence is a sibling contrast: `C1.2` has `HAS.8`, but most of its sibling `C1.1` lack it.
+The first sentence is a bare plural that states `nec_all`: the taxonomy makes every `CATEGORY.1.1` a `CATEGORY.1`. The second and third say "all" for `nec_all`: a rule fixes the part and the property for the category. A sibling contrast follows a fact with the same predicate about a sibling of the topic, with the other polarity, at `documents.sibling_contrast_rate`.
 
 Sentences from a situational narrative:
 
 ```
-A C2.1 V1.1 A C2.2
-A C1.1 CAN.4
-THE C2 WITH HAS.6 V1.1 THE C2 WITHOUT HAS.6
-THE C1 WITHOUT HAS.6 CAN.4
-THE C2 WITH HAS.6 CAN.4
+A CATEGORY.1.1 EVENTTYPE1.1
+A CATEGORY.1.1 EVENTTYPE1.1
+IT CAN EVENTTYPE2.2 A CATEGORY.1.2
+THE SCALARDIM.1.LOW CATEGORY.1.1 EVENTTYPE1.1
+A CATEGORY.2 EVENTTYPE1.1
 ```
 
-In narratives, an instance is introduced with "a" and mentioned later with "the" or "it". A mention can name an instance by a higher category ("the bird" for a penguin). When a scene has two things that the noun fits, a definite mention adds adjectives or with-phrases until it picks out one: "the C2 with HAS.6" against "the C2 without HAS.6".
+In narratives, an instance is introduced with "a" and mentioned later with "the" or "it". A mention can name an instance by a higher category ("the bird" for a penguin). When a scene has two things that the noun fits, a definite mention adds adjectives or with-phrases until it picks out one: "the small CATEGORY.1.1" against the other `CATEGORY.1.1`. The third sentence is a description of a participant, at `documents.instance_description_rate`.
 
-**The document mix is a lever.** Which words occur together in a document depends on the document type. Narratives put thematically related things together. Category documents put taxonomic neighbors together. In the default corpus:
+**The document mix is a lever.** Which words occur together in a document depends on the document type. Narratives put thematically related things together. Category documents put taxonomic neighbors together, and, with their relation facts, thematically related things as well. In the default corpus:
 
 | Documents | Co-occurrence with thematic relatedness | Co-occurrence with taxonomic similarity |
 | --- | --- | --- |
-| Entity narratives | 0.80 | 0.18 |
-| Situational narratives | 0.72 | 0.15 |
-| Category documents | 0.29 | 0.48 |
-| Category documents, `relation_fact_share: 0` | 0.09 | 0.56 |
-| Feature documents | 0.33 | 0.13 |
+| Entity narratives | 0.58 | 0.11 |
+| Situational narratives | 0.64 | 0.15 |
+| Category documents | 0.55 | 0.22 |
+| Category documents, `relation_fact_share: 0` | 0.09 | 0.55 |
+| Feature documents | 0.36 | 0.10 |
 
-The numbers are Pearson's correlations over the 741 pairs of leaf categories, counting a leaf when its own noun appears. Relation facts carry almost all the thematic signal of category documents. With `documents.relation_fact_share: 0`, category documents become a clean taxonomic condition. `stats.yaml` also gives Spearman's correlations, the same correlations counted by referents, and partial correlations that control each measure for the other.
+The numbers are Pearson's correlations over the 741 pairs of leaf categories, counting a leaf when its own noun appears. Relation facts carry almost all the thematic signal of category documents. With `documents.relation_fact_share: 0`, category documents become a clean taxonomic condition. `stats.yaml` also gives Spearman's correlations, the same correlations counted by referents, partial correlations that control each measure for the other, and a `check` block that says whether situational documents' co-occurrence tracks thematic relatedness more than encyclopedic documents' does, and taxonomic similarity less.
 
 ### Grammar
 
@@ -195,22 +198,23 @@ The default grammar is English-like and uninflected: "the penguin swim". The set
 **Word order.** `grammar.word_order.clause` takes any of the six orders (SVO, SOV, VSO, VOS, OVS, OSV). Two-way settings place determiners, adjectives, with-phrases, relative clauses, adpositions, auxiliaries, and negation before or after their head. The same sentence with `clause: SOV`, `adjective: after`, and `determiner: after`:
 
 ```
-default:  A C1.2 THAT V1.1 A C2.2 V2 A C2.1
-reordered: C1.2 A THAT C2.2 A V1.1 C2.1 A V2
+default:   THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 EVENTTYPE1.3
+reordered: CATEGORY.1.2 THE WITH PART.5 THAT EVENTTYPE1.1 EVENTTYPE1.3
 ```
 
 **Morphology.** Number, tense, and aspect are off by default. Each can be turned on, and realized either as an affix or as a separate function word:
 
 ```
-number and tense as affixes:  MOST C1.2-PLURAL HAVE HAS.6
-                              A C1.2 THAT V1.1-PAST A C2.2 V2-PAST A C2.1
-number and tense as words:    MOST C1.2 PLURAL HAVE HAS.6
-                              A C1.2 THAT V1.1 PAST A C2.2 V2 PAST A C2.1
+number and tense as affixes:  ALL CATEGORY.1.1-PLURAL HAVE PART.4
+                              THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1-PAST EVENTTYPE1.3-PAST
+number and tense as words:    ALL CATEGORY.1.1 PLURAL HAVE PART.4
+                              THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 PAST EVENTTYPE1.3 PAST
+aspect as a word:             THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 PROGRESSIVE EVENTTYPE1.3
 ```
 
 With number on, verbs agree with their subjects (`number.agreement`), and `is` and `has` become `are` and `have` in the plural. Agreement holds across relative clauses, which creates long-distance dependencies. A word takes at most one affix.
 
-**Ambiguity.** The logical form is never ambiguous, but the surface can be. `grammar.can_rate` gives the share of capacities that say "can". At the class level, it is 0.5 by default, so "penguins can swim" and "penguins swim" both occur. At the instance level, it is 1.0, so "the penguin can swim" always has "can". With the instance rate below 1, and tense unmarked, "the penguin swim" can be a capacity or an event. Each sentence records its possible readings (`readings`), worked out from its words alone, and `stats.yaml` reports how many sentences are ambiguous. Under the default grammar, none are.
+**Ambiguity.** The logical form is never ambiguous, but the surface can be. `grammar.can_rate` gives the share of capacities that say "can". At the class level, it is 0.5 by default, so "penguins can swim" and "penguins swim" both occur. At the instance level, it is 1.0, so "the penguin can swim" always has "can". With the instance rate below 1, and tense unmarked, "the penguin swim" can be a capacity or an event. Each sentence records its possible readings (`readings`), worked out from its words alone, and `stats.yaml` reports how many sentences are ambiguous. Under the default grammar, none are. A class-level sentence also lists the quantifiers its words allow: "all" allows `nec_all` in the default language, and a bare plural allows `nec_all` and `most`.
 
 ## Reading the outputs
 
@@ -218,12 +222,12 @@ A run writes one folder:
 
 | File | Contents |
 | --- | --- |
-| `config.yaml` | The resolved configuration, all seeds, the taxonomy's identity, the git commit, package versions, and, after rendering, the word-form run's identity. |
+| `config.yaml` | The resolved configuration, all seeds, the world's identity (its source, name, seed, configuration hash, and rule-set identity), the git commit, package versions, and, after rendering, the word-form run's identity. |
 | `lexicon.csv` | One row per lexeme: `label`, `pos`, `concept`, `word`, `spelling`, `gloss`, and `same_form_as` for a homonym. `word` and `spelling` are filled by rendering. |
 | `documents.jsonl` | One JSON object per document, with every sentence's renderings, tree, and logical form. |
 | `corpus.txt` | Every document in the spelled rendering (the formal rendering before rendering): one sentence per line, a blank line between documents. |
 | `corpus_formal.txt`, `corpus_conceptual.txt`, `corpus_propositional.txt` | The same documents in the other renderings. |
-| `scenes.jsonl` | One object per scene: its seed, its participants, and its events by time step. |
+| `scenes.jsonl` | One history per scene: its seed, its participants, their initial fluent values, and the events of each time step with the changes they made. The schema is the world package's (`tests/fixtures/world/README.md`, "Histories"). |
 | `tests/<set>.jsonl` | The test sets (see "Test sets"). |
 | `stats.yaml` | Counts, lengths, the quantifier mix, ambiguity, mentions, the co-occurrence check, and the size of each test set. |
 | `wordform_request.yaml`, `wordform_meanings.csv` | The request for the word-form pipeline (see "Spoken word forms"). |
@@ -236,10 +240,10 @@ Each document holds its `label`, `type`, `topic`, `scenes`, `referents` (each re
 
 - `label`, `tokens` (lexeme labels), and `words` (word-form labels, after rendering);
 - `text`, `formal`, `conceptual`, and `propositional`: the four renderings;
-- `tree`: the parse tree, as nested lists. The first sentence above is `["S", ["NP-SBJ", ["Det", "L.36"], ["N", "L.3"], ["RC", ...]], ["VP", ["V", "L.31"], ["NP-OBJ", ...]]]`. The subject and object are labeled by function, so a tree reads the same in every word order;
+- `tree`: the parse tree, as nested lists. The sentence above is `["S", ["NP-SBJ", ["Det", "LEXEME.37"], ["N", "LEXEME.3"], ["PP", ...], ["RC", ...]], ["VP", ["V", "LEXEME.25"]]]`. The subject and object are labeled by function, so a tree reads the same in every word order;
 - `logical_form`: the proposition as JSON, with its truth `grounding`: how the truth was decided, and the proportion it rests on;
 - `referents`, `events`, `coreference`, and `distinguished`: for each noun phrase, the thing it refers to and the noun that names it; for each verb, the event it reports; and whether each definite mention picks out its referent alone;
-- `readings`: the kinds of meaning that the sentence's words allow.
+- `readings`: the kinds of meaning that the sentence's words allow: its level, and, for a class-level sentence, the quantifiers.
 
 ## Test sets
 
@@ -255,27 +259,27 @@ The changes are:
 
 - **predicate:** another predicate of the same kind ("penguins can fly" for "penguins can swim");
 - **subject:** another subject of the same level;
-- **quantifier:** another quantifier ("all" for a "most" fact);
+- **quantifier:** another quantifier ("all" for a "most" fact, or the extensional "all" for a law-like one);
 - **role:** agent and patient exchanged ("mice eat owls").
 
 A pair from `class_quantifier` of the tiny corpus, in the conceptual rendering:
 
 ```
-true:   SOME C2.1 IS CANBE.V2.2
-false:  MOST C2.1 IS CANBE.V2.2
+true:   ALL CATEGORY.2.1 IS PROPERTY.4
+false:  ALL CATEGORY.2.1 IS PROPERTY.7
 ```
 
 Three kinds of item have sets of their own:
 
-- **Law-like items.** Under the law-like reading, "all penguins swim" can be false even when every penguin swims, because no rule fixes it. No observation contradicts such an item, so it tests whether a model grasps lawfulness. These items are in the `_lawlike` sets.
-- **Possible and impossible events.** A false event is one that never happened in its document's scenes. It is possible when the world allows it, and impossible when the world rules it out. A possible false event tests memory of the episode. An impossible one can be rejected by world knowledge alone.
+- **Law-like items.** A false `nec_all` or `nec_no` item whose extensional twin is true: every `CATEGORY.2.1` is `PROPERTY.7`, but no rule fixes it, so "all CATEGORY.2.1 are PROPERTY.7" is false as a law. No observation contradicts such an item, so it tests whether a model grasps lawfulness. These items are in the `_lawlike` sets. The pair above is one.
+- **Possible and impossible events.** A false event is one that never happened in its document's scenes. It is possible when the world allows the binding (the agent, or the pair, is `able`), and impossible when the world rules it out. A possible false event tests memory of the episode. An impossible one can be rejected by world knowledge alone. The grounding also says whether the event was `legal` at some time point of the scene.
 - **Items in context.** An instance-level or event-level item names a narrative document, and is tested as a continuation of it. "The penguin" in the item refers to that document's penguin.
 
-Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, and `seen`. True and false items never differ in the format of `input`, so the format never gives the answer away.
+Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, and `seen`. An event item's aspect is drawn for the item, and its false item keeps it. True and false items never differ in the format of `input`, so the format never gives the answer away.
 
-**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. In the default corpus, the share of true items that are seen runs from 2% (`instance_role`) to 90% (`event_predicate_possible`). `stats.yaml` gives the share for each set.
+**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 5% (`instance_role`) to 99% (`event_subject_impossible`). `stats.yaml` gives the share for each set.
 
-The default corpus has 500 pairs in each set, except two law-like sets: the default world runs out of law-like false items at 196 and 172 pairs. `test_sets.size` sets the size, and `test_sets.changes` chooses the changes. Test-set settings never change the documents.
+The default corpus has 500 pairs in each set, except the three law-like sets: the default world runs out of law-like false items at 325, 294, and 458 pairs. `test_sets.size` sets the size, and `test_sets.changes` chooses the changes. Test-set settings never change the documents.
 
 ## Spoken word forms
 
@@ -289,30 +293,36 @@ PYTHONPATH=python python -m semantic_world.corpus render runs/corpus/tiny_seed1 
 
 `generate` writes `wordform_request.yaml`: the lexemes with their parts of speech, the function words in order of their frequency in the corpus, the affixes the grammar needs, and the categories' meaning vectors. The word-form pipeline reads the request, makes pseudowords, assigns them to lexemes, and synthesizes them. `render` fills the spelled rendering, `corpus.txt`, the word columns of `lexicon.csv`, and the word-form run's identity in `config.yaml`. It changes nothing else in the corpus run.
 
-For the tiny corpus, the three steps take under 20 seconds. Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs. For the default corpus, `data/wordforms/corpus_default.yaml` is the matching word-form configuration: it reads the request in `runs/corpus/default_seed1`, and writes `runs/wordforms/corpus_default_seed1`.
+For the tiny corpus, the three steps take under 20 seconds. Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs. The rendered tiny corpus has 974 tokens. For the default corpus, `data/wordforms/corpus_default.yaml` is the matching word-form configuration: it reads the request in `runs/corpus/default_seed1`, and writes `runs/wordforms/corpus_default_seed1`.
 
 The word-form pipeline decides how sound relates to meaning: arbitrary, correlated at a target, marked by branch, or shaped by features. Its guide, `WORDFORMS.md`, covers this under "Assigning words to meanings" and "Word forms for a corpus". The words a lexeme gets never depend on the number of documents or the test sets, so a corpus can grow without its words changing.
 
 ## The configuration file
 
-`data/corpus/default.yaml` lists every parameter with its default. A configuration file only needs the parameters it changes: `tiny.yaml` sets the taxonomy, the document count, and the test-set size, and nothing else. Unknown keys are errors, and every error names the file and the field.
+`data/corpus/default.yaml` lists every parameter with its default. A configuration file only needs the parameters it changes: `tiny.yaml` sets the world, the document count, and the test-set size, and nothing else. Unknown keys are errors, and every error names the file and the field. A key of the old corpus (`taxonomy`, `quantifiers.all_grounding`, `scene.verb_weights`, and the others renamed in stage a5a) is an error that names the new key.
 
 The most useful parameters:
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `taxonomy` | `{config: data/taxonomy/relations.yaml, seed: 1}` | The world: a taxonomy configuration and seed, made in memory, or `{run: <folder>}`, a taxonomy output folder. |
+| `world` | `{config: data/world/default.yaml, seed: 1}` | The world: a world configuration and seed, defined in memory, or `{run: <folder>}`, a world run folder, which is regenerated in memory and checked against the folder. |
 | `documents.count` | 10000 | Number of documents. |
 | `documents.mix` | 0.3, 0.2, 0.2, 0.3 | Shares of category, feature, entity, and situational documents. |
 | `documents.sentences` | 5–15, 5–20 | Length range for each type. Narratives often end sooner, when their events run out. |
-| `documents.relation_fact_share` | null | Share of relation facts in category documents; 0 leaves them out. Null gives them an equal chance with the other kinds. |
+| `documents.content_kind_weights` | proportional | How a category document draws the kind of its next sentence: in proportion to the facts of each kind left to state, or `equal`. |
+| `documents.relation_fact_share` | null | Share of relation facts in category documents; 0 leaves them out. Null leaves the share to `content_kind_weights`. |
+| `documents.progressive_rate` | 0.3 | Share of reports in the progressive aspect. With `documents.one_aspect_per_event` (true), a document reports an event in one aspect. |
 | `documents.sibling_contrast_rate` | 0.2 | How often a category fact is followed by a contrasting sibling fact. |
 | `propositions.negation_rate` | 0.1 | Share of negative propositions, by level. |
-| `propositions.events` | past, 0.3 | The tense of every event, and the share of progressive events. |
-| `quantifiers.all_grounding` | fixed | `fixed` (law-like) or `observed`. |
-| `quantifiers.generic.means` | most | What the bare generic means: `all`, `most`, or `some`. |
-| `quantifiers.weights` | all 1 | Weights that rebalance the quantifier mix. The key for "no" is `none`. |
+| `propositions.events.tense` | past | The tense of every report. |
+| `quantifiers.universal_words` | nec | What "all" and "no" state: the `nec` quantifiers, the `extensional` ones, or `either`. |
+| `quantifiers.most.usage_min` | 0.7 | The share from which a true `most` is stated. |
+| `quantifiers.bare_plural.expresses` | [most] | What a bare plural states, besides `nec_all` for membership and rules. |
+| `quantifiers.generic_rate` | 0.5 | How often a fact that a word could state is said with a bare plural instead. |
+| `quantifiers.weights` | all 1 | Weights that rebalance the quantifier mix. The keys are `nec_all`, `all`, `most`, `some`, `none`, and `nec_none`. |
 | `scene.participant_weights` | thematic 1.0, taxonomic 0.5, constant 0.1 | How scene participants are chosen. |
+| `scene.policy` | uniform_event | How events are drawn at each step: `uniform_event` or `uniform_event_type`. |
+| `scene.event_type_weights` | all 1 | Weights that rebalance the event types. |
 | `mention.level_weights` | heaviest at the leaf | How often a mention names a higher category ("the bird"). |
 | `mention.pronoun_rate` | 0.5 | How often a later mention becomes "it". |
 | `mention.relative_clauses` | rate 0.1, depth 1 | How often noun phrases take relative clauses, and how deep they nest. |
@@ -320,7 +330,7 @@ The most useful parameters:
 | `grammar.morphology` | all off | Number, tense, and aspect: `enabled`, `realization` (`affix` or `word`), and `position`. |
 | `grammar.can_rate` | class 0.5, instance 1.0 | Share of capacities that say "can". |
 | `lexicon.synonym_rate`, `lexicon.homonym_rate` | 0 | Lexical ambiguity. |
-| `renderings.propositional.referents` | local | `local` (`R.1`, `R.2`) or `instance` (taxonomy instance labels). |
+| `renderings.propositional.referents` | local | `local` (`REF.1`, `REF.2`) or `instance` (the world's instance labels). |
 | `test_sets.size` | 500 | Pairs per test set. |
 
 ## Using the generator from Python
@@ -332,12 +342,13 @@ config = load_config("data/corpus/tiny.yaml", seed=1)
 corpus = generate(config)
 corpus.write()                       # writes runs/corpus/tiny_seed1/
 
-document = corpus.documents[0]
-document.type, document.topic        # ('entity', 'I2.1.3')
-sentence = document.to_json()["sentences"][0]
-sentence["conceptual"]               # 'A C1.2 THAT V1.1 A C2.2 V2 A C2.1'
+document = corpus.documents[5]
+document.type, document.topic        # ('situational', 'SCENE.4')
+sentence = document.to_json()["sentences"][14]
+sentence["conceptual"]               # 'THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 EVENTTYPE1.3'
 corpus.stats["ambiguity"]            # the ambiguity counts of stats.yaml
-corpus.planner.result                # the TaxonomyResult the corpus is about
+corpus.planner.world                 # the corpus's view of the world (semantic_world.corpus.World)
+corpus.planner.world.result          # the WorldResult of the world package behind it
 ```
 
 `config_from_mapping` builds a configuration from a dictionary, which is convenient for sweeping a parameter:
@@ -350,7 +361,7 @@ settings["grammar"] = {"word_order": {"clause": "SOV"}}
 corpus = generate(config_from_mapping(settings))
 ```
 
-`generate(config, result)` also takes a `TaxonomyResult` that is already in memory.
+`generate(config, world)` also takes a `World` that is already in memory, from `load_world(config)`.
 
 ## Recipes
 
@@ -359,13 +370,17 @@ corpus = generate(config_from_mapping(settings))
 - **A verb-final language.** `grammar.word_order: {clause: SOV}`. Add `adjective: after` and `relative_clause: before` for a more consistently head-final language.
 - **Agreement and long-distance dependencies.** `grammar.morphology.number: {enabled: true}`, with `mention.relative_clauses: {rate: 0.3, max_depth: 2}`.
 - **An English-like morphology.** Number with `verb_marks: singular` ("the penguin swims", "penguins swim"), and tense as an affix.
-- **An ambiguous surface.** `grammar.can_rate: {class: 0.5, instance: 0.5}`, with tense and aspect unmarked. In the tiny corpus, 42 of the 152 sentences then allow both a capacity and an event reading. `ambiguity` in `stats.yaml` gives the count.
+- **An ambiguous surface.** `grammar.can_rate: {class: 0.5, instance: 0.5}`, with tense and aspect unmarked. In the tiny corpus, 43 of the 193 sentences then allow both a capacity and an event reading. `ambiguity` in `stats.yaml` gives the count.
 - **Symbols only.** Train on `corpus_conceptual.txt` or `corpus_propositional.txt`, and skip the word-form pipeline.
-- **The observed reading.** `quantifiers.all_grounding: observed`, for a world in which "all" means every existing instance. The law-like test sets are then empty.
+- **The extensional universals.** `quantifiers.universal_words: extensional`, for a language in which "all" means every existing instance. The `nec` quantifiers are then stated only by the bare plurals of membership facts and rule statements, which no observation can make law-like, so the law-like test sets are empty.
+- **The old scene generator's draws.** `scene.policy: uniform_event_type` on a world with `fluents: {count: 0}` gives scenes with the participants of the corpus's old scene generator, with the kind of event drawn by `scene.transitive_share`.
 
 ## Troubleshooting
 
-- **"quantifiers.weights.no: is written none".** YAML reads a bare `no` as the boolean false. In `quantifiers.weights`, the quantifier "no" is written `none`.
+- **"quantifiers.weights.no: is written none".** YAML reads a bare `no` as the boolean false. In `quantifiers.weights`, the quantifier "no" is written `none`, and `nec_no` is written `nec_none`.
+- **"taxonomy: is now world".** The corpus is about a world of the world package. Point `world.config` at a world configuration file (`data/world/default.yaml`), which names the taxonomy.
+- **"scene.event_type_weights.EVENTTYPE2.1: not an event type".** A category of event types takes no weight: weight its event types.
+- **"entities.csv differs from the regenerated world".** A run folder given as `world.run` is regenerated from its `config.yaml` and compared. Regenerate the run with the current code, or point the corpus at the world's configuration file instead.
 - **"grammar.morphology.number.on: is now enabled".** The morphology switch is `enabled`. YAML reads a bare `on` as the boolean true.
 - **A document shorter than its range.** Narratives end when their events run out, and encyclopedic documents end when they have nothing more to say. `stats.yaml` reports drawn and achieved lengths for each type.
 - **A small test set.** A world can run out of true items for a set. `stats.yaml` reports the number of pairs in each set.
@@ -378,4 +393,5 @@ corpus = generate(config_from_mapping(settings))
 - `docs/specs/CORPUS_GENERATOR.md`: the full design, including the logical-form schema, the propositional notation, and the test-item schema.
 - `docs/DECISIONS.md`: every design decision, with who proposed and who decided it.
 - `docs/proposals/`: the decisions made during the build, stage by stage.
-- `docs/guides/TAXONOMY.md` and `docs/guides/WORDFORMS.md`: the world and the word forms that the corpus builds on.
+- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model, the labels, and the corpus's move onto it (stage a5a), with the decisions WM.1 to WM.33 and the engineering choices WM.E1 and following in `docs/DECISIONS.md`.
+- `docs/guides/TAXONOMY.md` and `docs/guides/WORDFORMS.md`: the taxonomy inside the world and the word forms that the corpus builds on.

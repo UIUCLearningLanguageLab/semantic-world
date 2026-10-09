@@ -9,10 +9,15 @@ one of three kinds of logical form, one for each level:
 - ``event``: an event-level sentence, about what happened ("the penguin swam").
 
 A noun phrase shows whether it names a category or an instance, so a class-level sentence has the
-one reading ``generic``. A sentence about instances can be ambiguous between ``capacity`` and
-``event``: with ``grammar.can_rate.instance`` below 1 a capacity can drop ``can``, and with the
-tense and the aspect unmarked an event has a bare verb too. "The penguin swim" then has both
-readings.
+one level reading ``generic``, followed by its quantifier readings: the quantifiers that its
+words allow. A bare plural allows every quantifier in ``quantifiers.bare_plural.expresses``,
+and ``nec_all``, because membership and rule statements use the bare plural for ``nec_all``.
+"All" allows ``nec_all``, ``all``, or both, and "no" allows ``nec_no``, ``no``, or both, by
+``quantifiers.universal_words``; "most" and "some" allow ``most`` and ``some``. A class-level
+scalar pole ("penguins are big") is a bare plural with no quantifier reading. A sentence about
+instances can be ambiguous between ``capacity`` and ``event``: with ``grammar.can_rate.instance``
+below 1 a capacity can drop ``can``, and with the tense and the aspect unmarked an event has a
+bare verb too. "The penguin swim" then has both readings.
 
 The readings are worked out from the tree and the lexemes of its leaves alone. Nothing of the
 sentence's record is used: not the events its verb phrases report, and not its logical form. The
@@ -36,12 +41,16 @@ from __future__ import annotations
 
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import Lexicon
+from semantic_world.corpus.propositions import ALL, MOST, NEC_ALL, NEC_NO, NO, SOME
 from semantic_world.corpus.realize import Tree, token_parts
+from semantic_world.corpus.world import PROPERTY_PREFIX, SCALAR_PREFIX
 
 GENERIC = "generic"
 CAPACITY = "capacity"
 EVENT = "event"
 READINGS = (GENERIC, CAPACITY, EVENT)
+QUANTIFIER_READINGS = (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO)
+"""The quantifier readings of a class-level sentence, in the order they are listed."""
 
 _INSTANCE_DETERMINERS = ("a", "the")
 _EVENT_MARKS = {"PAST", "PROGRESSIVE"}
@@ -49,7 +58,7 @@ _EVENT_MARKS = {"PAST", "PROGRESSIVE"}
 
 def readings(tree: Tree, lexicon: Lexicon, config: Config) -> tuple[str, ...]:
     """The readings that a sentence's tree and lexemes allow, in the order ``generic``,
-    ``capacity``, ``event``."""
+    ``capacity``, ``event``, then the quantifier readings of a class-level sentence."""
     return _Reader(lexicon, config).sentence(tree)
 
 
@@ -61,9 +70,22 @@ class _Reader:
         self.bare_capacity = config.grammar.can_rate["instance"] < 1
         """Whether an instance's capacity can be said without ``can``."""
         self.bare_event = (not morphology.tense.enabled or events.event_tense == "present") and (
-            not morphology.aspect.enabled or events.progressive_rate < 1
+            not morphology.aspect.enabled or config.documents.progressive_rate < 1
         )
         """Whether an event can be said with no marker on its verb."""
+        quantifiers = config.quantifiers
+        universal = quantifiers.universal_words
+        self.word_quantifiers: dict[str, tuple[str, ...]] = {
+            "all": {"nec": (NEC_ALL,), "extensional": (ALL,), "either": (NEC_ALL, ALL)}[universal],
+            "no": {"nec": (NEC_NO,), "extensional": (NO,), "either": (NEC_NO, NO)}[universal],
+            "most": (MOST,),
+            "some": (SOME,),
+        }
+        """The quantifiers that each determiner word allows."""
+        self.bare_quantifiers: tuple[str, ...] = tuple(
+            q for q in QUANTIFIER_READINGS if q == NEC_ALL or q in quantifiers.bare_plural_expresses
+        )
+        """The quantifiers that a bare plural allows."""
 
     def gloss(self, node: Tree) -> str:
         return self.lexicon.lexeme(token_parts(self.token(node))[0]).gloss
@@ -105,9 +127,23 @@ class _Reader:
         if subject is None:
             raise ValueError("a sentence has a subject")
         if not self.names_an_instance(subject):
-            return (GENERIC,)
+            return (GENERIC, *self.quantifier_readings(tree, subject))
         allowed = self.walk(tree)
         return tuple(reading for reading in READINGS if reading in allowed)
+
+    def quantifier_readings(self, tree: Tree, subject: Tree) -> tuple[str, ...]:
+        """The quantifiers that a class-level sentence's words allow: those of its determiner
+        word, or of the bare plural. A scalar pole as the predicate word has none."""
+        verb_phrase = self.child(tree, "VP")
+        adjective = None if verb_phrase is None else self.child(verb_phrase, "A")
+        if adjective is not None:
+            concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
+            if concept.startswith(SCALAR_PREFIX):
+                return ()
+        determiner = self.child(subject, "Det")
+        if determiner is None:
+            return self.bare_quantifiers
+        return self.word_quantifiers.get(self.gloss(determiner), ())
 
     def walk(self, node: Tree) -> set[str]:
         """The readings that every verb phrase below a node allows."""
@@ -133,7 +169,7 @@ class _Reader:
             adjective = self.child(node, "A")
             if in_clause and negated and adjective is not None:
                 concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
-                if concept.startswith("IS."):
+                if concept.startswith(PROPERTY_PREFIX):
                     # "that is not red" restricts its noun phrase, at any level
                     return {CAPACITY, EVENT}
             return {CAPACITY}
