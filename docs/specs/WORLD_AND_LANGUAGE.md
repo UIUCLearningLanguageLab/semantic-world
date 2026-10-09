@@ -48,10 +48,12 @@ The older specifications stay as the record of what was built before. Each stage
 
 Where a choice balances something that the world's own constraints would make uneven (frequencies, shares, rates), the balanced form is an option, and the default is the unbalanced form that follows from the world. The world has many frequency confounds that emerge from its constraints, as the real world does. A study that needs one of them removed turns on the balanced option. (Jon, October 7.)
 
+The principle governs the world's own frequencies: which events happen, and how features and event types are distributed. How a document divides its sentences among kinds of content is a choice of the writer, not a frequency of the world, so its default stays balanced (`documents.content_kind_weights: equal`). (Jon, October 8.)
+
 Defaults that change under the principle, in stage a5 (Jon, October 7):
 
-- **The content of category documents.** Each sentence of an encyclopedic document about a category now draws its kind of content (membership, a fact about the topic, a fact about a subcategory, a relation fact, and the new kinds) in proportion to the number of facts of each kind that the document can still state. `documents.content_kind_weights: proportional | equal` (default `proportional`). With `equal`, each kind has the same chance, as before. `documents.relation_fact_share` still overrides the share of relation facts.
-- **Event-type density (REL.15).** By default, the generator resamples an event type only when its requirement holds for no leaf pair or for every leaf pair, and never resamples a constraint for its density. The old checks (every event type within 1–30% of leaf pairs, every constraint at least 10%) stay available as settings.
+- **The content of category documents** (revised October 8). `documents.content_kind_weights: equal | proportional`, default `equal`: each sentence of an encyclopedic document about a category draws its kind of content (membership, a fact about the topic, a fact about a subcategory, a relation fact, and the new kinds) with the same chance, as before. With `proportional`, the kinds are drawn in proportion to the number of facts of each kind that the document can still state. Under `proportional`, about 80% of a category document's sentences in the default world are relation facts, and encyclopedic documents lose their taxonomic structure. `documents.relation_fact_share` still overrides the share of relation facts.
+- **Event-type density (REL.15).** By default, the generator resamples an event type only when its requirement holds for no leaf pair or for every leaf pair, and a constraint only when it holds for no leaf pair or for every leaf pair (approved October 9). The old checks (every event type within 1–30% of leaf pairs, every constraint at least 10%) stay available as settings.
 - **Feature base rates.** Heterogeneity is on by default: each free feature's base rate is drawn from a Beta distribution with the configured mean, so some features are common and others rare. The default concentration is 2. Setting heterogeneity off gives every free feature of a type the same base rate, as before.
 
 ## Terms
@@ -170,6 +172,8 @@ Every label is a word that a human reader can read without a key: a capitalized 
 | Word (stage a6) | `WORD.<n>` | `WORD.12` | `W.12` |
 | Speaker (stage a6) | `SPEAKER.<n>` | `SPEAKER.3` | `S.3` |
 | Token, one recording (stage a6) | `WORD.<n>.SPEAKER.<m>.TOKEN.<k>` | `WORD.12.SPEAKER.3.TOKEN.2` | `W.12.S.3.2` |
+| Augmented token (stage a6) | `<token>.AUGMENTED.<recipe>` | `WORD.12.SPEAKER.3.TOKEN.2.AUGMENTED.1` | new |
+| Token changed by acoustic mapping (stage a6) | `<token>.MAPPED` | `WORD.12.SPEAKER.3.TOKEN.2.MAPPED` | new |
 | Function word (stage a6) | `FUNCWORD.<n>` | `FUNCWORD.2` | `F.2` |
 | Affix (stage a6) | `AFFIX.<n>` | `AFFIX.1` | `AF.1` |
 | Inflected form (stage a6) | `WORD.<n>.AFFIX.<m>` | `WORD.12.AFFIX.1` | `W.12.AF.1` |
@@ -806,7 +810,7 @@ Jon reviewed every decision below on October 7, 2026, in five batches. Each item
 27. **Numeric adjectives are absolute.** A numeric fluent's words are judged against the ends of its range ("full", "empty"), not against a comparison class as "big" is. The language's cuts are 0.75 and 0.25 by default. (Confirmed by Jon, October 7.)
 28. **Numeric causal statements are about effects.** `RAISES` and `LOWERS` state what an effect does, not what was observed, because clamping and drift can hide an effect. Numeric thresholds in preconditions are not stated, as in decision 23. (Confirmed by Jon, October 7.)
 29. **Histories record every numeric change**, with its cause: an event, or drift. (Confirmed by Jon, October 7.)
-30. **Defaults follow the world.** Where a choice balances something that the world's constraints would make uneven, the balanced form is an option and the default follows the world ("A principle for defaults"). Under the principle, category documents draw their kinds of content in proportion to the facts available, event types are resampled only when they hold for no leaf pair or for every leaf pair, and feature base rates are heterogeneous by default. (Jon, October 7.)
+30. **Defaults follow the world.** Where a choice balances something that the world's constraints would make uneven, the balanced form is an option and the default follows the world ("A principle for defaults"). Under the principle, event types and constraints are resampled only when they hold for no leaf pair or for every leaf pair, and feature base rates are heterogeneous by default. (Jon, October 7.) The principle governs the world's own frequencies, not how a document divides its sentences among kinds of content, so category documents keep the balanced default `equal`. (Jon, October 8, reversing the proportional default of October 7.)
 
 ## References
 
