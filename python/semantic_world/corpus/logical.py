@@ -26,7 +26,16 @@ verb, are mentions:
 names, or null for a pronoun. ``restriction`` holds the modifiers. ``clauses`` holds the
 propositions of the relative clause, each with its other mention as ``patient`` or ``agent``,
 and, at the event level, with the event it reports. ``clauses`` is left out when there is none.
-A determiner is no part of the logical form.
+A determiner is no part of the logical form, but ``descriptive`` says what it does (CG.63): in
+a definite mention ("the furry dog") the noun, the modifiers, and the relative clause are
+descriptions, which identify the referent, and ``descriptive`` is true; in an indefinite mention
+("a penguin") they are asserted, the sentence introduces the referent, and it is false; a
+pronoun has no description, and it is false too.
+
+**Causal statements.** The form is the proposition's own: the subject is the event term
+(``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``), the predicate an effect
+or a precondition with its value, and ``causal`` the definition entry that the statement
+states.
 """
 
 from __future__ import annotations
@@ -36,6 +45,12 @@ from typing import Any
 
 from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
 from semantic_world.corpus.propositions import _JSON_KEY, CLASS, SCALAR, Proposition
+
+
+def is_descriptive(phrase: NounPhrase) -> bool:
+    """Whether a mention's noun, modifiers, and relative clause are descriptions (CG.63): a
+    definite mention's are; an indefinite mention's are asserted, and a pronoun has none."""
+    return phrase.determiner == "the"
 
 
 def logical_form(
@@ -57,6 +72,7 @@ def logical_form(
             "referent": labels.get(phrase.referent),
             "noun": phrase.noun,
             "restriction": [str(literal) for literal in phrase.restriction],
+            "descriptive": is_descriptive(phrase),
         }
         clause = phrase.clause
         if clause is not None:

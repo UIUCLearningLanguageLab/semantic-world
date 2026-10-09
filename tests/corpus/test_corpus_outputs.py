@@ -242,6 +242,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
                 "event",
                 "state",
                 "able_now",
+                "causal",
                 *QUANTIFIERS,
             }
 
@@ -349,6 +350,10 @@ def test_test_set_settings_change_no_document(folders) -> None:
         "tests/state_subject_unchanged.jsonl",
         "tests/able_now_subject_blocked.jsonl",
         "tests/able_now_subject_impossible.jsonl",
+        "tests/causal_effect_role.jsonl",
+        "tests/causal_effect_role_lawlike.jsonl",
+        "tests/causal_precondition_role.jsonl",
+        "tests/causal_precondition_role_lawlike.jsonl",
     }
     # the statistics differ only in their block on the test sets
     a, b = yaml.safe_load(base["stats.yaml"]), yaml.safe_load(other["stats.yaml"])
@@ -370,6 +375,7 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         "documents",
         "sentences",
         "states",
+        "causal",
         "quantifiers",
         "tokens",
         "ambiguity",
@@ -472,7 +478,11 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
 
     # ambiguity, mentions, scenes, propositions, the lexicon, and the rule statements
     level_readings = [
-        [r for r in s["readings"] if r in ("generic", "capacity", "event", "state", "able_now")]
+        [
+            r
+            for r in s["readings"]
+            if r in ("generic", "capacity", "event", "state", "able_now", "causal")
+        ]
         for s in sentences
     ]
     readings = Counter("+".join(found) for found in level_readings)
@@ -542,7 +552,14 @@ def test_ambiguous_sentences_are_counted(runs) -> None:
     )
     assert plain["ambiguous"] == with_can > 0
     assert plain["ambiguous_share"] == round(with_can / plain["sentences"], 6)
-    assert set(plain["readings"]) == {"capacity", "capacity+able_now", "event", "generic", "state"}
+    assert set(plain["readings"]) == {
+        "capacity",
+        "capacity+able_now",
+        "causal",
+        "event",
+        "generic",
+        "state",
+    }
     # with "can" left out at times, and no tense or aspect marked, "the penguin swim" is both a
     # capacity and an event
     corpus = runs("default", grammar={"can_rate": {"class": 0.5, "instance": 0.3}})
@@ -727,7 +744,12 @@ def test_statistics_without_test_sets_and_without_documents(cases) -> None:
     assert stats["test_sets"] == {} and stats["documents"]["count"] == 15
     empty = generate(case.config(documents={"count": 0}, test_sets={"size": 5}), case.result)
     assert empty.documents == () and empty.stats["sentences"]["count"] == 0
-    assert all(not test_set.pairs for test_set in empty.test_sets if test_set.level != "class")
+    # the class-level and the causal sets need no document
+    assert all(
+        not test_set.pairs
+        for test_set in empty.test_sets
+        if test_set.level not in ("class", "causal_effect", "causal_precondition")
+    )
     assert empty.stats["cooccurrence"]["by_document_type"]["all"]["words"]["thematic"] == {
         "pearson": None,
         "spearman": None,
@@ -747,7 +769,7 @@ def test_the_generate_command(tmp_path, capsys) -> None:
     assert main(["generate", "data/corpus/tiny.yaml", "--out", str(out)]) == 0
     message = capsys.readouterr().out
     assert message.startswith(f"wrote {out}: 20 documents, ")
-    assert "27 test sets" in message
+    assert "43 test sets" in message
     config = load_config(out / "config.yaml")
     assert (config.name, config.seed, config.documents.count) == ("tiny", 1, 20)
     assert len(lines(out / "documents.jsonl")) == 20

@@ -61,6 +61,17 @@ time point, and take the scene's tense and no aspect:
 
 Their truth is read from the scene's history, replayed through the runtime.
 
+**Causal statements** (``docs/specs/WORLD_AND_LANGUAGE.md``, "Causal statements") are class-level
+and timeless: what events of an event type do and what they need. The subject is an
+:class:`EventTerm`, the things that take a role in events of an event type ("things that things
+catch"), the predicate is an *effect* or a *precondition* of a base fluent with a value, and the
+quantifier is ``nec_all``, because the definition guarantees the statement:
+``NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``.
+An effect statement is true exactly when the event type has that effect, and a precondition
+statement exactly when its precondition holds that literal; a statement about a category of
+event types is true when every event type below the category has the entry. The polarity is
+always positive: the value is in the predicate.
+
 **The language's words** decide what a proposition's words mean, never what the proposition
 means: which quantifiers "all" and "no" express (``quantifiers.universal_words``), the least
 share at which a speaker says "most" (``quantifiers.most.usage_min``), and the implicature of
@@ -137,7 +148,14 @@ VERB = "event_type2"
 """The kind of a two-place event-type predicate (the old ``verb`` kind)."""
 STATE_KIND = "state"
 """The kind of a fluent predicate: a state (``HOLDS``) or a change (``BECOME``)."""
-KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND)
+EFFECT = "effect"
+"""The kind of the predicate of an effect statement: after every event of the subject's event
+type, the participant in the subject's role has the fluent's value (``AFTER``)."""
+PRECONDITION = "precondition"
+"""The kind of the predicate of a precondition statement: before every event of the subject's
+event type, the participant in the subject's role has the fluent's value (``BEFORE``)."""
+CAUSAL_KINDS = (EFFECT, PRECONDITION)
+KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND, EFFECT, PRECONDITION)
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
 PART feature, or a one-place event type (the capacity to be its agent)."""
@@ -167,15 +185,22 @@ VALUE = "value"
 """An instance's own value."""
 OCCURRED = "event"
 """An event-level proposition: whether such an event occurred in the scene."""
+DEFINITION = "definition"
+"""A causal statement: judged by the definition's entries for the event types."""
 
 LABEL_KEY = "label"
-"""The key under which every predicate and clause of the JSON logical form names its symbol."""
-FLUENT_KEY = "fluent"
-"""The key under which a state predicate names its fluent (``{"kind": "state", "fluent":
-"BOOLFL.3"}``, as "States and changes" writes it)."""
-_JSON_KEY = {**dict.fromkeys(KINDS, LABEL_KEY), STATE_KIND: FLUENT_KEY}
+"""The key under which every predicate and clause of the JSON logical form names its symbol,
+the state predicate's fluent included (Jon's ruling of October 9, 2026, on the stage a7a
+question 4: the specification's ``fluent`` key becomes ``label``, like every other kind)."""
+_JSON_KEY = dict.fromkeys(KINDS, LABEL_KEY)
 HISTORY = "history"
 """A state, a change, or an ``able_now`` proposition: judged by replaying the scene."""
+AGENT = "agent"
+PATIENT = "patient"
+ROLES = (AGENT, PATIENT)
+EVENT_VARIABLE = "EVENTVAR.1"
+"""The event variable of a causal statement, which binds the events of the subject's event
+type. A statement has one event, so the variable is always the first."""
 _LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2}
 
 
@@ -312,10 +337,44 @@ class CategoryTerm:
 
 
 @dataclass(frozen=True)
+class EventTerm:
+    """The subject of a causal statement: the things that take a role in the events of an
+    event type, "things that catch things" (the agent) or "things that things catch" (the
+    patient). The head is the generic noun, and the event type is a one-place event type, a
+    two-place event type, or a category of two-place event types. In the JSON logical form it
+    is ``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``."""
+
+    event_type: str
+    role: str = AGENT
+    """``agent`` or ``patient``."""
+
+    @property
+    def category(self) -> str:
+        """The head noun's category: the generic noun."""
+        return THING
+
+    def concepts(self) -> list[str]:
+        """The concepts that the term needs words for: the generic noun and the event type."""
+        return [THING, self.event_type]
+
+    def to_json(self) -> dict[str, Any]:
+        return {"head": THING, "event": self.event_type, "role": self.role}
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> EventTerm:
+        return cls(data["event"], data["role"])
+
+
+def is_event_variable(label: str | None) -> bool:
+    """Whether a label is an event variable (``EVENTVAR.<n>``)."""
+    return label is not None and label.startswith("EVENTVAR.")
+
+
+@dataclass(frozen=True)
 class Predicate:
     kind: str
     """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
-    ``event_type2``, or ``state``."""
+    ``event_type2``, ``state``, ``effect``, or ``precondition``."""
     label: str
     """The predicate's concept: a PROPERTY or PART feature, a one-place event type, a scalar
     pole, a category, a patient capacity (``CANBE.<event type>``), a two-place event type or
@@ -326,6 +385,13 @@ class Predicate:
     comparison: str | None = None
     """Instance-level scalar poles only: the comparison class, which is the category that the
     subject's noun names ("big for a mouse")."""
+    value: bool | None = None
+    """Effects and preconditions only: the value the fluent is set to (an effect) or must have
+    (a precondition)."""
+
+    @property
+    def causal(self) -> bool:
+        return self.kind in CAUSAL_KINDS
 
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {"kind": self.kind, _JSON_KEY[self.kind]: self.label}
@@ -335,6 +401,8 @@ class Predicate:
             data["patient"] = {"instance": self.patient}
         if self.comparison is not None:
             data["class"] = self.comparison
+        if self.value is not None:
+            data["value"] = self.value
         return data
 
     @classmethod
@@ -345,7 +413,7 @@ class Predicate:
             patient = (
                 patient["instance"] if "instance" in patient else CategoryTerm.from_json(patient)
             )
-        return cls(kind, data[_JSON_KEY[kind]], patient, data.get("class"))
+        return cls(kind, data[_JSON_KEY[kind]], patient, data.get("class"), data.get("value"))
 
 
 @dataclass(frozen=True)
@@ -354,8 +422,9 @@ class Proposition:
     grounding, and the rule a statement comes from take no part in comparisons."""
 
     level: str
-    subject: CategoryTerm | str
-    """A category term (class level) or an instance label (instance level)."""
+    subject: CategoryTerm | EventTerm | str
+    """A category term (class level), an event term (a causal statement, class level), or an
+    instance label (the other levels)."""
     predicate: Predicate
     polarity: bool = True
     quantifier: str | None = None
@@ -385,6 +454,25 @@ class Proposition:
         return self.level in TIMED_LEVELS
 
     @property
+    def causal(self) -> bool:
+        """Whether the proposition is a causal statement: an effect or a precondition of the
+        events of an event type."""
+        return isinstance(self.subject, EventTerm)
+
+    def causal_record(self) -> dict[str, Any] | None:
+        """The definition entry that a causal statement states (the ``causal`` record of
+        "Causal statements"): the event type, the role, the fluent, and the value. None for any
+        other proposition."""
+        if not isinstance(self.subject, EventTerm):
+            return None
+        return {
+            "event_type": self.subject.event_type,
+            "role": self.subject.role,
+            "fluent": self.predicate.label,
+            "value": self.predicate.value,
+        }
+
+    @property
     def negative(self) -> bool:
         """Whether the proposition denies its predicate: a negative polarity, or ``no``."""
         return not self.polarity or self.quantifier in (NO, NEC_NO)
@@ -400,7 +488,7 @@ class Proposition:
         from the comparison class of a scalar pole."""
         labels: list[str] = []
         for term in (self.subject, self.predicate.patient):
-            if isinstance(term, CategoryTerm):
+            if isinstance(term, CategoryTerm | EventTerm):
                 labels += term.concepts()
         labels.append(self.predicate.label)
         if self.predicate.comparison is not None:
@@ -411,7 +499,7 @@ class Proposition:
         """The logical form as it is written to ``documents.jsonl``."""
         data: dict[str, Any] = {"id": self.id, "level": self.level}
         if self.level == CLASS:
-            assert isinstance(self.subject, CategoryTerm)
+            assert isinstance(self.subject, CategoryTerm | EventTerm)
             data["quantifier"] = self.quantifier
             data["polarity"] = self.polarity
             data["subject"] = self.subject.to_json()
@@ -430,6 +518,9 @@ class Proposition:
         data["predicate"] = self.predicate.to_json()
         if self.rule is not None:
             data["rule"] = {"feature": self.rule[0], "term": self.rule[1]}
+        causal = self.causal_record()
+        if causal is not None:
+            data["causal"] = causal
         data["grounding"] = self.grounding
         return data
 
@@ -442,11 +533,15 @@ class Proposition:
             # a sentence's logical form writes the comparison class of a class-level pole for
             # the reader. The class comes from the tree, so it is no part of the proposition.
             predicate = dataclasses.replace(predicate, comparison=None)
+        if "instance" in subject:
+            read_subject: CategoryTerm | EventTerm | str = subject["instance"]
+        elif "head" in subject:
+            read_subject = EventTerm.from_json(subject)
+        else:
+            read_subject = CategoryTerm.from_json(subject)
         return cls(
             level=data["level"],
-            subject=subject["instance"]
-            if "instance" in subject
-            else CategoryTerm.from_json(subject),
+            subject=read_subject,
             predicate=predicate,
             polarity=data["polarity"],
             quantifier=data.get("quantifier"),
@@ -540,7 +635,9 @@ class Truth:
         if quantifier is None:
             return True  # a class-level scalar pole takes no quantifier word
         if quantifier in NEC_QUANTIFIERS and (
-            proposition.predicate.kind == MEMBER or proposition.rule is not None
+            proposition.predicate.kind == MEMBER
+            or proposition.rule is not None
+            or proposition.causal
         ):
             return True
         positive = COUNTERPART[quantifier] if quantifier in (NO, NEC_NO) else quantifier
@@ -634,6 +731,8 @@ class Truth:
     def evaluate(self, proposition: Proposition) -> Evaluation:
         """Judge a logical form against the world."""
         if proposition.level == CLASS:
+            if proposition.causal or proposition.predicate.causal:
+                return self._evaluate_causal(proposition)
             return self._evaluate_class(proposition)
         if proposition.level == INSTANCE:
             return self._evaluate_instance(proposition)
@@ -720,8 +819,18 @@ class Truth:
         elif kind == STATE_KIND:
             if label not in world.fluents:
                 return f"unknown fluent {label!r}"
+        elif kind in CAUSAL_KINDS:
+            if label not in world.base_fluents:
+                return (
+                    f"{label!r} is not a base fluent: a causal statement is about a base "
+                    "fluent, because the definition guarantees nothing about a derived one"
+                )
+            if not isinstance(predicate.value, bool):
+                return f"an {kind} statement has a value, true or false"
         else:
             return f"unknown predicate kind {kind!r}"
+        if kind not in CAUSAL_KINDS and predicate.value is not None:
+            return "only an effect or a precondition has a value"
         if (kind == VERB) != (predicate.patient is not None):
             return "a two-place event type, and only one, has a patient"
         return ""
@@ -923,6 +1032,94 @@ class Truth:
             grounding = {"value": int(value), "test": VALUE}
         true = value == proposition.polarity
         return Evaluation(True, true, true, grounding)
+
+    # Causal statements -----------------------------------------------------------------------
+
+    def has_entry(self, event_type: str, kind: str, role: str, fluent: str, value: bool) -> bool:
+        """Whether an event type's definition has the effect (``kind`` ``effect``) or the
+        precondition literal (``precondition``) that sets, or requires, the fluent of the role
+        to the value. A category of event types has it when every event type below it does."""
+        definition = self.world.definition
+        for label in self.world.event_types_below(event_type):
+            record = definition.event_type(label)
+            entries = record.effects if kind == EFFECT else record.precondition
+            if not any(e.role == role and e.fluent == fluent and e.value == value for e in entries):
+                return False
+        return True
+
+    def _evaluate_causal(self, proposition: Proposition) -> Evaluation:
+        subject, predicate = proposition.subject, proposition.predicate
+        world = self.world
+        if not isinstance(subject, EventTerm):
+            return _invalid("the subject of a causal statement is an event term")
+        if not predicate.causal:
+            return _invalid("a causal statement states an effect or a precondition")
+        if proposition.quantifier != NEC_ALL:
+            return _invalid("a causal statement is nec_all: the definition guarantees it")
+        if not proposition.polarity:
+            return _invalid("a causal statement is never negated: its value is in its predicate")
+        if subject.event_type not in world.event_types:
+            return _invalid(f"unknown event type {subject.event_type!r}")
+        roles = ROLES[: world.event_types[subject.event_type].arity]
+        if subject.role not in roles:
+            return _invalid(
+                f"{subject.event_type} has no {subject.role}: its roles are {', '.join(roles)}"
+            )
+        problem = self._predicate_problem(predicate)
+        if problem:
+            return _invalid(problem)
+        if predicate.patient is not None:
+            return _invalid("a causal statement has no patient: the roles are in its subject")
+        below = world.event_types_below(subject.event_type)
+        able = int(world.able(subject.event_type).sum())
+        if able == 0:
+            return _invalid(
+                f"no binding is able for {subject.event_type}: the statement is about no event"
+            )
+        definition = world.definition
+        holding = 0
+        for label in below:
+            record = definition.event_type(label)
+            entries = record.effects if predicate.kind == EFFECT else record.precondition
+            holding += any(
+                e.role == subject.role
+                and e.fluent == predicate.label
+                and e.value == predicate.value
+                for e in entries
+            )
+        true = holding == len(below)
+        grounding = {
+            "event_types": len(below),
+            "with_entry": holding,
+            "able_bindings": able,
+            "test": DEFINITION,
+        }
+        felicitous = true and self.statable(proposition)
+        return Evaluation(True, true, felicitous, grounding)
+
+    def observed(self, proposition: Proposition, scenes: list[str] | None = None) -> bool:
+        """Whether a causal statement held of every event of its type in the known scenes (or
+        in ``scenes``): the participant in the statement's role had the fluent's value at the
+        time point after the event's step (an effect) or at the event's time point (a
+        precondition), and at least one such event occurred. A false statement that is
+        observed is law-like: no observation contradicts it."""
+        subject, predicate = proposition.subject, proposition.predicate
+        assert isinstance(subject, EventTerm)
+        below = set(self.world.event_types_below(subject.event_type))
+        offset = 1 if predicate.kind == EFFECT else 0
+        seen = False
+        for scene in self.scenes if scenes is None else scenes:
+            for event in self.events_of(scene):
+                if event.type not in below:
+                    continue
+                entity = event.agent if subject.role == AGENT else event.patient
+                if entity is None:
+                    continue
+                seen = True
+                value = self.fluent_value(scene, event.step + offset, entity, predicate.label)
+                if value != predicate.value:
+                    return False
+        return seen
 
     # Events ----------------------------------------------------------------------------------
 
@@ -1199,16 +1396,20 @@ class Truth:
 
 __all__ = [
     "ABLE_NOW",
+    "AGENT",
     "ALL",
     "ASPECTS",
     "CAN",
+    "CAUSAL_KINDS",
     "CHANGE",
     "CLASS",
     "COUNTERPART",
+    "DEFINITION",
+    "EFFECT",
     "EVENT",
+    "EVENT_VARIABLE",
     "EXACT",
     "FEATURE_KINDS",
-    "FLUENT_KEY",
     "HAS",
     "HISTORY",
     "INSTANCE",
@@ -1228,11 +1429,14 @@ __all__ = [
     "OBSERVED",
     "OCCURRED",
     "PAST",
+    "PATIENT",
     "POSITIVE_ORDER",
+    "PRECONDITION",
     "PRESENT",
     "PROGRESSIVE",
     "PROJECTION",
     "QUANTIFIERS",
+    "ROLES",
     "SCALAR",
     "SIMPLE",
     "SOME",
@@ -1247,10 +1451,12 @@ __all__ = [
     "CategoryTerm",
     "Clause",
     "Evaluation",
+    "EventTerm",
     "Literal",
     "Predicate",
     "Proposition",
     "Truth",
     "event_of",
+    "is_event_variable",
     "scene_of",
 ]

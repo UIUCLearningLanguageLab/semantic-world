@@ -125,6 +125,7 @@ def test_default_values() -> None:
         "adposition": "preposition",
         "auxiliary": "before",
         "negation": "after_auxiliary",
+        "before": "after_predicate",
     }
     morphology = grammar.morphology
     assert not (morphology.number.enabled or morphology.tense.enabled or morphology.aspect.enabled)
@@ -133,8 +134,18 @@ def test_default_values() -> None:
     assert (morphology.tense.realization, morphology.aspect.realization) == ("affix", "word")
     assert config.scalar_z == 1.0
     assert config.propositional_referents == "local"
+    assert config.propositions.causal_statement_rate == 0.5
+    assert config.propositional_descriptions == "marked"
     assert config.test_sets.size == 500
-    assert config.test_sets.changes == ("predicate", "subject", "quantifier", "role")
+    assert config.test_sets.changes == (
+        "predicate",
+        "subject",
+        "quantifier",
+        "polarity",
+        "event",
+        "role",
+    )
+    assert config.test_sets.seen_descriptions is True
 
 
 def test_default_file_lists_every_default() -> None:

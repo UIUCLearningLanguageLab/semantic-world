@@ -7,7 +7,8 @@ tokens. A token is a lexeme label, joined to the gloss of its affix when it has 
 - ``S``, the sentence; ``NP-SBJ`` and ``NP-OBJ``, the subject and the object; ``VP``, the verb
   phrase; ``NP-PRD``, the noun of a "has" or "is a" predicate; ``AP``, the adjectives; ``PP``, a
   with-phrase; ``RC``, a relative clause;
-- ``N``, ``V``, ``A``, ``Det``, ``Pro``, ``P``, ``Conj``, ``Rel``, ``AUX``, and ``Neg``, the words;
+- ``N``, ``V``, ``A``, ``Det``, ``Pro``, ``P``, ``Conj``, ``Rel``, ``AUX``, ``Neg``, and ``Adv``
+  (the function word ``before`` of a precondition statement), the words;
 - ``PLURAL``, ``PAST``, and ``PROGRESSIVE``, an inflection realized as a separate word. The word
   it marks is then a node with two children: ``["N", ["N", "L.57"], ["PLURAL", "L.190"]]``.
 
@@ -48,6 +49,15 @@ the verb, always with the auxiliary, and ``not`` for a blocked event. The tense 
 sentence is marked on its auxiliary when the morphology realizes the tense as a separate word;
 an affix never attaches to a function word, so with an affixal tense the auxiliary stays bare.
 
+**Causal statements.** The subject is the generic noun with a relative clause that names the
+event ("things that catch things", "things that things catch", "things that sleep"): the verb
+is bound to the event variable, in the present tense, so it carries no marker and never
+``can``, and the other participant is the bare generic noun. An effect is ``become`` with the
+state adjective ("become caught", "become not caught": the ``not`` gives the value), and a
+precondition the copula with the state adjective and the function word ``before`` ("are awake
+before"), which stands at the end of the verb phrase (``word_order.before: after_predicate``) or
+at its start (``before_predicate``).
+
 The grammar's own choices are drawn from the generator it is given: a synonym for a concept
 with two lexemes, the adjective order when it is not fixed, and the ``can`` of a positive
 capacity. The draws are made in one order, whatever the word order, so a word-order setting
@@ -70,8 +80,19 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
     check_plan,
 )
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, ADJECTIVE, Lexeme, Lexicon
-from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, NEC_NO, NO, STATE_KIND, VERB
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, ADJECTIVE, BEFORE_WORD, Lexeme, Lexicon
+from semantic_world.corpus.propositions import (
+    CAN,
+    EFFECT,
+    HAS,
+    IS,
+    MEMBER,
+    NEC_NO,
+    NO,
+    PRECONDITION,
+    STATE_KIND,
+    VERB,
+)
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
 from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
@@ -81,7 +102,7 @@ PAST = "PAST"
 PROGRESSIVE = "PROGRESSIVE"
 MARKERS = (PLURAL, PAST, PROGRESSIVE)
 NP_LABELS = ("NP-SBJ", "NP-OBJ")
-WORD_LABELS = ("N", "V", "A", "Det", "Pro", "P", "Conj", "Rel", "AUX", "Neg")
+WORD_LABELS = ("N", "V", "A", "Det", "Pro", "P", "Conj", "Rel", "AUX", "Neg", "Adv")
 
 Tree = list
 
@@ -333,7 +354,10 @@ class _Builder:
 
     def verb_node(self, parts: list[Tree], predication: Predication) -> Tree:
         node = ["VP", *parts]
-        if predication.event is not None:
+        if predication.bound:
+            # the relative clause of a causal statement reports no event: the words say it
+            self.events[id(node)] = None
+        elif predication.event is not None:
             assert predication.tense is not None and predication.aspect is not None
             self.events[id(node)] = (predication.event, predication.tense, predication.aspect)
         elif predication.time is not None:
@@ -369,10 +393,18 @@ class _Builder:
         if predication.time is not None:
             if morphology.tense.enabled and predication.tense == PAST_TENSE:
                 timed_marks = (PAST,)
+        adverb: Tree | None = None
         if kind == STATE_KIND:
             auxiliary = "become" if predication.become else ("are" if plural and agree else "is")
             negated = not polarity
             head = self.word("A", predication.label)
+        elif kind in (EFFECT, PRECONDITION):
+            # a causal statement: become, or the copula with "before", and the state adjective
+            auxiliary = "become" if kind == EFFECT else ("are" if plural and agree else "is")
+            negated = not polarity
+            head = self.word("A", predication.label)
+            if kind == PRECONDITION:
+                adverb = self.function("Adv", BEFORE_WORD)
         elif kind in (CAN, VERB) and predication.time is not None:
             auxiliary, negated = self.realizer.able_now_word, not polarity
             head = self.word("V", predication.label)
@@ -433,6 +465,8 @@ class _Builder:
             parts = [negation, head] if before else [head, negation]
         else:
             parts = [head]
+        if adverb is not None:
+            parts = parts + [adverb] if self.order.before == "after_predicate" else [adverb] + parts
         return parts, target, auxiliary
 
     # The sentence ----------------------------------------------------------------------------

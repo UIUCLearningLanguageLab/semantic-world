@@ -197,7 +197,7 @@ The lexeme labels of every concept after the parts move by 4 (`EVENTTYPE1.2` is 
 3. **The own constraint** (the retune): the chosen settings turn `event_types.binary.own_constraint` off, so a two-place event type's requirement is the constraints of its features alone, and siblings that share their true features share their requirement. The alternative that keeps the own constraint and meets the density target (one true event-type feature per event type) leaves most categories of event types without a word and their events all but absent from the scenes. Is the own constraint off acceptable as the default, or should a category with an empty base relation get a word anyway, which would reopen the first alternative?
 4. **The key of the state predicate** (choice 3): `fluent`, as "States and changes" writes it, while every other predicate names its symbol under `label` since a5b. Keep the specification's key, or make it `label` for uniformity (a one-constant change)?
 5. **Which state pairs are `changed`** (choice 13): a pair whose true item or false item changed. The alternative is to mark by the true item alone.
-6. **The share reached** (the retune): 0.27 on the default world (seed 1), 0.43 on average over seeds 1 to 5, with the spread following the densities. Is the default world's share the target, or the mean?
+6. **The share reached** (the retune): 0.318 on the default world (seed 1), 0.379 on average over seeds 1 to 5, with the spread following the densities. Is the default world's share the target, or the mean? (The two figures read 0.27 and 0.43, the figures of the rejected candidate (a), until stage a7b corrected them to the figures of the table above.)
 
 ## Notes for stage a7b
 
@@ -210,3 +210,14 @@ What the next half of stage a7 (causal statements, descriptions, and the causal 
 - **Readings**: a class-level sentence with `become` or `before` takes the reading `causal`; `readings._Reader.verb_phrase` returns `state` for `become` today, for sentences about instances only (class-level sentences return `generic` before the verb phrases are read).
 - **The default world** (seed 1): 20 one-place and 20 two-place event types in 5 categories, every one with a word, 12 constraints (32 before: no own constraints), 8 fluents (2 derived), no precondition redraws, every event type legal, two-place share 0.318; the default corpus has 215 lexemes (199 content), 99,456 sentences, 10,088 scenes with 83,110 events, 27 test sets with 13,208 pairs. The run of the default corpus takes about two minutes, `pytest tests/corpus` about 16 minutes.
 - **The reference runs** of this stage are in `/Users/jon/Documents/Projects/semantic-world-reference/a7a/` (the tiny world and the tiny corpus from `main` at 28d1fb4).
+
+## Jon's rulings (October 9, 2026, in the stage a7b prompt)
+
+Choices 1 to 17 are approved, and WM.E129 to WM.E145 are decided. The open questions are answered:
+
+1. **The tense in the renderings of `BECOME` and `ABLE_NOW`** (choice 4): keep it, so that every rendering parses back on its own. Stage a8 adds a note to the specification.
+2. **The tense of `become` under an affixal tense** (choice 7): it stays unmarked for now. A later stage (b3) will let the word-form pipeline inflect function words, the copula included.
+3. **The own constraint** (the retune): `own_constraint: false` is accepted as the default world's setting.
+4. **The key of the state predicate** (choice 3): change it from `fluent` to `label`, so that it matches every other predicate (a5b choice 18). Stage a7b makes the change (its follow-up 1); stage a8 updates the specification.
+5. **Which state pairs are `changed`** (choice 13): keep "either item", and record which item changed. Stage a7b adds the record (its follow-up 2).
+6. **The share target** (the retune): the default world's share (seed 1, 0.318), not the mean over seeds. Stage a8's world guide reports the spread over seeds.

@@ -107,7 +107,7 @@ def test_state_and_change_sentences_are_true_of_their_history(cases, runs, name)
         assert form["level"] == proposition.level and form["time"] == proposition.time
         assert form["tense"] == "past" and "aspect" not in form and "event" not in form
         if proposition.level in (STATE, CHANGE):
-            assert form["predicate"] == {"kind": STATE_KIND, "fluent": proposition.predicate.label}
+            assert form["predicate"] == {"kind": STATE_KIND, "label": proposition.predicate.label}
             assert proposition.predicate.label.startswith("BOOLFL.")
         else:
             assert form["predicate"]["kind"] in (CAN, VERB)
@@ -259,7 +259,7 @@ def test_changed_marks_agree_with_the_history(cases, runs, name) -> None:
                 assert document.type == "situational"
                 assert item.proposition.subject in document.referents.values()
                 changed = oracle.changed(
-                    scene, form["subject"]["instance"], form["predicate"]["fluent"]
+                    scene, form["subject"]["instance"], form["predicate"]["label"]
                 )
                 assert item.meta["changed"] == changed
                 assert oracle.state(form, scene) == item.meta["truth"]

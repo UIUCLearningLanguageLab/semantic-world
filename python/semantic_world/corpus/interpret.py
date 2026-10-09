@@ -21,7 +21,10 @@ The reading undoes the grammar's fixed choices:
   record gives, and states a capacity when the record gives none. A verb with ``can`` (or the
   word ``can_now``) whose record gives a time point says what was possible then (``able_now``);
 - a state adjective (the word of a fluent) states the fluent at the time point the record
-  gives: a state with the copula, and a change with ``become``;
+  gives: a state with the copula, and a change with ``become``. With a category as the subject
+  it makes a causal statement, an effect with ``become`` and a precondition with the copula and
+  ``before``, and the subject's relative clause then names the event: its verb is bound to the
+  event variable. Nothing of the record is needed: the words say it;
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
 
@@ -49,14 +52,20 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
 )
 from semantic_world.corpus.histories import is_time_key
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, Lexicon
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, Lexicon
 from semantic_world.corpus.propositions import (
     CAN,
+    CAUSAL_KINDS,
+    EFFECT,
+    EVENT_VARIABLE,
     HAS,
     IS,
     MEMBER,
+    NEC_ALL,
     NEC_NO,
     NO,
+    PRECONDITION,
+    PRESENT,
     PROJECTION,
     SCALAR,
     STATE_KIND,
@@ -175,6 +184,9 @@ class _Reader:
         subject = self.noun_phrase(subject_node)
         target = self.child(self.tree, "NP-OBJ") or self.child(verb_phrase, "NP-OBJ")
         predication, _ = self.predication(verb_phrase, target, subject.kind, None)
+        if predication.kind in CAUSAL_KINDS:
+            # a causal statement: the subject's relative clause names the event
+            return SentencePlan(self.bound_subject(subject), predication, NEC_ALL)
         quantifier = self.quantifier if subject.kind == CLASS_NP else None
         if (
             subject.kind == CLASS_NP
@@ -185,6 +197,23 @@ class _Reader:
             # the negation of a bare plural states the quantifier ("penguins are not fish")
             predication = dataclasses.replace(predication, polarity=True)
         return SentencePlan(subject, predication, quantifier)
+
+    @staticmethod
+    def bound_subject(subject: NounPhrase) -> NounPhrase:
+        """The subject of a causal statement, with the verb of its relative clause bound to the
+        event variable: the clause names the events of the verb's event type."""
+        clause = subject.clause
+        if subject.kind != CLASS_NP or clause is None or len(clause.predications) != 1:
+            raise GrammarError(
+                "the subject of a causal statement is a category with a relative clause that "
+                "names the event"
+            )
+        bound = dataclasses.replace(
+            clause.predications[0], event=EVENT_VARIABLE, tense=PRESENT, aspect=None
+        )
+        return dataclasses.replace(
+            subject, clause=dataclasses.replace(clause, predications=(bound,))
+        )
 
     def noun_phrase(self, node: Tree) -> NounPhrase:
         referent = self.referent[id(node)]
@@ -290,6 +319,20 @@ class _Reader:
             return Predication(kind, concept, polarity, patient, event, tense, aspect), auxiliary
         if adjective is not None:
             concept = self.concept(adjective)
+            if concept.startswith(FLUENT_PREFIX) and subject_kind == CLASS_NP:
+                # a causal statement: an effect with become, a precondition with the copula
+                # and "before"
+                adverb = self.child(node, "Adv")
+                before = adverb is not None and self.gloss(adverb) == BEFORE_WORD
+                if auxiliary == "become" and not before:
+                    return Predication(EFFECT, concept, polarity), auxiliary
+                if auxiliary in ("is", "are") and before:
+                    return Predication(PRECONDITION, concept, polarity), auxiliary
+                raise GrammarError(
+                    f"the state adjective {concept} with a category as the subject makes a "
+                    "causal statement: an effect with become, or a precondition with the copula "
+                    f"and {BEFORE_WORD}"
+                )
             if concept.startswith(FLUENT_PREFIX):
                 report = self.event[id(node)]
                 if report is None or not is_time_key(report[0]):

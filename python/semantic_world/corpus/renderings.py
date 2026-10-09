@@ -42,12 +42,26 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   ``SCALARDIM.1.HIGH(CATEGORY.1.3, CATEGORY.1)``, the category and its comparison class;
 - a relative clause about another category means at least one member of it, written ``EXISTS``
   inside the restrictor: ``MOST(CATEGORY.1.2(VAR.1) AND EXISTS(VAR.2, CATEGORY.1.5(VAR.2) AND
-  ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2))), PART.3(VAR.1))`` for "owls that eat mice have claws".
+  ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2))), PART.3(VAR.1))`` for "owls that eat mice have claws";
+- a causal statement binds an event variable in its restrictor, ``EVENT(EVENTVAR.1, atom)``, the
+  events of the atom's event type with its participants, and its scope says what holds at the
+  time point after the event (``AFTER``) or before it (``BEFORE``):
+  ``NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``
+  for "things that things catch become caught". The agent is ``VAR.1`` and the patient
+  ``VAR.2``, whichever the statement is about.
 
 A sentence about instances is a conjunction. Each noun phrase gives its noun and its modifiers,
 then the propositions of its relative clause, and the proposition of the main clause comes last.
 Variables are numbered in the order of the logical form: the subject, its relative clauses, then
 the patient. Word order never changes the rendering.
+
+**Descriptions (CG.63).** The parts that a descriptive mention contributes (its noun, its
+modifiers, and the propositions of its relative clause) are descriptions, which identify the
+referent; the rest is the assertion. With ``renderings.propositional.descriptions: marked``, the
+descriptions come first, inside braces, and the assertion follows: ``{CATEGORY.1.3.2(REF.1) AND
+PROPERTY.12(REF.1)} PART.4(REF.1)`` for "the furry dog has legs". A part that an asserted mention
+contributes too is asserted. With ``omitted``, the braces and their contents are left out, and
+the rendering parses back to the assertion alone (:func:`assertion`).
 """
 
 from __future__ import annotations
@@ -62,10 +76,12 @@ from semantic_world.corpus.lexicon import THING, Lexeme
 from semantic_world.corpus.propositions import (
     _JSON_KEY,
     ABLE_NOW,
+    AGENT,
     ALL,
     CAN,
     CHANGE,
     CLASS,
+    EFFECT,
     EVENT,
     HAS,
     INSTANCE,
@@ -76,6 +92,8 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
+    PATIENT,
+    PRECONDITION,
     PROJECTION,
     SCALAR,
     SOME,
@@ -85,10 +103,12 @@ from semantic_world.corpus.propositions import (
     VERB,
     CategoryTerm,
     Clause,
+    EventTerm,
     Literal,
     Predicate,
     Proposition,
     event_of,
+    is_event_variable,
     scene_of,
 )
 from semantic_world.corpus.world import (
@@ -103,6 +123,8 @@ from semantic_world.corpus.world import (
 )
 
 REFERENT_MODES = ("local", "instance")
+DESCRIPTION_MODES = ("marked", "omitted")
+MARKED, OMITTED = DESCRIPTION_MODES
 QUANTIFIER_NAMES = {ALL: "ALL", MOST: "MOST", SOME: "SOME", NO: "NO"}
 """The operators of the extensional quantifiers. ``nec_all`` and ``nec_no`` are ``NEC(ALL(...))``
 and ``NEC(NO(...))``."""
@@ -193,6 +215,46 @@ _LEVEL_OF_OPERATOR = {operator: level for level, operator in TIMED_OPERATORS.ite
 
 
 @dataclass(frozen=True)
+class BoundEvent:
+    """The events of an event type, bound to an event variable in the restrictor of a causal
+    statement: ``EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2))``."""
+
+    variable: str
+    body: Atom
+
+    def __str__(self) -> str:
+        return f"EVENT({self.variable}, {self.body})"
+
+
+@dataclass(frozen=True)
+class Temporal:
+    """What holds at the time point after (``AFTER``) or before (``BEFORE``) a bound event: the
+    scope of a causal statement, an atom of a fluent, negated for the value false."""
+
+    operator: str
+    variable: str
+    body: Any
+
+    def __str__(self) -> str:
+        return f"{self.operator}({self.variable}, {self.body})"
+
+
+CAUSAL_OPERATORS = {EFFECT: "AFTER", PRECONDITION: "BEFORE"}
+_KIND_OF_CAUSAL_OPERATOR = {operator: kind for kind, operator in CAUSAL_OPERATORS.items()}
+
+
+@dataclass(frozen=True)
+class Described:
+    """The descriptions of a sentence about instances (CG.63): the parts in braces, which come
+    before the assertion."""
+
+    body: tuple[Any, ...]
+
+    def __str__(self) -> str:
+        return "{" + _conjunction(self.body) + "}"
+
+
+@dataclass(frozen=True)
 class Exists:
     variable: str
     body: tuple[Any, ...]
@@ -216,7 +278,8 @@ class Quantified:
 
 
 Formula = tuple[Any, ...]
-"""A conjunction of formulas. A class-level form is one :class:`Quantified`."""
+"""A conjunction of formulas, with the descriptions first (:class:`Described`) when the
+rendering marks them. A class-level form is one :class:`Quantified`."""
 
 
 def _conjunction(parts: tuple[Any, ...]) -> str:
@@ -224,7 +287,9 @@ def _conjunction(parts: tuple[Any, ...]) -> str:
 
 
 def write(formula: Formula) -> str:
-    """A formula as text."""
+    """A formula as text: the descriptions in braces, a space, then the assertion."""
+    if formula and isinstance(formula[0], Described):
+        return f"{formula[0]} {_conjunction(formula[1:])}"
     return _conjunction(formula)
 
 
@@ -326,13 +391,36 @@ def _predication(
     return body if polarity else Not(body)
 
 
-def formula(form: dict[str, Any], referents: str = "local") -> Formula:
+def _causal(form: dict[str, Any]) -> Formula:
+    """The formula of a causal statement: ``NEC(ALL(EVENT(EVENTVAR.1, <event type>(VAR.1[,
+    VAR.2])), AFTER|BEFORE(EVENTVAR.1, [NOT] <fluent>(<the role's variable>))))``."""
+    subject, predicate = form["subject"], form["predicate"]
+    event_type, role = subject["event"], subject["role"]
+    variables = {AGENT: "VAR.1"}
+    if not event_type.startswith("EVENTTYPE1."):
+        variables[PATIENT] = "VAR.2"
+    if role not in variables:
+        raise RenderingError(f"{event_type} has no {role}")
+    bound = BoundEvent("EVENTVAR.1", Atom(event_type, tuple(variables.values())))
+    atom = Atom(predicate[LABEL_KEY], (variables[role],))
+    operator = CAUSAL_OPERATORS[predicate["kind"]]
+    scope = Temporal(operator, "EVENTVAR.1", atom if predicate["value"] else Not(atom))
+    return (Quantified(form["quantifier"], (bound,), scope),)
+
+
+def formula(form: dict[str, Any], referents: str = "local", descriptions: str = MARKED) -> Formula:
     """The formula of a JSON logical form. ``referents`` is ``local``, for the referent labels
-    of the document (``R.1``), or ``instance``, for the taxonomy's instance labels."""
+    of the document (``R.1``), or ``instance``, for the taxonomy's instance labels.
+    ``descriptions`` is ``marked``, for the descriptions in braces before the assertion, or
+    ``omitted``, for the assertion alone."""
     if referents not in REFERENT_MODES:
         raise ValueError(f"unknown referent labels {referents!r}")
+    if descriptions not in DESCRIPTION_MODES:
+        raise ValueError(f"unknown descriptions mode {descriptions!r}")
     predicate = form["predicate"]
     if form["level"] == CLASS:
+        if "head" in form["subject"] or predicate["kind"] in CAUSAL_OPERATORS:
+            return _causal(form)
         if predicate["kind"] == SCALAR:
             # a statement about the category's mean, with no quantifier
             return (_predication(predicate, form["subject"]["category"], None, form["polarity"]),)
@@ -351,34 +439,36 @@ def formula(form: dict[str, Any], referents: str = "local") -> Formula:
             return mention["referent"]
         return mention["instance"]
 
-    def mention_parts(mention: dict[str, Any]) -> list[Any]:
+    def mention_parts(mention: dict[str, Any]) -> list[tuple[Any, bool]]:
         """A noun phrase: its noun, its modifiers, and the propositions of its relative
-        clause, each after the noun phrases it brings in."""
+        clause, each after the noun phrases it brings in, and each with whether it is a
+        description (the mention is descriptive) or asserted."""
         argument, noun = name(mention), mention.get("noun")
+        descriptive = bool(mention.get("descriptive", False))
         parts: list[Any] = [] if noun is None else [Atom(noun, (argument,))]
         parts += [_literal(text, argument, noun) for text in mention.get("restriction", ())]
+        found = [(part, descriptive) for part in parts]
         for clause in mention.get("clauses", ()):
             report = None
             if clause.get("event") is not None:
                 report = (clause["event"], clause["tense"], clause["aspect"])
             polarity = clause.get("polarity", True)
             if "agent" in clause:
-                parts += mention_parts(clause["agent"])
-                parts.append(
-                    _predication(clause, name(clause["agent"]), argument, polarity, report)
-                )
+                found += mention_parts(clause["agent"])
+                said = _predication(clause, name(clause["agent"]), argument, polarity, report)
+                found.append((said, descriptive))
                 continue
             other = None
             if "patient" in clause:
-                parts += mention_parts(clause["patient"])
+                found += mention_parts(clause["patient"])
                 other = name(clause["patient"])
-            parts.append(_predication(clause, argument, other, polarity, report))
-        return parts
+            found.append((_predication(clause, argument, other, polarity, report), descriptive))
+        return found
 
-    parts = mention_parts(form["subject"])
+    found = mention_parts(form["subject"])
     patient = None
     if "patient" in predicate:
-        parts += mention_parts(predicate["patient"])
+        found += mention_parts(predicate["patient"])
         patient = name(predicate["patient"])
     report = timed = None
     if form["level"] == EVENT:
@@ -387,20 +477,35 @@ def formula(form: dict[str, Any], referents: str = "local") -> Formula:
     elif form["level"] in TIMED_LEVELS:
         timed = (form["level"], form["scene"], form["time"], form["tense"])
     main = _predication(predicate, name(form["subject"]), patient, form["polarity"], report, timed)
-    # a noun phrase said twice gives the same proposition twice: it is written once
-    return tuple(dict.fromkeys(part for part in parts if part != main)) + (main,)
+    # a noun phrase said twice gives the same proposition twice: it is written once, and a
+    # part that an asserted mention contributes is asserted
+    asserted = tuple(dict.fromkeys(part for part, d in found if not d and part != main))
+    described = tuple(
+        dict.fromkeys(part for part, d in found if d and part != main and part not in asserted)
+    )
+    if described and descriptions == MARKED:
+        return (Described(described), *asserted, main)
+    return (*asserted, main)
 
 
-def propositional(form: dict[str, Any], referents: str = "local") -> str:
+def assertion(form: dict[str, Any], referents: str = "local") -> Formula:
+    """The formula of a logical form with its descriptions removed: what the ``omitted``
+    rendering parses back to."""
+    return formula(form, referents, OMITTED)
+
+
+def propositional(
+    form: dict[str, Any], referents: str = "local", descriptions: str = MARKED
+) -> str:
     """The propositional rendering of a JSON logical form."""
-    return write(formula(form, referents))
+    return write(formula(form, referents, descriptions))
 
 
 # ---------------------------------------------------------------------------------------------
 # Reading a rendering back
 # ---------------------------------------------------------------------------------------------
 
-_TOKEN = re.compile(r"\s*([(),]|[^\s(),]+)")
+_TOKEN = re.compile(r"\s*([(),{}]|[^\s(),{}]+)")
 
 
 class _Parser:
@@ -443,6 +548,25 @@ class _Parser:
             if not isinstance(body, Atom):
                 raise RenderingError(f"ABLE wraps an atom in {self.text!r}")
             return Able(body)
+        if word == "EVENT" and is_event_variable(self.peek()):
+            variable = self.take()
+            self.take(",")
+            body = self.item()
+            self.take(")")
+            if not isinstance(body, Atom):
+                raise RenderingError(f"EVENT binds an atom in {self.text!r}")
+            return BoundEvent(variable, body)
+        if word in _KIND_OF_CAUSAL_OPERATOR:
+            variable = self.take()
+            self.take(",")
+            body = self.item()
+            self.take(")")
+            inner = body.body if isinstance(body, Not) else body
+            if not is_event_variable(variable) or not isinstance(inner, Atom):
+                raise RenderingError(
+                    f"{word} holds an atom about an event variable in {self.text!r}"
+                )
+            return Temporal(word, variable, body)
         if word == "EVENT":
             event = self.take()
             self.take(",")
@@ -497,12 +621,18 @@ class _Parser:
 
 
 def parse_propositional(text: str) -> Formula:
-    """The formula that a propositional rendering writes."""
+    """The formula that a propositional rendering writes: the descriptions in braces, when
+    there are any, then the assertion."""
     parser = _Parser(text)
+    described: tuple[Any, ...] = ()
+    if parser.peek() == "{":
+        parser.take()
+        described = (Described(parser.conjunction()),)
+        parser.take("}")
     parsed = parser.conjunction()
     if parser.peek() is not None:
         raise RenderingError(f"cannot read the rendering {text!r}: {parser.peek()!r} is left over")
-    return parsed
+    return described + parsed
 
 
 def _kind(label: str) -> str:
@@ -565,13 +695,38 @@ def _mentions(part: Any, variable: str) -> bool:
     return part.arguments[0] == variable
 
 
+def _causal_proposition(main: Quantified) -> Proposition:
+    """The causal statement that a quantified formula with a temporal scope says."""
+    scope = main.scope
+    assert isinstance(scope, Temporal)
+    bound = [part for part in main.restrictor if isinstance(part, BoundEvent)]
+    if len(bound) != 1 or len(main.restrictor) != 1 or bound[0].variable != scope.variable:
+        raise RenderingError("a causal statement binds one event, which its scope is about")
+    value = not isinstance(scope.body, Not)
+    atom = scope.body if value else scope.body.body
+    event = bound[0].body
+    if atom.arguments[0] not in event.arguments:
+        raise RenderingError(f"{scope.operator} is about a participant of the event")
+    role = AGENT if event.arguments.index(atom.arguments[0]) == 0 else PATIENT
+    kind = _KIND_OF_CAUSAL_OPERATOR[scope.operator]
+    return Proposition(
+        CLASS,
+        EventTerm(event.label, role),
+        Predicate(kind, atom.label, value=value),
+        True,
+        main.quantifier,
+    )
+
+
 def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None) -> Proposition:
     """The proposition of a formula: the whole logical form of a class-level sentence, and the
     proposition of the main clause of a sentence about instances, which is the last part of the
-    conjunction. ``referents`` gives the instance of every referent label, for the ``local``
-    labels."""
+    conjunction (the descriptions in braces take no part). ``referents`` gives the instance of
+    every referent label, for the ``local`` labels."""
     names = referents or {}
     main = formula[-1]
+    if isinstance(main, Quantified) and isinstance(main.scope, Temporal):
+        return _causal_proposition(main)
     if isinstance(main, Quantified):
         scope = main.scope
         polarity = not isinstance(scope, Not)
