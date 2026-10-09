@@ -38,6 +38,7 @@ from semantic_world.corpus.lexicon import (
     relation_extent,
     world_concepts,
 )
+from semantic_world.corpus.world import EVENT_TYPE1_KIND, PART_KIND, PROPERTY_KIND
 
 SEEDS = range(1, 21)
 
@@ -61,10 +62,11 @@ def test_concepts_of_the_default_world(default_world) -> None:
     lexicon = lexicon_of(world)
     labels = {t: [c.label for c in lexicon.of_type(t)] for t in CONCEPT_TYPES}
     assert labels["category"] == list(world.categories) and len(labels["category"]) == 56
-    assert labels["is"] == list(world.features["is"]) and len(labels["is"]) == 40
-    assert labels["has"] == list(world.features["has"]) and len(labels["has"]) == 40
+    assert labels["is"] == list(world.features[PROPERTY_KIND]) and len(labels["is"]) == 40
+    assert labels["has"] == list(world.features[PART_KIND]) and len(labels["has"]) == 40
     assert labels["state"] == []  # state adjectives come in stage a7
-    assert labels["event_unary"] == list(world.features["can"]) and len(labels["event_unary"]) == 20
+    assert labels["event_unary"] == list(world.features[EVENT_TYPE1_KIND])
+    assert len(labels["event_unary"]) == 20
     assert labels["event"] == [
         v for v in world.binary_leaves if v not in lexicon.event_types_without_word
     ]
@@ -128,20 +130,23 @@ def test_a_world_without_two_place_event_types_or_scalars(world_files) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_an_event_type_category_that_holds_for_every_pair_gets_no_lexeme(tiny_world) -> None:
-    lexicon = lexicon_of(tiny_world, TINY_WORLD)
-    # EVENTTYPE2.1 has no defining constraint, so its base relation holds for every pair
-    n = tiny_world.count
-    assert tiny_world.able("EVENTTYPE2.1").sum() == n * (n - 1)
-    assert lexicon.event_types_without_word == {"EVENTTYPE2.1": EVERY_PAIR}
-    assert not lexicon.is_named("EVENTTYPE2.1") and lexicon.lexemes_of("EVENTTYPE2.1") == ()
-    assert "EVENTTYPE2.1" not in {c.label for c in lexicon.concepts}
-    assert "EVENTTYPE2.1" not in lexicon.unnamed  # left out as a concept, not by the proportion
-    assert [c.label for c in lexicon.of_type("event_category")] == ["EVENTTYPE2.2"]
+def test_an_event_type_category_that_holds_for_every_pair_gets_no_lexeme(cases) -> None:
+    # In the deep world, the base relation of EVENTTYPE2.2 holds for every pair (since stage
+    # a5b, every category of the tiny world has a defining constraint).
+    case = cases("deep")
+    world = case.world
+    lexicon = case.lexicon()
+    n = world.count
+    assert world.able("EVENTTYPE2.2").sum() == n * (n - 1)
+    assert lexicon.event_types_without_word == {"EVENTTYPE2.2": EVERY_PAIR}
+    assert not lexicon.is_named("EVENTTYPE2.2") and lexicon.lexemes_of("EVENTTYPE2.2") == ()
+    assert "EVENTTYPE2.2" not in {c.label for c in lexicon.concepts}
+    assert "EVENTTYPE2.2" not in lexicon.unnamed  # left out as a concept, not by the proportion
+    assert [c.label for c in lexicon.of_type("event_category")] == ["EVENTTYPE2.1"]
     assert [c.label for c in lexicon.of_type("event")] == [
         "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.1", "EVENTTYPE2.2.2"
     ]  # fmt: skip
-    assert lexicon.stats()["event_types_without_word"] == {"EVENTTYPE2.1": EVERY_PAIR}
+    assert lexicon.stats()["event_types_without_word"] == {"EVENTTYPE2.2": EVERY_PAIR}
 
 
 @pytest.mark.parametrize("world_name", ["tiny_world", "default_world"])
@@ -182,10 +187,7 @@ def test_an_event_type_that_holds_for_no_pair_gets_no_lexeme(tiny_world, monkeyp
     tiny_world.able("EVENTTYPE2.2.1")  # fill the table, then blank one event type
     monkeypatch.setitem(tiny_world._able, "EVENTTYPE2.2.1", np.zeros((n, n), dtype=bool))
     lexicon = lexicon_of(tiny_world, TINY_WORLD)
-    assert lexicon.event_types_without_word == {
-        "EVENTTYPE2.1": EVERY_PAIR,
-        "EVENTTYPE2.2.1": NO_PAIR,
-    }
+    assert lexicon.event_types_without_word == {"EVENTTYPE2.2.1": NO_PAIR}
     assert [c.label for c in lexicon.of_type("event")] == [
         "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.2"
     ]  # fmt: skip
@@ -562,7 +564,7 @@ def test_a_homonym_never_pairs_a_concept_with_its_own_synonym(tiny_world) -> Non
     for seed in SEEDS:
         knobs = {"homonym_rate": 1.0, "synonym_rate": 1.0}
         lexicon = lexicon_of(tiny_world, TINY_WORLD, seed=seed, lexicon=knobs)
-        assert len(lexicon.content_lexemes) == 70
+        assert len(lexicon.content_lexemes) == 72  # 36 content concepts, each with a synonym
         pairs = lexicon.homonym_pairs()
         assert len(pairs) >= 33
         assert all(a.concept != b.concept for a, b in pairs)

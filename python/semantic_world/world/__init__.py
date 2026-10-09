@@ -5,7 +5,10 @@ a1 holds rules as threshold matrices (REL.18), the rule-set identity, and derive
 their manifest (REL.16). Stage a2 is the world generator (``define``). Stage a3 is the runtime
 (``runtime.py``: ``derive``, ``able``, ``legal``, ``legal_bindings``, ``apply``), the loader of a
 definition from its files (``RuntimeDefinition``), and the conformance fixtures
-(``fixtures.py``). The package runs with Python alone: NumPy, polars, and PyYAML.
+(``fixtures.py``). Stage a4 adds episodes and histories. Stage a5b moves the one-place and
+two-place event types here from the taxonomy (``unary.py``, ``event_tree.py``,
+``constraints.py``, ``projections.py``, ``relation_stats.py``, bundled by ``statics.py``). The
+package runs with Python alone: NumPy, polars, and PyYAML.
 """
 
 from semantic_world.world.derived import (

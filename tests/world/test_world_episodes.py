@@ -11,21 +11,20 @@ import yaml
 
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.__main__ import main
-from semantic_world.world.config import load_config
-from semantic_world.world.definition import RuntimeDefinition, runtime_definition
+from semantic_world.world.config import config_from_mapping, load_config
+from semantic_world.world.definition import RuntimeDefinition, load_definition, runtime_definition
 from semantic_world.world.episodes import (
     STATS_STREAM,
     EpisodeGenerator,
     EpisodeSettings,
     Relatedness,
     load_scene_settings,
-    read_initial_rates,
     read_scene_settings,
     simulate,
 )
 from semantic_world.world.errors import WorldError
 from semantic_world.world.fixtures import fixture_record, read_fixture
-from semantic_world.world.generate import WorldResult, define
+from semantic_world.world.generate import WorldResult, define, statistics_episodes
 from semantic_world.world.history import (
     History,
     HistoryError,
@@ -64,12 +63,10 @@ def chain() -> WorldResult:
 
 def _generator(result: WorldResult, **settings) -> EpisodeGenerator:
     runtime = result.definition.runtime()
-    rates = {f.label: f.initial_rate for f in result.fluents.base}
     return EpisodeGenerator(
         runtime,
-        Relatedness.from_taxonomy(result.taxonomy, runtime),
+        Relatedness.from_statics(result.statics, runtime),
         EpisodeSettings(**settings),
-        rates,
         record_legal=True,
     )
 
@@ -231,13 +228,27 @@ def _catch_before_eat(result: WorldResult, silence: bool) -> int:
 
 
 def test_chain_example_events_follow_the_preconditions(chain: WorldResult) -> None:
-    """On the chain example, every eating follows the catching that made it legal. In the
-    default seed's sampled requirements no patient is both catchable and eatable, so the
-    strict chain is checked on a seed where it can happen (seed 3), and the forced order
-    (caught before eaten, never in the same step) on the default seed."""
+    """On the chain example, every eating follows the catching that made it legal, never in
+    the same step."""
     assert _catch_before_eat(chain, silence=False) > 20
-    overlapping = define(load_config(DATA / "tiny_chain.yaml", seed=3))
-    assert _catch_before_eat(overlapping, silence=True) > 20
+    assert _catch_before_eat(chain, silence=True) > 20
+
+
+def test_chain_example_completes_on_every_seed() -> None:
+    """The acceptance test of stage a5b: with the chain's explicit requirement (the agent is
+    bigger than the patient on the first scalar, shared by both event types), whatever is
+    caught can be eaten, so on every seed 1 to 10 an eating (EVENTTYPE2.1.2) follows a catching
+    (EVENTTYPE2.1.1) of the same patient. The statistics episodes see both event types occur,
+    and with every other setter of BOOLFL.2 weighted out the forced order holds."""
+    data = yaml.safe_load((DATA / "tiny_chain.yaml").read_text(encoding="utf-8"))
+    for seed in range(1, 11):
+        config = config_from_mapping(data, source=str(DATA / "tiny_chain.yaml"), seed=seed)
+        assert config.seed == seed
+        result = define(config)
+        occurred = result.stats["episodes"]["occurrence_share"]
+        assert occurred["EVENTTYPE2.1.1"] > 0 and occurred["EVENTTYPE2.1.2"] > 0, seed
+        assert "EVENTTYPE2.1.2" not in result.stats["episodes"]["never_legal"], seed
+        assert _catch_before_eat(result, silence=True) > 0, seed
 
 
 def _occurrence_and_legal(result: WorldResult, name: str, count: int) -> tuple[dict, dict]:
@@ -325,13 +336,14 @@ def test_each_episode_depends_only_on_its_own_part(tiny: WorldResult) -> None:
     assert all(h.seed == generator.definition.entity_labels[4] for h in given)
 
 
-def old_scene_participants(taxonomy, settings: EpisodeSettings):
+def old_scene_participants(statics, settings: EpisodeSettings):
     """A reference of the participant draw of the corpus's scene generator before stage a5a
     (``corpus/scenes.py``): the weights over the instances, and the draw. Thematic relatedness
-    comes from the taxonomy's ``thematic`` table, and similarity from the leaves' generative
+    comes from the world's ``thematic`` table, and similarity from the leaves' generative
     vectors with the taxonomy's similarity settings, undefined and negative values counting 0."""
     from semantic_world.taxonomy.similarity import similarity_matrix
 
+    taxonomy = statics.taxonomy
     instances, tree = taxonomy.instances, taxonomy.tree
     leaves = [leaf.label for leaf in tree.leaves]
     number = {label: i for i, label in enumerate(leaves)}
@@ -339,8 +351,8 @@ def old_scene_participants(taxonomy, settings: EpisodeSettings):
     leaf_of_row = {int(row): i for i, row in enumerate(leaf_rows)}
     leaf = np.array([leaf_of_row[int(row)] for row in instances.leaf_index], dtype=np.intp)
     thematic = np.zeros((len(leaves), len(leaves)))
-    if taxonomy.relation_stats is not None:
-        for row in taxonomy.relation_stats.thematic.iter_rows(named=True):
+    if statics.relation_stats is not None:
+        for row in statics.relation_stats.thematic.iter_rows(named=True):
             a, b = number[row["leaf_a"]], number[row["leaf_b"]]
             thematic[a, b] = thematic[b, a] = row["thematic"]
     analysis = taxonomy.config.analysis
@@ -378,7 +390,7 @@ def test_participants_are_drawn_as_corpus_scenes_drew_them(tiny: WorldResult) ->
     similarity, and a constant, over the leaf of each entity and the seed's leaf."""
     generator = _generator(tiny)
     definition = generator.definition
-    theirs, draw = old_scene_participants(tiny.taxonomy, generator.settings)
+    theirs, draw = old_scene_participants(tiny.statics, generator.settings)
     for seed in range(definition.entity_count):
         assert np.allclose(generator.participant_weights(seed), theirs(seed), atol=1e-6)
         rng_a, rng_b = np.random.default_rng(seed), np.random.default_rng(seed)
@@ -387,7 +399,7 @@ def test_participants_are_drawn_as_corpus_scenes_drew_them(tiny: WorldResult) ->
 
 def test_relatedness_from_a_run_equals_in_memory(tiny: WorldResult, tmp_path: Path) -> None:
     runtime = tiny.definition.runtime()
-    in_memory = Relatedness.from_taxonomy(tiny.taxonomy, runtime)
+    in_memory = Relatedness.from_statics(tiny.statics, runtime)
     from_run = Relatedness.from_run(tiny.write(tmp_path / "tiny"), runtime)
     assert from_run.leaves == in_memory.leaves
     assert np.allclose(from_run.thematic, in_memory.thematic)
@@ -398,12 +410,16 @@ def test_relatedness_from_a_run_equals_in_memory(tiny: WorldResult, tmp_path: Pa
 
 def test_relatedness_without_two_place_event_types(tmp_path: Path) -> None:
     data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
-    data["event_types"] = {"binary": None}
+    data["event_types"]["binary"] = None
     path = tmp_path / "unary.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     result = define(load_config(path))
+    assert result.statics.relations is None and result.statics.relation_stats is None
+    assert [et.label for et in result.event_types.event_types] == [
+        f"EVENTTYPE1.{k}" for k in range(1, 5)
+    ]
     runtime = result.definition.runtime()
-    in_memory = Relatedness.from_taxonomy(result.taxonomy, runtime)
+    in_memory = Relatedness.from_statics(result.statics, runtime)
     assert not in_memory.thematic.any()
     assert in_memory.similarity.max() > 0
     folder = result.write(tmp_path / "unary_run")
@@ -428,6 +444,7 @@ def test_initial_state_kept_or_redrawn(tiny: WorldResult) -> None:
         assert history.initial == {p: entities[p] for p in history.participants}
     redraw = _generator(tiny, initial="redraw")
     rates = redraw.initial_rates
+    assert rates == definition.initial_rates == {f.label: f.initial_rate for f in tiny.fluents.base}
     differs = 0
     for history in redraw.run(1, 50, STATS_STREAM):
         for participant, fluents in history.initial.items():
@@ -439,8 +456,16 @@ def test_initial_state_kept_or_redrawn(tiny: WorldResult) -> None:
                     assert fluent in fluents
         replay(definition, history)
     assert differs > 0
+    # Rates given apart replace the definition's; a rate missing for a base fluent is an error.
+    halves = dict.fromkeys(definition.base_fluents, 0.5)
+    given = EpisodeGenerator(
+        definition, keep.relatedness, EpisodeSettings(initial="redraw"), halves
+    )
+    assert given.initial_rates == halves
     with pytest.raises(WorldError, match="initial rate"):
-        EpisodeGenerator(definition, keep.relatedness, EpisodeSettings(initial="redraw"))
+        EpisodeGenerator(
+            definition, keep.relatedness, EpisodeSettings(initial="redraw"), {"BOOLFL.1": 1.0}
+        )
 
 
 def test_quiescence_ends_an_episode() -> None:
@@ -484,8 +509,7 @@ def test_scene_settings_defaults_and_corpus_file(tiny: WorldResult) -> None:
         {
             "scene": {
                 "size": [1, 2],
-                "verb_weights": {"CAN.1": 2.0},
-                "event_type_weights": {"EVENTTYPE2.1.1": 0.0},
+                "event_type_weights": {"EVENTTYPE1.1": 2.0, "EVENTTYPE2.1.1": 0.0},
                 "policy": "uniform_event_type",
                 "initial": "redraw",
             }
@@ -500,7 +524,7 @@ def test_scene_settings_defaults_and_corpus_file(tiny: WorldResult) -> None:
         ({"policy": "nothing"}, "policy"),
         ({"size": [3, 2]}, "size"),
         ({"event_type_weights": {"EVENTTYPE9.9": 1.0}}, "EVENTTYPE9.9"),
-        ({"verb_weights": {"CAN.9": 1.0}}, "CAN.9"),
+        ({"verb_weights": {"EVENTTYPE1.1": 1.0}}, r"verb_weights.*scene.event_type_weights"),
         ({"participant_weights": {"other": 1.0}}, "participant_weights.other"),
         ({"unknown": 1}, "unknown"),
         ({"initial": "fresh"}, "initial"),
@@ -519,7 +543,9 @@ def test_simulate_command_and_histories_file(
     tiny: WorldResult, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     folder = tiny.write(tmp_path / "tiny")
-    assert read_initial_rates(folder) == {f.label: f.initial_rate for f in tiny.fluents.base}
+    rates = {f.label: f.initial_rate for f in tiny.fluents.base}
+    assert load_definition(folder).initial_rates == rates
+    assert tiny.definition.runtime().initial_rates == rates
     assert main(["simulate", str(folder), "--episodes", "4", "--legal"]) == 0
     out = capsys.readouterr().out
     assert "4 episodes" in out
@@ -576,7 +602,9 @@ def test_simulate_command_and_histories_file(
     assert round_trip.read_bytes() == path.read_bytes()
 
 
-def test_world_stats_report_episodes_and_initial_rates(tiny: WorldResult, tmp_path: Path) -> None:
+def test_world_stats_report_episodes_redraws_and_never_legal(
+    tiny: WorldResult, tmp_path: Path
+) -> None:
     episodes = tiny.stats["episodes"]
     assert episodes["count"] == 1000
     performable = [et.label for et in tiny.event_types.leaves]
@@ -584,19 +612,39 @@ def test_world_stats_report_episodes_and_initial_rates(tiny: WorldResult, tmp_pa
     assert list(episodes["occurrence_share"]) == performable
     for label in performable:
         assert 0.0 <= episodes["occurrence_share"][label] <= episodes["legal_share"][label] <= 1.0
-    assert episodes["never_legal"] == [
+    assert list(episodes["never_legal"]) == [
         label for label in performable if episodes["legal_share"][label] == 0
     ]
+    assert set(episodes["never_legal"].values()) <= {"never_able", "preconditions"}
     assert len(episodes["warnings"]) == len(episodes["never_legal"])
     assert 0.0 <= episodes["quiescent_share"] <= 1.0
     assert episodes["mean_changes_per_event"] >= 0.0
+    assert 0.0 < episodes["two_place_share"] < 1.0
+    assert set(episodes["precondition_redraws"]) <= set(performable)
     folder = tiny.write(tmp_path / "tiny")
     stats = yaml.safe_load((folder / "world_stats.yaml").read_text(encoding="utf-8"))
-    assert stats["fluents"]["initial_rates"] == {f.label: f.initial_rate for f in tiny.fluents.base}
+    assert stats["fluents"] == {"base": 3, "derived": 1}
     assert stats["episodes"]["count"] == 1000
-    # The statistics episodes are the default policy on the world:stats stream.
+    assert stats["episodes"]["precondition_redraws"] == episodes["precondition_redraws"]
+    assert stats["episodes"]["never_legal"] == episodes["never_legal"]
+    # The statistics episodes are the default policy on the world:stats stream, with the legal
+    # counts recorded; the statistics of the final definition carry the redraw counts over.
     generator = _generator(tiny)
     histories = generator.run(tiny.config.seed, 1000, STATS_STREAM)
+    from semantic_world.world.runtime import able_table
     from semantic_world.world.stats import episode_stats
 
-    assert episode_stats(histories, generator.performable) == episodes
+    able = able_table(generator.definition)
+    never_able = [label for label in generator.performable if not able[label].any()]
+    assert (
+        episode_stats(
+            histories, generator.performable, episodes["precondition_redraws"], never_able
+        )
+        == episodes
+    )
+    assert (
+        statistics_episodes(
+            tiny.definition, tiny.statics, tiny.config, episodes["precondition_redraws"]
+        )
+        == episodes
+    )

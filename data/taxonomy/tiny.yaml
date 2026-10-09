@@ -1,5 +1,5 @@
-# A taxonomy small enough to read by eye: 2 superordinates, depth 2, 8 IS, 8 HAS, 4 CAN,
-# and 3 instances per leaf. Parameters not listed keep their defaults (see default.yaml).
+# A taxonomy small enough to read by eye: 2 superordinates, depth 2, 8 PROPERTY and 8 PART
+# features, and 3 instances per leaf. Parameters not listed keep their defaults (see default.yaml).
 
 name: tiny
 seed: 1
@@ -7,7 +7,8 @@ seed: 1
 features:
   is:  {count: 8, proportion_determined: 0.25, expected_true_free: 2}
   has: {count: 8, proportion_determined: 0.25, expected_true_free: 2}
-  can: {count: 4}
+  base_rate_heterogeneity: null  # equal base rates: with 6 free features of a type, heterogeneous rates can leave a
+                                 # superordinate with no true feature, which the similarity bound cannot place
 
 taxonomy:
   superordinates: 2

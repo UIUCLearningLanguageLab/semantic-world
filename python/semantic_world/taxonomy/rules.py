@@ -2,12 +2,13 @@
 evaluation of the determined features.
 
 The rule set is global: one rule set holds for the whole world. Rules form an acyclic graph.
-Free IS and HAS features are layer 0. A rule for a layer-k IS or HAS feature takes inputs from
-layers below k, and at least one input comes from layer k−1. CAN rules read IS and HAS features
-of any layer. No rule reads an ISA or CAN feature. Evaluation order is layer order, so every
-input is known before a rule runs.
+Free PROPERTY and PART features are layer 0. A rule for a layer-k feature takes inputs from
+layers below k, and at least one input comes from layer k−1. No rule reads an ISA feature.
+Evaluation order is layer order, so every input is known before a rule runs. The one-place
+requirements of the world package (the old CAN rules) are sampled by the same builder over every
+layer; see ``semantic_world.world.unary``.
 
-A rule's input can also be a threshold literal on a scalar dimension, ``SC.<n> > threshold``,
+A rule's input can also be a threshold literal on a scalar dimension, ``SCALARDIM.<n> > threshold``,
 which acts like a binary layer-0 input (``docs/specs/TAXONOMY_RELATIONS.md``, Part A). One rule
 uses at most one literal per scalar. Thresholds are quantiles of the scalar's model distribution,
 drawn from the ``rules`` stream and rounded to 4 decimal places.
@@ -34,7 +35,14 @@ from semantic_world.common.boolean import (
     shj_function,
     shj_type_of,
 )
-from semantic_world.taxonomy.config import Config, ConfigError, RuleSampling, ScalarsConfig
+from semantic_world.taxonomy.config import (
+    LABEL_PREFIX,
+    SCALAR_PREFIX,
+    Config,
+    ConfigError,
+    RuleSampling,
+    ScalarsConfig,
+)
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import (
     Expr,
@@ -67,7 +75,7 @@ RULE_FAMILIES = ("literal", "binary", "shj", "compositional", "fixed", "explicit
 
 @dataclass(frozen=True)
 class Threshold:
-    """A threshold literal ``SC.<scalar> > threshold`` used as a rule input. It is a layer-0
+    """A threshold literal ``SCALARDIM.<scalar> > threshold`` used as a rule input. It is a layer-0
     input, always free, of type ``scalar``."""
 
     scalar: int
@@ -82,7 +90,7 @@ class Threshold:
 
     @property
     def label(self) -> str:
-        return f"SC.{self.scalar}"
+        return f"{SCALAR_PREFIX}.{self.scalar}"
 
     @property
     def key(self) -> str:
@@ -225,7 +233,7 @@ class RuleSet:
 
         ``free_values`` has shape ``(n, free count)`` in free-feature order and ``scalar_values``
         shape ``(n, scalar count)``. The result has shape ``(n, feature count)`` in matrix order
-        (IS, HAS, CAN), dtype ``uint8``.
+        (PROPERTY, PART), dtype ``uint8``.
         """
         return compute_features(self.features, self.rules, free_values, scalar_values)
 
@@ -582,34 +590,30 @@ class _Builder:
             name = atom.name
             if name.startswith("ISA."):
                 raise error("expression", f"reads {name}; no rule may read an ISA feature")
-            if name.startswith("SC."):
+            if name.startswith(f"{SCALAR_PREFIX}."):
                 raise error(
                     "expression",
                     f"reads the scalar {name} without a threshold; write {name} > x or {name} <= x",
                 )
             if name not in self.features:
                 raise error("expression", f"reads unknown feature {name}")
-            feature = self.features[name]
-            if feature.type == "can":
-                raise error("expression", f"reads {name}; no rule may read a CAN feature")
-            inputs.append(feature)
+            inputs.append(self.features[name])
         scalars_used = [i.scalar for i in inputs if isinstance(i, Threshold)]
         if len(set(scalars_used)) != len(scalars_used):
             raise error("expression", "uses more than one threshold literal on the same scalar")
-        if output.type != "can":
-            above = [f.label for f in inputs if f.layer >= output.layer]
-            if above:
-                raise error(
-                    "expression",
-                    f"{output.label} is at layer {output.layer} but reads {above}, which are not "
-                    f"below layer {output.layer}",
-                )
-            if not any(f.layer == output.layer - 1 for f in inputs):
-                raise error(
-                    "expression",
-                    f"{output.label} is at layer {output.layer} but reads no feature from "
-                    f"layer {output.layer - 1}",
-                )
+        above = [f.label for f in inputs if f.layer >= output.layer]
+        if above:
+            raise error(
+                "expression",
+                f"{output.label} is at layer {output.layer} but reads {above}, which are not "
+                f"below layer {output.layer}",
+            )
+        if not any(f.layer == output.layer - 1 for f in inputs):
+            raise error(
+                "expression",
+                f"{output.label} is at layer {output.layer} but reads no feature from "
+                f"layer {output.layer - 1}",
+            )
         labels = [input_key(i) for i in inputs]
         table = explicit.expression.truth_table(labels)
         return Rule(
@@ -625,7 +629,11 @@ class _Builder:
 
     def _explicit_threshold(self, atom: Gt, error) -> Threshold:
         prefix, _, number = atom.scalar.partition(".")
-        if prefix != "SC" or not number.isdigit() or not 1 <= int(number) <= self.scalars.count:
+        if (
+            prefix != SCALAR_PREFIX
+            or not number.isdigit()
+            or not 1 <= int(number) <= self.scalars.count
+        ):
             raise error(
                 "expression",
                 f"reads unknown scalar {atom.scalar}; the run has {self.scalars.count} scalars",
@@ -654,7 +662,8 @@ class _Builder:
                         self.rule_file.source,
                         f"templates[{i}].arity",
                         f"the template has arity {template.max_arity}, but a rule for a "
-                        f"{feature_type.upper()} feature can read at most {len(pool)} features",
+                        f"{LABEL_PREFIX[feature_type]} feature can read at most {len(pool)} "
+                        f"features",
                     )
 
     # Sampling ------------------------------------------------------------------------------------
@@ -701,13 +710,13 @@ class _Builder:
         )
 
     def _pool(self, output: Feature, sampling: RuleSampling) -> list[Feature | int]:
-        """The inputs a rule for ``output`` may read: features in feature order, then the
-        scalar dimensions (as indices) when scalars are on with a positive weight."""
+        """The inputs a rule for ``output`` may read: features of the layers below in feature
+        order, then the scalar dimensions (as indices) when scalars are on with a positive
+        weight."""
         types = sampling.input_types
-        if output.type == "can":
-            pool: list[Feature | int] = [f for f in self.features.features if f.type in types]
-        else:
-            pool = [f for f in self.features.features if f.type in types and f.layer < output.layer]
+        pool: list[Feature | int] = [
+            f for f in self.features.features if f.type in types and f.layer < output.layer
+        ]
         if self.scalars.count and sampling.scalar_weight > 0:
             pool.extend(range(1, self.scalars.count + 1))
         return pool
@@ -722,15 +731,14 @@ class _Builder:
                 f"eligible; lower the arity or loosen rules.input_type_weights"
             )
         chosen: list[Feature | int] = []
-        if output.type != "can":
-            previous = [c for c in pool if _entry_layer(c) == output.layer - 1]
-            if not previous:
-                raise GenerationError(
-                    f"a rule for {output.label} at layer {output.layer} needs an input from layer "
-                    f"{output.layer - 1}, but no eligible feature is at that layer; loosen "
-                    f"rules.input_type_weights or lower rules.max_chain_depth"
-                )
-            chosen.append(self._weighted_pick(previous, sampling, 1)[0])
+        previous = [c for c in pool if _entry_layer(c) == output.layer - 1]
+        if not previous:
+            raise GenerationError(
+                f"a rule for {output.label} at layer {output.layer} needs an input from layer "
+                f"{output.layer - 1}, but no eligible feature is at that layer; loosen "
+                f"rules.input_type_weights or lower rules.max_chain_depth"
+            )
+        chosen.append(self._weighted_pick(previous, sampling, 1)[0])
         remaining = [c for c in pool if c not in chosen]
         chosen.extend(self._weighted_pick(remaining, sampling, arity - len(chosen)))
         binary = sorted((c for c in chosen if isinstance(c, Feature)), key=lambda f: f.position)
@@ -784,8 +792,8 @@ class _Builder:
             raise ConfigError(
                 self.rule_file.source,
                 "templates",
-                f"no template with positive weight applies to {output.type.upper()} features, "
-                f"and {output.label} has no explicit rule",
+                f"no template with positive weight applies to {LABEL_PREFIX[output.type]} "
+                f"features, and {output.label} has no explicit rule",
             )
         template: Template = templates[
             _draw(self.rng, {i: t.weight for i, t in enumerate(templates)})

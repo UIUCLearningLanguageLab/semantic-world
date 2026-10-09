@@ -1,0 +1,97 @@
+- output: IS.7
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.2, IS.5, HAS.3, HAS.4]
+  relevant_inputs: [IS.2, IS.5, HAS.3, HAS.4]
+  expression: IS.2 OR IS.5 OR NOT HAS.3 OR HAS.4
+  truth_table: '1101111111111111'
+  min_dnf_literals: 4
+  thresholds: {}
+- output: IS.8
+  layer: 1
+  family: shj
+  shj_type: II
+  arity: 3
+  nesting_depth: null
+  inputs: [HAS.5, HAS.6, SC.1]
+  relevant_inputs: [HAS.5, HAS.6]
+  expression: (NOT HAS.5 AND NOT HAS.6) OR (HAS.5 AND HAS.6)
+  truth_table: '11000011'
+  min_dnf_literals: 4
+  thresholds: {SC.1: -0.5822}
+- output: HAS.7
+  layer: 1
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.4, HAS.2, HAS.3, HAS.5]
+  relevant_inputs: [IS.4, HAS.2, HAS.3, HAS.5]
+  expression: IS.4 XOR NOT HAS.2 XOR NOT HAS.3 XOR NOT HAS.5
+  truth_table: '1001011001101001'
+  min_dnf_literals: 32
+  thresholds: {}
+- output: HAS.8
+  layer: 1
+  family: shj
+  shj_type: III
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.2, IS.4, HAS.1]
+  relevant_inputs: [IS.2, IS.4, HAS.1]
+  expression: (NOT IS.2 AND NOT IS.4) OR (IS.2 AND HAS.1)
+  truth_table: '11000101'
+  min_dnf_literals: 4
+  thresholds: {}
+- output: CAN.1
+  layer: 2
+  family: shj
+  shj_type: IV
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.1, IS.2, IS.7]
+  relevant_inputs: [IS.1, IS.2, IS.7]
+  expression: (NOT IS.1 AND NOT IS.2) OR (NOT IS.1 AND IS.7) OR (NOT IS.2 AND IS.7)
+  truth_table: '11010100'
+  min_dnf_literals: 6
+  thresholds: {}
+- output: CAN.2
+  layer: 2
+  family: compositional
+  shj_type: null
+  arity: 4
+  nesting_depth: 1
+  inputs: [IS.2, HAS.1, HAS.2, HAS.4]
+  relevant_inputs: [IS.2, HAS.1, HAS.2, HAS.4]
+  expression: NOT IS.2 AND HAS.1 AND NOT HAS.2 AND HAS.4
+  truth_table: '0000010000000000'
+  min_dnf_literals: 4
+  thresholds: {}
+- output: CAN.3
+  layer: 2
+  family: shj
+  shj_type: VI
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.5, IS.6, HAS.8]
+  relevant_inputs: [IS.5, IS.6, HAS.8]
+  expression: (NOT IS.5 AND NOT IS.6 AND NOT HAS.8) OR (NOT IS.5 AND IS.6 AND HAS.8)
+    OR (IS.5 AND NOT IS.6 AND HAS.8) OR (IS.5 AND IS.6 AND NOT HAS.8)
+  truth_table: '10010110'
+  min_dnf_literals: 12
+  thresholds: {}
+- output: CAN.4
+  layer: 2
+  family: shj
+  shj_type: II
+  arity: 3
+  nesting_depth: null
+  inputs: [IS.6, IS.8, HAS.7]
+  relevant_inputs: [IS.6, HAS.7]
+  expression: (NOT IS.6 AND HAS.7) OR (IS.6 AND NOT HAS.7)
+  truth_table: '01011010'
+  min_dnf_literals: 4
+  thresholds: {}

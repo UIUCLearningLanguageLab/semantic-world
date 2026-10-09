@@ -14,7 +14,7 @@ import pytest
 
 from semantic_world.common.boolean import TruthTable
 from semantic_world.taxonomy import TaxonomyResult, config_from_mapping, generate, load_config
-from semantic_world.taxonomy.io import STATIC_FEATURES_FILE, WORLD_FILES
+from semantic_world.taxonomy.io import BASE_FILE, STATIC_FEATURES_FILE, WORLD_FILES
 from semantic_world.taxonomy.rule_matrices import (
     build_rule_matrices,
     check_rule_agreement,
@@ -58,7 +58,7 @@ def test_every_rule_is_covered_and_agrees_on_every_instance(run: TaxonomyResult)
     assert run.matrices is not None
     outputs = run.matrices.matrices.outputs
     assert sorted(outputs) == sorted(rule.output.label for rule in run.rules.rules)
-    assert {r.output.type for r in run.rules.rules} <= {"is", "has", "can"}
+    assert {r.output.type for r in run.rules.rules} <= {"is", "has"}
     report = check_rule_agreement(run.matrices, run.rules, run.instances)
     assert report.rules == len(run.rules.rules)
     assert report.entities == len(run.instances)
@@ -135,10 +135,10 @@ def test_a_disagreement_fails_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
     module = sys.modules["semantic_world.taxonomy.generate"]
 
     def broken(matrices, rules, instances):
-        raise AgreementError("the matrix form of the rule for IS.7 disagrees (test)")
+        raise AgreementError("the matrix form of the rule for PROPERTY.7 disagrees (test)")
 
     monkeypatch.setattr(module, "check_rule_agreement", broken)
-    with pytest.raises(AgreementError, match="IS.7"):
+    with pytest.raises(AgreementError, match="PROPERTY.7"):
         generate(load_config(DATA / "tiny.yaml"))
 
 
@@ -150,12 +150,12 @@ def test_the_command_line_reports_an_agreement_failure(
     module = sys.modules["semantic_world.taxonomy.generate"]
 
     def broken(matrices, rules, instances):
-        raise AgreementError("the matrix form of the rule for IS.7 disagrees (test)")
+        raise AgreementError("the matrix form of the rule for PROPERTY.7 disagrees (test)")
 
     monkeypatch.setattr(module, "check_rule_agreement", broken)
     code = main([str(DATA / "tiny.yaml"), "--out", str(tmp_path / "out")])
     assert code == 1
-    assert "error: the matrix form of the rule for IS.7" in capsys.readouterr().err
+    assert "error: the matrix form of the rule for PROPERTY.7" in capsys.readouterr().err
     assert not (tmp_path / "out").exists()
 
 
@@ -299,17 +299,24 @@ def test_canonical_json_of_the_record_is_deterministic(run: TaxonomyResult) -> N
 # ---------------------------------------------------------------------------------------------
 
 
-def test_static_features_holds_the_determined_is_and_has_features(
+def test_static_features_holds_the_determined_property_and_part_features(
     run: TaxonomyResult, folder: Path
 ) -> None:
+    """``derived/static_features.csv`` holds every determined feature, which ``base.csv`` no
+    longer carries; together the two files are every static feature of every instance."""
     frame = pl.read_csv(folder / "derived" / STATIC_FEATURES_FILE)
-    determined = [f.label for f in run.features.features if not f.free and f.type != "can"]
+    determined = [f.label for f in run.features.determined]
+    assert determined == [f.label for f in run.features.features if not f.free]
     assert frame.columns == ["label"] + determined
     assert frame["label"].to_list() == list(run.instances.labels)
-    instances = pl.read_csv(folder / "instances.csv")
     for label in determined:
-        assert frame[label].to_list() == instances[label].to_list(), label
-    assert not any(c.startswith("CAN.") for c in frame.columns)
+        position = run.features[label].position
+        assert frame[label].to_list() == run.instances.values[:, position].tolist(), label
+    base = pl.read_csv(folder / BASE_FILE)
+    free = [f.label for f in run.features.free]
+    assert base.columns == ["label", "leaf", *free, *run.features.scalar_labels]
+    assert not set(free) & set(determined)
+    assert all(c.startswith(("PROPERTY.", "PART.")) for c in determined + free)
 
 
 def test_manifest_tags_the_file_with_the_runs_identity(run: TaxonomyResult, folder: Path) -> None:

@@ -1,7 +1,9 @@
 """Stage 1 acceptance tests: configuration loading, validation, and the resolved configuration.
 
 The example configurations load. Deliberately broken configurations each fail with an error
-that names the file and the field. The resolved configuration round-trips.
+that names the file and the field. The resolved configuration round-trips. The keys that left the
+taxonomy in stage a5b of the world model (``features.can``, ``rules.overrides.can``, ``verbs``)
+fail with errors that name their new place in the world configuration.
 """
 
 from __future__ import annotations
@@ -38,13 +40,13 @@ def test_default_values() -> None:
     config = load_config(DATA / "default.yaml")
     assert config.seed == 1
     features = config.features
-    assert (features.is_.count, features.has.count, features.can.count) == (40, 40, 20)
+    assert (features.is_.count, features.has.count) == (40, 40)
     assert features.is_.determined_count == 10
     assert features.is_.free_count == 30
     assert features.base_rate("is") == pytest.approx(6 / 30)
     assert features.base_rate("has") == pytest.approx(6 / 30)
     assert features.base_rate_override is None
-    assert features.base_rate_heterogeneity is None
+    assert features.base_rate_heterogeneity == 2.0
     rules = config.rules
     assert rules.source == "automatic"
     assert rules.file is None
@@ -66,7 +68,9 @@ def test_default_values() -> None:
     assert rules.sampling.nesting_depth == {1: 0.5, 2: 0.5}
     assert rules.sampling.input_types == ("is", "has")
     assert rules.overrides == {}
-    assert rules.sampling_for("can") is rules.sampling
+    assert rules.sampling_for("has") is rules.sampling
+    with pytest.raises(ValueError, match="not a feature type"):
+        rules.sampling_for("can")
     assert rules.allow_duplicate_rules is False
     assert rules.variance_bound is None
     assert config.taxonomy.superordinates == 4
@@ -92,10 +96,11 @@ def test_default_values() -> None:
 def test_tiny_values() -> None:
     config = load_config(DATA / "tiny.yaml")
     features = config.features
-    assert (features.is_.count, features.has.count, features.can.count) == (8, 8, 4)
+    assert (features.is_.count, features.has.count) == (8, 8)
     assert features.is_.determined_count == 2
     assert features.is_.free_count == 6
     assert features.base_rate("is") == pytest.approx(2 / 6)
+    assert features.base_rate_heterogeneity is None  # set explicitly; the default is 2
     assert config.taxonomy.superordinates == 2
     assert config.taxonomy.depth == 2
     assert config.taxonomy.branching == (Range(2, 2),)
@@ -146,7 +151,6 @@ def test_resolved_configuration_has_the_specified_sections_in_order() -> None:
         "instances",
         "analysis",
         "scalars",
-        "verbs",
     ]
 
 
@@ -171,13 +175,39 @@ def test_rule_file_path_is_relative_to_the_configuration_file(tmp_path: Path) ->
 
 def test_overrides_merge_over_the_base_settings() -> None:
     config = config_from_mapping(
-        {"rules": {"negation_probability": 0.5, "overrides": {"can": {"arity": {2: 1, 3: 1}}}}}
+        {"rules": {"negation_probability": 0.5, "overrides": {"has": {"arity": {2: 1, 3: 1}}}}}
     )
-    can = config.rules.sampling_for("can")
-    assert can.arity == {2: 1, 3: 1}
-    assert can.negation_probability == 0.5  # inherited from the base settings
+    has = config.rules.sampling_for("has")
+    assert has.arity == {2: 1, 3: 1}
+    assert has.negation_probability == 0.5  # inherited from the base settings
     assert config.rules.sampling_for("is").arity == {1: 0.1, 2: 0.3, 3: 0.4, 4: 0.2}
-    assert config.resolved()["rules"]["overrides"]["can"]["negation_probability"] == 0.5
+    assert config.resolved()["rules"]["overrides"]["has"]["negation_probability"] == 0.5
+
+
+@pytest.mark.parametrize(
+    ("data", "field", "new_place"),
+    [
+        ({"features": {"can": {"count": 4}}}, "features.can", "event_types.unary"),
+        (
+            {"rules": {"overrides": {"can": {"arity": {2: 1}}}}},
+            "rules.overrides.can",
+            "event_types.unary.rules",
+        ),
+        ({"verbs": {}}, "verbs", "event_types.binary"),
+        ({"verbs": None}, "verbs", "event_types.binary"),
+    ],
+)
+def test_keys_that_moved_to_the_world_name_their_new_place(
+    data: dict, field: str, new_place: str
+) -> None:
+    """CAN features and verbs left the taxonomy in stage a5b: the old keys are errors that name
+    the world configuration's block."""
+    with pytest.raises(ConfigError) as info:
+        config_from_mapping(data, source="old.yaml")
+    assert info.value.field == field
+    assert new_place in str(info.value)
+    assert "data/world/default.yaml" in str(info.value)
+    assert str(info.value).startswith(f"old.yaml: {field}: ")
 
 
 def test_base_rate_override_replaces_expected_true_free() -> None:
@@ -209,7 +239,6 @@ def test_no_determined_features_allows_zero_chain_depth() -> None:
             "features": {
                 "is": {"proportion_determined": 0},
                 "has": {"proportion_determined": 0},
-                "can": {"count": 0},
             },
             "rules": {"max_chain_depth": 0},
         }
@@ -273,7 +302,7 @@ BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
     ("fractional count", _set("features.is.count", 2.5), "features.is.count"),
     ("boolean count", _set("features.is.count", True), "features.is.count"),
     ("string count", _set("features.is.count", "40"), "features.is.count"),
-    ("negative can count", _set("features.can.count", -3), "features.can.count"),
+    ("CAN features moved to the world", _set("features.can", {"count": 4}), "features.can"),
     (
         "proportion above 1",
         _set("features.is.proportion_determined", 1.5),
@@ -329,14 +358,19 @@ BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
         "rules.overrides.isa",
     ),
     (
-        "override arity larger than the CAN pool",
-        _set("rules.overrides", {"can": {"arity": {81: 1}}}),
-        "rules.overrides.can.arity",
+        "override arity larger than the free pool",
+        _set("rules.overrides", {"has": {"arity": {61: 1}}}),
+        "rules.overrides.has.arity",
     ),
     (
         "unknown override key",
-        _set("rules.overrides", {"can": {"colour": 1}}),
-        "rules.overrides.can.colour",
+        _set("rules.overrides", {"has": {"colour": 1}}),
+        "rules.overrides.has.colour",
+    ),
+    (
+        "CAN overrides moved to the world",
+        _set("rules.overrides", {"can": {"arity": {2: 1}}}),
+        "rules.overrides.can",
     ),
     ("string boolean", _set("rules.allow_duplicate_rules", "no"), "rules.allow_duplicate_rules"),
     ("reversed variance bound", _set("rules.variance_bound", [0.6, 0.4]), "rules.variance_bound"),
@@ -468,6 +502,7 @@ BROKEN: list[tuple[str, Callable[[dict], None], str]] = [
         "analysis.similarity_features",
     ),
     ("zero max pairs", _set("analysis.max_pairs", 0), "analysis.max_pairs"),
+    ("verbs moved to the world", _set("verbs", {}), "verbs"),
 ]
 
 

@@ -11,25 +11,27 @@ import pytest
 from semantic_world.world import canonical_json, read_json, rule_set_id, to_json, write_json
 from semantic_world.world.identity import format_float
 
-SYMBOLS = [{"label": "IS.1", "kind": "is", "derived": False, "fluent": False, "arity": 1}]
+SYMBOLS = [
+    {"label": "PROPERTY.1", "kind": "property", "derived": False, "fluent": False, "arity": 1}
+]
 LITERALS = [
-    {"index": 0, "key": "IS.1", "kind": "feature", "role": None, "feature": "IS.1"},
+    {"index": 0, "key": "PROPERTY.1", "kind": "feature", "role": None, "feature": "PROPERTY.1"},
     {
         "index": 1,
-        "key": "SC.1>0.4127",
+        "key": "SCALARDIM.1>0.4127",
         "kind": "threshold",
         "role": None,
-        "scalar": "SC.1",
+        "scalar": "SCALARDIM.1",
         "operator": ">",
         "threshold": 0.4127,
     },
 ]
 RULES = [
     {
-        "output": "IS.2",
+        "output": "PROPERTY.2",
         "inputs": [0, 1],
         "truth_table": "0001",
-        "expression": "IS.1 AND SC.1 > 0.4127",
+        "expression": "PROPERTY.1 AND SCALARDIM.1 > 0.4127",
     }
 ]
 

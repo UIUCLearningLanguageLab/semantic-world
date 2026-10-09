@@ -105,7 +105,12 @@ def _define(args: argparse.Namespace) -> int:
         f"{len(event_types.binary)} two-place event types, "
         f"{len(event_types.constraints)} constraints; rule set {result.rule_set_id[:12]}"
     )
+    episodes = result.stats.get("episodes") or {}
+    for label, count in (episodes.get("precondition_redraws") or {}).items():
+        print(f"note: the preconditions of {label} were drawn again {count} time(s)")
     for warning in result.warnings:
+        print(f"warning: {warning}")
+    for warning in episodes.get("warnings") or ():
         print(f"warning: {warning}")
     return 0
 

@@ -25,7 +25,9 @@ name: plain
 seed: 1
 taxonomy: {config: data/taxonomy/tiny.yaml}
 fluents: {count: 0}
-event_types: {binary: null}
+event_types:
+  unary: {count: 4}
+  binary: null
 """
 
 STATIC_WORLD = """\
@@ -35,6 +37,11 @@ name: static
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
 fluents: {count: 0}
+event_types:
+  unary: {count: 4}
+  binary:
+    features: {count: 4, expected_true: 2}
+    taxonomy: {superordinates: 2, depth: 2, branching: 2}
 """
 
 
@@ -57,49 +64,68 @@ def write_world(folder: Path, name: str, text: str) -> str:
 # ---------------------------------------------------------------------------------------------
 
 DEEP_TAXONOMY = """\
-# A small world whose rules chain: some determined features are computed from other determined
-# features, and some rules read scalar thresholds.
+# A small taxonomy whose rules chain: some determined features are computed from other
+# determined features, and some rules read scalar thresholds. Equal base rates, as before the
+# heterogeneous default.
 name: deep
 seed: 3
 features:
   is: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
   has: {count: 12, proportion_determined: 0.5, expected_true_free: 2.5}
-  can: {count: 6}
+  base_rate_heterogeneity: null
 rules: {max_chain_depth: 2}
 taxonomy: {superordinates: 3, depth: 2, branching: [2, 3]}
 instances: {per_leaf: [4, 6]}
 scalars: {count: 2}
-verbs:
-  features: {count: 6, expected_true: 2}
-  taxonomy: {superordinates: 2, depth: 2, branching: 2}
+"""
+
+DEEP_EVENT_TYPES = """\
+event_types:
+  unary: {count: 6}
+  binary:
+    features: {count: 6, expected_true: 2}
+    taxonomy: {superordinates: 2, depth: 2, branching: 2}
 """
 
 STILL_TAXONOMY = """\
-# A small world whose scalar never drifts, so a threshold literal is fixed at every category,
-# and whose verb tree is flat.
+# A small taxonomy whose scalar never drifts, so a threshold literal is fixed at every category.
+# Equal base rates, as before the heterogeneous default.
 name: still
 seed: 2
 features:
   is: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
   has: {count: 8, proportion_determined: 0.5, expected_true_free: 2}
-  can: {count: 6}
+  base_rate_heterogeneity: null
 rules: {input_type_weights: {is: 1, has: 1, scalar: 3}}
 taxonomy: {superordinates: 3, depth: 2, branching: 2}
 instances: {per_leaf: 4}
 scalars: {count: 1, drift: 0, instance_drift: 0}
-verbs:
-  features: {count: 4, expected_true: 2}
-  taxonomy: {superordinates: 2, depth: 1, branching: 2}
 """
 
+STILL_EVENT_TYPES = """\
+event_types:
+  unary: {count: 6}
+  binary:
+    features: {count: 4, expected_true: 2}
+    taxonomy: {superordinates: 3, depth: 1, branching: 2}
+"""
+"""The still world's event-type tree is flat: three event types and no category. (Two event
+types, as before stage a5b, hold for 1% and 7% of the pairs under the new draws, which leaves
+the scenes almost without two-place events.)"""
+
 WRITTEN_TAXONOMIES = {"deep": DEEP_TAXONOMY, "still": STILL_TAXONOMY}
+WRITTEN_EVENT_TYPES = {"deep": DEEP_EVENT_TYPES, "still": STILL_EVENT_TYPES}
+WRITTEN_SEEDS = {"deep": 3, "still": 2}
 EXAMPLE_WORLDS = {"tiny": TINY_WORLD, "default": DEFAULT_WORLD}
 
 
-def world_over(name: str, taxonomy_path: str, seed: int) -> str:
-    """A world configuration over a written taxonomy, with the default fluents and event
-    types."""
-    return f"name: {name}\nseed: {seed}\ntaxonomy: {{config: {taxonomy_path}, seed: {seed}}}\n"
+def world_over(name: str, taxonomy_path: str, seed: int, event_types: str = "") -> str:
+    """A world configuration over a written taxonomy, with the default fluents, and the given
+    ``event_types`` block (the defaults when none is given)."""
+    return (
+        f"name: {name}\nseed: {seed}\ntaxonomy: {{config: {taxonomy_path}, seed: {seed}}}\n"
+        + event_types
+    )
 
 
 class Case:
@@ -134,10 +160,8 @@ class Case:
 
     def oracle(self, **sections: Any):
         """The independent oracle over the world run folder, with the same truth settings."""
-        from truth_oracle import Oracle
-
         config = self.config(**sections)
-        return Oracle(self.folder, z=config.scalar_z)
+        return oracle_over(self.folder, z=config.scalar_z)
 
     def scenes(self, **sections: Any):
         """The scene generator of the same settings."""
@@ -158,6 +182,18 @@ class Case:
 
         config = self.config(**sections)
         return Realizer(config, self.lexicon(**sections), Streams(config.seed))
+
+
+# ---------------------------------------------------------------------------------------------
+# The oracle
+# ---------------------------------------------------------------------------------------------
+
+
+def oracle_over(folder: Path, *, z: float):
+    """The independent oracle over a world run folder."""
+    from truth_oracle import Oracle
+
+    return Oracle(folder, z=z)
 
 
 # ---------------------------------------------------------------------------------------------

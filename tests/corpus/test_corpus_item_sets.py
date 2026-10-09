@@ -26,6 +26,7 @@ from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EVENT,
+    FEATURE_KINDS,
     INSTANCE,
     NEC_ALL,
     NEC_NO,
@@ -151,9 +152,12 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 assert list(item.to_json()) == ["input", "meta"]
                 assert list(item.input) == list(INPUT_FIELDS)
                 assert item.proposition.level == level
-    # the default world fills every set but some of the law-like ones
+    # the default world fills every set but some of the law-like ones and the possible role
+    # swaps of events: its two-place event types hold for few pairs (since stage a5b), so few
+    # swapped bindings are able (1 pair in 200 documents)
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
-    assert all(sizes[name] == size for name in ALL_SETS if LAWLIKE not in name), sizes
+    unfilled = {name for name in ALL_SETS if LAWLIKE in name} | {"event_role_possible"}
+    assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
     assert all(sizes[name] > 0 for name in ALL_SETS), sizes
     # a true item is used once in the sets of one level and change
     for level, change in {(s.level, s.change) for s in corpus.test_sets}:
@@ -365,7 +369,7 @@ def test_the_format_check_finds_planted_differences(runs) -> None:
     found, problems = planted(lambda x: x.update(document=None))
     assert found and "names a document" in " ".join(problems)
     # one more relative clause than the other item has
-    clause = {"kind": "can", "feature": "EVENTTYPE1.1"}
+    clause = {"kind": "event_type1", "label": "EVENTTYPE1.1"}
     found, _ = planted(lambda x: x["logical_form"]["subject"].update(clauses=[clause]))
     assert any("relative clauses" in f for f in found)
     assert notation("CATEGORY.1.3") == notation("CATEGORY.1.3.2") == "CATEGORY.#"
@@ -492,7 +496,7 @@ def test_event_items(cases, runs, name) -> None:
         assert (other["tense"], other["aspect"]) == (form["tense"], form["aspect"])
         assert not oracle.happened(other, document_scenes)
         predicate = other["predicate"]
-        label = predicate["verb"] if predicate["kind"] == "verb" else predicate["feature"]
+        label = predicate["label"]
         patient = predicate["patient"]["instance"] if "patient" in predicate else None
         able = oracle.able(label, other["subject"]["instance"], patient)
         assert false.meta["possible"] is able is false.meta["grounding"]["able"]
@@ -639,7 +643,7 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
         kind = form["predicate"]["kind"]
         claimed = claimed_value(form)
         uncontradicted = False
-        if claimed is not None and kind in ("is", "has", "can"):
+        if claimed is not None and kind in FEATURE_KINDS:
             count, total = oracle._counts(form)
             uncontradicted = count == (total if claimed else 0)
         assert false.meta["law_like"] is uncontradicted
@@ -648,12 +652,12 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
         if uncontradicted:
             law_like_pairs += 1
             # false by the fixed test alone: nothing fixes the value that every instance has
-            assert oracle.fixed(form["subject"], form["predicate"]["feature"]) != claimed
+            assert oracle.fixed(form["subject"], form["predicate"]["label"]) != claimed
             assert false.meta["grounding"]["test"] in ("exact", "local")
             # the extensional twin is true, by the engine and by the oracle
             twin = {**form, "quantifier": "all" if form["quantifier"] == NEC_ALL else "no"}
             assert oracle.truth(twin) is True
-        elif claimed is not None and kind in ("is", "has", "can"):
+        elif claimed is not None and kind in FEATURE_KINDS:
             decidable += 1  # some instance contradicts the item
     assert decidable > 0
     if name in ("default", "deep"):
@@ -667,7 +671,7 @@ def test_law_like_items_are_nec_items(runs) -> None:
     for test_set, _, false in pairs_of(corpus):
         if test_set.kind == LAWLIKE:
             assert false.proposition.quantifier in (NEC_ALL, NEC_NO)
-            assert false.proposition.predicate.kind in ("is", "has", "can")
+            assert false.proposition.predicate.kind in FEATURE_KINDS
     extensional = runs("default", quantifiers={"universal_words": "extensional"})
     for test_set, _, false in pairs_of(extensional):
         if test_set.level == CLASS and false.proposition.quantifier in (NEC_ALL, NEC_NO):
@@ -782,7 +786,7 @@ def test_what_the_documents_state(runs) -> None:
                 for clause in mention.get("clauses", ()):
                     relative += 1
                     other = clause.get("patient") or clause.get("agent")
-                    label = clause.get("verb") or clause.get("feature")
+                    label = clause["label"]
                     agent, patient = instance, None if other is None else other["instance"]
                     if "agent" in clause:
                         agent, patient = patient, instance

@@ -38,7 +38,14 @@ import polars as pl
 
 from semantic_world.corpus.config import CONCEPT_TYPES, Config
 from semantic_world.corpus.streams import Streams
-from semantic_world.corpus.world import SCALAR_POLES, THING, World
+from semantic_world.corpus.world import (
+    EVENT_TYPE1_KIND,
+    PART_KIND,
+    PROPERTY_KIND,
+    SCALAR_POLES,
+    THING,
+    World,
+)
 
 NOUN = "noun"
 ADJECTIVE = "adjective"
@@ -232,9 +239,11 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
     two-place event types whose requirement holds for every pair or for no pair are left out:
     :func:`event_types_without_word` lists them."""
     concepts = [Concept(c, "category", NOUN, c) for c in world.categories]
-    concepts += [Concept(f, "is", ADJECTIVE, f) for f in world.features["is"]]
-    concepts += [Concept(f, "has", PART_NOUN, f) for f in world.features["has"]]
-    concepts += [Concept(f, "event_unary", INTRANSITIVE_VERB, f) for f in world.features["can"]]
+    concepts += [Concept(f, "is", ADJECTIVE, f) for f in world.features[PROPERTY_KIND]]
+    concepts += [Concept(f, "has", PART_NOUN, f) for f in world.features[PART_KIND]]
+    concepts += [
+        Concept(f, "event_unary", INTRANSITIVE_VERB, f) for f in world.features[EVENT_TYPE1_KIND]
+    ]
     for concept_type, leaf in (("event", True), ("event_category", False)):
         for label in world.binary:
             if world.event_types[label].category == leaf:

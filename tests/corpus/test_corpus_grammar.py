@@ -975,7 +975,7 @@ QUANTIFIER_READINGS = {
     "generic": BARE_PLURAL,
     "most": ("generic", MOST),
     "no": ("generic", NEC_NO),
-    "negative": BARE_PLURAL,
+    "negative": ("generic", MOST),  # a negated bare plural allows the counterparts only
     "member": ("generic", NEC_ALL),
     "pole": ("generic",),
     "rule": ("generic", NEC_ALL),
@@ -1515,12 +1515,13 @@ def test_a_concept_without_a_word_cannot_be_said(tiny) -> None:
     realizer = tiny.realizer(lexicon={"named_proportion": {"event_unary": 0.0}})
     with pytest.raises(GrammarError, match="EVENTTYPE1.1 has no word"):
         realizer.realize(PLANS["generic"], np.random.default_rng(0))
-    # EVENTTYPE2.1 holds for every pair of instances, so it never has a word
+    # a category of event types without a word cannot name a relation either
     general = SentencePlan(
         kind_of("CATEGORY.1"), Predication(VERB, "EVENTTYPE2.1", True, kind_of("CATEGORY.2")), ALL
     )
+    unnamed = tiny.realizer(lexicon={"named_proportion": {"event_category": 0.0}})
     with pytest.raises(GrammarError, match="EVENTTYPE2.1 has no word"):
-        tiny.realizer().realize(general, np.random.default_rng(0))
+        unnamed.realize(general, np.random.default_rng(0))
 
 
 def test_trees_that_cannot_be_read(tiny) -> None:

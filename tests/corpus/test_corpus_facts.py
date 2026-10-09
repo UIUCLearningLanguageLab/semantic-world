@@ -48,11 +48,33 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
 )
-from semantic_world.world.labels import translate
 
 WORLDS = ("tiny", "default", "deep", "still")
 EXTENSIONAL = {"quantifiers": {"universal_words": "extensional"}}
 KIND_OF = {"PROPERTY": IS, "PART": HAS, "EVENTTYPE1": CAN}
+
+
+def one_place_requirements(folder) -> list[tuple[str, list[str], str]]:
+    """The one-place requirements of a world run, from ``definition.json``: each event type's
+    label, the input labels of its one constraint (a scalar's label for a threshold literal),
+    and the constraint's truth table."""
+    record = json.loads((folder / "definition.json").read_text(encoding="utf-8"))
+    literals = record["literals"]
+    rules = {r["output"]: r for r in record["rules"]}
+    found = []
+    for event_type in record["event_types"]:
+        if event_type["arity"] != 1:
+            continue
+        (constraint,) = event_type["requirement"]["constraints"]
+        assert event_type["requirement"]["expression"] == constraint
+        rule = rules[constraint]
+        inputs = []
+        for index in rule["inputs"]:
+            literal = literals[index]
+            assert literal["kind"] in ("feature", "threshold"), literal
+            inputs.append(literal["feature"] if literal["kind"] == "feature" else literal["scalar"])
+        found.append((event_type["label"], inputs, rule["truth_table"]))
+    return found
 
 
 def confirm(oracle, propositions, universal_words: str = "nec") -> None:
@@ -229,7 +251,8 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
         MEMBER,
         VERB,
     ]
-    assert len(predicates) == 8 + 8 + 4 + 1 + 2 + 5 + 5 * 6
+    # 6 two-place event types (4 leaves and 2 categories, all with a word) by 6 patient categories
+    assert len(predicates) == 8 + 8 + 4 + 1 + 2 + 5 + 6 * 6
     # membership in a category at the same level or above, never in itself or in a subcategory
     assert [p.label for p in predicates if p.kind == MEMBER] == [
         "CATEGORY.1",
@@ -246,7 +269,7 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
     stated = [order[f.predicate] for f in facts.class_facts("CATEGORY.1.1")]
     assert stated == sorted(stated) and len(set(stated)) == len(stated)
     limited = facts.class_predicates("CATEGORY.1.1", patients=("CATEGORY.2",))
-    assert [p.patient for p in limited if p.kind == VERB] == [CategoryTerm("CATEGORY.2")] * 5
+    assert [p.patient for p in limited if p.kind == VERB] == [CategoryTerm("CATEGORY.2")] * 6
 
 
 def test_membership_facts(cases) -> None:
@@ -298,7 +321,7 @@ def test_instance_predicates(cases) -> None:
     facts = case.facts()
     predicates = facts.instance_predicates("INSTANCE.1.1.1")
     by_kind = Counter(p.kind for p in predicates)
-    assert by_kind == {IS: 8, HAS: 8, CAN: 4, PROJECTION: 1, SCALAR: 4, MEMBER: 6, VERB: 5 * 11}
+    assert by_kind == {IS: 8, HAS: 8, CAN: 4, PROJECTION: 1, SCALAR: 4, MEMBER: 6, VERB: 6 * 11}
     # a scalar pole against every category the instance is below
     assert {p.comparison for p in predicates if p.kind == SCALAR} == {"CATEGORY.1", "CATEGORY.1.1"}
     assert all(p.patient != "INSTANCE.1.1.1" for p in predicates if p.kind == VERB)
@@ -343,13 +366,14 @@ def test_only_named_concepts_take_part(cases) -> None:
 
 
 def test_event_types_without_a_word_are_never_stated(cases) -> None:
-    facts = cases("tiny").facts()
-    assert "EVENTTYPE2.1" not in facts.verbs
+    # EVENTTYPE2.2 of the deep world holds for every pair, so it has no word
+    facts = cases("deep").facts()
+    assert "EVENTTYPE2.2" not in facts.verbs
     assert facts.verbs == (
-        "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.1", "EVENTTYPE2.2.2", "EVENTTYPE2.2"
+        "EVENTTYPE2.1.1", "EVENTTYPE2.1.2", "EVENTTYPE2.2.1", "EVENTTYPE2.2.2", "EVENTTYPE2.1"
     )  # fmt: skip
     for category in facts.categories:
-        assert all(f.predicate.label != "EVENTTYPE2.1" for f in facts.class_facts(category))
+        assert all(f.predicate.label != "EVENTTYPE2.2" for f in facts.class_facts(category))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -385,31 +409,28 @@ def test_rule_statements_are_nec_all(cases, name) -> None:
 
 @pytest.mark.parametrize("name", WORLDS)
 def test_rule_statements_are_the_terms_of_the_minimal_dnf(cases, name) -> None:
-    # Recount the terms from rules.yaml: each term of each rule is stated or skipped, once.
+    # Recount the terms from the files: the taxonomy's rules from its rules.yaml, and the
+    # one-place requirements from definition.json. Each term of each rule is stated or
+    # skipped, once.
     case = cases(name)
     facts = case.facts()
     statements = {s.rule: s for s in facts.rule_statements()}
     rules = yaml.safe_load((case.folder / "taxonomy" / "rules.yaml").read_text(encoding="utf-8"))
+    rules = [(r["output"], r["inputs"], r["truth_table"]) for r in rules]
+    rules += one_place_requirements(case.folder)
     truth = facts.truth
     expected = dict.fromkeys(SKIP_REASONS, 0)
     terms = 0
-    for rule in rules:
-        table = TruthTable.from_bit_string(rule["truth_table"])
-        output = translate(rule["output"])
+    for output, inputs, bits in rules:
+        table = TruthTable.from_bit_string(bits)
         for number, term in enumerate(minimal_dnf(table), start=1):
             terms += 1
-            used = [
-                (name, bit)
-                for name, bit in zip(rule["inputs"], term, strict=True)
-                if bit is not None
-            ]
+            used = [(name, bit) for name, bit in zip(inputs, term, strict=True) if bit is not None]
             key = (output, number)
-            if any(name.startswith("SC.") for name, _ in used):
+            if any(name.startswith("SCALARDIM.") for name, _ in used):
                 expected[SKIP_THRESHOLD] += 1
             else:
-                subject = CategoryTerm(
-                    THING, tuple(Literal(translate(name), bool(bit)) for name, bit in used)
-                )
+                subject = CategoryTerm(THING, tuple(Literal(name, bool(bit)) for name, bit in used))
                 if len(truth.members(subject)) == 0:
                     expected[SKIP_NO_INSTANCE] += 1
                 else:
@@ -434,15 +455,16 @@ def test_rule_statement_counts_of_the_default_world(cases) -> None:
     facts = cases("default").facts()
     facts.rule_statements()
     report = facts.rule_report
+    # 20 rules of the taxonomy and 20 one-place requirements
     assert report == {
         "rules": 40,
-        "terms": 103,
-        "stated": 86,
+        "terms": 111,
+        "stated": 94,
         "skipped": {
-            SKIP_THRESHOLD: 13,
+            SKIP_THRESHOLD: 6,
             SKIP_MAX_LITERALS: 0,
             SKIP_NO_WORD: 0,
-            SKIP_NO_INSTANCE: 4,
+            SKIP_NO_INSTANCE: 11,
             SKIP_UNCONFIRMED: 0,
         },
     }
@@ -452,15 +474,21 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
     case = cases("default")
     uncapped = case.facts()
     lengths = Counter(len(s.subject.restriction) for s in uncapped.rule_statements())
-    # rule statements are exempt from the limits on adjectives and with-phrases: one of the
-    # default world's statements has four with-phrases, and the limit is two
-    assert lengths == {1: 14, 2: 31, 3: 10, 4: 31}
-    assert case.config().mention.max_with_phrases == 2
+    # rule statements are exempt from the limits on adjectives and with-phrases: some of the
+    # default world's statements have four adjectives, and the limit is three (before stage
+    # a5b, one statement had four with-phrases, and the limit is two)
+    assert lengths == {1: 24, 2: 30, 3: 9, 4: 31}
+    mention = case.config().mention
+    assert (mention.max_adjectives, mention.max_with_phrases) == (3, 2)
+    adjectives = [
+        sum(x.feature.startswith("PROPERTY.") for x in s.subject.restriction)
+        for s in uncapped.rule_statements()
+    ]
     with_phrases = [
         sum(x.feature.startswith("PART.") for x in s.subject.restriction)
         for s in uncapped.rule_statements()
     ]
-    assert max(with_phrases) == 4
+    assert max(adjectives) == 4 and max(with_phrases) == 2
     for cap in (1, 2, 3):
         capped = case.facts(propositions={"rule_statements": {"max_literals": cap}})
         statements = capped.rule_statements()
@@ -472,7 +500,7 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
         skipped = capped.rule_report["skipped"]
         # a term that is skipped for another reason is not counted against the cap
         assert skipped[SKIP_MAX_LITERALS] >= over
-        assert capped.rule_report["stated"] + sum(skipped.values()) == 103
+        assert capped.rule_report["stated"] + sum(skipped.values()) == 111
 
 
 def test_negated_property_literals_share_one_relative_clause(cases) -> None:
@@ -483,7 +511,7 @@ def test_negated_property_literals_share_one_relative_clause(cases) -> None:
         sum(not x.positive and x.feature.startswith("PROPERTY.") for x in s.subject.restriction)
         for s in facts.rule_statements()
     ]
-    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 27
+    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 25
     assert max(negated) == 4
     assert "relative_clauses" not in facts.rule_report["skipped"]
     # only a term that reads a scalar threshold, or that no instance satisfies, stays unstated
@@ -507,7 +535,7 @@ def test_a_drawn_rule_statement_is_always_nec_all(cases) -> None:
         assert oracle.truth(statement.to_json()) is True
         assert statement.rule is not None and statement.polarity
         assert statement.subject.category == THING
-    assert len({p.rule for p in drawn}) == 86  # every rule statement is drawn
+    assert len({p.rule for p in drawn}) == 94  # every rule statement is drawn
     # a pool limits the draw: the sufficient conditions of one feature
     feature = facts.rule_statements()[0].predicate.label
     pool = facts.rule_statements(feature)

@@ -68,7 +68,7 @@ def test_default_values() -> None:
     assert (documents.shuffle, documents.instance_description_rate) == (0.3, 0.2)
     assert documents.sibling_contrast_rate == 0.2
     assert documents.relation_fact_share is None
-    assert documents.content_kind_weights == "proportional"
+    assert documents.content_kind_weights == "equal"
     assert documents.progressive_rate == 0.3 and documents.one_aspect_per_event is True
     assert config.propositions.negation_rate == {"class": 0.1, "instance": 0.1}
     assert config.propositions.rule_statement_rate == 0.3
@@ -247,7 +247,7 @@ def test_world_configuration_file_with_a_seed() -> None:
 
 def test_world_run_folder(tmp_path: Path) -> None:
     world = load_world_config(TINY_WORLD, seed=3)
-    folder = define(world, episode_stats=False).write(tmp_path / "run")
+    folder = define(world).write(tmp_path / "run")
     config = config_from_mapping({"world": {"run": str(folder)}})
     assert (config.world.kind, config.world.path) == ("run", str(folder))
     assert config.world.seed == 3

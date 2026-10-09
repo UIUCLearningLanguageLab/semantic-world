@@ -1,8 +1,8 @@
 """The world a corpus is about: defining the world run, and the corpus's view of it.
 
 The corpus generator needs the world's live objects (the definition, the able tables, the
-entities, the taxonomy's tree and rules for the fixed test), not only its output files. So the
-world is always defined in memory, without its statistics episodes:
+entities, the category tree and the rules for the fixed test), not only its output files. So the
+world is always defined in memory:
 
 - from a world configuration file and a seed, with nothing saved on disk;
 - or from a world run folder, regenerated from the folder's ``config.yaml``. The regenerated
@@ -11,12 +11,12 @@ world is always defined in memory, without its statistics episodes:
   describe another world than the files do. ``config.yaml`` itself is not compared: it records
   the git commit and the dirty flag.
 
-**Labels.** In stage a5a the taxonomy still carries the old labels (``C1.3``, ``I1.3.2``,
-``IS.4``, ``HAS.12``, ``SC.2``, ``CAN.3``, ``V1.2``), while the world package writes the labels
-of ``docs/specs/WORLD_AND_LANGUAGE.md`` ("Labels"). This module is the one place in the corpus
-where the two vocabularies meet: :class:`World` gives every other corpus module what it needs in
-the new labels, and translates at the call for the two things that still run on the taxonomy's
-own machinery, the fixed test and the rule terms. Stage a5b removes the translation.
+:class:`World` gives every other corpus module what it needs: the categories with their levels
+and paths, the entities with their leaves, the PROPERTY and PART features and the one-place event
+types with their columns, the scalars and poles, the event types with their tree, the able tables
+of the runtime, the patient capacities, the relatedness, the fixed test and the rule terms over
+the world's static rules, and the meanings table of the word-form request. Every label is the
+world's own (``docs/specs/WORLD_AND_LANGUAGE.md``, "Labels").
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import polars as pl
 import yaml
 
 from semantic_world.common.boolean import minimal_dnf, settings_array
@@ -49,8 +48,8 @@ from semantic_world.world.definition import (
 from semantic_world.world.derived import DERIVED_DIR, read_manifest
 from semantic_world.world.episodes import Relatedness
 from semantic_world.world.generate import WorldResult, define
-from semantic_world.world.labels import translate, translate_column, untranslate
 from semantic_world.world.runtime import able_table
+from semantic_world.world.unary import EVENT_TYPE1_TYPE
 
 THING = "THING"
 """The generic head noun's concept, and the subject of a rule statement."""
@@ -62,6 +61,14 @@ PROPERTY_PREFIX = "PROPERTY."
 PART_PREFIX = "PART."
 CATEGORY_PREFIX = "CATEGORY."
 SCALAR_POLES = ("HIGH", "LOW")
+
+PROPERTY_KIND = "property"
+PART_KIND = "part"
+EVENT_TYPE1_KIND = "event_type1"
+FEATURE_KINDS = (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND)
+"""The kinds of the world's feature table: a PROPERTY feature, a PART feature, and a one-place
+event type (whose column is the capacity to be its agent)."""
+_KIND_OF_TYPE = {"is": PROPERTY_KIND, "has": PART_KIND, EVENT_TYPE1_TYPE: EVENT_TYPE1_KIND}
 
 EXACT = "exact"
 """The fixed test, by enumerating the cone: exact."""
@@ -82,7 +89,7 @@ def load_world(config: Config | WorldSource) -> World:
     """Define the world that a corpus configuration names, in memory, and give the corpus's
     view of it. A run folder is checked against the regenerated world."""
     source = config.world if isinstance(config, Config) else config
-    result = define(source.config, episode_stats=False)
+    result = define(source.config)
     if source.kind == "run":
         check_run_folder(result, source.path)
     return World(result, source)
@@ -184,7 +191,7 @@ class RuleTerm:
 
     output: str
     kind: str
-    """``is``, ``has``, or ``can``: the kind of the output's predicate."""
+    """``property``, ``part``, or ``event_type1``: the kind of the output's predicate."""
     number: int
     """The number of the term, from 1."""
     literals: tuple[tuple[str, bool], ...]
@@ -194,28 +201,28 @@ class RuleTerm:
 
 
 class World:
-    """The corpus's view of a world run, in the labels of the specification."""
+    """The corpus's view of a world run."""
 
     def __init__(self, result: WorldResult, source: WorldSource | None = None) -> None:
         self.result = result
         self.source = source
-        taxonomy = result.taxonomy
+        statics = result.statics
+        taxonomy = statics.taxonomy
+        self._statics = statics
         self._taxonomy = taxonomy
         self.definition: RuntimeDefinition = result.definition.runtime()
         self.rule_set_id = result.rule_set_id
 
         # Categories and entities.
-        self.categories: tuple[str, ...] = tuple(
-            translate(c.label) for c in taxonomy.tree.categories
-        )
+        self.categories: tuple[str, ...] = tuple(c.label for c in taxonomy.tree.categories)
         infos: dict[str, CategoryInfo] = {}
         children: dict[str, list[str]] = {label: [] for label in self.categories}
         for category in taxonomy.tree.categories:
-            label = translate(category.label)
-            parent = None if category.parent is None else translate(category.parent.label)
+            label = category.label
+            parent = None if category.parent is None else category.parent.label
             if parent is not None:
                 children[parent].append(label)
-            path = tuple(translate(a.label) for a in reversed(category.ancestors())) + (label,)
+            path = tuple(a.label for a in reversed(category.ancestors())) + (label,)
             infos[label] = CategoryInfo(label, category.level, parent, category.is_leaf, path, ())
         self.category: dict[str, CategoryInfo] = {
             label: dataclasses.replace(info, children=tuple(children[label]))
@@ -238,23 +245,21 @@ class World:
             )
 
         # Static features, scalars, and poles. The one-place event types stand in the feature
-        # table too, as the taxonomy's CAN features: their column is the capacity to be their
-        # agent, which the able table also gives.
-        features = taxonomy.features
-        self.features: dict[str, tuple[str, ...]] = {
-            kind: tuple(translate(f.label) for f in features.of_type(kind))
-            for kind in ("is", "has", "can")
-        }
+        # table too: their column is the capacity to be their agent, which the able table also
+        # gives.
+        features = statics.features
+        self.features: dict[str, tuple[str, ...]] = {kind: () for kind in FEATURE_KINDS}
+        for feature in features.features:
+            kind = _KIND_OF_TYPE[feature.type]
+            self.features[kind] = self.features[kind] + (feature.label,)
         self.feature_kind: dict[str, str] = {
             label: kind for kind, labels in self.features.items() for label in labels
         }
-        self.free: frozenset[str] = frozenset(
-            translate(f.label) for f in features.features if f.free
-        )
-        self.position: dict[str, int] = {translate(f.label): f.position for f in features.features}
-        self.values: np.ndarray = taxonomy.instances.values
+        self.free: frozenset[str] = frozenset(f.label for f in features.features if f.free)
+        self.position: dict[str, int] = {f.label: f.position for f in features.features}
+        self.values: np.ndarray = statics.values
         """Every instance's static features, one-place capacities included, by ``position``."""
-        self.scalars: tuple[str, ...] = tuple(translate(s) for s in features.scalar_labels)
+        self.scalars: tuple[str, ...] = tuple(features.scalar_labels)
         self.scalar_values: np.ndarray = taxonomy.instances.scalars
         self.poles: tuple[str, ...] = tuple(
             f"{scalar}.{pole}" for scalar in self.scalars for pole in SCALAR_POLES
@@ -286,19 +291,20 @@ class World:
         )
         self._able: dict[str, np.ndarray] | None = None
 
-        # Patient capacities: every two-place leaf event type's, from the taxonomy's patient
-        # projections (intensional: some possible agent).
+        # Patient capacities: every two-place leaf event type's, from the patient projections
+        # (intensional: some possible agent).
         self.patient_capacities: tuple[str, ...] = ()
         self._capacity: dict[str, np.ndarray] = {}
-        projections = taxonomy.projections
+        projections = statics.projections
         if projections is not None:
-            for i, verb in enumerate(projections.verb_labels):
-                label = f"{PATIENT_CAPACITY_PREFIX}{translate(verb)}"
-                self._capacity[label] = projections.patient[:, i].astype(bool)
+            for i, label in enumerate(projections.event_type_labels):
+                self._capacity[f"{PATIENT_CAPACITY_PREFIX}{label}"] = projections.patient[
+                    :, i
+                ].astype(bool)
             self.patient_capacities = tuple(self._capacity)
 
         # Relatedness: thematic relatedness and taxonomic similarity over the leaves.
-        self.relatedness = Relatedness.from_taxonomy(taxonomy, self.definition)
+        self.relatedness = Relatedness.from_statics(statics, self.definition)
         assert self.relatedness.leaves == self.leaves
         self.entity_leaf: np.ndarray = self.relatedness.entity_leaf
         """Each entity's leaf, as an index into ``leaves``."""
@@ -313,12 +319,12 @@ class World:
         )
         """The taxonomic similarity of every pair of leaves, NaN where undefined."""
 
-        self.initial_rates: dict[str, float] = {
-            f.label: float(f.initial_rate) for f in result.fluents.base
-        }
-        self._rules_by_output = {r.output.label: r for r in taxonomy.rules.rules}
+        self.initial_rates: dict[str, float] = dict(self.definition.initial_rates)
+        self._rules = statics.rules
+        self._rules_by_output = {r.output.label: r for r in statics.rules.rules}
         self._free_index = {f.label: i for i, f in enumerate(features.free)}
-        self._categories_old = {c.label: c for c in taxonomy.tree.categories}
+        self._category_of = {c.label: c for c in taxonomy.tree.categories}
+        self._category_values = statics.unary.category_values
 
     # Sets of instances -----------------------------------------------------------------------
 
@@ -381,17 +387,18 @@ class World:
         by feature literals, and by which test: ``(1, test)`` or ``(0, test)`` when every
         possible member has that value, and ``(None, test)`` otherwise.
 
-        The test is the fixed-by-rule test of the taxonomy generator, with the restriction's
+        The test is the fixed-by-rule test of the taxonomy generator, over the world's static
+        rules (the taxonomy's rules and the one-place requirements), with the restriction's
         literals added as fixed. The free features that are defining at the category, and the
         restriction's literals on free features, are held. The other free features in the cone
         are enumerated, with the intervals between the thresholds of every scalar that is free
         to vary. A restriction's literal on a determined feature keeps only the settings that
         satisfy it. Above ``2 ** cone_limit`` settings, the local test is used instead.
         """
-        taxonomy = self._taxonomy
-        target = taxonomy.features[untranslate(feature)]
-        node = None if category == THING else self._categories_old[untranslate(category)]
-        n_free = len(taxonomy.features.free)
+        features = self._statics.features
+        target = features[feature]
+        node = None if category == THING else self._category_of[category]
+        n_free = len(features.free)
         if node is None:
             base = np.zeros(n_free, dtype=np.uint8)
             held = np.zeros(n_free, dtype=bool)
@@ -400,7 +407,7 @@ class World:
             held = node.defining_mask().copy()
         filters = []
         for label, positive in restriction:
-            restricted = taxonomy.features[untranslate(label)]
+            restricted = features[label]
             if restricted.free:
                 index = self._free_index[restricted.label]
                 if held[index] and base[index] != int(positive):
@@ -410,12 +417,12 @@ class World:
             else:
                 filters.append((restricted, int(positive)))
 
-        rules = taxonomy.rules
+        rules = self._rules
         targets = [target] + [f for f, _ in filters]
         cone = sorted({self._free_index[f.label] for t in targets for f in rules.cone(t)})
         open_features = [i for i in cone if not held[i]]
         thresholds = {t.key: t for t in targets for t in rules.thresholds_of(t)}
-        scalar_config = taxonomy.config.scalars
+        scalar_config = self._taxonomy.config.scalars
         scalars_fixed = node is not None and scalar_config.fixed_below(node.level)
         literal_values: dict[str, np.ndarray] = {}
         groups: dict[int, list[Threshold]] = {}
@@ -455,7 +462,7 @@ class World:
 
         def column(item) -> np.ndarray:
             return evaluate_feature(
-                item, free_values, taxonomy.features, self._rules_by_output, cache, literal_values
+                item, free_values, features, self._rules_by_output, cache, literal_values
             )
 
         keep = np.ones(rows, dtype=bool)
@@ -477,30 +484,31 @@ class World:
         """The local test, for a cone too large to enumerate: the taxonomy generator's test on a
         copy of the category in which the held features are defining. Literals on determined
         features are left out, which can only miss a fixed feature."""
-        taxonomy = self._taxonomy
+        features = self._statics.features
+        rules = self._rules
         if feature.free:
             index = self._free_index[feature.label]
             return (int(base[index]) if held[index] else None), LOCAL
         roles = np.where(held, Role.DEFINING_NEW, Role.UNDIAGNOSTIC).astype(np.int8)
-        scalars = np.zeros(taxonomy.features.scalar_count) if category is None else category.scalars
-        values = taxonomy.rules.compute(base[None, :], scalars[None, :])[0]
+        scalars = np.zeros(features.scalar_count) if category is None else category.scalars
+        values = rules.compute(base[None, :], scalars[None, :])[0]
         if category is None:
             stand_in = Category(THING, (), 0, None, base, values, roles, scalars=scalars)
-            fixed, _ = fixed_by_rule(taxonomy.rules, stand_in, cone_limit, scalars=None)
+            fixed, _ = fixed_by_rule(rules, stand_in, cone_limit, scalars=None)
         else:
             stand_in = dataclasses.replace(category, free_values=base, values=values, roles=roles)
-            fixed, _ = fixed_by_rule(taxonomy.rules, stand_in, cone_limit, taxonomy.config.scalars)
+            fixed, _ = fixed_by_rule(rules, stand_in, cone_limit, self._taxonomy.config.scalars)
         return (int(values[feature.position]) if fixed[feature.position] else None), LOCAL
 
     # Rules -----------------------------------------------------------------------------------
 
     def rule_terms(self) -> tuple[RuleTerm, ...]:
-        """Every term of the minimal DNF of every feature rule, in rule order and then term
+        """Every term of the minimal DNF of every static rule, in rule order and then term
         order: the sufficient conditions of the determined PROPERTY and PART features and of the
         one-place capacities."""
         terms = []
-        for rule in self._taxonomy.rules.rules:
-            output = translate(rule.output.label)
+        for rule in self._rules.rules:
+            output = rule.output.label
             for number, term in enumerate(minimal_dnf(rule.table), start=1):
                 used = [
                     (item, value)
@@ -509,27 +517,25 @@ class World:
                 ]
                 threshold = any(isinstance(item, Threshold) for item, _ in used)
                 literals = tuple(
-                    (translate(item.label), bool(value))
+                    (item.label, bool(value))
                     for item, value in used
                     if not isinstance(item, Threshold)
                 )
-                terms.append(RuleTerm(output, rule.output.type, number, literals, threshold))
+                terms.append(
+                    RuleTerm(output, _KIND_OF_TYPE[rule.output.type], number, literals, threshold)
+                )
         return tuple(terms)
 
     @property
     def rule_count(self) -> int:
-        return len(self._taxonomy.rules.rules)
+        return len(self._rules.rules)
 
     # Files -----------------------------------------------------------------------------------
 
     def meanings_csv(self) -> str:
         """The categories' meaning vectors, as the taxonomy generator writes them to
-        ``categories_generative.csv``, with every label in the world's vocabulary."""
+        ``categories_generative.csv``."""
         frame = result_frames(self._taxonomy)[MEANINGS_TABLE]
-        frame = frame.with_columns(
-            pl.Series("label", [translate(v) for v in frame["label"].to_list()], dtype=pl.Utf8)
-        )
-        frame.columns = [c if c == "label" else translate_column(c) for c in frame.columns]
         return frame.write_csv(None, float_precision=6, null_value="")
 
     def identity(self) -> dict[str, Any] | None:
@@ -544,8 +550,12 @@ def leaf_of(world: World, instance: str) -> str:
 
 
 __all__ = [
+    "EVENT_TYPE1_KIND",
     "EXACT",
+    "FEATURE_KINDS",
     "LOCAL",
+    "PART_KIND",
+    "PROPERTY_KIND",
     "THING",
     "CategoryInfo",
     "EventTypeInfo",

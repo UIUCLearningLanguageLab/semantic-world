@@ -1,14 +1,14 @@
 # An example rule file. See docs/specs/TAXONOMY_GENERATOR.md, "Automatic rules and rule files".
 #
 # Templates are drawn by weight for every determined feature that has no explicit rule. A template
-# applies to every output type unless applies_to names one (is, has, or can) or a list of them.
-# Explicit rules fix a named determined feature to an expression over IS and HAS features.
+# applies to every output type unless applies_to names one (is or has) or a list of them.
+# Explicit rules fix a named determined feature to an expression over PROPERTY and PART features.
 
 templates:
   - {family: literal, weight: 0.1}
   - {family: fixed, arity: 2, operator: XOR, weight: 0.1}
   - {family: shj, type: IV, weight: 0.2}
-  - {family: shj, type: VI, weight: 0.05, applies_to: can}
+  - {family: shj, type: VI, weight: 0.05, applies_to: has}
   - {family: compositional, arity: 4, operators: {AND: 1, OR: 1}, nesting_depth: 2, weight: 0.3}
 explicit:
-  - {output: CAN.3, expression: "(HAS.2 AND NOT IS.5) OR IS.7"}
+  - {output: PROPERTY.35, expression: "(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7"}

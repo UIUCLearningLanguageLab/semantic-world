@@ -7,9 +7,8 @@ seed: 1                          # master seed, a 64-bit unsigned integer
 features:
   is:  {count: 40, proportion_determined: 0.25, expected_true_free: 6}
   has: {count: 40, proportion_determined: 0.25, expected_true_free: 6}
-  can: {count: 20}
   base_rate_override: null       # one probability for all free features; replaces expected_true_free
-  base_rate_heterogeneity: null  # null: equal base rates within a type; a number: Beta concentration
+  base_rate_heterogeneity: 2     # the Beta concentration of each type's base rates; null: equal base rates within a type
 
 rules:
   source: automatic              # automatic or file
@@ -21,7 +20,7 @@ rules:
   arity_3_families: {I: 1, II: 1, III: 1, IV: 1, V: 1, VI: 1, compositional: 1}
   nesting_depth: {1: 0.5, 2: 0.5}                # compositional rules only
   input_type_weights: {is: 1, has: 1}
-  overrides: {}                  # optional per-output-type settings, e.g. {can: {arity: {2: 1, 3: 1}}}
+  overrides: {}                  # optional per-output-type settings, e.g. {has: {arity: {2: 1, 3: 1}}}
   allow_duplicate_rules: false
   variance_bound: null           # [low, high] proportion of instances true; null is off
 

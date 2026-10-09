@@ -51,7 +51,9 @@ from semantic_world.corpus.propositions import (
     CAN,
     CLASS,
     EVENT,
+    HAS,
     INSTANCE,
+    IS,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -649,7 +651,7 @@ def test_feature_documents(corpora) -> None:
         if document.type != "encyclopedic_feature":
             continue
         topic = document.topic
-        kind = "verb" if topic in facts.verbs else planner.world.feature_kind[topic]
+        kind = VERB if topic in facts.verbs else planner.world.feature_kind[topic]
         topics[kind] += 1
         for sentence in document.sentences:
             proposition = sentence.proposition
@@ -665,7 +667,7 @@ def test_feature_documents(corpora) -> None:
                 assert proposition.predicate.label == topic
                 assert proposition.subject.category in facts.categories
             sentences += 1
-    assert set(topics) == {"is", "has", "can", "verb"}
+    assert set(topics) == {IS, HAS, CAN, VERB}
     assert rules > 20 and 0.05 < rules / sentences < 0.4
     # with the rate at 0, no document states a rule, and at 1 the rules come first
     _, none = corpora("default", 150, propositions={"rule_statement_rate": 0.0})
@@ -771,10 +773,10 @@ def test_the_description_rate(corpora) -> None:
 def test_the_relation_fact_share(corpora, world_files) -> None:
     """``documents.relation_fact_share`` sets how often a sentence of a category document draws
     a relation fact. The default, null, keeps the chance that ``content_kind_weights`` gives
-    the kinds of content: here equal. The setting changes the category documents alone."""
+    the kinds of content: equal, by default. The setting changes the category documents
+    alone."""
 
     def made(**documents):
-        documents = {"content_kind_weights": "equal", **documents}
         planner, found = corpora("default", 300, documents=documents)
         drawn = [
             s.section
@@ -1187,8 +1189,8 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     case = cases("default")
 
     def made(**weights):
-        # equal kinds of content, so that the category documents state scalar poles too
-        sections = {"documents": {"content_kind_weights": "equal"}}
+        # the default equal kinds of content, so the category documents state scalar poles too
+        sections = {}
         if weights:
             sections["quantifiers"] = {"weights": weights}
         planner = Planner(case.config(**sections), case.world)

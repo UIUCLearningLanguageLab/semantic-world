@@ -23,7 +23,9 @@ ID_B = "b" * 64
 def derived_folder(tmp_path: Path) -> Path:
     folder = tmp_path / "derived"
     folder.mkdir()
-    pl.DataFrame({"label": ["I1.1.1"], "IS.7": [1]}).write_csv(folder / "static_features.csv")
+    pl.DataFrame({"label": ["INSTANCE.1.1.1"], "PROPERTY.7": [1]}).write_csv(
+        folder / "static_features.csv"
+    )
     write_manifest(folder, {"static_features.csv": ID_A})
     return folder
 
@@ -39,7 +41,7 @@ def test_matching_identity_loads_the_file(tmp_path: Path) -> None:
     folder = derived_folder(tmp_path)
     assert check_derived_file(folder, "static_features.csv", ID_A) == folder / "static_features.csv"
     frame = load_derived_csv(folder, "static_features.csv", ID_A)
-    assert frame.columns == ["label", "IS.7"]
+    assert frame.columns == ["label", "PROPERTY.7"]
 
 
 def test_different_identity_is_refused_naming_the_file_and_both_identities(tmp_path: Path) -> None:

@@ -1,13 +1,14 @@
 """The feature layout: labels, free and determined features, layers, and base rates.
 
 Within each type, free features are numbered first, then determined features in layer order.
-Determined IS and HAS features are split as evenly as possible across layers 1 to
+Determined PROPERTY and PART features are split as evenly as possible across layers 1 to
 ``max_chain_depth``, lowest layers first, and the assignment of types to layer slots is drawn
-from the ``taxonomy:rules`` stream. Every CAN feature is determined and sits above the last
-IS or HAS layer, because CAN rules may read any IS or HAS feature.
+from the ``taxonomy:rules`` stream.
 
-The matrix layout used by the generator puts the non-ISA features in the order IS, HAS, CAN,
-each by index. ISA features are determined by the tree alone and live outside this layout.
+The matrix layout used by the generator puts the non-ISA features in the order PROPERTY, PART,
+each by index. ISA features are determined by the tree alone and live outside this layout. The
+world package appends its one-place event types to this layout when it computes their
+requirements (``semantic_world.world.unary``).
 """
 
 from __future__ import annotations
@@ -16,7 +17,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from semantic_world.taxonomy.config import FEATURE_TYPES, FREE_FEATURE_TYPES, Config
+from semantic_world.taxonomy.config import (
+    FEATURE_TYPES,
+    FREE_FEATURE_TYPES,
+    LABEL_PREFIX,
+    SCALAR_PREFIX,
+    Config,
+)
 from semantic_world.taxonomy.streams import Streams
 
 
@@ -24,17 +31,17 @@ from semantic_world.taxonomy.streams import Streams
 class Feature:
     label: str
     type: str
-    """``is``, ``has``, or ``can``."""
+    """``is`` (a PROPERTY feature) or ``has`` (a PART feature). The world package uses other
+    types for the features it appends (``event_type1``)."""
     index: int
     """The 1-based index within the type, as in the label."""
     free: bool
     layer: int
-    """0 for free features; 1 and up for determined IS and HAS features; the layer above the
-    last IS or HAS layer for CAN features."""
+    """0 for free features; 1 and up for determined features."""
     base_rate: float | None
     """The base rate of a free feature; None for determined features."""
     position: int
-    """The column of the feature in the non-ISA matrix (IS, HAS, CAN, each by index)."""
+    """The column of the feature in the non-ISA matrix (PROPERTY, PART, each by index)."""
 
 
 @dataclass(frozen=True)
@@ -45,7 +52,7 @@ class FeatureSet:
     max_chain_depth: int
     warnings: tuple[str, ...]
     scalar_count: int = 0
-    """The number of scalar dimensions ``SC.1`` to ``SC.<count>``. Scalars are not in
+    """The number of scalar dimensions ``SCALARDIM.1`` to ``SCALARDIM.<count>``. Scalars are not in
     ``features``: they are always free, have no rules, and live in separate float arrays."""
 
     def __post_init__(self) -> None:
@@ -70,14 +77,14 @@ class FeatureSet:
 
     @property
     def scalar_labels(self) -> tuple[str, ...]:
-        return tuple(f"SC.{i}" for i in range(1, self.scalar_count + 1))
+        return tuple(f"{SCALAR_PREFIX}.{i}" for i in range(1, self.scalar_count + 1))
 
     def of_type(self, feature_type: str) -> tuple[Feature, ...]:
         return tuple(f for f in self.features if f.type == feature_type)
 
     @property
     def free(self) -> tuple[Feature, ...]:
-        """The free features, IS then HAS, by index."""
+        """The free features, PROPERTY then PART, by index."""
         return self._free  # type: ignore[attr-defined]
 
     @property
@@ -91,24 +98,20 @@ class FeatureSet:
 
     @property
     def determined(self) -> tuple[Feature, ...]:
-        """The determined features in evaluation order: layer by layer (IS before HAS within a
-        layer, each by index), then the CAN features."""
-        is_has = [f for f in self.features if not f.free and f.type != "can"]
-        is_has.sort(key=lambda f: (f.layer, FEATURE_TYPES.index(f.type), f.index))
-        return tuple(is_has) + self.of_type("can")
+        """The determined features in evaluation order: layer by layer (PROPERTY before PART
+        within a layer, each by index)."""
+        determined = [f for f in self.features if not f.free]
+        determined.sort(key=lambda f: (f.layer, FEATURE_TYPES.index(f.type), f.index))
+        return tuple(determined)
 
     def layer(self, layer: int) -> tuple[Feature, ...]:
-        """The IS and HAS features at a layer (layer 0 is the free features)."""
-        return tuple(f for f in self.features if f.type != "can" and f.layer == layer)
+        """The features at a layer (layer 0 is the free features)."""
+        return tuple(f for f in self.features if f.layer == layer)
 
     @property
-    def is_has_layers(self) -> int:
-        """The number of IS or HAS layers with at least one feature, not counting layer 0."""
-        return max((f.layer for f in self.features if f.type != "can"), default=0)
-
-    @property
-    def can_layer(self) -> int:
-        return self.is_has_layers + 1
+    def layers(self) -> int:
+        """The number of layers with at least one feature, not counting layer 0."""
+        return max((f.layer for f in self.features), default=0)
 
 
 def _round_half_up(x: float) -> int:
@@ -121,7 +124,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
     fc = config.features
     warnings: list[str] = []
 
-    # Layers for the determined IS and HAS features.
+    # Layers for the determined features.
     determined_counts = {t: fc.determined_count(t) for t in FREE_FEATURE_TYPES}
     total_determined = sum(determined_counts.values())
     depth = config.rules.max_chain_depth if total_determined else 0
@@ -140,8 +143,8 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
     empty = [layer for layer, size in enumerate(layer_sizes, start=1) if size == 0]
     if empty:
         warnings.append(
-            f"rules.max_chain_depth is {depth} but only {total_determined} IS and HAS features "
-            f"are determined, so layers {empty} are empty"
+            f"rules.max_chain_depth is {depth} but only {total_determined} PROPERTY and PART "
+            f"features are determined, so layers {empty} are empty"
         )
 
     # Base rates for the free features.
@@ -165,7 +168,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
         for index in range(1, free_count + 1):
             features.append(
                 Feature(
-                    label=f"{t.upper()}.{index}",
+                    label=f"{LABEL_PREFIX[t]}.{index}",
                     type=t,
                     index=index,
                     free=True,
@@ -179,7 +182,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
             index = free_count + offset + 1
             features.append(
                 Feature(
-                    label=f"{t.upper()}.{index}",
+                    label=f"{LABEL_PREFIX[t]}.{index}",
                     type=t,
                     index=index,
                     free=False,
@@ -189,20 +192,6 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
                 )
             )
             position += 1
-    can_layer = len([s for s in layer_sizes if s > 0]) + 1
-    for index in range(1, fc.can.count + 1):
-        features.append(
-            Feature(
-                label=f"CAN.{index}",
-                type="can",
-                index=index,
-                free=False,
-                layer=can_layer,
-                base_rate=None,
-                position=position,
-            )
-        )
-        position += 1
     return FeatureSet(
         tuple(features),
         max_chain_depth=depth,

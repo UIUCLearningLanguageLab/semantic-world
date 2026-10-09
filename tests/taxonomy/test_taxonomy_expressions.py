@@ -45,9 +45,9 @@ def test_precedence_not_and_xor_or() -> None:
 
 
 def test_parsed_structure() -> None:
-    expr = parse_expression("(HAS.2 AND NOT IS.5) OR IS.7")
-    assert expr == Op("OR", (Op("AND", (Var("HAS.2"), Not(Var("IS.5")))), Var("IS.7")))
-    assert expr.variables() == ("HAS.2", "IS.5", "IS.7")
+    expr = parse_expression("(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7")
+    assert expr == Op("OR", (Op("AND", (Var("PART.2"), Not(Var("PROPERTY.5")))), Var("PROPERTY.7")))
+    assert expr.variables() == ("PART.2", "PROPERTY.5", "PROPERTY.7")
     assert expr.literal_count() == 3
     assert expr.depth() == 2
     # Chains of one operator are n-ary; parenthesized chains keep their structure.
@@ -129,21 +129,21 @@ def test_evaluate_broadcasts_over_arrays() -> None:
 
 
 def test_printer_parenthesizes_every_nested_operator() -> None:
-    expr = Op("OR", (Op("AND", (Var("HAS.2"), Not(Var("IS.5")))), Var("IS.7")))
-    assert str(expr) == "(HAS.2 AND NOT IS.5) OR IS.7"
+    expr = Op("OR", (Op("AND", (Var("PART.2"), Not(Var("PROPERTY.5")))), Var("PROPERTY.7")))
+    assert str(expr) == "(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7"
     nested = Op("AND", (Op("OR", (Var("A"), Op("XOR", (Var("B"), Var("C"))))), Not(Var("D"))))
     assert str(nested) == "(A OR (B XOR C)) AND NOT D"
     assert str(Not(Op("AND", (Var("A"), Var("B"))))) == "NOT (A AND B)"
     assert str(Not(Not(Var("A")))) == "NOT NOT A"
-    assert format_expression(Var("IS.4")) == "IS.4"
+    assert format_expression(Var("PROPERTY.4")) == "PROPERTY.4"
 
 
 def test_shj_rules_print_as_their_minimal_dnf_over_the_input_labels() -> None:
-    inputs = ("HAS.2", "IS.5", "IS.7")
+    inputs = ("PART.2", "PROPERTY.5", "PROPERTY.7")
     expr = from_dnf(minimal_dnf(SHJ_CANONICAL["IV"]), inputs)
-    assert (
-        str(expr)
-        == "(NOT HAS.2 AND NOT IS.5) OR (NOT HAS.2 AND NOT IS.7) OR (NOT IS.5 AND NOT IS.7)"
+    assert str(expr) == (
+        "(NOT PART.2 AND NOT PROPERTY.5) OR (NOT PART.2 AND NOT PROPERTY.7) "
+        "OR (NOT PROPERTY.5 AND NOT PROPERTY.7)"
     )
     assert expr.truth_table(inputs).bit_string() == "11101000"
     # The specification's forms, checked as functions.
@@ -195,7 +195,7 @@ def _random_expression(rng: np.random.Generator, names: list[str], budget: int) 
 
 def test_every_printed_expression_parses_back_to_the_same_truth_table() -> None:
     rng = np.random.default_rng(7)
-    names = ["IS.1", "IS.2", "HAS.3", "HAS.4", "CAN.5"]
+    names = ["PROPERTY.1", "PROPERTY.2", "PART.3", "PART.4", "SCALARDIM.5"]
     for _ in range(300):
         expr = _random_expression(rng, names, budget=4)
         text = str(expr)
@@ -214,7 +214,7 @@ MIXES = ({"AND": 1, "OR": 1, "XOR": 1}, {"XOR": 1}, {"AND": 1}, {"AND": 3, "OR":
 @pytest.mark.parametrize("mix", MIXES, ids=lambda m: "+".join(k for k, v in m.items() if v))
 def test_every_read_once_formula_depends_on_every_input(mix: dict[str, float]) -> None:
     for arity, depth, seed in itertools.product(range(1, 8), range(1, 5), range(6)):
-        inputs = [f"IS.{i}" for i in range(1, arity + 1)]
+        inputs = [f"PROPERTY.{i}" for i in range(1, arity + 1)]
         rng = np.random.default_rng(seed)
         expr = random_read_once(inputs, depth, mix, 0.3, rng)
         # Read once: every input appears exactly once.
@@ -271,7 +271,7 @@ def test_negation_probability_extremes() -> None:
 
 
 def test_read_once_is_deterministic_for_a_seed() -> None:
-    inputs = ["IS.1", "HAS.2", "IS.3", "HAS.4", "IS.5"]
+    inputs = ["PROPERTY.1", "PART.2", "PROPERTY.3", "PART.4", "PROPERTY.5"]
     mix = {"AND": 1, "OR": 2, "XOR": 1}
     a = random_read_once(inputs, 3, mix, 0.2, np.random.default_rng(99))
     b = random_read_once(inputs, 3, mix, 0.2, np.random.default_rng(99))

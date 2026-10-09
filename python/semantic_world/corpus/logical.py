@@ -6,7 +6,7 @@ the propositional rendering is made from it alone (``renderings.propositional``)
 
 **Class level.** The form is the proposition's own: the subject and the patient are category
 terms, each with its restriction and, when it has them, its relative clauses (``clauses``). A
-clause is written like a predicate: ``{"kind": "can", "feature": "EVENTTYPE1.3"}``, or a
+clause is written like a predicate: ``{"kind": "event_type1", "label": "EVENTTYPE1.3"}``, or a
 two-place event type with the other category, as ``patient`` when the head is the agent ("owls
 that eat mice") and as ``agent`` when the head is the patient ("mice that owls eat"). The
 predicate of a scalar pole also holds its comparison class (``class``): the subject category's
@@ -17,7 +17,7 @@ parent, or ``THING`` for a top-level category.
 ```json
 {"instance": "INSTANCE.1.3.2.5", "referent": "REF.1", "noun": "CATEGORY.1.3.2",
  "restriction": ["PROPERTY.12"],
- "clauses": [{"kind": "verb", "verb": "EVENTTYPE2.1.2", "patient": {...},
+ "clauses": [{"kind": "event_type2", "label": "EVENTTYPE2.1.2", "patient": {...},
               "event": "SCENE.3.EVENTINSTANCE.2", "tense": "past", "aspect": "simple"}]}
 ```
 
@@ -34,17 +34,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
-from semantic_world.corpus.propositions import CLASS, SCALAR, Proposition
-
-_LABEL_KEY = {
-    "is": "feature",
-    "has": "feature",
-    "can": "feature",
-    "scalar": "pole",
-    "member": "category",
-    "projection": "projection",
-    "verb": "verb",
-}
+from semantic_world.corpus.propositions import CLASS, LABEL_KEY, SCALAR, Proposition
 
 
 def logical_form(
@@ -73,7 +63,7 @@ def logical_form(
         return data
 
     def predication(part: Predication, agent: NounPhrase | None) -> dict[str, Any]:
-        data: dict[str, Any] = {"kind": part.kind, _LABEL_KEY[part.kind]: part.label}
+        data: dict[str, Any] = {"kind": part.kind, LABEL_KEY: part.label}
         if agent is not None:
             data["agent"] = mention(agent)
         elif part.object is not None:

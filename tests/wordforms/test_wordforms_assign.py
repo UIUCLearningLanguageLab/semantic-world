@@ -49,14 +49,15 @@ def taxonomy_file(tmp_path, scalar: bool = False):
     """A small taxonomy-like meanings table: 3 branches of 4 categories each (a parent and three
     leaves), with ISA columns and random binary features; optionally a scalar column."""
     rng = np.random.default_rng(0)
-    ids = [f"C{b}" + (f".{k}" if k else "") for b in (1, 2, 3) for k in range(4)]
+    ids = [f"CATEGORY.{b}" + (f".{k}" if k else "") for b in (1, 2, 3) for k in range(4)]
+    branches = [int(i.split(".")[1]) for i in ids]
     table: dict[str, list] = {"label": ids}
     for branch in (1, 2, 3):
-        table[f"ISA.C{branch}"] = [int(i.split(".")[0] == f"C{branch}") for i in ids]
+        table[f"ISA.CATEGORY.{branch}"] = [int(b == branch) for b in branches]
     for j in range(12):
         # features are mostly shared within a branch, so meaning distance follows the taxonomy
         base = rng.integers(0, 2, size=3)
-        table[f"IS.{j + 1}"] = [int(base[int(i[1]) - 1] ^ (rng.random() < 0.15)) for i in ids]
+        table[f"PROPERTY.{j + 1}"] = [int(base[b - 1] ^ (rng.random() < 0.15)) for b in branches]
     if scalar:
         table["SIZE"] = [round(float(x), 3) for x in rng.uniform(0, 10, size=len(ids))]
     path = tmp_path / "meanings.csv"
@@ -108,7 +109,7 @@ def test_assignment_configuration(tmp_path):
                 "strict": True,
                 "target_correlation": {"target": -0.2, "tolerance": 0.05, "max_swaps": 100},
                 "branch_markers": {"depth": 2, "position": "final", "shape": "VC"},
-                "acoustic_mapping": [{"feature": "IS.1", "property": "pitch", "amount": 2}],
+                "acoustic_mapping": [{"feature": "PROPERTY.1", "property": "pitch", "amount": 2}],
             },
         },
         "x",
@@ -117,7 +118,7 @@ def test_assignment_configuration(tmp_path):
     assert a.categories == "leaves" and a.sound_distance == "e" and a.meaning_distance == "jaccard"
     assert (a.target, a.tolerance, a.max_swaps) == (-0.2, 0.05, 100) and a.strict is True
     assert (a.marker_depth, a.marker_position, a.marker_shape) == (2, "final", "VC")
-    assert a.acoustic[0].feature == "IS.1" and a.acoustic[0].amount == 2.0
+    assert a.acoustic[0].feature == "PROPERTY.1" and a.acoustic[0].amount == 2.0
     assert parse_config(config.resolved(), "x") == config
     for section, field in (
         ({"mode": "systematic"}, "assignment.mode"),
@@ -128,8 +129,8 @@ def test_assignment_configuration(tmp_path):
         ({"target_correlation": {"target": 2}}, "assignment.target_correlation.target"),
         ({"branch_markers": {"depth": 0}}, "assignment.branch_markers.depth"),
         ({"branch_markers": {"shape": "V"}}, "assignment.branch_markers.shape"),
-        ({"acoustic_mapping": [{"feature": "IS.1", "property": "loudness", "amount": 1}]}, "assignment.acoustic_mapping[0].property"),
-        ({"acoustic_mapping": [{"feature": "IS.1", "property": "duration", "amount": 0}]}, "assignment.acoustic_mapping[0].amount"),
+        ({"acoustic_mapping": [{"feature": "PROPERTY.1", "property": "loudness", "amount": 1}]}, "assignment.acoustic_mapping[0].property"),
+        ({"acoustic_mapping": [{"feature": "PROPERTY.1", "property": "duration", "amount": 0}]}, "assignment.acoustic_mapping[0].amount"),
         ({"mode": "acoustic_mapping"}, "assignment.acoustic_mapping"),
         ({"mode": "branch_markers", "sound_distance": "e"}, "assignment.sound_distance"),
     ):  # fmt: skip
@@ -149,19 +150,29 @@ def test_meanings_tables_drop_scalar_columns_and_select_categories(tmp_path):
     table = load_meaning_table(path, "drop")
     assert table.dropped == ["SIZE"] and "SIZE" not in table.names
     assert table.features.shape == (12, 15) and set(np.unique(table.features)) == {0, 1}
-    assert table.feature("ISA.C2").tolist() == [0] * 4 + [1] * 4 + [0] * 4
+    assert table.feature("ISA.CATEGORY.2").tolist() == [0] * 4 + [1] * 4 + [0] * 4
     with pytest.raises(AssignmentError, match="no feature column 'NOPE'"):
         table.feature("NOPE")
     leaves = table.select("leaves")
-    assert leaves.ids == [f"C{b}.{k}" for b in (1, 2, 3) for k in (1, 2, 3)]
+    assert leaves.ids == [f"CATEGORY.{b}.{k}" for b in (1, 2, 3) for k in (1, 2, 3)]
     assert leaves.features.shape == (9, 15)
-    chosen = table.select(("C2", "C1.3"))
-    assert chosen.ids == ["C2", "C1.3"]
-    with pytest.raises(AssignmentError, match="no ID 'C9'"):
-        table.select(("C9",))
+    chosen = table.select(("CATEGORY.2", "CATEGORY.1.3"))
+    assert chosen.ids == ["CATEGORY.2", "CATEGORY.1.3"]
+    with pytest.raises(AssignmentError, match="no ID 'CATEGORY.9'"):
+        table.select(("CATEGORY.9",))
     assert table.select("all") is table
-    assert branch_of("C1.2.3", 1) == "C1" and branch_of("C1.2.3", 2) == "C1.2"
-    assert branch_of("C1", 2) is None
+    assert branch_of("CATEGORY.1.2.3", 1) == "CATEGORY.1"
+    assert branch_of("CATEGORY.1.2.3", 2) == "CATEGORY.1.2"
+    assert branch_of("CATEGORY.1", 2) is None
+    assert branch_of("THING", 1) is None and branch_of("CATEGORY.x", 1) is None
+
+
+def test_branch_of_reads_only_the_new_label_form():
+    """Since stage a5b of the world model, a meaning ID is a prefix and numbers
+    (``CATEGORY.1.2.3``). The old form without a prefix (``C1.2.3``, ``1.2.3``) is not read: such
+    an ID is in no branch."""
+    assert branch_of("C1.2.3", 1) is None and branch_of("C1.2.3", 2) is None
+    assert branch_of("1.2.3", 1) is None and branch_of("C1", 1) is None
 
 
 def test_meaning_distances():
@@ -374,7 +385,7 @@ def test_branch_markers_differ_by_at_least_the_minimum_distance(tmp_path):
         distances(3, 1)
     message = str(error.value)
     assert "closer than 3 phonemes" in message and "branch_markers.min_distance" in message
-    assert "C1.2" in message  # the first branch got its marker, and the second could not
+    assert "CATEGORY.1.2" in message  # the first branch got its marker, and the second could not
     # a longer shape has room
     config = assign_config(
         tmp_path, count=150, mode="branch_markers", null_samples=5,
@@ -477,7 +488,7 @@ def test_branch_marker_run_writes_the_marked_forms_and_synthesizes_them(tmp_path
     markers = pl.read_csv(folder / "assignment" / "markers.csv")
     assert markers["label"].to_list() == ["M.1", "M.2", "M.3"]
     assert (
-        markers["branch"].to_list() == ["C1", "C2", "C3"]
+        markers["branch"].to_list() == ["CATEGORY.1", "CATEGORY.2", "CATEGORY.3"]
         and markers["position"].to_list() == ["prefix"] * 3
     )
     summary = yaml.safe_load((folder / "assignment" / "summary.yaml").read_text())
@@ -599,10 +610,10 @@ def test_the_pitch_shift_measure():
 
 
 MAPPINGS = [
-    {"feature": "ISA.C1", "property": "pitch", "amount": 3.0},
-    {"feature": "ISA.C2", "property": "duration", "amount": 1.25},
-    {"feature": "ISA.C3", "property": "tilt", "amount": -4.0},
-    {"feature": "IS.1", "property": "formants", "amount": 1.15},
+    {"feature": "ISA.CATEGORY.1", "property": "pitch", "amount": 3.0},
+    {"feature": "ISA.CATEGORY.2", "property": "duration", "amount": 1.25},
+    {"feature": "ISA.CATEGORY.3", "property": "tilt", "amount": -4.0},
+    {"feature": "PROPERTY.1", "property": "formants", "amount": 1.15},
 ]
 
 
@@ -841,9 +852,9 @@ def test_trained_encoders_never_see_a_control_token(tmp_path):
 def test_an_unknown_feature_is_an_error_before_any_audio(tmp_path):
     config = assign_config(
         tmp_path, mode="acoustic_mapping",
-        acoustic_mapping=[{"feature": "IS.99", "property": "pitch", "amount": 1}],
+        acoustic_mapping=[{"feature": "PROPERTY.99", "property": "pitch", "amount": 1}],
     )  # fmt: skip
-    with pytest.raises(AssignmentError, match="no feature column 'IS.99'"):
+    with pytest.raises(AssignmentError, match="no feature column 'PROPERTY.99'"):
         run_assignment(run_forms(config))
 
 
@@ -861,10 +872,10 @@ def test_all_with_acoustic_mapping_on_the_tiny_configuration(tmp_path, capsys):
         "mode": "acoustic_mapping",
         "meanings": str(taxonomy_file(tmp_path)),
         "acoustic_mapping": [
-            {"feature": "ISA.C1", "property": "duration", "amount": 1.2},
-            {"feature": "ISA.C2", "property": "pitch", "amount": 2.0},
-            {"feature": "ISA.C3", "property": "tilt", "amount": 3.0},
-            {"feature": "IS.1", "property": "formants", "amount": 1.1},
+            {"feature": "ISA.CATEGORY.1", "property": "duration", "amount": 1.2},
+            {"feature": "ISA.CATEGORY.2", "property": "pitch", "amount": 2.0},
+            {"feature": "ISA.CATEGORY.3", "property": "tilt", "amount": 3.0},
+            {"feature": "PROPERTY.1", "property": "formants", "amount": 1.1},
         ],
     }
     path = tmp_path / "tiny.yaml"
@@ -873,7 +884,7 @@ def test_all_with_acoustic_mapping_on_the_tiny_configuration(tmp_path, capsys):
     assert main(["all", str(path), "--out", str(out)]) == 0
     text = capsys.readouterr().out
     assert "assignment (acoustic_mapping): 12 meanings" in text
-    assert "ISA.C1 -> duration 1.2: 24 tokens, achieved mean 1." in text
+    assert "ISA.CATEGORY.1 -> duration 1.2: 24 tokens, achieved mean 1." in text
     summary = yaml.safe_load((out / "assignment" / "summary.yaml").read_text())
     by = {m["property"]: m for m in summary["acoustic_mapping"]["mappings"]}
     assert by["duration"]["achieved_mean"] == pytest.approx(1.2, rel=0.01)

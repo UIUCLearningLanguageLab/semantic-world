@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from semantic_world.taxonomy.config import Config
+from semantic_world.taxonomy.config import INSTANCE_PREFIX, Config
 from semantic_world.taxonomy.features import FeatureSet
 from semantic_world.taxonomy.rules import RuleSet
 from semantic_world.taxonomy.streams import Streams
@@ -24,7 +24,7 @@ from semantic_world.taxonomy.tree import Category, Role, Tree
 @dataclass(frozen=True)
 class Instances:
     labels: tuple[str, ...]
-    """``I<leaf indices>.<k>``, in leaf order then index order."""
+    """``INSTANCE.<leaf indices>.<k>``, in leaf order then index order."""
     leaf_labels: tuple[str, ...]
     """The leaf of each instance."""
     leaf_index: np.ndarray
@@ -75,7 +75,7 @@ def generate_instances(config: Config, rules: RuleSet, tree: Tree, streams: Stre
             continue
         count = int(rng.integers(per_leaf.min, per_leaf.max + 1))
         for k in range(1, count + 1):
-            labels.append("I" + ".".join(str(i) for i in category.indices) + f".{k}")
+            labels.append(INSTANCE_PREFIX + ".".join(str(i) for i in category.indices) + f".{k}")
             leaf_labels.append(category.label)
             leaf_index.append(index)
             free_rows.append(instance_free_values(category, copy_probability, base_rates, rng))

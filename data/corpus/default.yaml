@@ -28,7 +28,7 @@ documents:
   instance_description_rate: 0.2 # the probability that an event sentence of a narrative is followed by a description
   sibling_contrast_rate: 0.2     # the probability that a fact in a category document is followed by the matching fact about a sibling
   relation_fact_share: null      # the share of a category document's sentences that draw a relation fact; null: relation facts are weighted like the other kinds; 0: none
-  content_kind_weights: proportional   # how a category document draws its next kind of content: proportional to the facts of each kind it can still state, or equal
+  content_kind_weights: equal          # how a category document draws its next kind of content: each kind with the same chance (equal), or in proportion to the facts of each kind it can still state (proportional)
   progressive_rate: 0.3          # the share of event reports that are progressive; each report chooses its aspect
   one_aspect_per_event: true     # every report of one event in one document uses the aspect of its first report
 

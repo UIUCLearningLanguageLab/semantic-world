@@ -1,19 +1,21 @@
-"""Constraints and relations: two-argument relations between instances.
+"""Constraints and relations: the requirements of two-place event types.
 
-A verb ``v`` is a relation ``R_v(a, p)`` between an agent instance ``a`` and a patient instance
-``p``: a conjunction of constraints. Each constraint is a rule over the features of one or both
-arguments. Its inputs are binary IS and HAS features (free or determined) and scalar threshold
-literals from either argument, named with the prefixes ``a.`` and ``p.``, and scalar comparisons
-between the two arguments. No constraint reads an ISA feature, a CAN feature, or a projection.
-An instance is never related to itself.
+A two-place event type is a relation ``R(agent, patient)`` between two entities: a conjunction
+of constraints. Each constraint is a rule over the static facts of one or both roles. Its inputs
+are binary PROPERTY and PART features (free or determined) and scalar threshold literals of either
+role, named with the prefixes ``agent.`` and ``patient.``, and scalar comparisons between the two
+roles. No constraint reads an ISA feature, a fluent, or a capacity. An entity is never related to
+itself.
 
 Every constraint is stored as its Boolean skeleton (a truth table over its literals) plus the
 definitions of its literals, and printed expressions parse back to the same constraint. Every
-verb feature ``VF.<n>`` gets one constraint ``K.VF.<n>``, and, with ``verbs.own_constraint`` on,
-every verb gets one of its own, ``K.<verb label>``. A verb's relation is the conjunction of the
-constraints of its true verb features plus its own constraint. Every verb category has a base
-relation: the constraints of the verb features that are defining with value 1 at the category.
-Constraint sampling draws from the ``taxonomy:constraints`` stream.
+event-type feature ``EVENTFEAT.<n>`` gets one constraint ``CONSTRAINT.EVENTFEAT.<n>``, and, with
+``event_types.binary.own_constraint`` on, every event type gets one of its own,
+``CONSTRAINT.<event type>``. An event type's relation is the conjunction of the constraints of its
+true event-type features plus its own constraint. Every category of event types has a base
+relation: the constraints of the event-type features that are defining with value 1 at the
+category. Constraint sampling draws from the ``world:constraints`` stream (Part B of
+``docs/specs/TAXONOMY_RELATIONS.md``, with "verb" read as "event type").
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import Any
 import numpy as np
 
 from semantic_world.common.boolean import TruthTable, dnf_literal_count
-from semantic_world.taxonomy.config import Config, RuleSampling, ScalarsConfig, VerbsConfig
+from semantic_world.taxonomy.config import RuleSampling, ScalarsConfig
 from semantic_world.taxonomy.errors import GenerationError
 from semantic_world.taxonomy.expressions import Cmp, Expr, Gt, Op, Var, literal
 from semantic_world.taxonomy.features import Feature, FeatureSet
@@ -40,13 +42,19 @@ from semantic_world.taxonomy.rules import (
     build_function,
     model_quantile_threshold,
 )
-from semantic_world.taxonomy.streams import Streams
-from semantic_world.taxonomy.tree import Category, Tree
-from semantic_world.taxonomy.verbs import VerbTaxonomy, generate_verb_tree, redraw_verb_features
+from semantic_world.taxonomy.tree import Category, Role, Tree
+from semantic_world.world.config import BinaryConfig
+from semantic_world.world.event_tree import EventTree, generate_event_tree, redraw_event_features
 
-ROLES = ("a", "p")
+ROLES = ("agent", "patient")
 FAMILIES = ("agent", "patient", "cross", "key_lock", "comparison")
+CONSTRAINT_PREFIX = "CONSTRAINT"
 CHUNK_ROWS = 2048
+
+
+def constraint_label(owner: str) -> str:
+    """The label of the constraint of an event-type feature or an event type's own."""
+    return f"{CONSTRAINT_PREFIX}.{owner}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -56,7 +64,7 @@ CHUNK_ROWS = 2048
 
 @dataclass(frozen=True)
 class RoleFeature:
-    """A binary feature of the agent (``a.IS.7``) or the patient (``p.HAS.4``)."""
+    """A binary feature of the agent (``agent.PROPERTY.7``) or the patient (``patient.PART.4``)."""
 
     role: str
     feature: Feature
@@ -74,7 +82,8 @@ class RoleFeature:
 
 @dataclass(frozen=True)
 class RoleThreshold:
-    """A threshold literal on a scalar of the agent or the patient: ``p.SC.1 > 0.2031``."""
+    """A threshold literal on a scalar of the agent or the patient: ``patient.SCALARDIM.1 >
+    0.2031``."""
 
     role: str
     threshold: Threshold
@@ -92,8 +101,8 @@ class RoleThreshold:
 
 @dataclass(frozen=True)
 class ScalarComparison:
-    """An order ``a.SC.i - p.SC.j > low`` (``high`` None) or a window
-    ``low < a.SC.i - p.SC.j < high`` between the arguments' scalars."""
+    """An order ``agent.SCALARDIM.i - patient.SCALARDIM.j > low`` (``high`` None) or a window
+    ``low < agent.SCALARDIM.i - patient.SCALARDIM.j < high`` between the roles' scalars."""
 
     agent_scalar: int
     patient_scalar: int
@@ -101,7 +110,12 @@ class ScalarComparison:
     high: float | None
 
     def atom(self) -> Cmp:
-        return Cmp(f"a.SC.{self.agent_scalar}", f"p.SC.{self.patient_scalar}", self.low, self.high)
+        return Cmp(
+            f"agent.SCALARDIM.{self.agent_scalar}",
+            f"patient.SCALARDIM.{self.patient_scalar}",
+            self.low,
+            self.high,
+        )
 
     @property
     def key(self) -> str:
@@ -123,7 +137,7 @@ ConstraintLiteral = RoleFeature | RoleThreshold | ScalarComparison
 
 
 def literal_role(item: ConstraintLiteral) -> str:
-    """``a``, ``p``, or ``both`` for a comparison."""
+    """``agent``, ``patient``, or ``both`` for a comparison."""
     return "both" if isinstance(item, ScalarComparison) else item.role
 
 
@@ -151,11 +165,11 @@ class Constraint:
 
     @property
     def agent_literals(self) -> tuple[ConstraintLiteral, ...]:
-        return tuple(item for item in self.literals if literal_role(item) == "a")
+        return tuple(item for item in self.literals if literal_role(item) == "agent")
 
     @property
     def patient_literals(self) -> tuple[ConstraintLiteral, ...]:
-        return tuple(item for item in self.literals if literal_role(item) == "p")
+        return tuple(item for item in self.literals if literal_role(item) == "patient")
 
     @property
     def comparisons(self) -> tuple[ScalarComparison, ...]:
@@ -165,7 +179,7 @@ class Constraint:
         """Whether the skeleton depends on at least one agent input and one patient input (a
         comparison counts for both)."""
         roles = {literal_role(self.literals[i]) for i in self.table.relevant_inputs()}
-        return ("a" in roles or "both" in roles) and ("p" in roles or "both" in roles)
+        return ("agent" in roles or "both" in roles) and ("patient" in roles or "both" in roles)
 
     def pair_values(
         self, values: np.ndarray, scalars: np.ndarray, agents: np.ndarray, patients: np.ndarray
@@ -187,7 +201,7 @@ class Constraint:
         for item in self.literals:
             if isinstance(item, ScalarComparison):
                 columns[item.key] = item.pair_values(agent_scalars, patient_scalars)
-            elif item.role == "a":
+            elif item.role == "agent":
                 columns[item.key] = item.instance_values(agent_values, agent_scalars)
             else:
                 columns[item.key] = item.instance_values(patient_values, patient_scalars)
@@ -223,14 +237,14 @@ class Constraint:
                 index += bit * item.of_difference(difference).astype(np.int64)
             else:
                 column = item.instance_values(values, scalars).astype(np.int64)
-                if item.role == "a":
+                if item.role == "agent":
                     index += bit * column[agents][:, None]
                 else:
                     index += bit * column[None, :]
         return np.asarray(self.table.bits, dtype=np.uint8)[index].astype(bool)
 
     def record(self) -> dict[str, Any]:
-        """The entry written to ``constraints.yaml``."""
+        """The constraint as a record (the form the old ``constraints.yaml`` held)."""
         return {
             "label": self.label,
             "family": self.family,
@@ -238,8 +252,8 @@ class Constraint:
             "patient_literals": [_literal_record(item) for item in self.patient_literals],
             "comparisons": [
                 {
-                    "agent": f"SC.{c.agent_scalar}",
-                    "patient": f"SC.{c.patient_scalar}",
+                    "agent": f"SCALARDIM.{c.agent_scalar}",
+                    "patient": f"SCALARDIM.{c.patient_scalar}",
                     "low": c.low,
                     "high": c.high,
                 }
@@ -265,7 +279,8 @@ def _literal_record(item: ConstraintLiteral) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class Relation:
-    """The relation of a verb (``base`` False) or the base relation of a verb category."""
+    """The relation of an event type (``base`` False) or the base relation of a category of
+    event types."""
 
     label: str
     base: bool
@@ -312,34 +327,42 @@ def leaf_pair_density(
 
 
 class Relations:
-    """Every constraint and every relation of a run, with evaluation over the run's instances."""
+    """Every constraint and every relation of a world, with evaluation over the world's
+    entities."""
 
     def __init__(
         self,
-        verbs: VerbTaxonomy,
+        event_tree: EventTree,
         feature_constraints: Sequence[Constraint],
         own_constraints: dict[str, Constraint],
         instances: Instances,
         constraint_density: dict[str, float] | None = None,
-        verb_density: dict[str, float] | None = None,
-        verb_tries: dict[str, int] | None = None,
+        event_type_density: dict[str, float] | None = None,
+        event_type_tries: dict[str, int] | None = None,
         outside_range: tuple[str, ...] = (),
         warnings: tuple[str, ...] = (),
+        explicit: frozenset[str] = frozenset(),
     ) -> None:
-        self.verbs = verbs
+        self.event_tree = event_tree
         self.feature_constraints = tuple(feature_constraints)
         self.own_constraints = dict(own_constraints)
         self.instances = instances
+        self.explicit = explicit
+        """The event types whose own constraint is an explicit requirement from an event file.
+        Such an event type keeps the constraints of the features that are defining at its
+        ancestors (their base relations, REL.10) and loses those of its other true features."""
         self.constraint_density = constraint_density
         """Leaf-pair density of every constraint alone, when a density check is on."""
-        self.verb_density = verb_density
-        """Leaf-pair density of every verb's relation, when the verb density check is on."""
-        self.verb_tries = verb_tries
+        self.event_type_density = event_type_density
+        """Leaf-pair density of every event type's relation, when the density check is on."""
+        self.event_type_tries = event_type_tries
         self.outside_range = outside_range
-        """The verbs the generator could not bring inside the density range."""
+        """The event types the generator could not bring inside the density range."""
         self.warnings = warnings
         self.constraints: tuple[Constraint, ...] = self.feature_constraints + tuple(
-            self.own_constraints[v.label] for v in verbs.verbs if v.label in self.own_constraints
+            self.own_constraints[v.label]
+            for v in event_tree.event_types
+            if v.label in self.own_constraints
         )
         self._by_label = {c.label: c for c in self.constraints}
 
@@ -349,14 +372,16 @@ class Relations:
         except KeyError:
             raise KeyError(f"unknown constraint {label!r}") from None
 
-    def category(self, verb: Category | str) -> Category:
-        return verb if isinstance(verb, Category) else self.verbs.tree[verb]
+    def category(self, event_type: Category | str) -> Category:
+        return event_type if isinstance(event_type, Category) else self.event_tree.tree[event_type]
 
-    def relation(self, verb: Category | str) -> Relation:
-        """A verb's relation, or the base relation of an internal verb category."""
-        category = self.category(verb)
+    def relation(self, event_type: Category | str) -> Relation:
+        """An event type's relation, or the base relation of a category of event types."""
+        category = self.category(event_type)
         if category.is_leaf:
             mask = category.values == 1
+            if category.label in self.explicit:
+                mask &= category.roles == Role.DEFINING_INHERITED
             constraints = [self.feature_constraints[i] for i in np.flatnonzero(mask)]
             own = self.own_constraints.get(category.label)
             if own is not None:
@@ -368,25 +393,27 @@ class Relations:
         )
 
     def relations(self) -> list[Relation]:
-        return [self.relation(c) for c in self.verbs.categories]
+        return [self.relation(c) for c in self.event_tree.categories]
 
-    def holds(self, verb: Category | str, agents: np.ndarray, patients: np.ndarray) -> np.ndarray:
+    def holds(
+        self, event_type: Category | str, agents: np.ndarray, patients: np.ndarray
+    ) -> np.ndarray:
         """Whether the relation holds for the aligned pairs ``(agents[k], patients[k])`` of
         instance indices. An instance is never related to itself."""
         agents = np.asarray(agents, dtype=np.intp)
         patients = np.asarray(patients, dtype=np.intp)
         result = agents != patients
         values, scalars = self.instances.values, self.instances.scalars
-        for constraint in self.relation(verb).constraints:
+        for constraint in self.relation(event_type).constraints:
             result &= constraint.pair_values(values, scalars, agents, patients)
         return result
 
-    def matrix(self, verb: Category | str, chunk_rows: int = CHUNK_ROWS) -> np.ndarray:
+    def matrix(self, event_type: Category | str, chunk_rows: int = CHUNK_ROWS) -> np.ndarray:
         """The relation over every ordered pair of instances, as an ``(n, n)`` bool array with a
         False diagonal, computed in chunks of agents."""
         n = len(self.instances)
         values, scalars = self.instances.values, self.instances.scalars
-        constraints = self.relation(verb).constraints
+        constraints = self.relation(event_type).constraints
         out = np.zeros((n, n), dtype=bool)
         for start in range(0, n, chunk_rows):
             agents = np.arange(start, min(start + chunk_rows, n))
@@ -398,8 +425,7 @@ class Relations:
         return out
 
     def records(self) -> list[dict[str, Any]]:
-        """The ``constraints.yaml`` entries, with each constraint's leaf-pair density when a
-        density check is on."""
+        """Every constraint's record, with its leaf-pair density when a density check is on."""
         entries = []
         for c in self.constraints:
             entry = c.record()
@@ -418,44 +444,53 @@ class Relations:
 
 
 def generate_constraints(
-    config: Config,
+    binary: BinaryConfig | None,
+    scalars: ScalarsConfig,
     features: FeatureSet,
-    verbs: VerbTaxonomy | None,
+    event_tree: EventTree | None,
     instances: Instances,
-    streams: Streams,
+    rng: np.random.Generator,
 ) -> Relations | None:
-    """Sample one constraint per verb feature and, when on, one per verb, from the
-    ``constraints`` stream, and assemble the relations. This is the build without the density
-    checks; :func:`generate_relations` is the full build."""
-    if verbs is None or config.verbs is None:
+    """Sample one constraint per event-type feature and, when on, one per event type, from the
+    ``world:constraints`` stream, and assemble the relations. This is the build without the
+    density checks; :func:`generate_relations` is the full build."""
+    if event_tree is None or binary is None:
         return None
-    sampler = _ConstraintSampler(config.verbs, config.scalars, features, streams.constraints)
-    feature_constraints = [sampler.sample(f"K.{label}") for label in verbs.features.labels]
+    sampler = _ConstraintSampler(binary, scalars, features, rng)
+    feature_constraints = [
+        sampler.sample(constraint_label(label)) for label in event_tree.features.labels
+    ]
     own: dict[str, Constraint] = {}
-    if config.verbs.own_constraint:
-        for verb in verbs.verbs:
-            own[verb.label] = sampler.sample(f"K.{verb.label}")
-    return Relations(verbs, feature_constraints, own, instances)
+    if binary.own_constraint:
+        for event_type in event_tree.event_types:
+            own[event_type.label] = sampler.sample(constraint_label(event_type.label))
+    return Relations(event_tree, feature_constraints, own, instances)
 
 
 def generate_relations(
-    config: Config, rules: RuleSet, tree: Tree, instances: Instances, streams: Streams
-) -> tuple[VerbTaxonomy | None, Relations | None]:
-    """The full verb build: verb-feature constraints (with the constraint density floor), the
-    verb tree, and each verb's own constraint with the verb density range
-    (``docs/proposals/2026-09-29-taxonomy-verb-density.md``).
+    binary: BinaryConfig | None,
+    scalars: ScalarsConfig,
+    rules: RuleSet,
+    tree: Tree,
+    instances: Instances,
+    rng_constraints: np.random.Generator,
+    rng_event_tree: np.random.Generator,
+) -> tuple[EventTree | None, Relations | None]:
+    """The full build of the two-place event types: the constraints of the event-type features
+    (with the constraint density floor), the event-type tree, and each event type's own
+    constraint with the density range (``docs/proposals/2026-09-29-taxonomy-verb-density.md``).
 
-    Densities are measured over the leaves of the noun tree, never the instances. Constraints
-    draw from the ``constraints`` stream and verb features from the ``verb_tree`` stream, so with
-    both checks off the build equals the one without them.
+    Densities are measured over the leaves of the category tree, never the entities. Constraints
+    draw from ``world:constraints`` and the event tree from ``world:event_tree``, so with both
+    checks off the build equals the one without them.
     """
-    if config.verbs is None:
+    if binary is None:
         return None, None
-    settings = config.verbs
+    settings = binary
     leaf_values = np.stack([leaf.values for leaf in tree.leaves])
     leaf_scalars = np.stack([leaf.scalars for leaf in tree.leaves])
     checks_on = settings.density is not None or settings.constraint_min_density is not None
-    sampler = _ConstraintSampler(settings, config.scalars, rules.features, streams.constraints)
+    sampler = _ConstraintSampler(settings, scalars, rules.features, rng_constraints)
     warnings: list[str] = []
     constraint_density: dict[str, float] = {}
 
@@ -464,8 +499,8 @@ def generate_relations(
 
     feature_constraints: list[Constraint] = []
     for label in settings.feature_labels:
-        name = f"K.{label}"
-        if settings.constraint_min_density is None:
+        name = constraint_label(label)
+        if settings.density is None and settings.constraint_min_density is None:
             constraint = sampler.sample(name)
         else:
             constraint, warning = _sample_dense_constraint(
@@ -477,64 +512,77 @@ def generate_relations(
         if checks_on:
             constraint_density[name] = density([constraint])
 
-    verbs = generate_verb_tree(config, streams)
-    assert verbs is not None
+    event_tree = generate_event_tree(binary, rng_event_tree)
+    assert event_tree is not None
     own: dict[str, Constraint] = {}
-    verb_density: dict[str, float] = {}
-    verb_tries: dict[str, int] = {}
+    event_type_density: dict[str, float] = {}
+    event_type_tries: dict[str, int] = {}
     outside: list[str] = []
     if settings.density is None:
-        for verb in verbs.verbs:
+        for event_type in event_tree.event_types:
             if settings.own_constraint:
-                own[verb.label] = sampler.sample(f"K.{verb.label}")
+                own[event_type.label] = sampler.sample(constraint_label(event_type.label))
     else:
-        tuner = _DensityTuner(settings, verbs, feature_constraints, sampler, density, streams)
-        for verb in verbs.verbs:
-            result = tuner.tune(verb)
+        tuner = _DensityTuner(
+            settings, event_tree, feature_constraints, sampler, density, rng_event_tree
+        )
+        for event_type in event_tree.event_types:
+            result = tuner.tune(event_type)
             if result.own is not None:
-                own[verb.label] = result.own
-            verb_density[verb.label] = result.density
-            verb_tries[verb.label] = result.tries
+                own[event_type.label] = result.own
+            event_type_density[event_type.label] = result.density
+            event_type_tries[event_type.label] = result.tries
             if not result.in_range:
-                outside.append(verb.label)
+                outside.append(event_type.label)
                 warnings.append(
-                    f"verb {verb.label} has leaf-pair density {result.density:.4f}, outside "
-                    f"[{settings.density.min}, {settings.density.max}] after {result.tries} tries"
+                    f"event type {event_type.label} has leaf-pair density {result.density:.4f}, "
+                    f"outside ({settings.density.min}, {settings.density.max}) after "
+                    f"{result.tries} tries"
                 )
     if checks_on:
         for constraint in own.values():
             constraint_density[constraint.label] = density([constraint])
     relations = Relations(
-        verbs,
+        event_tree,
         feature_constraints,
         own,
         instances,
         constraint_density=constraint_density if checks_on else None,
-        verb_density=verb_density if settings.density is not None else None,
-        verb_tries=verb_tries if settings.density is not None else None,
+        event_type_density=event_type_density if settings.density is not None else None,
+        event_type_tries=event_type_tries if settings.density is not None else None,
         outside_range=tuple(outside),
         warnings=tuple(warnings),
     )
-    return verbs, relations
+    return event_tree, relations
 
 
 def _sample_dense_constraint(
-    sampler: _ConstraintSampler, label: str, density, minimum: float, max_tries: int
+    sampler: _ConstraintSampler, label: str, density, minimum: float | None, max_tries: int
 ) -> tuple[Constraint, str | None]:
-    """Resample a constraint until its leaf-pair density reaches ``minimum``; otherwise keep the
-    densest candidate and return a warning."""
+    """Resample a constraint until its leaf-pair density is not degenerate (neither 0 nor 1: a
+    constraint that no leaf pair satisfies makes every event type that carries its feature
+    impossible, and one that every pair satisfies constrains nothing) and, with ``minimum``
+    given, reaches it; otherwise keep the best candidate and return a warning."""
+    floor = minimum or 0.0
     best: tuple[float, Constraint] | None = None
     for _ in range(max_tries):
         constraint = sampler.sample(label)
         value = density([constraint])
-        if value >= minimum:
+        if value >= floor and 0.0 < value < 1.0:
             return constraint, None
-        if best is None or value > best[0]:
-            best = (value, constraint)
+        score = value if value < 1.0 else -1.0
+        if best is None or score > best[0]:
+            best = (score, constraint)
     assert best is not None
+    value = density([best[1]])
+    if minimum is None:
+        return best[1], (
+            f"constraint {label} has leaf-pair density {value:.4f} after {max_tries} tries: "
+            f"it holds for no leaf pair or for every leaf pair"
+        )
     return best[1], (
-        f"constraint {label} has leaf-pair density {best[0]:.4f}, below "
-        f"verbs.constraint_min_density {minimum} after {max_tries} tries"
+        f"constraint {label} has leaf-pair density {value:.4f}, below "
+        f"event_types.binary.constraint_min_density {minimum} after {max_tries} tries"
     )
 
 
@@ -547,106 +595,113 @@ class _TuneResult:
 
 
 class _DensityTuner:
-    """Brings each verb's leaf-pair density into the configured range, in category order."""
+    """Brings each event type's leaf-pair density into the configured range, in category
+    order. A density of 0 or 1 is always outside the range."""
 
     def __init__(
         self,
-        settings: VerbsConfig,
-        verbs: VerbTaxonomy,
+        settings: BinaryConfig,
+        event_tree: EventTree,
         feature_constraints: Sequence[Constraint],
         sampler: _ConstraintSampler,
         density,
-        streams: Streams,
+        rng: np.random.Generator,
     ) -> None:
         assert settings.density is not None
         self.settings = settings
         self.range = settings.density
-        self.verbs = verbs
+        self.event_tree = event_tree
         self.feature_constraints = tuple(feature_constraints)
         self.sampler = sampler
         self.density = density
-        self.rng = streams.verb_tree
-        self.base_rates = verbs.features.base_rates
-        self.vectors: dict[str, bytes] = {v.label: v.values.tobytes() for v in verbs.verbs}
+        self.rng = rng
+        self.base_rates = event_tree.features.base_rates
+        self.vectors: dict[str, bytes] = {
+            v.label: v.values.tobytes() for v in event_tree.event_types
+        }
 
     def distance(self, value: float) -> float:
-        if self.range.min <= value <= self.range.max:
-            return 0.0
-        return self.range.min - value if value < self.range.min else value - self.range.max
+        return self.range.distance(value)
 
-    def base_constraints(self, verb: Category) -> list[Constraint]:
-        return [self.feature_constraints[i] for i in np.flatnonzero(verb.values == 1)]
+    def base_constraints(self, event_type: Category) -> list[Constraint]:
+        return [self.feature_constraints[i] for i in np.flatnonzero(event_type.values == 1)]
 
-    def redraw(self, verb: Category) -> bool:
-        """Redraw the verb's non-defining features; False when the draw duplicates another verb
-        and distinct leaves are required, or when nothing can change."""
-        if verb.parent is not None and verb.parent.defining_mask().all():
-            return False
-        values = redraw_verb_features(verb, self.settings, self.base_rates, self.rng)
+    def redraw(self, event_type: Category) -> bool | None:
+        """Redraw the event type's non-defining features. None when nothing can change (every
+        feature is defining at the parent); False when the draw duplicates another event type
+        and distinct leaves are required, which counts as a failed try; True otherwise."""
+        if event_type.parent is not None and event_type.parent.defining_mask().all():
+            return None
+        values = redraw_event_features(event_type, self.settings, self.base_rates, self.rng)
         key = values.tobytes()
         if self.settings.inheritance.require_distinct_leaves and any(
-            other == key for label, other in self.vectors.items() if label != verb.label
+            other == key for label, other in self.vectors.items() if label != event_type.label
         ):
             return False
-        verb.free_values = values
-        verb.values = values.copy()
-        self.vectors[verb.label] = key
+        event_type.free_values = values
+        event_type.values = values.copy()
+        self.vectors[event_type.label] = key
         return True
 
-    def tune(self, verb: Category) -> _TuneResult:
-        label = f"K.{verb.label}"
+    def tune(self, event_type: Category) -> _TuneResult:
+        label = constraint_label(event_type.label)
         best: tuple[float, np.ndarray, Constraint | None, float] | None = None
         tries = 0
         stuck = False
         while tries < self.range.max_tries and not stuck:
             tries += 1
-            base_density = self.density(self.base_constraints(verb))
-            too_sparse = base_density < self.range.min
-            too_dense_without_own = (
-                not self.settings.own_constraint and base_density > self.range.max
+            base_density = self.density(self.base_constraints(event_type))
+            too_sparse = base_density <= max(self.range.min, 0.0)
+            too_dense_without_own = not self.settings.own_constraint and (
+                base_density >= min(self.range.max, 1.0)
             )
             if too_sparse or too_dense_without_own:
-                candidate = (self.distance(base_density), verb.values.copy(), None, base_density)
+                candidate = (
+                    self.distance(base_density),
+                    event_type.values.copy(),
+                    None,
+                    base_density,
+                )
                 if best is None or candidate[0] < best[0]:
                     best = candidate
-                if not self.redraw(verb):
+                if self.redraw(event_type) is None:
                     stuck = True
                 continue
             own = self.sampler.sample(label) if self.settings.own_constraint else None
-            value = self.density(self.base_constraints(verb) + ([own] if own else []))
-            candidate = (self.distance(value), verb.values.copy(), own, value)
+            value = self.density(self.base_constraints(event_type) + ([own] if own else []))
+            candidate = (self.distance(value), event_type.values.copy(), own, value)
             if best is None or candidate[0] < best[0]:
                 best = candidate
             if candidate[0] == 0.0:
                 break
         assert best is not None
         _, values, own, value = best
-        verb.free_values = values.copy()
-        verb.values = values.copy()
-        self.vectors[verb.label] = values.tobytes()
+        event_type.free_values = values.copy()
+        event_type.values = values.copy()
+        self.vectors[event_type.label] = values.tobytes()
         if own is None and self.settings.own_constraint:
-            # Every candidate was too sparse before its own constraint; the verb still gets one.
+            # Every candidate was too sparse before its own constraint; it still gets one.
             own = self.sampler.sample(label)
-            value = self.density(self.base_constraints(verb) + [own])
+            value = self.density(self.base_constraints(event_type) + [own])
         return _TuneResult(own, value, tries, self.distance(value) == 0.0)
 
 
 class _ConstraintSampler:
     def __init__(
         self,
-        verbs: VerbsConfig,
+        binary: BinaryConfig,
         scalars: ScalarsConfig,
         features: FeatureSet,
         rng: np.random.Generator,
     ) -> None:
-        self.verbs = verbs
+        self.binary = binary
         self.scalars = scalars
         self.features = features
         self.rng = rng
-        self.sampling: RuleSampling = verbs.rules
+        self.sampling: RuleSampling = binary.rules
         self.families = {
             f: w
-            for f, w in verbs.constraint_families.items()
+            for f, w in binary.constraint_families.items()
             if w > 0 and (f != "comparison" or scalars.count > 0)
         }
         types = self.sampling.input_types
@@ -661,8 +716,8 @@ class _ConstraintSampler:
         for _ in range(MAX_TRIES):
             family = _draw(self.rng, self.families)
             builder = {
-                "agent": lambda: self._role_rule("a", "agent"),
-                "patient": lambda: self._role_rule("p", "patient"),
+                "agent": lambda: self._role_rule("agent", "agent"),
+                "patient": lambda: self._role_rule("patient", "patient"),
                 "cross": self._cross,
                 "key_lock": self._key_lock,
                 "comparison": self._comparison,
@@ -702,7 +757,7 @@ class _ConstraintSampler:
         if len(entries) < count:
             raise GenerationError(
                 f"a constraint needs {count} literals but only {len(entries)} inputs are eligible; "
-                f"lower the arity in verbs.rules or loosen verbs.rules.input_type_weights"
+                f"lower the arity in event_types.binary.rules or loosen its input_type_weights"
             )
         p = self._weights([e[1] if isinstance(e, tuple) else e for e in entries])
         picks = self.rng.choice(len(entries), size=count, replace=False, p=p / p.sum())
@@ -743,26 +798,28 @@ class _ConstraintSampler:
         if not weights:
             raise GenerationError(
                 "cross-role constraints need an arity of at least 2 with positive weight in "
-                "verbs.rules.arity"
+                "event_types.binary.rules.arity"
             )
         arity = _draw(self.rng, weights)
         agent_entry = self._pick(self.pool, 1)[0]
         patient_entry = self._pick(self.pool, 1)[0]
-        rest = [("a", e) for e in self.pool if e != agent_entry] + [
-            ("p", e) for e in self.pool if e != patient_entry
+        rest = [("agent", e) for e in self.pool if e != agent_entry] + [
+            ("patient", e) for e in self.pool if e != patient_entry
         ]
         more = self._pick(rest, arity - 2)
-        agent_entries = [agent_entry] + [e for role, e in more if role == "a"]
-        patient_entries = [patient_entry] + [e for role, e in more if role == "p"]
-        literals = self._literals("a", agent_entries) + self._literals("p", patient_entries)
+        agent_entries = [agent_entry] + [e for role, e in more if role == "agent"]
+        patient_entries = [patient_entry] + [e for role, e in more if role == "patient"]
+        literals = self._literals("agent", agent_entries) + self._literals(
+            "patient", patient_entries
+        )
         return self._function("cross", literals)
 
     def _key_lock(self) -> Constraint:
-        pairs = _draw(self.rng, self.verbs.key_lock_pairs)
+        pairs = _draw(self.rng, self.binary.key_lock_pairs)
         agent_entries = self._pick(self.pool, pairs)
         patient_entries = self._pick(self.pool, pairs)
-        agent_literals = self._literals("a", agent_entries)
-        patient_literals = self._literals("p", patient_entries)
+        agent_literals = self._literals("agent", agent_entries)
+        patient_literals = self._literals("patient", patient_entries)
         negated = [bool(v) for v in self.rng.random(2 * pairs) < self.sampling.negation_probability]
         literals: list[ConstraintLiteral] = []
         terms: list[Expr] = []
@@ -785,11 +842,11 @@ class _ConstraintSampler:
         count = self.scalars.count
         i = int(self.rng.integers(1, count + 1))
         j = i
-        if count >= 2 and self.rng.random() < self.verbs.comparison.cross_dimension_probability:
+        if count >= 2 and self.rng.random() < self.binary.comparison.cross_dimension_probability:
             others = [s for s in range(1, count + 1) if s != i]
             j = others[int(self.rng.integers(len(others)))]
-        window = bool(self.rng.random() < self.verbs.comparison.window_probability)
-        low_q, high_q = self.verbs.comparison.margin_quantiles
+        window = bool(self.rng.random() < self.binary.comparison.window_probability)
+        low_q, high_q = self.binary.comparison.margin_quantiles
         if window:
             for _ in range(MAX_TRIES):
                 q1, q2 = sorted(float(q) for q in self.rng.uniform(low_q, high_q, size=2))

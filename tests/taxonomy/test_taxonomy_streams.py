@@ -51,10 +51,9 @@ def test_streams_have_the_named_generators() -> None:
         "analysis",
         "scalars",
         "scalar_instances",
-        "verb_tree",
-        "constraints",
-        "pairs",
     )
+    # The verb tree, the constraints, and the pairs are drawn by the world package now.
+    assert not {"verb_tree", "constraints", "pairs"} & set(STREAM_NAMES)
     for name in STREAM_NAMES:
         assert isinstance(getattr(streams, name), np.random.Generator)
     assert list(streams.seeds()) == [f"taxonomy:{name}" for name in STREAM_NAMES]

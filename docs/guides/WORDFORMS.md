@@ -266,7 +266,7 @@ With `assignment.meanings` set to a CSV file, the `assign` subcommand assigns co
 ```yaml
 assignment:
   mode: target_correlation
-  meanings: runs/taxonomy/default_seed1/out/categories_generative.csv
+  meanings: runs/taxonomy/default_seed1/categories_generative.csv
   target_correlation: {target: 0.3}
 ```
 
@@ -274,18 +274,18 @@ There are four modes:
 
 - `arbitrary`: a random assignment. Sound says nothing about meaning, and the correlation is near 0.
 - `target_correlation`: the assignment starts random, and words are exchanged while each exchange moves the correlation toward `target_correlation.target`. The summary says whether the target was reached within the tolerance. A target that the words cannot give is not an error: the closest value is reported, with `reached: false` and a warning in the summary and on the command line. `assignment.strict: true` makes a miss larger than the tolerance an error. With 500 words and 56 meanings, targets up to about 0.75 are reached.
-- `branch_markers`: the words of each branch of the taxonomy share a marker syllable, at the start (`position: initial`) or the end (`final`) of the word. `depth: 1` marks the top branches (`C1`, `C2`, and so on), and `depth: 2` the branches below them. A marker is joined like an affix, with the same glide and schwa repairs. The marked forms are new words of kind `marked` (`W.12.M.2` is word 12 with marker 2). They are synthesized and embedded like any word, and their stem AUC is reported. Two markers differ by at least two phonemes (`branch_markers.min_distance: 2`), so that two branches never sound alike: markers such as *ri-* and *rih-* are not drawn together. When the markers cannot be drawn that far apart, the run stops with an error that names the setting.
+- `branch_markers`: the words of each branch of the taxonomy share a marker syllable, at the start (`position: initial`) or the end (`final`) of the word. `depth: 1` marks the top branches (`CATEGORY.1`, `CATEGORY.2`, and so on), and `depth: 2` the branches below them. A marker is joined like an affix, with the same glide and schwa repairs. The marked forms are new words of kind `marked` (`W.12.M.2` is word 12 with marker 2). They are synthesized and embedded like any word, and their stem AUC is reported. Two markers differ by at least two phonemes (`branch_markers.min_distance: 2`), so that two branches never sound alike: markers such as *ri-* and *rih-* are not drawn together. When the markers cannot be drawn that far apart, the run stops with an error that names the setting.
 - `acoustic_mapping`: the assignment is random, and semantic features then change the sound of a word's recordings. Each mapping names a feature column, a property, and an amount:
 
 ```yaml
 assignment:
   mode: acoustic_mapping
-  meanings: runs/taxonomy/default_seed1/out/categories_generative.csv
+  meanings: runs/taxonomy/default_seed1/categories_generative.csv
   acoustic_mapping:
-    - {feature: IS.3, property: pitch, amount: 2.0}       # semitones
-    - {feature: IS.7, property: formants, amount: 1.1}    # ratio; above 1 is a shorter vocal tract
-    - {feature: IS.9, property: duration, amount: 1.2}    # factor
-    - {feature: IS.12, property: tilt, amount: -3.0}      # decibels per octave; negative is duller
+    - {feature: PROPERTY.3, property: pitch, amount: 2.0}       # semitones
+    - {feature: PROPERTY.7, property: formants, amount: 1.1}    # ratio; above 1 is a shorter vocal tract
+    - {feature: PROPERTY.9, property: duration, amount: 1.2}    # factor
+    - {feature: PROPERTY.12, property: tilt, amount: -3.0}      # decibels per octave; negative is duller
 ```
 
 Every clean token of a word whose meaning has the feature gets a changed copy, labeled with `.M` (`W.12.S.3.2.M`). The mapped tokens are the mapped word's tokens from then on: they make the word's embedding, trained encoders and augmentation use them, and `SoundEmbeddings` returns them. The unmapped originals stay in the run as a control set (`control` is true in `tokens.csv`). The control tokens are used for nothing but comparison: `SoundEmbeddings` holds them apart in `emb.control`, and the evaluation reports the two sets as `mapped` and `control` in the `tokens` column. The `mapping` column of `tokens.csv` holds a mapped token's source, meaning, and mappings, and the `achieved` column holds each amount beside the shift measured on the changed clip. The summary reports the measured shifts, not the amounts: their mean and spread, how many tokens miss the amount by more than 5% and 10%, and the correlation between the feature and the measured shift. Acoustic mapping needs `praat-parselmouth`.

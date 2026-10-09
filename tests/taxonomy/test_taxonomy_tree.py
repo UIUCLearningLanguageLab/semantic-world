@@ -20,7 +20,10 @@ def make(overrides: dict | None = None, seed: int = 1) -> tuple[Tree, object]:
     return generate_tree(config, rules, streams), rules
 
 
+CATEGORY = "CATEGORY."
 LARGE = {
+    # Equal base rates (the default heterogeneity draws them), so rates compare with one value.
+    "features": {"base_rate_heterogeneity": None},
     "taxonomy": {"superordinates": 3, "depth": 4, "branching": 4},
     "superordinates": {"similarity_bound": None},
 }
@@ -75,13 +78,18 @@ def test_similarity_against_a_direct_computation() -> None:
 def test_default_tree_structure() -> None:
     tree, rules = make()
     labels = [c.label for c in tree.categories]
-    assert labels[:2] == ["C1", "C1.1"]
-    assert labels == sorted(labels, key=lambda s: tuple(int(i) for i in s[1:].split(".")))
+    assert labels[:2] == ["CATEGORY.1", "CATEGORY.1.1"]
+    assert all(label.startswith(CATEGORY) for label in labels)
+    assert labels == sorted(
+        labels, key=lambda s: tuple(int(i) for i in s[len(CATEGORY) :].split("."))
+    )
     assert len(tree.superordinates) == 4
     assert tree.depth == 3
     for category in tree.categories:
         assert category.level == len(category.indices)
-        assert category.label == "C" + ".".join(str(i) for i in category.indices)
+        assert category.label == CATEGORY + ".".join(str(i) for i in category.indices)
+        assert tree.ancestor_label(category, 1) == f"CATEGORY.{category.indices[0]}"
+        assert tree.ancestor_label(category, category.level) == category.label
         if category.parent is not None:
             assert category.parent.indices == category.indices[:-1]
             assert category in category.parent.children
@@ -97,9 +105,11 @@ def test_default_tree_structure() -> None:
         assert np.array_equal(category.values[rules.features.free_positions], category.free_values)
         assert np.array_equal(rules.compute(category.free_values[None, :])[0], category.values)
     assert all(leaf.level == 3 for leaf in tree.leaves)
-    assert tree["C1.1"].parent is tree["C1"]
+    assert tree["CATEGORY.1.1"].parent is tree["CATEGORY.1"]
     with pytest.raises(KeyError):
-        tree["C9"]
+        tree["CATEGORY.9"]
+    with pytest.raises(KeyError):
+        tree["C1"]
 
 
 def test_depth_one_tree() -> None:
@@ -115,10 +125,10 @@ def test_isa_vectors() -> None:
     n = len(tree.categories)
     assert matrix.shape == (n, n)
     assert np.array_equal(np.diag(matrix), np.ones(n, dtype=np.uint8))
-    leaf = tree["C2.1.1"]
+    leaf = tree["CATEGORY.2.1.1"]
     on = {tree.categories[i].label for i in np.flatnonzero(tree.isa_vector(leaf))}
-    assert on == {"C2", "C2.1", "C2.1.1"}
-    assert tree.isa_vector(tree["C2"]).sum() == 1
+    assert on == {"CATEGORY.2", "CATEGORY.2.1", "CATEGORY.2.1.1"}
+    assert tree.isa_vector(tree["CATEGORY.2"]).sum() == 1
 
 
 def test_branching_schedule_and_ranges() -> None:
@@ -164,11 +174,14 @@ def test_bound_holds_on_every_metric_and_scope(metric: str, scope: str) -> None:
         {"superordinates": {"similarity_bound": bound}, "taxonomy": {"depth": 1}}, seed=2
     )
     features = rules.features
+    # Without CAN features, the is_has scope equals the all scope.
     columns = {
         "free": features.free_positions,
-        "is_has": np.array([f.position for f in features.features if f.type != "can"]),
+        "is_has": np.array([f.position for f in features.features if f.type in ("is", "has")]),
         "all": np.arange(len(features)),
     }[scope]
+    if scope == "is_has":
+        assert np.array_equal(columns, np.arange(len(features)))
     rows = np.stack([c.values[columns] for c in tree.superordinates])
     sims = similarity_matrix(rows, metric)[np.triu_indices(4, k=1)]
     assert np.all((sims >= low - 1e-12) & (sims <= high + 1e-12)), sims
@@ -213,7 +226,7 @@ def test_infeasible_bound_reports_the_closest_value() -> None:
             }
         )
     message = str(error.value)
-    assert "superordinate C3" in message or "superordinate C2" in message
+    assert "superordinate CATEGORY.3" in message or "superordinate CATEGORY.2" in message
     assert "closest phi similarity reached was" in message
     assert "loosen superordinates.similarity_bound" in message
     closest = float(message.split("reached was ")[1].split(" ")[0])
@@ -345,7 +358,6 @@ FEW_FEATURES = {
     "features": {
         "is": {"count": 2, "proportion_determined": 0, "expected_true_free": 1},
         "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
-        "can": {"count": 1},
     },
     "rules": {"arity": {1: 1}, "input_type_weights": {"is": 1, "has": 0}},
     "taxonomy": {"superordinates": 1, "depth": 2, "branching": 8},

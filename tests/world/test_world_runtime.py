@@ -26,7 +26,6 @@ from semantic_world.world.fixtures import BruteEvent, BruteForce, fixture_inputs
 from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, define
 from semantic_world.world.identity import read_json, to_json
-from semantic_world.world.labels import translate
 from semantic_world.world.runtime import (
     Event,
     State,
@@ -163,9 +162,9 @@ def test_derive_matches_the_taxonomy_and_the_reference_evaluation(
     facts = derive(runtime, initial_state(runtime))
     features = tiny.taxonomy.features
     values = tiny.taxonomy.instances.values
+    assert list(facts.static_labels) == [f.label for f in features.determined]
     for j, label in enumerate(facts.static_labels):
-        feature = features[next(f.label for f in features.features if translate(f.label) == label)]
-        assert np.array_equal(facts.static[:, j], values[:, feature.position]), label
+        assert np.array_equal(facts.static[:, j], values[:, features[label].position]), label
     reference = derived_initial_values(tiny.fluents, tiny.taxonomy)
     for j, label in enumerate(facts.fluent_labels):
         assert np.array_equal(facts.fluent[:, j], reference[label]), label
@@ -177,7 +176,7 @@ def test_derive_matches_the_taxonomy_and_the_reference_evaluation(
 def test_able_matches_the_capacities(tiny: WorldResult, runtime: RuntimeDefinition) -> None:
     from semantic_world.world.capacities import capacities_frame
 
-    capacities = capacities_frame(tiny.taxonomy)
+    capacities = capacities_frame(tiny.statics)
     n = runtime.entity_count
     for et in runtime.event_types:
         if et.is_category:

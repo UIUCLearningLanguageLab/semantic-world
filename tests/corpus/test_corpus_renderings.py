@@ -67,8 +67,8 @@ def test_formal_rendering(tiny_world) -> None:
     (noun,) = lexicon.lexemes_of("CATEGORY.1.1")
     (verb,) = lexicon.lexemes_of("EVENTTYPE1.2")
     # a content lexeme's gloss is its concept's label, and a function word's is its English gloss
-    assert formal([the, noun, verb]) == "the/LEXEME.37 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.24"
-    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.41"
+    assert formal([the, noun, verb]) == "the/LEXEME.38 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.24"
+    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.42"
     assert formal([]) == ""
     for lexeme in lexicon.lexemes:
         gloss, label = formal_word(lexeme).split("/")
@@ -409,12 +409,12 @@ def test_the_formula_of_a_logical_form() -> None:
     form = logical_form(plan, plan.proposition())
     assert form["subject"]["clauses"] == [
         {
-            "kind": "verb",
-            "verb": "EVENTTYPE2.2.1",
+            "kind": "event_type2",
+            "label": "EVENTTYPE2.2.1",
             "patient": {"category": "CATEGORY.1.5", "restriction": []},
         }
     ]
-    assert form["predicate"] == {"kind": "has", "feature": "PART.2"}
+    assert form["predicate"] == {"kind": "part", "label": "PART.2"}
     assert form["quantifier"] == ALL
     assert formula(form) == (
         Quantified(
@@ -451,7 +451,7 @@ def test_the_formula_of_a_logical_form() -> None:
     assert form["quantifier"] is None
     assert form["predicate"] == {
         "kind": "scalar",
-        "pole": "SCALARDIM.1.HIGH",
+        "label": "SCALARDIM.1.HIGH",
         "class": "CATEGORY.1",
     }
     assert formula(form) == (Atom("SCALARDIM.1.HIGH", ("CATEGORY.1.2", "CATEGORY.1")),)
@@ -464,8 +464,8 @@ def test_the_formula_of_a_logical_form() -> None:
         "restriction": [],
         "clauses": [
             {
-                "kind": "verb",
-                "verb": "EVENTTYPE2.1.2",
+                "kind": "event_type2",
+                "label": "EVENTTYPE2.1.2",
                 "agent": {
                     "instance": DOG,
                     "referent": "REF.1",

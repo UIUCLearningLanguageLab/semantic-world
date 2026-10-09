@@ -45,7 +45,8 @@ def test_taxonomy_imports_and_runs_with_the_core_unavailable(tmp_path: Path) -> 
     assert run.returncode == 0, run.stderr
     assert "instances 12" in run.stdout
     assert "core unavailable" in run.stdout
-    assert (tmp_path / "run" / "instances.csv").exists()
+    assert (tmp_path / "run" / "base.csv").exists()
+    assert not (tmp_path / "run" / "instances.csv").exists()
     assert (tmp_path / "run" / "rule_matrices.json").exists()
     assert (tmp_path / "run" / "derived" / "static_features.csv").exists()
 

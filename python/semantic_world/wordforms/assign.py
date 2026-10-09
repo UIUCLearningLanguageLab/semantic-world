@@ -1,9 +1,9 @@
 """Sound-meaning assignment: which word form goes with which meaning.
 
 The meanings are any table of IDs with binary feature vectors, such as the taxonomy generator's
-``categories_generative.csv``: a CSV file whose first column is the ID and whose other columns
-hold 0 and 1. A column that holds other numbers (a scalar dimension) is dropped and reported,
-or is an error, as configured. The assignment modes are:
+``categories_generative.csv`` (``CATEGORY.<path>`` IDs): a CSV file whose first column is the
+ID and whose other columns hold 0 and 1. A column that holds other numbers (a scalar dimension)
+is dropped and reported, or is an error, as configured. The assignment modes are:
 
 - ``arbitrary``: a seeded random assignment from the ``wordforms:assign`` stream.
 - ``target_correlation``: the assignment starts random, and pairs of words are swapped while
@@ -439,15 +439,15 @@ def assign_target_correlation(
 
 
 def branch_of(meaning: str, depth: int) -> str | None:
-    """The branch of a meaning at a depth: the first ``depth`` numbers of its ID, which the
-    taxonomy generator separates with periods (``C1.2.3`` is in ``C1`` at depth 1 and in
-    ``C1.2`` at depth 2). A label of the world package keeps its prefix as a part of its own
-    (``CATEGORY.1.2.3`` is in ``CATEGORY.1`` at depth 1). None for a meaning above that depth."""
-    parts = meaning.split(".")
-    if parts[0] and not any(c.isdigit() for c in parts[0]):
-        prefix, numbers = parts[0], parts[1:]
-        return ".".join([prefix, *numbers[:depth]]) if len(numbers) >= depth else None
-    return ".".join(parts[:depth]) if len(parts) >= depth else None
+    """The branch of a meaning at a depth: its prefix and the first ``depth`` numbers of its
+    ID, which the taxonomy generator separates with periods (``CATEGORY.1.2.3`` is in
+    ``CATEGORY.1`` at depth 1 and in ``CATEGORY.1.2`` at depth 2). None for a meaning above that
+    depth, or for an ID without a prefix and numbers."""
+    prefix, _, rest = meaning.partition(".")
+    numbers = rest.split(".") if rest else []
+    if not prefix.isalpha() or not numbers or not all(n.isdigit() for n in numbers):
+        return None
+    return ".".join([prefix, *numbers[:depth]]) if len(numbers) >= depth else None
 
 
 def marker_candidates(english, shape: str, position: str) -> list[tuple[tuple[str, ...], float]]:

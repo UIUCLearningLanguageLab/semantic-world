@@ -26,14 +26,13 @@ import numpy as np
 import polars as pl
 
 from semantic_world.common.boolean import TruthTable
-from semantic_world.taxonomy.constraints import (
+from semantic_world.taxonomy.rules import Rule, Threshold, input_key
+from semantic_world.world.constraints import (
     Constraint,
     RoleFeature,
     RoleThreshold,
     ScalarComparison,
 )
-from semantic_world.taxonomy.generate import TaxonomyResult
-from semantic_world.taxonomy.rules import Rule, Threshold, input_key
 from semantic_world.world.dynamics import ROLES, Effect, Literal
 from semantic_world.world.errors import DefinitionError, WorldError
 from semantic_world.world.event_types import ConstraintSpec, EventTypes
@@ -45,7 +44,6 @@ from semantic_world.world.identity import (
     to_json,
     write_json,
 )
-from semantic_world.world.labels import ROLE_PREFIXES, translate, translate_expression, untranslate
 from semantic_world.world.matrices import (
     AgreementReport,
     LiteralSpec,
@@ -55,6 +53,7 @@ from semantic_world.world.matrices import (
     check_agreement,
     evaluate_by_tables,
 )
+from semantic_world.world.statics import StaticWorld
 
 DEFINITION_FILE = "definition.json"
 ENTITIES_FILE = "entities.csv"
@@ -99,7 +98,7 @@ def fluent_literal(label: str) -> LiteralSpec:
 
 
 def comparison_literal(item: ScalarComparison) -> LiteralSpec:
-    key = translate_expression(item.key)
+    key = item.key
     return LiteralSpec(
         key,
         {
@@ -122,9 +121,9 @@ def _rule_input_literals(rule: Rule, role: str | None) -> list[LiteralSpec]:
     specs = []
     for item in rule.inputs:
         if isinstance(item, Threshold):
-            specs.append(threshold_literal(translate(item.label), item.threshold, role))
+            specs.append(threshold_literal(item.label, item.threshold, role))
         else:
-            specs.append(feature_literal(translate(item.label), role))
+            specs.append(feature_literal(item.label, role))
     return specs
 
 
@@ -132,14 +131,10 @@ def _constraint_input_literals(constraint: Constraint) -> list[LiteralSpec]:
     specs = []
     for item in constraint.literals:
         if isinstance(item, RoleFeature):
-            specs.append(feature_literal(translate(item.feature.label), ROLE_PREFIXES[item.role]))
+            specs.append(feature_literal(item.feature.label, item.role))
         elif isinstance(item, RoleThreshold):
             specs.append(
-                threshold_literal(
-                    translate(item.threshold.label),
-                    item.threshold.threshold,
-                    ROLE_PREFIXES[item.role],
-                )
+                threshold_literal(item.threshold.label, item.threshold.threshold, item.role)
             )
         else:
             specs.append(comparison_literal(item))
@@ -192,7 +187,7 @@ def _literal_sort_key(spec: LiteralSpec, position_of: dict[str, int]) -> tuple:
 
 @dataclass(frozen=True)
 class Definition:
-    taxonomy: TaxonomyResult
+    statics: StaticWorld
     fluents: Fluents
     event_types: EventTypes
     symbols: tuple[dict[str, Any], ...]
@@ -270,16 +265,20 @@ class Definition:
 
     # Literal values ---------------------------------------------------------------------------
 
+    @property
+    def taxonomy(self):
+        return self.statics.taxonomy
+
     def _position(self, label: str) -> int:
-        return self.taxonomy.features[untranslate(label)].position
+        return self.statics.features[label].position
 
     def entity_literal_values(
         self, values: np.ndarray, scalars: np.ndarray, base_fluents: np.ndarray
     ) -> np.ndarray:
-        """The base literal matrix of entities: free features from ``values`` (the taxonomy's
-        non-ISA matrix), thresholds from ``scalars``, base fluents from ``base_fluents``
-        (``(n, base fluents)``), and 0 for every literal that a rule computes or that a binding
-        reads."""
+        """The base literal matrix of entities: free features from ``values`` (the static
+        feature matrix, by position), thresholds from ``scalars``, base fluents from
+        ``base_fluents`` (``(n, base fluents)``), and 0 for every literal that a rule computes or
+        that a binding reads."""
         n = values.shape[0]
         matrix = self.entity_matrices.literal_matrix(n)
         base_index = {label: i for i, label in enumerate(self.fluents.base_labels)}
@@ -288,7 +287,7 @@ class Definition:
             if reads["role"] is not None:
                 continue
             if reads["kind"] == "feature":
-                feature = self.taxonomy.features[untranslate(reads["feature"])]
+                feature = self.statics.features[reads["feature"]]
                 if feature.free:
                     matrix[:, i] = values[:, feature.position]
             elif reads["kind"] == "threshold":
@@ -336,15 +335,14 @@ class Definition:
 
 
 def _symbols(
-    taxonomy: TaxonomyResult, fluents: Fluents, event_types: EventTypes
+    statics: StaticWorld, fluents: Fluents, event_types: EventTypes
 ) -> list[dict[str, Any]]:
+    taxonomy = statics.taxonomy
     symbols: list[dict[str, Any]] = []
     for feature in taxonomy.features.features:
-        if feature.type == "can":
-            continue
         symbols.append(
             {
-                "label": translate(feature.label),
+                "label": feature.label,
                 "kind": KIND_OF_TYPE[feature.type],
                 "derived": not feature.free,
                 "fluent": False,
@@ -354,7 +352,7 @@ def _symbols(
     for label in taxonomy.features.scalar_labels:
         symbols.append(
             {
-                "label": translate(label),
+                "label": label,
                 "kind": "scalar",
                 "derived": False,
                 "fluent": False,
@@ -369,6 +367,7 @@ def _symbols(
                 "derived": fluent.derived,
                 "fluent": True,
                 "arity": 1,
+                "initial_rate": None if fluent.derived else float(fluent.initial_rate),
             }
         )
     for et in event_types.event_types:
@@ -384,13 +383,11 @@ def _symbols(
     return symbols
 
 
-def build_definition(
-    taxonomy: TaxonomyResult, fluents: Fluents, event_types: EventTypes
-) -> Definition:
+def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventTypes) -> Definition:
     """Assemble the definition: the literal table, both rule scopes, the matrices, and the
     identity."""
-    features = taxonomy.features
-    position_of = {translate(f.label): f.position for f in features.features}
+    taxonomy = statics.taxonomy
+    position_of = {f.label: f.position for f in statics.features.features}
     literal_specs: dict[str, LiteralSpec] = {}
 
     def add(spec: LiteralSpec) -> None:
@@ -399,15 +396,11 @@ def build_definition(
     entity_rules: list[RuleSpec] = []
     families: dict[str, str] = {}
     for rule in taxonomy.rules.rules:
-        if rule.output.type == "can":
-            continue
         for spec in _rule_input_literals(rule, None):
             add(spec)
-        output = translate(rule.output.label)
-        inputs = tuple(translate_expression(input_key(item)) for item in rule.inputs)
-        entity_rules.append(
-            RuleSpec(output, inputs, rule.table, translate_expression(str(rule.expression)))
-        )
+        output = rule.output.label
+        inputs = tuple(input_key(item) for item in rule.inputs)
+        entity_rules.append(RuleSpec(output, inputs, rule.table, str(rule.expression)))
         families[output] = rule.family
     for rule in fluents.rules:
         for key in rule.inputs:
@@ -442,9 +435,9 @@ def build_definition(
     )
     entity_matrices = build_matrices(literals, entity_rules)
     binding_matrices = build_matrices(literals, binding_rules)
-    symbols = tuple(_symbols(taxonomy, fluents, event_types))
+    symbols = tuple(_symbols(statics, fluents, event_types))
     draft = Definition(
-        taxonomy,
+        statics,
         fluents,
         event_types,
         symbols,
@@ -460,7 +453,7 @@ def build_definition(
         symbols, draft.literals_record(), draft.rules_record(), draft.event_types_record()
     )
     return Definition(
-        taxonomy,
+        statics,
         fluents,
         event_types,
         symbols,
@@ -488,22 +481,20 @@ class DefinitionReport:
 def check_definition(definition: Definition) -> DefinitionReport:
     """The agreement test over the whole definition. Entity rules are checked on every entity
     against the taxonomy's values (static features) and the truth tables (derived fluents).
-    Binding rules are checked on every ordered pair of entities against the taxonomy's own
+    Binding rules are checked on every ordered pair of entities against the static world's own
     evaluation of each constraint, and the requirement against the conjunction."""
-    taxonomy = definition.taxonomy
+    statics = definition.statics
+    taxonomy = statics.taxonomy
     instances = taxonomy.instances
-    values, scalars = instances.values, instances.scalars
+    values, scalars = statics.values, instances.scalars
     base = definition.entity_literal_values(values, scalars, definition.fluents.initial_values)
     expected = evaluate_by_tables(definition.entity_matrices, definition.entity_rules, base)
     for rule in taxonomy.rules.rules:
-        if rule.output.type != "can":
-            column = values[:, rule.output.position]
-            label = translate(rule.output.label)
-            if not np.array_equal(expected[label], column):
-                raise WorldError(
-                    f"the truth tables of {label} disagree with the taxonomy's instances"
-                )
-            expected[label] = column
+        column = values[:, rule.output.position]
+        label = rule.output.label
+        if not np.array_equal(expected[label], column):
+            raise WorldError(f"the truth tables of {label} disagree with the taxonomy's instances")
+        expected[label] = column
     entity_report = check_agreement(
         definition.entity_matrices, definition.entity_rules, base, expected
     )
@@ -522,6 +513,7 @@ def check_definition(definition: Definition) -> DefinitionReport:
         for spec in definition.event_types.constraints:
             if isinstance(spec.source, Rule):
                 expected_binding[spec.label] = values[agents, spec.source.output.position]
+                # the one-place capacity column of the static world, by the extended position
             else:
                 expected_binding[spec.label] = (
                     spec.source.matrix(values, scalars, agent_rows).reshape(-1).astype(np.uint8)
@@ -559,16 +551,13 @@ def entities_frame(definition: Definition) -> pl.DataFrame:
     taxonomy = definition.taxonomy
     instances = taxonomy.instances
     data: dict[str, Any] = {
-        "label": [translate(label) for label in instances.labels],
-        "leaf": [translate(label) for label in instances.leaf_labels],
+        "label": list(instances.labels),
+        "leaf": list(instances.leaf_labels),
     }
-    for feature in taxonomy.features.features:
-        if feature.free and feature.type != "can":
-            data[translate(feature.label)] = (
-                instances.values[:, feature.position].astype(np.int64).tolist()
-            )
+    for feature in taxonomy.features.free:
+        data[feature.label] = instances.values[:, feature.position].astype(np.int64).tolist()
     for j, label in enumerate(taxonomy.features.scalar_labels):
-        data[translate(label)] = instances.scalars[:, j].astype(float).tolist()
+        data[label] = instances.scalars[:, j].astype(float).tolist()
     for i, fluent in enumerate(definition.fluents.base):
         data[fluent.label] = definition.fluents.initial_values[:, i].astype(np.int64).tolist()
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
@@ -639,6 +628,9 @@ class RuntimeDefinition:
     derived_fluents: tuple[str, ...]
     entity_labels: tuple[str, ...]
     leaves: tuple[str, ...]
+    initial_rates: dict[str, float]
+    """Each base fluent's initial rate, from its symbol (``scene.initial: redraw`` draws at
+    these rates)."""
     free_values: np.ndarray
     """Shape ``(entities, free features)``, uint8."""
     scalar_values: np.ndarray
@@ -770,6 +762,7 @@ def _runtime_definition(
     scalars: list[str] = []
     base_fluents: list[str] = []
     derived_fluents: list[str] = []
+    initial_rates: dict[str, float] = {}
     for symbol in record["symbols"]:
         label, kind = str(symbol["label"]), str(symbol["kind"])
         _expect(kind in SYMBOL_KINDS, f"the symbol {label} has the unknown kind {kind!r}")
@@ -780,7 +773,19 @@ def _runtime_definition(
         elif kind == "scalar":
             scalars.append(label)
         elif kind == "fluent":
-            (derived_fluents if symbol["derived"] else base_fluents).append(label)
+            rate = symbol.get("initial_rate")
+            if symbol["derived"]:
+                _expect(rate is None, f"the derived fluent {label} carries an initial rate")
+                derived_fluents.append(label)
+            else:
+                _expect(
+                    isinstance(rate, (int, float))
+                    and not isinstance(rate, bool)
+                    and 0.0 <= float(rate) <= 1.0,
+                    f"the base fluent {label} has no initial rate between 0 and 1",
+                )
+                base_fluents.append(label)
+                initial_rates[label] = float(rate)
 
     # Literals.
     literals: list[LiteralSpec] = []
@@ -992,6 +997,7 @@ def _runtime_definition(
         derived_fluents=tuple(derived_fluents),
         entity_labels=tuple(labels),
         leaves=leaves,
+        initial_rates=initial_rates,
         free_values=free_values,
         scalar_values=scalar_values,
         initial_values=initial,

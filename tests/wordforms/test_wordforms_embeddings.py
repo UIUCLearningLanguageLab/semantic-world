@@ -807,9 +807,9 @@ def test_whisper_encoder_pools_the_frames_of_the_clip():
 
 def meanings_file(tmp_path, count=5, features=12, seed=0):
     rng = np.random.default_rng(seed)
-    table = {"label": [f"C{i + 1}" for i in range(count)]}
+    table = {"label": [f"CATEGORY.{i + 1}" for i in range(count)]}
     for j in range(features):
-        table[f"IS.{j + 1}"] = rng.integers(0, 2, size=count).tolist()
+        table[f"PROPERTY.{j + 1}"] = rng.integers(0, 2, size=count).tolist()
     path = tmp_path / "categories_generative.csv"
     pl.DataFrame(table).write_csv(path)
     return path
@@ -818,7 +818,7 @@ def meanings_file(tmp_path, count=5, features=12, seed=0):
 def test_load_meanings(tmp_path):
     path = meanings_file(tmp_path)
     ids, features = load_meanings(path)
-    assert ids == ["C1", "C2", "C3", "C4", "C5"] and features.shape == (5, 12)
+    assert ids == [f"CATEGORY.{i}" for i in range(1, 6)] and features.shape == (5, 12)
     assert set(np.unique(features)) <= {0, 1}
     assert hamming_distances(features).shape == (10,)
     bad = tmp_path / "bad.csv"
@@ -871,7 +871,7 @@ def test_assign_command_writes_the_lexicon(tmp_path, capsys):
     assert main(["assign", str(path), "--out", str(out)]) == 0
     assert "assignment (arbitrary): 6 meanings" in capsys.readouterr().out
     lexicon = pl.read_csv(out / "assignment" / "lexicon.csv")
-    assert lexicon["meaning"].to_list() == [f"C{i}" for i in range(1, 7)]
+    assert lexicon["meaning"].to_list() == [f"CATEGORY.{i}" for i in range(1, 7)]
     words = pl.read_csv(out / "words.csv")
     assert set(lexicon["word"]) <= set(words["label"]) and lexicon["word"].n_unique() == 6
     summary = yaml.safe_load((out / "assignment" / "summary.yaml").read_text())
@@ -1003,10 +1003,24 @@ def test_embed_with_the_real_engines(tiny_run):
     assert len(calls) == 2  # the second time, both clips came from the audio cache
 
 
+def example_meanings(module, folder):
+    """The meanings of the contrastive example's own taxonomy, generated with the taxonomy
+    package of this stage. The example's configuration still asks for CAN features, which the
+    taxonomy no longer has (stage a5b of the world model), so we drop that key and hand the
+    example the table through its ``--meanings`` option."""
+    from semantic_world.taxonomy import generate, load_config
+
+    features = {k: v for k, v in module.TAXONOMY["features"].items() if k != "can"}
+    config = folder / "taxonomy.yaml"
+    config.write_text(yaml.safe_dump({**module.TAXONOMY, "features": features}))
+    generate(load_config(config)).write(folder / "taxonomy")
+    return folder / "taxonomy" / "categories_generative.csv"
+
+
 @needs_espeak
 @needs_piper
 @needs_torch
-def test_examples_run_on_the_tiny_configuration(tiny_run, capsys):
+def test_examples_run_on_the_tiny_configuration(tiny_run, tmp_path, capsys):
     import importlib.util
     import time
 
@@ -1018,8 +1032,11 @@ def test_examples_run_on_the_tiny_configuration(tiny_run, capsys):
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        arguments = ["--config", str(path), "--run", str(run)]
+        if name == "wordforms_contrastive":
+            arguments += ["--meanings", str(example_meanings(module, tmp_path))]
         start = time.time()
-        results[name] = module.main(["--config", str(path), "--run", str(run)])
+        results[name] = module.main(arguments)
         assert time.time() - start < 600  # each example runs in under 10 minutes on a CPU
     text = capsys.readouterr().out
     language = results["wordforms_lm_inputs"]

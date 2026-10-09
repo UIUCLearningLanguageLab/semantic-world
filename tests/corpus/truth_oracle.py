@@ -7,7 +7,7 @@ form given as JSON. It shares no code with ``semantic_world.corpus``: subject se
 rows of ``entities.csv``, derived features and requirements are evaluated by the brute-force
 evaluator of ``semantic_world.world.fixtures`` (truth-table lookups over the definition record,
 never the runtime), the fixed test is a brute-force enumeration over the rules' truth tables,
-and the taxonomy's old labels are translated by a few lines of this file.
+and nothing translates a label.
 
 A relative clause in a category term is restrictive: it keeps the rows that are able to be the
 agent of the one-place event type, or that are related to at least one row of the other
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -38,25 +37,6 @@ from semantic_world.world.fixtures import BruteEvent, BruteForce
 
 THING = "THING"
 NEC_ALL, ALL, MOST, SOME, NO, NEC_NO = "nec_all", "all", "most", "some", "no", "nec_no"
-
-
-def new_label(old: str) -> str:
-    """The world's label for a taxonomy label (the oracle's own translation)."""
-    for pattern, replacement in (
-        (r"^ISA\.C(\d.*)$", r"ISA.CATEGORY.\1"),
-        (r"^CAN\.V(\d.*)$", r"CAN.EVENTTYPE2.\1"),
-        (r"^CANBE\.V(\d.*)$", r"CANBE.EVENTTYPE2.\1"),
-        (r"^CAN\.(\d+)$", r"CAN.EVENTTYPE1.\1"),
-        (r"^IS\.(\d+)$", r"PROPERTY.\1"),
-        (r"^HAS\.(\d+)$", r"PART.\1"),
-        (r"^SC\.(\d+)$", r"SCALARDIM.\1"),
-        (r"^C(\d.*)$", r"CATEGORY.\1"),
-        (r"^I(\d.*)$", r"INSTANCE.\1"),
-        (r"^V(\d.*)$", r"EVENTTYPE2.\1"),
-    ):
-        if re.match(pattern, old):
-            return re.sub(pattern, replacement, old)
-    return old
 
 
 class Oracle:
@@ -111,11 +91,11 @@ class Oracle:
         # The tree, and the leaf of every entity.
         tree = pl.read_csv(folder / "taxonomy" / "tree.csv", infer_schema_length=None)
         self.parent = {
-            new_label(label): None if parent is None else new_label(parent)
+            label: parent
             for label, parent in zip(tree["label"].to_list(), tree["parent"].to_list(), strict=True)
         }
         self.level = {
-            new_label(label): level
+            label: level
             for label, level in zip(tree["label"].to_list(), tree["level"].to_list(), strict=True)
         }
         self.leaf = entities["leaf"].to_list()
@@ -132,13 +112,12 @@ class Oracle:
             strict=True,
         ):
             if role.startswith("defining"):
-                self.defining[new_label(category)].append(new_label(feature))
+                self.defining[category].append(feature)
         generative = pl.read_csv(
             folder / "taxonomy" / "categories_generative.csv", infer_schema_length=None
         )
         self.generative = {
-            new_label(row["label"]): {new_label(k): v for k, v in row.items()}
-            for row in generative.iter_rows(named=True)
+            row["label"]: dict(row.items()) for row in generative.iter_rows(named=True)
         }
         config = yaml.safe_load((folder / "taxonomy" / "config.yaml").read_text(encoding="utf-8"))
         self.drift = config["scalars"]["drift"]["values"]
@@ -172,10 +151,10 @@ class Oracle:
             else:
                 keep &= self.column[name] == int(positive)
         for clause in term.get("clauses", ()):
-            if clause["kind"] == "can":
-                keep &= self.column[clause["feature"]] == 1
+            if clause["kind"] == "event_type1":
+                keep &= self.column[clause["label"]] == 1
                 continue
-            holds = self.matrix(clause["verb"])
+            holds = self.matrix(clause["label"])
             as_agent = "patient" in clause
             others = np.flatnonzero(self.subject_set(clause["patient" if as_agent else "agent"]))
             for row in np.flatnonzero(keep):
@@ -401,7 +380,7 @@ class Oracle:
         """The events of a scene, as ``scenes.jsonl`` holds it, that an event-level form could
         report: the same agent and patient, and an event type that the form's label names."""
         predicate = form["predicate"]
-        label = predicate["verb"] if predicate["kind"] == "verb" else predicate["feature"]
+        label = predicate["label"]
         patient = predicate["patient"]["instance"] if "patient" in predicate else None
         return [
             event
@@ -435,14 +414,13 @@ class Oracle:
         predicate = form["predicate"]
         members = self.subject_set(form["subject"])
         kind = predicate["kind"]
-        if kind == "verb":
+        if kind == "event_type2":
             patients = self.subject_set(predicate["patient"])
-            block = self.matrix(predicate["verb"])[np.ix_(members, patients)]
+            block = self.matrix(predicate["label"])[np.ix_(members, patients)]
             return int(block.sum()), int(
                 members.sum() * patients.sum() - (members & patients).sum()
             )
-        name = predicate["projection"] if kind == "projection" else predicate["feature"]
-        return int(self.column[name][members].sum()), int(members.sum())
+        return int(self.column[predicate["label"]][members].sum()), int(members.sum())
 
     def _class(self, form: dict[str, Any]) -> bool | None:
         subject, predicate = form["subject"], form["predicate"]
@@ -454,7 +432,7 @@ class Oracle:
             if subject["restriction"] or subject.get("clauses"):
                 return None  # a statement about the category, not about a restricted set
             members = self.subject_set(subject)
-            scalar, side = predicate["pole"].rsplit(".", 1)
+            scalar, side = predicate["label"].rsplit(".", 1)
             values = self.column[scalar].astype(float)
             parent = self.parent[category]
             comparison = self.below(THING if parent is None else parent)
@@ -472,13 +450,13 @@ class Oracle:
         if quantifier in (NEC_ALL, ALL, NO, NEC_NO) and not polarity:
             return None
         if quantifier in (NEC_ALL, NEC_NO):
-            if kind not in ("is", "has", "can", "member") or subject.get("clauses"):
+            if kind not in ("property", "part", "event_type1", "member") or subject.get("clauses"):
                 return None
         members = self.subject_set(subject)
         if not members.any():
             return None
         if kind == "member":
-            other = predicate["category"]
+            other = predicate["label"]
             if quantifier in (MOST, SOME) or category in (THING, other):
                 return None
             if quantifier in (NO, NEC_NO):
@@ -491,9 +469,9 @@ class Oracle:
             return None
         asserted = count if polarity else total - count
         if quantifier == NEC_ALL:
-            return self.fixed(subject, predicate["feature"]) == 1
+            return self.fixed(subject, predicate["label"]) == 1
         if quantifier == NEC_NO:
-            return self.fixed(subject, predicate["feature"]) == 0
+            return self.fixed(subject, predicate["label"]) == 0
         if quantifier == ALL:
             return count == total
         if quantifier == NO:
@@ -506,19 +484,17 @@ class Oracle:
         subject, predicate = form["subject"]["instance"], form["predicate"]
         row, kind = self.row[subject], predicate["kind"]
         path = self.path[subject]
-        if kind in ("is", "has", "can"):
-            value = self.column[predicate["feature"]][row] == 1
-        elif kind == "projection":
-            value = self.column[predicate["projection"]][row] == 1
+        if kind in ("property", "part", "event_type1", "patient_capacity"):
+            value = self.column[predicate["label"]][row] == 1
         elif kind == "member":
-            value = predicate["category"] in path
+            value = predicate["label"] in path
         elif kind == "scalar":
             if predicate["class"] not in path:
                 return None
-            value = self.pole(predicate["pole"], self.below(predicate["class"]))[row]
+            value = self.pole(predicate["label"], self.below(predicate["class"]))[row]
         else:
             patient = predicate["patient"]["instance"]
             if patient == subject:
                 return None
-            value = self.matrix(predicate["verb"])[row, self.row[patient]]
+            value = self.matrix(predicate["label"])[row, self.row[patient]]
         return bool(value) == form["polarity"]

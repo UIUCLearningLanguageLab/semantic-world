@@ -63,7 +63,7 @@ from semantic_world.corpus.grammar import (
     check_plan,
 )
 from semantic_world.corpus.lexicon import ADJECTIVE, Lexeme, Lexicon
-from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, VERB
+from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, NEC_NO, NO, VERB
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
 from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
@@ -315,15 +315,22 @@ class _Builder:
         return node
 
     def verb_phrase(
-        self, predication: Predication, subject: NounPhrase, elide: str | None = None
+        self,
+        predication: Predication,
+        subject: NounPhrase,
+        elide: str | None = None,
+        negate: bool = False,
     ) -> tuple[list[Tree], Tree | None, str | None]:
         """The words of a verb phrase without its object, the object's noun phrase, and the
         gloss of the auxiliary. ``elide`` is the auxiliary of the verb phrase before it in a
-        joined relative clause: the same auxiliary is not said again."""
+        joined relative clause: the same auxiliary is not said again. ``negate`` says the phrase
+        is negated although its predication is positive: a bare plural that states ``no`` or
+        ``nec_no`` ("penguins are not fish")."""
         morphology = self.morphology
         plural = self.plural(subject)
         agree = morphology.agreement
         kind = predication.kind
+        polarity = predication.polarity and not negate
         auxiliary: str | None = None
         negated = False
         target: Tree | None = None
@@ -334,7 +341,7 @@ class _Builder:
                     marks += (PAST,)
                 if morphology.aspect.enabled and predication.aspect == PROGRESSIVE_ASPECT:
                     marks += (PROGRESSIVE,)
-            elif not predication.polarity:
+            elif not polarity:
                 auxiliary, negated = "can", True
             else:
                 level = "class" if subject.kind == CLASS_NP else "instance"
@@ -354,19 +361,19 @@ class _Builder:
         elif kind == HAS:
             auxiliary = "have" if plural and agree else "has"
             part = [self.word("N", predication.label)]
-            if not predication.polarity:
+            if not polarity:
                 part = self.place(part, [self.function("Det", "no")], self.order.determiner)
             head = ["NP-PRD", *part]
         elif kind == MEMBER:
             auxiliary = "are" if plural and agree else "is"
-            negated = not predication.polarity
+            negated = not polarity
             noun = [self.word("N", predication.label, (PLURAL,) if plural else ())]
             if not plural:
                 noun = self.place(noun, [self.function("Det", "a")], self.order.determiner)
             head = ["NP-PRD", *noun]
         else:  # a property, a scalar pole, or an exposed patient projection
             auxiliary = "are" if plural and agree else "is"
-            negated = not predication.polarity
+            negated = not polarity
             head = self.word("A", predication.label)
 
         negation = self.function("Neg", "not") if negated else None
@@ -388,7 +395,8 @@ class _Builder:
 
     def sentence(self, plan: SentencePlan) -> Sentence:
         subject = self.noun_phrase(plan.subject, "NP-SBJ")
-        parts, target, _ = self.verb_phrase(plan.predication, plan.subject)
+        negate = plan.bare_plural and plan.quantifier in (NO, NEC_NO)
+        parts, target, _ = self.verb_phrase(plan.predication, plan.subject, negate=negate)
         clause = self.order.clause
         if target is None:
             verb_phrase = self.verb_node(parts, plan.predication)

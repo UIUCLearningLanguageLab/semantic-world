@@ -28,27 +28,27 @@ from semantic_world.wordforms.synth import synthesize_lexicon
 
 pytestmark = [needs_cmudict, needs_wordfreq]
 
-CATEGORIES = [f"C{b}" + (f".{k}" if k else "") for b in (1, 2, 3) for k in range(4)]
+CATEGORIES = [f"CATEGORY.{b}" + (f".{k}" if k else "") for b in (1, 2, 3) for k in range(4)]
 """The 12 categories of the test meanings table: 3 branches, each a parent and three leaves."""
 NOUN, ADJECTIVE, PART, VERB = "noun", "adjective", "part_noun", "transitive_verb"
 MODES = ("arbitrary", "target_correlation", "branch_markers")
 
 
 def request_data(inflect="all") -> dict:
-    """A request like the corpus generator's: 13 lexemes of categories (C1.1 has a synonym), the
-    generic noun, 4 adjectives, 3 part nouns, 5 verbs, and 2 homonyms (an adjective that shares
-    a noun's form, and a verb that shares an adjective's). Nouns take PLURAL, and
-    verbs take PLURAL and PAST. ``inflect`` is ``all`` (every noun with PLURAL and every verb
-    with both affixes), ``some``, or ``none``."""
+    """A request like the corpus generator's: 13 lexemes of categories (CATEGORY.1.1 has a
+    synonym), the generic noun, 4 adjectives, 3 part nouns, 5 verbs, and 2 homonyms (an
+    adjective that shares a noun's form, and a verb that shares an adjective's). Nouns take
+    PLURAL, and verbs take PLURAL and PAST. ``inflect`` is ``all`` (every noun with PLURAL and
+    every verb with both affixes), ``some``, or ``none``."""
     lexemes = [{"concept": c, "pos": NOUN} for c in CATEGORIES]
     lexemes.append({"concept": "THING", "pos": NOUN})
-    lexemes += [{"concept": f"IS.{k}", "pos": ADJECTIVE} for k in range(1, 5)]
-    lexemes += [{"concept": f"HAS.{k}", "pos": PART} for k in range(1, 4)]
-    lexemes += [{"concept": f"CAN.{k}", "pos": "intransitive_verb"} for k in range(1, 3)]
-    lexemes += [{"concept": f"V1.{k}", "pos": VERB} for k in range(1, 4)]
-    lexemes.append({"concept": "C1.1", "pos": NOUN})  # L.26, a synonym
-    lexemes.append({"concept": "IS.9", "pos": ADJECTIVE, "same_form_as": "L.3"})  # L.27
-    lexemes.append({"concept": "V1.9", "pos": VERB, "same_form_as": "L.15"})  # L.28
+    lexemes += [{"concept": f"PROPERTY.{k}", "pos": ADJECTIVE} for k in range(1, 5)]
+    lexemes += [{"concept": f"PART.{k}", "pos": PART} for k in range(1, 4)]
+    lexemes += [{"concept": f"EVENTTYPE1.{k}", "pos": "intransitive_verb"} for k in range(1, 3)]
+    lexemes += [{"concept": f"EVENTTYPE2.1.{k}", "pos": VERB} for k in range(1, 4)]
+    lexemes.append({"concept": "CATEGORY.1.1", "pos": NOUN})  # L.26, a synonym
+    lexemes.append({"concept": "PROPERTY.9", "pos": ADJECTIVE, "same_form_as": "L.3"})  # L.27
+    lexemes.append({"concept": "EVENTTYPE2.1.9", "pos": VERB, "same_form_as": "L.15"})  # L.28
     for number, lexeme in enumerate(lexemes, start=1):
         lexeme["label"] = f"L.{number}"
     nouns = [x["label"] for x in lexemes if x["pos"] == NOUN]
@@ -119,7 +119,7 @@ def test_the_request_is_a_top_level_setting(tmp_path):
     request, closed = config.request, config.closed_class
     assert config.assigns_lexemes and request.file == str(path)
     assert len(request.lexemes) == 28 and len(request.leaders) == 26
-    assert request.lexemes[26].same_form_as == "L.3" and request.lexemes[0].concept == "C1"
+    assert request.lexemes[26].same_form_as == "L.3" and request.lexemes[0].concept == "CATEGORY.1"
     assert request.takes == {
         NOUN: ("PLURAL",),
         "intransitive_verb": ("PLURAL", "PAST"),
@@ -140,7 +140,7 @@ def test_the_request_is_a_top_level_setting(tmp_path):
     # the resolved configuration holds the request inline, and reloads equal
     resolved = config.resolved()
     assert resolved["request"]["lexemes"][26] == {
-        "label": "L.27", "concept": "IS.9", "pos": ADJECTIVE, "same_form_as": "L.3",
+        "label": "L.27", "concept": "PROPERTY.9", "pos": ADJECTIVE, "same_form_as": "L.3",
     }  # fmt: skip
     assert resolved["closed_class"]["inflect"][0]["lexemes"][0] == "L.1"
     again = parse_config(resolved, "request_test")
@@ -310,7 +310,7 @@ def test_category_lexemes_carry_their_branch_marker(runs):
         assert form.phones[: len(marker.phones)] == marker.phones
         assert marker_of_branch.setdefault(branch, marker.label) == marker.label
     assert len(marker_of_branch) == 3 == len(markers)
-    # the two lexemes of C1.1 are synonyms: two words, one marker
+    # the two lexemes of CATEGORY.1.1 are synonyms: two words, one marker
     rows = {row["lexeme"]: row for row in assignment.frame().iter_rows(named=True)}
     assert rows["L.2"]["marker"] == rows["L.26"]["marker"]
     assert rows["L.2"]["base_word"] != rows["L.26"]["base_word"]

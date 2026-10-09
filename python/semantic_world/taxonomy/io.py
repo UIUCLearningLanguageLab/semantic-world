@@ -3,14 +3,16 @@
 A run writes one folder, by default ``runs/taxonomy/<name>_seed<seed>/``. CSV files have a header
 row and one ID column first. Binary values are written as 0 and 1, missing values as ``NaN``, and
 means and other real numbers with 6 decimal places. Feature columns are ordered ISA (in category
-order), then IS, HAS, and CAN (in index order). The same configuration and seed give byte-identical
-folders: nothing here depends on the time or the machine, apart from the git commit hash and the
-package version recorded in ``config.yaml``.
+order), then PROPERTY and PART (in index order). The same configuration and seed give
+byte-identical folders: nothing here depends on the time or the machine, apart from the git commit
+hash and the package version recorded in ``config.yaml``.
 
-Stage a1 of ``docs/specs/WORLD_AND_LANGUAGE.md`` adds ``rule_matrices.json`` (the rules as
-threshold matrices, with the rule-set identity) and the folder ``derived/`` (derived values, each
-listed in ``derived/manifest.yaml`` with the rule-set identity that produced it). Every file that
-was written before stage a1 is unchanged.
+The base vector and the derived values are written apart (``docs/specs/WORLD_AND_LANGUAGE.md``,
+"Taxonomy outputs"): ``base.csv`` holds each instance's label, leaf, free PROPERTY and PART
+features, and scalars; ``derived/static_features.csv`` holds the determined features, listed in
+``derived/manifest.yaml`` with the rule-set identity that produced it; ``rule_matrices.json`` holds
+the rules as threshold matrices with that identity. The category-vector files keep both kinds of
+feature, because they describe categories, not world inputs.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from semantic_world.world.identity import write_json
 if TYPE_CHECKING:
     from semantic_world.taxonomy.generate import TaxonomyResult
 
+BASE_FILE = "base.csv"
 CSV_FILES = (
     "features.csv",
     "tree.csv",
@@ -40,7 +43,7 @@ CSV_FILES = (
     "categories_generative.csv",
     "categories_defining.csv",
     "categories_mean.csv",
-    "instances.csv",
+    BASE_FILE,
     "similarity.csv",
     "feature_stats.csv",
 )
@@ -53,7 +56,7 @@ WORLD_FILES = (
     f"{DERIVED_DIR}/{MANIFEST_FILE}",
     f"{DERIVED_DIR}/{STATIC_FEATURES_FILE}",
 )
-"""The files stage a1 of the world model added, as paths relative to the run folder."""
+"""The files of the matrix form and the derived values, as paths relative to the run folder."""
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -222,35 +225,7 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         "label", category_labels, all_labels, _means(vectors.mean) + _means(vectors.scalar_mean)
     )
 
-    full = instances.full_matrix(tree).astype(np.int64)
-    instance_data: dict[str, Any] = {
-        "label": list(instances.labels),
-        "leaf": list(instances.leaf_labels),
-    }
-    for j, label in enumerate(labels):
-        instance_data[label] = full[:, j].tolist()
-    for j, label in enumerate(scalar_labels):
-        instance_data[label] = _means(instances.scalars[:, j : j + 1])[0]
-    instances_frame = pl.DataFrame(
-        instance_data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
-    )
-
-    if result.projections is not None:
-        for name, column in result.projections.exposed_columns().items():
-            instance_data[name] = column.astype(np.int64).tolist()
-        instances_frame = pl.DataFrame(
-            instance_data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
-        )
-
     extra: dict[str, pl.DataFrame] = {}
-    if result.projections is not None:
-        extra["projections.csv"] = projections_frame(list(instances.labels), result.projections)
-    if (
-        result.verbs is not None
-        and result.relations is not None
-        and result.relation_stats is not None
-    ):
-        extra.update(verb_frames(result))
     bins = result.config.scalars.thermometer_bins
     if k and bins:
         extra["instances_scalar_codes.csv"] = thermometer_frame(
@@ -264,107 +239,17 @@ def result_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
         "categories_generative.csv": generative,
         "categories_defining.csv": defining,
         "categories_mean.csv": mean,
-        "instances.csv": instances_frame,
+        BASE_FILE: base_frame(result),
         "similarity.csv": result.similarity,
         "feature_stats.csv": result.feature_stats,
         **extra,
     }
 
 
-RELATION_FILES = (
-    "verb_features.csv",
-    "verb_tree.csv",
-    "verb_roles.csv",
-    "verbs_generative.csv",
-    "verbs_defining.csv",
-    "constraints.yaml",
-    "relations.yaml",
-    "projections.csv",
-    "relation_proportions.csv",
-    "relation_pairs.csv",
-    "verb_stats.csv",
-    "thematic.csv",
-)
-"""The files written only when verbs are on."""
-
-
-def verb_frames(result: TaxonomyResult) -> dict[str, pl.DataFrame]:
-    """The verb and relation CSV tables."""
-    verbs = result.verbs
-    relations = result.relations
-    stats = result.relation_stats
-    assert verbs is not None and relations is not None and stats is not None
-    features = verbs.features
-    labels = list(features.labels)
-    category_labels = [c.label for c in verbs.categories]
-    constraint_of = {c.label[2:]: c.label for c in relations.feature_constraints}
-    verb_features = pl.DataFrame(
-        {
-            "label": labels,
-            "base_rate": pl.Series(
-                [float("nan") if f.base_rate is None else f.base_rate for f in features.features],
-                dtype=pl.Float64,
-            ),
-            "constraint": [constraint_of[label] for label in labels],
-        }
-    )
-    verb_tree = pl.DataFrame(
-        {
-            "label": category_labels,
-            "parent": [None if c.parent is None else c.parent.label for c in verbs.categories],
-            "level": [c.level for c in verbs.categories],
-            "children": [len(c.children) for c in verbs.categories],
-        },
-        schema={"label": pl.Utf8, "parent": pl.Utf8, "level": pl.Int64, "children": pl.Int64},
-    )
-    role_names = {int(r): r.csv_name for r in Role}
-    role_rows: dict[str, list] = {"category": [], "feature": [], "role": []}
-    for category in verbs.categories:
-        for k, label in enumerate(labels):
-            role_rows["category"].append(category.label)
-            role_rows["feature"].append(label)
-            role_rows["role"].append(role_names[int(category.roles[k])])
-    generative = _matrix_frame(
-        "label",
-        category_labels,
-        tuple(labels),
-        [
-            verbs.tree.generative_matrix()[:, j].astype(np.int64).tolist()
-            for j in range(len(labels))
-        ],
-    )
-    defining = _matrix_frame(
-        "label", category_labels, tuple(labels), _binary_or_nan(verbs.defining_matrix())
-    )
-    return {
-        "verb_features.csv": verb_features,
-        "verb_tree.csv": verb_tree,
-        "verb_roles.csv": pl.DataFrame(role_rows),
-        "verbs_generative.csv": generative,
-        "verbs_defining.csv": defining,
-        "relation_proportions.csv": stats.proportions,
-        "relation_pairs.csv": stats.pairs,
-        "verb_stats.csv": stats.verb_stats,
-        "thematic.csv": stats.thematic,
-    }
-
-
-def projections_frame(instance_labels: list[str], projections) -> pl.DataFrame:
-    """``projections.csv``: every intensional projection, the approximate flag, and every
-    extensional projection, one row per instance."""
-    data: dict[str, Any] = {"label": instance_labels}
-    for name, column in projections.all_columns().items():
-        if isinstance(column, str):
-            data[name] = [column] * len(instance_labels)
-        else:
-            data[name] = np.asarray(column).astype(np.int64).tolist()
-    return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "approximate": pl.Utf8})
-
-
 def thermometer_frame(
     instance_labels: list[str], scalar_labels: list[str], values: np.ndarray, bins: int
 ) -> pl.DataFrame:
-    """Thermometer codes: for each scalar, ``bins`` binary columns ``SC.<n>>q<j>``, one per
+    """Thermometer codes: for each scalar, ``bins`` binary columns ``SCALARDIM.<n>>q<j>``, one per
     quantile ``j / (bins + 1)`` of the realized instance values, 1 where the value exceeds it."""
     data: dict[str, Any] = {"label": instance_labels}
     for j, label in enumerate(scalar_labels):
@@ -375,13 +260,27 @@ def thermometer_frame(
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8})
 
 
+def base_frame(result: TaxonomyResult) -> pl.DataFrame:
+    """``base.csv``: one row per instance, with its label, its leaf, every free PROPERTY and PART
+    feature in matrix order, and every scalar with 6 decimals."""
+    instances = result.instances
+    data: dict[str, Any] = {
+        "label": list(instances.labels),
+        "leaf": list(instances.leaf_labels),
+    }
+    for feature in result.features.free:
+        data[feature.label] = instances.values[:, feature.position].astype(np.int64).tolist()
+    for j, label in enumerate(result.features.scalar_labels):
+        data[label] = _means(instances.scalars[:, j : j + 1])[0]
+    return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
+
+
 def static_features_frame(result: TaxonomyResult) -> pl.DataFrame:
     """``derived/static_features.csv``: one row per instance, with every derived static feature
-    (the determined IS and HAS features, in matrix order)."""
+    (the determined PROPERTY and PART features, in matrix order)."""
     features = result.features
-    derived = [f for f in features.features if not f.free and f.type != "can"]
     data: dict[str, Any] = {"label": list(result.instances.labels)}
-    for feature in derived:
+    for feature in features.determined:
         data[feature.label] = result.instances.values[:, feature.position].astype(np.int64).tolist()
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8})
 
@@ -404,13 +303,6 @@ def write_result(result: TaxonomyResult, path: str | Path | None = None) -> Path
     (folder / "config.yaml").write_text(_yaml(config_data), encoding="utf-8")
     (folder / "rules.yaml").write_text(_yaml(result.rules.records()), encoding="utf-8")
     (folder / "summary.yaml").write_text(_yaml(result.summary), encoding="utf-8")
-    if result.relations is not None:
-        (folder / "constraints.yaml").write_text(
-            _yaml(result.relations.records()), encoding="utf-8"
-        )
-        (folder / "relations.yaml").write_text(
-            _yaml(result.relations.relation_records()), encoding="utf-8"
-        )
     for name, frame in result_frames(result).items():
         frame.write_csv(folder / name, float_precision=6, null_value="")
     if result.matrices is not None:
