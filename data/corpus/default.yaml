@@ -14,7 +14,7 @@ world: {config: data/world/default.yaml, seed: 1}
 
 lexicon:
   # the proportion of concepts of each type that get a word (state: stage a7)
-  named_proportion: {category: 1.0, is: 1.0, has: 1.0, state: 1.0, event_unary: 1.0, event: 1.0, event_category: 1.0, patient_projection: 0.25, scalar: 1.0}
+  named_proportion: {category: 1.0, property: 1.0, part: 1.0, state: 1.0, event_unary: 1.0, event: 1.0, event_category: 1.0, patient_projection: 0.25, scalar: 1.0}
   synonym_rate: 0.0              # the probability that a content concept gets a second lexeme
   homonym_rate: 0.0              # the probability that a content lexeme shares its word form
   homonym_same_pos: 0.5          # the share of homonym pairs within one part of speech

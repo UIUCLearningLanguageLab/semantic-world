@@ -370,7 +370,7 @@ def test_augmented_tokens_are_new_tokens_with_their_own_records(tmp_path):
         record = json.loads(token.augmentation)
         source = by_source[record["source"]]
         number = 1 if record["recipe"] == "noisy" else 2
-        assert token.label == f"{source.label}.A.{number}"
+        assert token.label == f"{source.label}.AUGMENTED.{number}"
         assert token.word == source.word and token.speaker == source.speaker
         assert token.engine == source.engine and token.phonemes == source.phonemes
         assert token.cache_path.startswith("v2/augment/") and token.sha256 != source.sha256
@@ -463,7 +463,7 @@ def test_augmentation_is_cached_seeded_and_independent(tmp_path):
     assert [t.sha256 for t in other.synthesis.tokens] == [t.sha256 for t in first.synthesis.tokens]
     # adding a recipe changes nothing about the earlier recipes' tokens
     more = stand_in_run(tmp_path, stand_in_config(tmp_path, NOISE_AND_SPEED + [{"name": "third", "speed_pitch": {"speed": 0.8, "pitch_semitones": 0}}]))  # fmt: skip
-    kept = [t for t in more.synthesis.tokens if not t.label.endswith(".A.3")]
+    kept = [t for t in more.synthesis.tokens if not t.label.endswith(".AUGMENTED.3")]
     assert kept == first.synthesis.tokens
     # another seed gives other draws
     seeded = stand_in_run(tmp_path, config.with_seed(2))
@@ -516,7 +516,7 @@ def test_augmented_tokens_go_through_frontends_embeddings_and_the_interface(tmp_
     assert embedded.shape == (6, 3, 8)
     for w in range(6):
         for s in range(3):
-            row = sounds._stored[(f"W.{w + 1}", labels[s], 1)]
+            row = sounds._stored[(f"WORD.{w + 1}", labels[s], 1)]
             assert not sounds.token_augmented[row]
             assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-5)
 

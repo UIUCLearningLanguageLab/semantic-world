@@ -234,7 +234,7 @@ def test_embed_runs_the_frozen_encoder_on_new_forms(tmp_path):
         assert embedded.shape == (4, 3, sounds.dims)
         for w in range(4):
             for s in range(3):
-                row = sounds._stored[(f"W.{w + 1}", labels[s], 1)]
+                row = sounds._stored[(f"WORD.{w + 1}", labels[s], 1)]
                 assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-4)
         novel = sounds.embed(["Z AE1 M P IH0 K"], labels[:1])
         assert novel.shape == (1, 1, sounds.dims) and np.isfinite(novel).all()

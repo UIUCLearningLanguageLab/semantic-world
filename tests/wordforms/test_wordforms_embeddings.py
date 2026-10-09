@@ -471,7 +471,7 @@ def test_evaluation_with_and_without_the_long_synthesis_words(tmp_path):
     plain = plain_rows(plain)
     assert set(plain["word_set"]) == {"all"}  # no word is flagged: one set of rows
     for word in words:
-        word.long_synthesis = word.label in ("W.2", "W.7")
+        word.long_synthesis = word.label in ("WORD.2", "WORD.7")
     table = evaluate_embeddings(run.embeddings, words, run.synthesis, np.random.default_rng(0))
     table = plain_rows(table)
     assert table.height == 4
@@ -489,7 +489,7 @@ def test_evaluation_with_and_without_the_long_synthesis_words(tmp_path):
     kept = [w for w in words if not w.long_synthesis]
     _, _, train = token_layout(words, run.synthesis)
     store = run.embeddings["logmel_fixed"]
-    keep_rows = np.array([t.word not in ("W.2", "W.7") for t in run.synthesis.tokens])
+    keep_rows = np.array([t.word not in ("WORD.2", "WORD.7") for t in run.synthesis.tokens])
     token_words, token_speakers, _ = token_layout(words, run.synthesis)
     expected = PairSets(
         token_words[keep_rows], token_speakers[keep_rows], train[keep_rows]
@@ -539,7 +539,7 @@ def test_sound_embeddings_interface(tmp_path):
     assert sounds.types.shape == (6, 8) and sounds.tokens.shape == (36, 8) and sounds.dims == 8
     assert sounds.pretrained is False
     assert sounds.words["label"].to_list() == [w.label for w in run.lexicon.words]
-    assert sounds.speakers["label"].to_list() == ["S.1", "S.2", "S.3"]
+    assert sounds.speakers["label"].to_list() == ["SPEAKER.1", "SPEAKER.2", "SPEAKER.3"]
     assert sounds.token_words.tolist() == [i for i in range(6) for _ in range(6)]
     assert sounds.token_speakers.tolist() == [0, 0, 1, 1, 2, 2] * 6
     held_out = (sounds.speakers["split"] == "held_out").to_numpy()
@@ -584,7 +584,7 @@ def test_embed_reproduces_the_stored_embeddings(tmp_path):
             assert embedded.shape == (6, 3, 8) and embedded.dtype == np.float32
             for w in range(6):
                 for s in range(3):
-                    row = sounds._stored[(f"W.{w + 1}", labels[s], token)]
+                    row = sounds._stored[(f"WORD.{w + 1}", labels[s], token)]
                     assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-5)
         # the default speakers are the training speakers, and the types are their mean
         train = sounds.speakers.filter(pl.col("split") == "train")["label"].to_list()
@@ -602,14 +602,14 @@ def test_embed_a_novel_word_looks_up_the_cache_before_synthesizing(tmp_path):
     novel = "Z AE1 M P IH0 K"
     assert novel not in sounds.words["arpabet"].to_list()
     calls = engine.calls
-    first = sounds.embed([novel], ["S.1", "S.3"])
+    first = sounds.embed([novel], ["SPEAKER.1", "SPEAKER.3"])
     assert first.shape == (1, 2, 8) and np.isfinite(first).all()
     assert engine.calls == calls + 4  # two speakers, two tokens each
     # the clips are now in the audio cache, so the same call synthesizes nothing
-    again = sounds.embed([novel], ["S.1", "S.3"])
+    again = sounds.embed([novel], ["SPEAKER.1", "SPEAKER.3"])
     assert engine.calls == calls + 4 and np.array_equal(again, first)
     other = SoundEmbeddings.load(tmp_path / "run", "logmel_fixed", engines={"espeak": engine})
-    assert np.array_equal(other.embed([novel], ["S.3"])[0, 0], first[0, 1])
+    assert np.array_equal(other.embed([novel], ["SPEAKER.3"])[0, 0], first[0, 1])
     assert engine.calls == calls + 4
     # the word embedding of a novel word: the mean over the training speakers' tokens
     types = sounds.embed_types([novel])
@@ -625,13 +625,13 @@ def test_embed_errors(tmp_path):
     run, engine = embed_run(tmp_path)
     sounds = SoundEmbeddings.load(tmp_path / "run", "logmel_fixed", engines={"espeak": engine})
     with pytest.raises(ValueError, match="unknown speaker"):
-        sounds.embed(["K AE1 T"], ["S.9"])
+        sounds.embed(["K AE1 T"], ["SPEAKER.9"])
     with pytest.raises(ValueError, match="not ARPAbet"):
         sounds.embed(["K XX1 T"])
     with pytest.raises(ValueError, match="stress digit"):
         sounds.embed(["K AE T"])
     with pytest.raises(ValueError, match="beyond tokens_per_speaker"):
-        sounds.embed(["Z AE1 M P IH0 K"], ["S.1"], token=3)
+        sounds.embed(["Z AE1 M P IH0 K"], ["SPEAKER.1"], token=3)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -698,9 +698,9 @@ def test_pretrained_embedding_stores_the_configured_layer(tmp_path):
     embedded = sounds.embed(sounds.words["arpabet"].to_list(), sounds.speakers["label"].to_list())
     for w in range(4):
         for s in range(3):
-            row = sounds._stored[(f"W.{w + 1}", f"S.{s + 1}", 1)]
+            row = sounds._stored[(f"WORD.{w + 1}", f"SPEAKER.{s + 1}", 1)]
             assert np.allclose(embedded[w, s], sounds.tokens[row], atol=1e-5)
-    assert sounds.embed(["Z AE1 M P IH0 K"], ["S.1"]).shape == (1, 1, 768)
+    assert sounds.embed(["Z AE1 M P IH0 K"], ["SPEAKER.1"]).shape == (1, 1, 768)
 
 
 @needs_hubert
@@ -996,10 +996,10 @@ def test_embed_with_the_real_engines(tiny_run):
 
         engine.synthesize = counted
     sounds.engines = engines
-    novel = sounds.embed(["Z AE1 M P IH0 K"], ["S.1", "S.5"])
+    novel = sounds.embed(["Z AE1 M P IH0 K"], ["SPEAKER.1", "SPEAKER.5"])
     assert novel.shape == (1, 2, 16) and np.isfinite(novel).all()
     assert len(calls) == 2  # one clip from Piper and one from espeak-ng
-    assert np.array_equal(sounds.embed(["Z AE1 M P IH0 K"], ["S.1", "S.5"]), novel)
+    assert np.array_equal(sounds.embed(["Z AE1 M P IH0 K"], ["SPEAKER.1", "SPEAKER.5"]), novel)
     assert len(calls) == 2  # the second time, both clips came from the audio cache
 
 

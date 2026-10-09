@@ -4,7 +4,7 @@ A recipe names the transformations it applies, in this order: Praat manipulation
 pitch range, formant shift, duration, as in Praat's "Change gender"), speed and pitch
 perturbation, reverberation, and additive noise. Each recipe is applied to a seeded share of the
 eligible tokens. An augmented token keeps its source's word and speaker, gets the label
-``<source label>.A.<recipe number>``, and records its recipe with every value that was drawn
+``<source label>.AUGMENTED.<recipe number>``, and records its recipe with every value that was drawn
 (``augmentation`` in ``tokens.csv``). Its clip goes in the audio cache under a hash of the
 source clip and the drawn values, so a second run reads it back.
 
@@ -37,6 +37,7 @@ from typing import Any
 import numpy as np
 
 from semantic_world.wordforms.config import Config, RecipeConfig
+from semantic_world.wordforms.labels import augmented_label
 from semantic_world.wordforms.streams import Streams
 from semantic_world.wordforms.synth import CACHE_VERSION, Synthesis, Token
 from semantic_world.wordforms.synth import audio as audio_tools
@@ -520,7 +521,7 @@ def augment_synthesis(
         result.tokens.append(
             replace(
                 token,
-                label=f"{token.label}.A.{number}",
+                label=augmented_label(token.label, number),
                 duration=round(len(clip) / config.synthesis.sample_rate, 6),
                 cache_path=relative.as_posix(),
                 sha256=audio_tools.sha256_file(path),

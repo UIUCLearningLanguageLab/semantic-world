@@ -156,7 +156,7 @@ def define(config: Config) -> WorldResult:
         definition = build_definition(statics, fluents, event_types)
         episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
-    stats = world_stats(fluents, event_types, episodes)
+    stats = world_stats(fluents, event_types, episodes, statics)
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     return WorldResult(
         config=config,

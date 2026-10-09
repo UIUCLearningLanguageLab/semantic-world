@@ -38,7 +38,7 @@ def default_lexicon(english):
 def test_labels_and_shape(default_lexicon):
     words = default_lexicon.words
     assert len(words) == 500
-    assert [w.label for w in words] == [f"W.{i}" for i in range(1, 501)]
+    assert [w.label for w in words] == [f"WORD.{i}" for i in range(1, 501)]
     for w in words:
         assert not w.real_word
         assert w.syllable_count in (1, 2, 3)

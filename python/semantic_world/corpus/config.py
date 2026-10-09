@@ -39,8 +39,8 @@ from semantic_world.world.policies import DEFAULT_POLICY, policy_names
 
 CONCEPT_TYPES = (
     "category",
-    "is",
-    "has",
+    "property",
+    "part",
     "state",
     "event_unary",
     "event",
@@ -50,7 +50,13 @@ CONCEPT_TYPES = (
 )
 """The concept types whose share of named concepts is a parameter."""
 NAMED_PROPORTION_DEFAULTS = {**dict.fromkeys(CONCEPT_TYPES, 1.0), "patient_projection": 0.25}
-RENAMED_CONCEPT_TYPES = {"can": "event_unary", "verb": "event", "verb_category": "event_category"}
+RENAMED_CONCEPT_TYPES = {
+    "is": "property",
+    "has": "part",
+    "can": "event_unary",
+    "verb": "event",
+    "verb_category": "event_category",
+}
 DOCUMENT_TYPES = ("encyclopedic_category", "encyclopedic_feature", "entity", "situational")
 NEGATION_LEVELS = ("class", "instance")
 UNIVERSAL_WORDS = ("nec", "extensional", "either")

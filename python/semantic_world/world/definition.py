@@ -58,7 +58,7 @@ from semantic_world.world.statics import StaticWorld
 DEFINITION_FILE = "definition.json"
 ENTITIES_FILE = "entities.csv"
 BINDING_CHUNK_ROWS = 32768
-KIND_OF_TYPE = {"is": "property", "has": "part"}
+KIND_OF_TYPE = {"property": "property", "part": "part"}
 
 
 def _natural(label: str) -> tuple:

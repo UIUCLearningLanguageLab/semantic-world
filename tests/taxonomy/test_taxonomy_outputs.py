@@ -314,8 +314,8 @@ def test_summary_yaml(default_result: TaxonomyResult, default_folder: Path) -> N
     assert summary["instances"] == len(default_result.instances)
     values = default_result.instances.values
     features = default_result.features
-    assert list(summary["mean_true_features_per_instance"]) == ["is", "has"]
-    for t in ("is", "has"):
+    assert list(summary["mean_true_features_per_instance"]) == ["property", "part"]
+    for t in ("property", "part"):
         positions = [f.position for f in features.of_type(t)]
         assert summary["mean_true_features_per_instance"][t] == pytest.approx(
             values[:, positions].sum(axis=1).mean()

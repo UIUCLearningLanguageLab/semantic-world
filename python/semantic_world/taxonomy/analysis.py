@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from semantic_world.taxonomy.config import Config
+from semantic_world.taxonomy.config import FEATURE_TYPES, Config
 from semantic_world.taxonomy.fixed import NodeVectors
 from semantic_world.taxonomy.instances import Instances
 from semantic_world.taxonomy.rules import RuleSet
@@ -302,7 +302,7 @@ def summary_stats(
     values = instances.values
     n = values.shape[0]
     mean_true = {}
-    for feature_type in ("is", "has"):
+    for feature_type in FEATURE_TYPES:
         positions = [f.position for f in features.of_type(feature_type)]
         mean_true[feature_type] = (
             float(values[:, positions].sum(axis=1).mean()) if n and positions else math.nan

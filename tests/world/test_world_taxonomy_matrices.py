@@ -58,7 +58,7 @@ def test_every_rule_is_covered_and_agrees_on_every_instance(run: TaxonomyResult)
     assert run.matrices is not None
     outputs = run.matrices.matrices.outputs
     assert sorted(outputs) == sorted(rule.output.label for rule in run.rules.rules)
-    assert {r.output.type for r in run.rules.rules} <= {"is", "has"}
+    assert {r.output.type for r in run.rules.rules} <= {"property", "part"}
     report = check_rule_agreement(run.matrices, run.rules, run.instances)
     assert report.rules == len(run.rules.rules)
     assert report.entities == len(run.instances)

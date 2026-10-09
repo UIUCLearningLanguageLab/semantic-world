@@ -42,8 +42,8 @@ def test_default_values() -> None:
     lexicon = config.lexicon
     assert list(lexicon.named_proportion) == [
         "category",
-        "is",
-        "has",
+        "property",
+        "part",
         "state",
         "event_unary",
         "event",
@@ -194,7 +194,7 @@ def test_resolved_configuration_round_trips(name: str) -> None:
 
 def test_resolved_configuration_keeps_changed_values() -> None:
     config = corpus_config(
-        lexicon={"synonym_rate": 0.2, "named_proportion": {"is": 0.5}},
+        lexicon={"synonym_rate": 0.2, "named_proportion": {"property": 0.5}},
         documents={"mix": {"situational": 1}, "sentences": {"entity": 7}},
         scene={
             "event_type_weights": {"EVENTTYPE1.1": 2, "EVENTTYPE2.1.1": 0.5},
@@ -206,7 +206,7 @@ def test_resolved_configuration_keeps_changed_values() -> None:
         test_sets={"changes": ["role"]},
     )
     resolved = config.resolved()
-    assert resolved["lexicon"]["named_proportion"]["is"] == 0.5
+    assert resolved["lexicon"]["named_proportion"]["property"] == 0.5
     assert resolved["documents"]["mix"] == {
         "encyclopedic_category": 0.0,
         "encyclopedic_feature": 0.0,
@@ -300,6 +300,8 @@ def test_errors_in_the_world_file_name_that_file(tmp_path: Path) -> None:
 
 RENAMED: list[tuple[dict[str, Any], str, str]] = [
     ({"taxonomy": {"config": "data/taxonomy/relations.yaml"}}, "taxonomy", "world"),
+    ({"lexicon": {"named_proportion": {"is": 1.0}}}, "lexicon.named_proportion.is", "property"),
+    ({"lexicon": {"named_proportion": {"has": 1.0}}}, "lexicon.named_proportion.has", "part"),
     (
         {"lexicon": {"named_proportion": {"can": 1.0}}},
         "lexicon.named_proportion.can",
@@ -374,8 +376,8 @@ BROKEN: list[tuple[dict[str, Any], str, str]] = [
         "unknown key",
     ),
     (
-        {"lexicon": {"named_proportion": {"is": 2}}},
-        "lexicon.named_proportion.is",
+        {"lexicon": {"named_proportion": {"property": 2}}},
+        "lexicon.named_proportion.property",
         "at most 1",
     ),
     ({"lexicon": {"synonyms": 0.1}}, "lexicon.synonyms", "unknown key"),

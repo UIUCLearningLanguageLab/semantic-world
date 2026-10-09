@@ -1,5 +1,8 @@
-# The default world configuration. Every parameter is shown with its default value.
-# See docs/specs/WORLD_AND_LANGUAGE.md, "Configuration".
+# The default world configuration. Every parameter is shown with its default value, except the
+# event-type tree: the default world has about as many two-place event types as one-place ones
+# (stage a6, Jon's ruling on the two-place share), so its tree is set larger than the code's
+# default of 3 superordinates with 2 to 3 event types each. See docs/specs/WORLD_AND_LANGUAGE.md,
+# "Configuration".
 
 name: default
 seed: 1
@@ -13,7 +16,8 @@ fluents:
 
 event_types:
   unary: {count: 20, rules: {}}              # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
-  binary: {}                                  # the two-place event types (the old `verbs` block of the taxonomy, every key at its default); null turns them off
+  binary:                                     # the two-place event types (the old `verbs` block of the taxonomy); null turns them off
+    taxonomy: {superordinates: 5, depth: 2, branching: 4}   # 20 two-place event types in 5 categories, as many as the one-place event types (the code's default is 3 superordinates with 2 to 3 each)
   preconditions:
     literals: {0: 0.3, 1: 0.5, 2: 0.2}        # weights over the number of an event type's own precondition literals
     feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal

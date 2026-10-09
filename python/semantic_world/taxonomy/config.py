@@ -19,13 +19,14 @@ import yaml
 
 SEED_MAX = 2**64 - 1
 
-FEATURE_TYPES = ("is", "has")
-"""The binary feature types: ``is`` makes ``PROPERTY.<n>`` features and ``has`` makes
-``PART.<n>`` features. Both have free and determined features. CAN features left the taxonomy in
-stage a5b of ``docs/specs/WORLD_AND_LANGUAGE.md``: they are the one-place event types of the world
-package (``event_types.unary``)."""
+FEATURE_TYPES = ("property", "part")
+"""The binary feature types: ``property`` makes ``PROPERTY.<n>`` features and ``part`` makes
+``PART.<n>`` features. Both have free and determined features. The type names followed the
+labels in stage a6 of ``docs/specs/WORLD_AND_LANGUAGE.md`` (they were ``is`` and ``has``;
+``RENAMED_TYPES`` maps the old names to the new ones). CAN features left the taxonomy in stage
+a5b: they are the one-place event types of the world package (``event_types.unary``)."""
 FREE_FEATURE_TYPES = FEATURE_TYPES
-LABEL_PREFIX = {"is": "PROPERTY", "has": "PART"}
+LABEL_PREFIX = {"property": "PROPERTY", "part": "PART"}
 """The label prefix of each feature type."""
 SCALAR_PREFIX = "SCALARDIM"
 CATEGORY_PREFIX = "CATEGORY."
@@ -36,12 +37,17 @@ MOVED_KEYS = {
     "verbs": "event_types.binary",
 }
 """Taxonomy keys that moved to the world configuration (``data/world/default.yaml``)."""
-INPUT_TYPES = ("is", "has", "scalar")
+RENAMED_TYPES = {"is": "property", "has": "part"}
+"""The old type names (keys of ``features``, ``rules.input_type_weights``, and ``rules.overrides``,
+values of ``applies_to`` and of the ``type`` column), each with its new name."""
+RENAMED_VALUES = {"is_has": "property_part"}
+"""Old configuration values that named the types, each with its new form."""
+INPUT_TYPES = ("property", "part", "scalar")
 OPERATORS = ("AND", "OR", "XOR")
 SHJ_TYPES = ("I", "II", "III", "IV", "V", "VI")
 ARITY_3_FAMILIES = SHJ_TYPES + ("compositional",)
 SIMILARITY_METRICS = ("phi", "cosine", "jaccard")
-SIMILARITY_SCOPES = ("free", "is_has", "all")
+SIMILARITY_SCOPES = ("free", "property_part", "all")
 SIMILARITY_FEATURE_SETS = ("non_isa", "all")
 RULE_SOURCES = ("automatic", "file")
 SCHEDULE_KINDS = ("linear", "exponential", "list")
@@ -99,16 +105,16 @@ class FreeFeatureTypeConfig:
 
 @dataclass(frozen=True)
 class FeaturesConfig:
-    is_: FreeFeatureTypeConfig
-    has: FreeFeatureTypeConfig
+    property: FreeFeatureTypeConfig
+    part: FreeFeatureTypeConfig
     base_rate_override: float | None
     base_rate_heterogeneity: float | None
 
     def free_type(self, feature_type: str) -> FreeFeatureTypeConfig:
-        if feature_type == "is":
-            return self.is_
-        if feature_type == "has":
-            return self.has
+        if feature_type == "property":
+            return self.property
+        if feature_type == "part":
+            return self.part
         raise ValueError(f"{feature_type!r} is not a free feature type")
 
     def count(self, feature_type: str) -> int:
@@ -311,8 +317,8 @@ class Config:
             "name": self.name,
             "seed": self.seed,
             "features": {
-                "is": _resolved_free_type(features.is_),
-                "has": _resolved_free_type(features.has),
+                "property": _resolved_free_type(features.property),
+                "part": _resolved_free_type(features.part),
                 "base_rate_override": features.base_rate_override,
                 "base_rate_heterogeneity": features.base_rate_heterogeneity,
             },
@@ -406,7 +412,7 @@ DEFAULT_SAMPLING = RuleSampling(
     negation_probability=0.2,
     arity_3_families={"I": 1, "II": 1, "III": 1, "IV": 1, "V": 1, "VI": 1, "compositional": 1},
     nesting_depth={1: 0.5, 2: 0.5},
-    input_type_weights={"is": 1, "has": 1, "scalar": 1},
+    input_type_weights={"property": 1, "part": 1, "scalar": 1},
 )
 
 DEFAULT_SIMILARITY_BOUND = {
@@ -739,11 +745,24 @@ def _moved_key_error(node: _Node, key: str, moved: str) -> ConfigError:
     )
 
 
+def _check_renamed_keys(node: _Node) -> None:
+    """An old type name used as a key (``is``, ``has``) fails with an error that names the new
+    one (``property``, ``part``): the type names followed the labels in stage a6."""
+    for old, new in RENAMED_TYPES.items():
+        if old in node.data:
+            raise node.error(
+                old,
+                f"this key was renamed in stage a6 of the world model: the type is called {new} "
+                f"now (the labels are {LABEL_PREFIX[new]}.<n>); use {new} in its place",
+            )
+
+
 def _read_features(node: _Node) -> FeaturesConfig:
     if "can" in node.data:
         raise _moved_key_error(node, "can", "features.can")
-    is_node = node.mapping("is")
-    has_node = node.mapping("has")
+    _check_renamed_keys(node)
+    is_node = node.mapping("property")
+    has_node = node.mapping("part")
     is_ = _read_free_type(is_node)
     has = _read_free_type(has_node)
     override = node.probability("base_rate_override", None, nullable=True)
@@ -755,7 +774,7 @@ def _read_features(node: _Node) -> FeaturesConfig:
         )
     node.finish()
     if override is None:
-        for type_node, cfg in ((is_node, is_), (has_node, has)):
+        for type_node, cfg in ((is_node, is_), (has_node, has)):  # property, part
             if cfg.free_count > 0 and cfg.expected_true_free > cfg.free_count:
                 raise type_node.error(
                     "expected_true_free",
@@ -779,7 +798,11 @@ def _read_sampling(node: _Node, base: RuleSampling) -> RuleSampling:
 
 
 def _read_input_type_weights(node: _Node, base: RuleSampling) -> dict[str, float]:
-    """``is`` and ``has`` weights, plus a ``scalar`` weight that defaults to 1 when absent."""
+    """``property`` and ``part`` weights, plus a ``scalar`` weight that defaults to 1 when
+    absent."""
+    value = node.data.get("input_type_weights")
+    if isinstance(value, dict):
+        _check_renamed_keys(node.mapping("input_type_weights"))
     weights = node.weights("input_type_weights", base.input_type_weights, allowed=INPUT_TYPES)
     weights.setdefault("scalar", 1.0)
     return {t: weights[t] for t in INPUT_TYPES}
@@ -819,6 +842,7 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
     overrides_node = node.mapping("overrides")
     if "can" in overrides_node.data:
         raise _moved_key_error(overrides_node, "can", "rules.overrides.can")
+    _check_renamed_keys(overrides_node)
     overrides: dict[str, RuleSampling] = {}
     for feature_type in FEATURE_TYPES:
         if feature_type in overrides_node.data:
@@ -830,7 +854,7 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
     variance_bound = node.unit_interval("variance_bound", None)
     node.finish()
 
-    determined = features.determined_count("is") + features.determined_count("has")
+    determined = sum(features.determined_count(t) for t in FEATURE_TYPES)
     if determined > 0 and max_chain_depth < 1:
         raise node.error(
             "max_chain_depth",
@@ -846,7 +870,7 @@ def _read_rules(node: _Node, features: FeaturesConfig, scalars: ScalarsConfig) -
         ):
             raise owner.error(
                 "input_type_weights",
-                "at least one of is and has must be positive (or scalars must be on with a "
+                "at least one of property and part must be positive (or scalars must be on with a "
                 "positive scalar weight)",
             )
     for feature_type in FEATURE_TYPES:
@@ -889,6 +913,13 @@ def _read_similarity_bound(node: _Node, default_on: bool = True) -> SimilarityBo
     if bound is None:
         return None
     d = DEFAULT_SIMILARITY_BOUND
+    if bound.data.get("scope") in RENAMED_VALUES:
+        old = bound.data["scope"]
+        raise bound.error(
+            "scope",
+            f"the scope {old!r} was renamed in stage a6 of the world model: it is called "
+            f"{RENAMED_VALUES[old]} now; use that in its place",
+        )
     metric = bound.choice("metric", d["metric"], SIMILARITY_METRICS)
     scope = bound.choice("scope", d["scope"], SIMILARITY_SCOPES)
     low = bound.number("min", d["min"], nullable=True)

@@ -351,7 +351,7 @@ def test_rendering_leaves_the_rest_of_the_folder_byte_identical(chains, name, mo
 
 def test_marked_forms_are_inflected(chains) -> None:
     """With branch markers and plural affixes, the plural of a category's noun is the inflected
-    form of its marked form: ``W.12.M.2.AF.1``."""
+    form of its marked form: ``WORD.12.MARKER.2.AFFIX.1``."""
     corpus, _, folder, forms, _ = chains("tiny", mode="branch_markers", **NUMBER)
     words = {row["label"]: row for row in pl.read_csv(forms / "words.csv").iter_rows(named=True)}
     lexicon = {row["label"]: row for row in pl.read_csv(folder / "lexicon.csv").iter_rows(named=True)}  # fmt: skip
@@ -384,7 +384,7 @@ def test_marked_forms_are_inflected(chains) -> None:
                 )
                 if words[form["stem"]]["kind"] == "marked":
                     marked_plurals += 1
-                    assert word.count(".M.") == 1 and word.endswith(".AF.1")
+                    assert word.count(".MARKER.") == 1 and word.endswith(".AFFIX.1")
                     assert form["spelling"].startswith(words[form["stem"]]["spelling"])
     assert marked_plurals > 20 and plurals > marked_plurals  # verbs agree, and are unmarked
 
@@ -479,8 +479,8 @@ def test_the_word_form_configuration_for_the_default_corpus() -> None:
     assert (corpus.name, corpus.seed) == ("default", 1)  # the run folder that the request is in
     lexicon = build_lexicon(corpus, load_world(corpus), Streams(corpus.seed))
     content = lexicon.content_lexemes
-    assert len(content) == 173 <= config.wordforms.count
-    assert sum(x.same_form_as is None for x in content) == 173
+    assert len(content) == 191 <= config.wordforms.count
+    assert sum(x.same_form_as is None for x in content) == 191
     assert len(lexicon.function_lexemes) == 15
 
 

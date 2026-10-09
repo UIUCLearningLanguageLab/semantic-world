@@ -736,8 +736,10 @@ def redraw_preconditions(
     """The event types with the own precondition literals of the named event types drawn
     again, each from its own generator (the part ``world:preconditions:<label>``), as
     ``define`` redraws an event type that was never legal in the statistics episodes. The
-    inherited literals stay; a literal that would make one of the event type's own effects
-    empty, or that duplicates an inherited one, is drawn again. No other event type changes."""
+    inherited literals stay, except one that is no longer achievable (the generator's fix-ups
+    dropped it from the event type when the effect that produced its value went); a literal that
+    would make one of the event type's own effects empty, or that duplicates an inherited one,
+    is drawn again. No other event type changes."""
     cfg = config.event_types.preconditions
     achievable: set[tuple[str, bool]] = set()
     for i, fluent in enumerate(fluents.base):
@@ -756,7 +758,11 @@ def redraw_preconditions(
         inherited: dict[tuple[str, str], Literal] = {}
         for feature in event_types.features:
             literal = feature_literals.get(feature)
-            if literal is not None and feature in et.features:
+            if (
+                literal is not None
+                and feature in et.features
+                and (literal.fluent, literal.value) in achievable
+            ):
                 inherited.setdefault((literal.role, literal.fluent), literal)
         empty = {(e.role, e.fluent, e.value) for e in et.effects}
         kept = dict(inherited)

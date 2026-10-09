@@ -199,8 +199,11 @@ def test_a_configuration_without_a_request_is_unchanged():
     """The word tables of the two example configurations, as they were before the request gained
     lexemes: the same bytes, and no ``pos`` column."""
     expected = {
-        "tiny.yaml": "b80903c6837a0499225ab203398db400f68386d7ff10fe8b08b6fa699ed835dc",
-        "default.yaml": "dbfb05963ac3a9b929d0d61ef87aae6f54e4259d30df512e3299e2b10e159fff",
+        # The digests of the tables with the labels of stage a6. Mapped back to the old labels,
+        # the tables hash to b80903c6837a0499225ab203398db400f68386d7ff10fe8b08b6fa699ed835dc
+        # and dbfb05963ac3a9b929d0d61ef87aae6f54e4259d30df512e3299e2b10e159fff, as before.
+        "tiny.yaml": "e526b061d76b3323f62a9ab62453e2d3dbf899e67359565da86440d8eb22c4e6",
+        "default.yaml": "85cb8d4b60489650b0405cb95db28db2b3708ae1b77e438b6f576410cda66de5",
     }
     for name, digest in expected.items():
         config = load_config(DATA / name)
@@ -361,10 +364,10 @@ def test_inflecting_lexemes_get_words_that_take_their_affixes(runs, mode, common
     order = ["content", "function", "marked", "inflected"]
     assert kinds == sorted(kinds, key=order.index)
     if mode == "branch_markers":
-        # marked forms take affixes: W.12.M.2.AF.1
+        # marked forms take affixes: WORD.12.MARKER.2.AFFIX.1
         marked = [w for w in inflected if by_label[w.stem].kind == "marked"]
-        assert len(marked) == 13 and all(w.label.count(".M.") == 1 for w in marked)
-        assert all(w.label.endswith(".AF.1") for w in marked)
+        assert len(marked) == 13 and all(w.label.count(".MARKER.") == 1 for w in marked)
+        assert all(w.label.endswith(".AFFIX.1") for w in marked)
         assert all(by_label[w.stem].stem in by_label for w in marked)
 
 
@@ -457,7 +460,7 @@ def test_the_function_words_never_change_a_lexemes_word(tmp_path, mode, common_e
     assert len(forms[0]) == 5 and len(forms[1]) == 11 and forms[0]["the"] != forms[1]["the"]
     for run in made:
         function = [w for w in run.lexicon.words if w.kind == "function"]
-        assert [w.label for w in function] == [f"F.{i + 1}" for i in range(len(function))]
+        assert [w.label for w in function] == [f"FUNCWORD.{i + 1}" for i in range(len(function))]
         # no function word is another form of the run, a marker, or a form that a word could
         # have with an affix
         assert len({w.stripped for w in run.lexicon.words}) == len(run.lexicon.words)

@@ -109,7 +109,7 @@ def test_closed_class_settings_and_their_errors():
                 "epenthesis": False,
             },
             "inflect": [
-                {"words": ["W.1", "W.20"], "affixes": ["B"]},
+                {"words": ["WORD.1", "WORD.20"], "affixes": ["B"]},
                 {"words": "none", "affixes": ["A"]},
             ],
         }
@@ -119,7 +119,7 @@ def test_closed_class_settings_and_their_errors():
     assert closed.min_distance == 1 and closed.epenthesis is False
     assert [a.position for a in closed.affixes] == ["suffix", "prefix"]
     assert closed.affix_shapes == {"C": 1.0}
-    assert closed.inflect[0].words == ("W.1", "W.20") and closed.inflect[1].words == "none"
+    assert closed.inflect[0].words == ("WORD.1", "WORD.20") and closed.inflect[1].words == "none"
     assert parse_config(config.resolved(), "again").closed_class == config.closed_class
     function_field = "closed_class.function_words"
     cases = [
@@ -158,9 +158,9 @@ def test_closed_class_settings_and_their_errors():
             "'DUAL' is not the gloss",
         ),
         (
-            {"inflect": [{"words": ["W.21"], "affixes": ["PLURAL"]}]},
+            {"inflect": [{"words": ["WORD.21"], "affixes": ["PLURAL"]}]},
             "closed_class.inflect[0].words",
-            "W.1 to W.20",
+            "WORD.1 to WORD.20",
         ),
         (
             {"inflect": [{"words": "some", "affixes": ["PLURAL"]}]},
@@ -193,7 +193,7 @@ def test_request_file_replaces_the_inline_request(tmp_path):
             {
                 "function_words": ["the", "no", "of"],
                 "affixes": [{"gloss": "PLURAL"}, {"gloss": "AGENT", "position": "prefix"}],
-                "inflect": [{"words": ["W.2"], "affixes": ["PLURAL", "AGENT"]}],
+                "inflect": [{"words": ["WORD.2"], "affixes": ["PLURAL", "AGENT"]}],
             }
         )
     )
@@ -205,7 +205,10 @@ def test_request_file_replaces_the_inline_request(tmp_path):
         ("PLURAL", "suffix"),
         ("AGENT", "prefix"),
     ]
-    assert closed.inflect[0].words == ("W.2",) and closed.inflect[0].affixes == ("PLURAL", "AGENT")
+    assert closed.inflect[0].words == ("WORD.2",) and closed.inflect[0].affixes == (
+        "PLURAL",
+        "AGENT",
+    )
     # the resolved configuration holds the request inline, and reloads equal
     resolved = config.resolved()
     assert resolved["request"] is None and "request" not in resolved["closed_class"]
@@ -268,7 +271,7 @@ def test_function_words_meet_every_rule(common_english):
         run = run_forms(config_with({}, count=30, seed=seed))
         function = forms_of(run, "function")
         content = forms_of(run, "content")
-        assert [w.label for w in function] == [f"F.{i}" for i in range(1, 16)]
+        assert [w.label for w in function] == [f"FUNCWORD.{i}" for i in range(1, 16)]
         assert [w.gloss for w in function] == list(run.config.closed_class.glosses)
         weighted = {s for s, w in run.config.closed_class.function_shapes.items() if w > 0}
         for word in function:
@@ -362,7 +365,7 @@ def test_affixes_have_an_allowed_shape_and_are_distinct():
     )
     for seed in (1, 2, 3):
         affixes = run_forms(config.with_seed(seed)).lexicon.affixes
-        assert [a.label for a in affixes] == [f"AF.{i}" for i in range(1, 6)]
+        assert [a.label for a in affixes] == [f"AFFIX.{i}" for i in range(1, 6)]
         assert [a.gloss for a in affixes] == ["A", "B", "C", "D", "E"]
         assert [a.position for a in affixes] == ["suffix", "prefix", "suffix", "prefix", "suffix"]
         for affix in affixes:
@@ -375,15 +378,15 @@ def test_affixes_have_an_allowed_shape_and_are_distinct():
 def test_joining_with_a_schwa_or_a_glide():
     from semantic_world.wordforms.closed_class import glide_after, repair_join, vowel_collision
 
-    suffix = Affix("AF.1", "S", "suffix", ("Z",), "z")
-    prefix = Affix("AF.2", "P", "prefix", ("AH0", "N"), "ən")
+    suffix = Affix("AFFIX.1", "S", "suffix", ("Z",), "z")
+    prefix = Affix("AFFIX.2", "P", "prefix", ("AH0", "N"), "ən")
     assert join(("K", "AE1", "T"), suffix) == ("K", "AE1", "T", "Z")
     assert join(("K", "AE1", "T"), suffix, "schwa") == ("K", "AE1", "T", SCHWA, "Z")
     assert join(("K", "AE1", "T"), prefix) == ("AH0", "N", "K", "AE1", "T")
     assert join(("K", "AE1", "T"), prefix, "schwa") == ("AH0", "N", SCHWA, "K", "AE1", "T")
     # a glide goes only where a vowel meets a vowel: Y after a front vowel, W after a back or
     # rounded one, and the configured default otherwise
-    vowel = Affix("AF.3", "V", "suffix", ("AH0",), "ə")
+    vowel = Affix("AFFIX.3", "V", "suffix", ("AH0",), "ə")
     assert vowel_collision(("K", "AE1", "T"), vowel) is None
     assert vowel_collision(("S", "IY1"), vowel) == "IY1"
     assert vowel_collision(("S", "IY1"), suffix) is None
@@ -398,12 +401,12 @@ def test_joining_with_a_schwa_or_a_glide():
         assert glide_after(back, "Y") == "W"
     assert glide_after("AH0", "W") == "W" and glide_after("ER", "Y") == "Y"
     # a vowel-final prefix before a vowel-initial stem
-    open_prefix = Affix("AF.4", "P", "prefix", ("AH0",), "ə")
+    open_prefix = Affix("AFFIX.4", "P", "prefix", ("AH0",), "ə")
     assert vowel_collision(("AE1", "T"), open_prefix) == "AH0"
     assert join(("AE1", "T"), open_prefix, "glide", "W") == ("AH0", "W", "AE1", "T")
     assert join(("K", "AE1", "T"), open_prefix, "glide") == ("AH0", "K", "AE1", "T")
     # an English affix is not repaired or checked
-    english = Affix("AF.5", "PLURAL", "suffix", ("Z",), "z", (("Z",), ("S",), ("IH0", "Z")))
+    english = Affix("AFFIX.5", "PLURAL", "suffix", ("Z",), "z", (("Z",), ("S",), ("IH0", "Z")))
     assert repair_join(object(), ("K", "AE1", "T"), english, True) == (
         ("K", "AE1", "T", "S"),
         "none",
@@ -478,8 +481,8 @@ def test_inflect_entries_choose_words_and_affixes():
     config = config_with(
         {
             "inflect": [
-                {"words": ["W.3", "W.1"], "affixes": ["PAST"]},
-                {"words": ["W.1"], "affixes": ["PLURAL", "PAST"]},
+                {"words": ["WORD.3", "WORD.1"], "affixes": ["PAST"]},
+                {"words": ["WORD.1"], "affixes": ["PLURAL", "PAST"]},
             ]
         }  # fmt: skip
     )
@@ -488,7 +491,7 @@ def test_inflect_entries_choose_words_and_affixes():
     pairs = {(w.stem, w.affix) for w in inflected} | {
         (s["stem"], s["affix"]) for s in run.lexicon.closed_class["inflected"]["skipped"]
     }
-    assert pairs == {("W.1", "AF.1"), ("W.1", "AF.2"), ("W.3", "AF.2")}
+    assert pairs == {("WORD.1", "AFFIX.1"), ("WORD.1", "AFFIX.2"), ("WORD.3", "AFFIX.2")}
     assert run.lexicon.closed_class["inflected"]["requested"] == 3
     none = run_forms(config_with({"inflect": [{"words": "none", "affixes": ["PAST"]}]}))
     assert forms_of(none, "inflected") == []
@@ -551,7 +554,9 @@ def test_content_words_are_the_stage_4_words():
 
     assert content_csv(DATA / "tiny.yaml") == stored
     digest = hashlib.sha256(content_csv(DATA / "default.yaml")).hexdigest()
-    assert digest == "1702284f9b737ee8e8cf78b3238983176f0d6da145872e18426d07998a66eb68"
+    # the digest of the stage-4 table with the labels of stage a6; mapped back to the old
+    # labels, the table hashes to 1702284f9b737ee8e8cf78b3238983176f0d6da145872e18426d07998a66eb68
+    assert digest == "ab33066882476395e97894986f2791c356ab3114a75da231f36bce9ddcce3d4d"
 
 
 def stand_in_run(tmp_path, closed_class, count: int = 8) -> Run:
@@ -603,9 +608,9 @@ def test_turning_closed_class_forms_on_changes_no_audio_embedding_or_evaluation(
     assert [t.cache_path for t in on.synthesis.tokens[:n]] == [
         t.cache_path for t in off.synthesis.tokens
     ]
-    assert all(t.word.startswith(("F.", "W.")) for t in on.synthesis.tokens[n:])
-    assert any(t.word.startswith("F.") for t in on.synthesis.tokens[n:])
-    assert any(".AF." in t.word for t in on.synthesis.tokens[n:])
+    assert all(t.word.startswith(("FUNCWORD.", "WORD.")) for t in on.synthesis.tokens[n:])
+    assert any(t.word.startswith("FUNCWORD.") for t in on.synthesis.tokens[n:])
+    assert any(".AFFIX." in t.word for t in on.synthesis.tokens[n:])
     # the same front-end frames, and the same embeddings (the projection is fitted on the
     # content words)
     for name in ("logmel", "cochleagram"):
@@ -676,10 +681,10 @@ def test_forms_command_writes_closed_class_forms(tmp_path, capsys):
     assert set(kinds[35:]) == {"inflected"} and len(kinds) > 35
     function = words.filter(pl.col("kind") == "function")
     assert function["gloss"].to_list() == list(load_config(DATA / "tiny.yaml").closed_class.glosses)
-    assert function["label"].to_list() == [f"F.{i}" for i in range(1, 16)]
+    assert function["label"].to_list() == [f"FUNCWORD.{i}" for i in range(1, 16)]
     inflected = words.filter(pl.col("kind") == "inflected")
-    assert inflected["stem"].str.starts_with("W.").all()
-    assert inflected["affix"].str.starts_with("AF.").all()
+    assert inflected["stem"].str.starts_with("WORD.").all()
+    assert inflected["affix"].str.starts_with("AFFIX.").all()
     assert set(inflected["join"].to_list()) <= {"none", "schwa", "glide"}
     assert inflected["join"].null_count() == 0
     assert inflected["label"].to_list() == [
@@ -688,7 +693,7 @@ def test_forms_command_writes_closed_class_forms(tmp_path, capsys):
     assert words.filter(pl.col("kind") != "inflected")["join"].null_count() == 35
     affixes = pl.read_csv(out / "affixes.csv")
     assert affixes.columns == list(AFFIX_COLUMNS)
-    assert affixes["label"].to_list() == ["AF.1", "AF.2", "AF.3"]
+    assert affixes["label"].to_list() == ["AFFIX.1", "AFFIX.2", "AFFIX.3"]
     assert affixes["gloss"].to_list() == ["PLURAL", "PAST", "PROGRESSIVE"]
     assert affixes["position"].to_list() == ["suffix"] * 3
     summary = yaml.safe_load((out / "summary.yaml").read_text())
@@ -747,7 +752,7 @@ def test_function_words_may_sound_like_rare_dictionary_words_but_not_common_ones
     assert report["function_words"]["candidates"]["CV"]["not_common_english_words"] > 30
     for word in function:
         assert not common_english.is_common_pronunciation(word.phones)
-    rare = {label for label in report["english_words"] if label.startswith("F.")}
+    rare = {label for label in report["english_words"] if label.startswith("FUNCWORD.")}
     assert rare == {w.label for w in function if common_english.is_pronunciation(w.phones)}
 
 
@@ -818,7 +823,7 @@ def test_english_function_words(common_english):
         assert common_english.is_common_pronunciation(word.phones)
         assert word.ipa and word.espeak and word.kind == "function"
     assert run.lexicon.closed_class["function_words"] == {"source": "english", "count": 15}
-    assert not any(k.startswith("F.") for k in run.lexicon.closed_class["english_words"])
+    assert not any(k.startswith("FUNCWORD.") for k in run.lexicon.closed_class["english_words"])
     with pytest.raises(GenerationError, match="'blorp' has no English pronunciation"):
         run_forms(config_with({"function_words": {"source": "english", "glosses": ["blorp"]}}))
 
@@ -941,8 +946,8 @@ def test_an_affix_is_never_another_affix_with_the_schwa():
                 assert a is b or not same_after_schwa(a.phones, b.phones), (seed, a, b)
         # so no stem has the same form for two affixes
         assert not any(
-            len({s for s in group if ".AF." in s}) > 1
+            len({s for s in group if ".AFFIX." in s}) > 1
             and len(set(group)) > 1
-            and all(s.split(".AF.")[0] == group[0].split(".AF.")[0] for s in group)
+            and all(s.split(".AFFIX.")[0] == group[0].split(".AFFIX.")[0] for s in group)
             for group in run.lexicon.closed_class["identical_forms"]
         )

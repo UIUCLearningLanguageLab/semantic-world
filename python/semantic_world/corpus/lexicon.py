@@ -239,8 +239,8 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
     two-place event types whose requirement holds for every pair or for no pair are left out:
     :func:`event_types_without_word` lists them."""
     concepts = [Concept(c, "category", NOUN, c) for c in world.categories]
-    concepts += [Concept(f, "is", ADJECTIVE, f) for f in world.features[PROPERTY_KIND]]
-    concepts += [Concept(f, "has", PART_NOUN, f) for f in world.features[PART_KIND]]
+    concepts += [Concept(f, "property", ADJECTIVE, f) for f in world.features[PROPERTY_KIND]]
+    concepts += [Concept(f, "part", PART_NOUN, f) for f in world.features[PART_KIND]]
     concepts += [
         Concept(f, "event_unary", INTRANSITIVE_VERB, f) for f in world.features[EVENT_TYPE1_KIND]
     ]

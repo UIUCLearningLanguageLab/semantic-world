@@ -17,6 +17,8 @@ from typing import Any
 
 import yaml
 
+from semantic_world.wordforms.labels import word_label, word_number
+
 SEED_MAX = 2**64 - 1
 
 SOURCES = ("pseudowords", "english", "mixed")
@@ -1651,12 +1653,13 @@ def _read_closed_class(
                 )
         if isinstance(entry.words, tuple):
             for label in entry.words:
-                number = label[2:] if label.startswith("W.") else ""
-                if not (number.isdecimal() and 1 <= int(number) <= word_count):
+                number = word_number(label)
+                if number is None or not 1 <= number <= word_count:
                     raise ConfigError(
                         owner_source,
                         f"{inflect_field}[{i}].words",
-                        f"{label!r} is not the label of a content word (W.1 to W.{word_count})",
+                        f"{label!r} is not the label of a content word "
+                        f"({word_label(1)} to {word_label(word_count)})",
                     )
     affix_source = affix_node.choice("source", "pseudo", CLOSED_CLASS_SOURCES)
     if affix_source == "english":

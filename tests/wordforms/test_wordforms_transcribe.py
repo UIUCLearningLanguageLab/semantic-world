@@ -49,7 +49,7 @@ def test_common_words_are_a_seeded_sample_of_frequent_words(common_english):
 
 def test_real_word_forms(common_english):
     forms = real_word_forms(["hello", "computer"], common_english)
-    assert [f.label for f in forms] == ["W.1", "W.2"]
+    assert [f.label for f in forms] == ["WORD.1", "WORD.2"]
     assert forms[0].real_word and forms[0].english_word == forms[0].spelling == "hello"
     assert forms[0].ipa == "həlˈoʊ" and forms[0].espeak == "h@l'oU"
     assert forms[1].arpabet == "K AH0 M P Y UW1 T ER0"

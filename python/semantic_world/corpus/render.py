@@ -16,7 +16,8 @@ or with another one made from the same request, replaces what the earlier render
 A content lexeme's form is the one that the word-form run assigned to it
 (``assignment/lexicon.csv``). A function word's form is the run's function word with the same
 gloss. An inflected token (``L.5-PLURAL``) is the inflected form of its lexeme's form with the
-affix of that gloss (``W.12.AF.1``, or ``W.12.M.2.AF.1`` for a marked form).
+affix of that gloss (``WORD.12.AFFIX.1``, or ``WORD.12.MARKER.2.AFFIX.1`` for a marked
+form).
 """
 
 from __future__ import annotations

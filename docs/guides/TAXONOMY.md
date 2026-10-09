@@ -58,7 +58,7 @@ The old labels (`C1.2`, `I1.2.3`, `IS.4`, `HAS.12`, `SC.1`) appear in the two ta
 ### Feature types
 
 - **ISA** features record membership. An instance has `ISA.CATEGORY.1 = 1` and `ISA.CATEGORY.1.2 = 1` when it belongs to leaf `CATEGORY.1.2`. ISA features come from the tree alone. No rule reads them.
-- **PROPERTY** features are properties, and **PART** features are parts. The configuration keeps the short names of the two types: `features.is` configures the PROPERTY features and `features.has` the PART features, and the `type` column of `features.csv` says `is` or `has`.
+- **PROPERTY** features are properties, and **PART** features are parts. The type names follow the labels since stage a6 of the world-and-language refactor: `features.property` configures the PROPERTY features and `features.part` the PART features, and the `type` column of `features.csv` says `property` or `part`. The old keys and type names (`is`, `has`) fail with an error that names the new ones.
 - **Scalar** dimensions (`SCALARDIM.<n>`) are continuous values, such as size. Scalars are off unless the configuration turns them on.
 
 PROPERTY and PART features are either **free** or **determined**. A free feature's value comes from sampling and inheritance. A determined feature's value is computed by a rule from other features. A configured proportion of each type is determined.
@@ -129,7 +129,7 @@ CATEGORY.1.2,CATEGORY.1,2,0,3
 
 ### `features.csv`
 
-One row per feature: `label`, `type` (`isa`, `is`, `has`, or `scalar`), `kind` (`free` or `determined`), `layer`, and `base_rate` (free binary features only).
+One row per feature: `label`, `type` (`isa`, `property`, `part`, or `scalar`), `kind` (`free` or `determined`), `layer`, and `base_rate` (free binary features only).
 
 ### `rules.yaml`
 
@@ -242,7 +242,7 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | --- | --- | --- |
 | `name` | `default` | Names the output folder. |
 | `seed` | 1 | The master seed. |
-| `features.is.count`, `features.has.count` | 40, 40 | Number of PROPERTY and PART features. |
+| `features.property.count`, `features.part.count` | 40, 40 | Number of PROPERTY and PART features. |
 | `features.<type>.proportion_determined` | 0.25 | Proportion of PROPERTY or PART features computed by rules. |
 | `features.<type>.expected_true_free` | 6 | Expected number of true free features per object. Base rate = this number ÷ the number of free features. |
 | `features.base_rate_override` | null | One base rate for every free feature. |
@@ -253,8 +253,8 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | `rules.negation_probability` | 0.2 | Probability that a rule input is negated. |
 | `rules.arity_3_families` | equal | Weights over SHJ types I–VI and `compositional` for 3-input rules. |
 | `rules.nesting_depth` | `{1: 0.5, 2: 0.5}` | Weights over nesting depth, for rules with 4 or more inputs. |
-| `rules.input_type_weights` | `{is: 1, has: 1, scalar: 1}` | Weights over input types. The scalar weight matters only when scalars are on. |
-| `rules.overrides` | `{}` | Different rule settings for PROPERTY (`is`) or PART (`has`) outputs, for example `{has: {arity: {2: 1, 3: 1}}}`. |
+| `rules.input_type_weights` | `{property: 1, part: 1, scalar: 1}` | Weights over input types. The scalar weight matters only when scalars are on. |
+| `rules.overrides` | `{}` | Different rule settings for PROPERTY (`property`) or PART (`part`) outputs, for example `{part: {arity: {2: 1, 3: 1}}}`. |
 | `rules.allow_duplicate_rules` | false | Whether two determined features can have identical rules. |
 | `rules.variance_bound` | null | `[low, high]`: resample rules whose expected proportion of true outputs falls outside the range. |
 | `rules.source`, `rules.file` | automatic, null | Set `source: file` and name a rule file to use rule templates and explicit rules (see below). |
@@ -304,7 +304,7 @@ explicit:
   - {output: PROPERTY.35, expression: "(PART.2 AND NOT PROPERTY.5) OR PROPERTY.7"}
 ```
 
-The rule file's path is read relative to the configuration file's folder. A template applies to PROPERTY outputs (`is`), PART outputs (`has`), or both. The requirement of a one-place event type is given by hand in the world's event file, not in a rule file.
+The rule file's path is read relative to the configuration file's folder. A template applies to PROPERTY outputs (`property`), PART outputs (`part`), or both. The requirement of a one-place event type is given by hand in the world's event file, not in a rule file.
 
 ## Where CAN features and verbs went
 
@@ -346,7 +346,7 @@ event_type,level,agent,patient,true_pairs,total_pairs,proportion,estimated
 EVENTTYPE2.1.1,1,CATEGORY.1,CATEGORY.1,16,30,0.533333,false
 ```
 
-**Event-type parameters.** `event_types.binary` takes the keys of the old `verbs` block, without `projections`: `features` (`{count: 12, expected_true: 3}`), `taxonomy` (3 superordinates, depth 2, branching `[2, 3]`), `inheritance` (0.4 defining, 0.4 characteristic, 0.9 copy probability), `own_constraint` (true), `constraint_families` (equal weights), `key_lock_pairs` (`{1: 0.5, 2: 0.3, 3: 0.2}`), `comparison` (windows 0.3, cross-dimension 0.2), `rules` (the taxonomy's rule settings), `pairs` (1000 true, 1000 false, `max_exact_pairs`), `density` (`{min: 0.0, max: 1.0, max_tries: 200}`: the degenerate check), and `constraint_min_density` (null). `event_types.unary` takes `count` (20) and `rules` (overrides of the taxonomy's rule settings for the requirements). `config.yaml` of a world run shows every value.
+**Event-type parameters.** `event_types.binary` takes the keys of the old `verbs` block, without `projections`: `features` (`{count: 12, expected_true: 3}`), `taxonomy` (3 superordinates, depth 2, branching `[2, 3]`; `data/world/default.yaml` sets 5 superordinates with 4 event types each, so that the default world has 20 two-place event types, as many as its one-place ones), `inheritance` (0.4 defining, 0.4 characteristic, 0.9 copy probability), `own_constraint` (true), `constraint_families` (equal weights), `key_lock_pairs` (`{1: 0.5, 2: 0.3, 3: 0.2}`), `comparison` (windows 0.3, cross-dimension 0.2), `rules` (the taxonomy's rule settings), `pairs` (1000 true, 1000 false, `max_exact_pairs`), `density` (`{min: 0.0, max: 1.0, max_tries: 200}`: the degenerate check), and `constraint_min_density` (null). `event_types.unary` takes `count` (20) and `rules` (overrides of the taxonomy's rule settings for the requirements). `config.yaml` of a world run shows every value.
 
 ## Using the generator from Python
 

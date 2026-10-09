@@ -36,8 +36,8 @@ TAXONOMY = {
     "name": "contrastive_example",
     "seed": 1,
     "features": {
-        "is": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
-        "has": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
+        "property": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
+        "part": {"count": 12, "proportion_determined": 0.25, "expected_true_free": 3},
     },
     "taxonomy": {"superordinates": 3, "depth": 2, "branching": 4},
     "instances": {"per_leaf": 1},

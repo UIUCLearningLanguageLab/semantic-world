@@ -11,16 +11,26 @@ the share of quiescent episodes; the number of times each event type's precondit
 redrawn because it was never legal (``precondition_redraws``); and, for each event type still
 never legal, why: ``never_able`` (no entity, or no ordered pair, meets its requirement) or
 ``preconditions`` (its preconditions were never met in the episodes, after the redraws).
+The ``relations`` block reports what the taxonomy's ``summary.yaml`` reported about the
+two-place event types before stage a5b: the counts of event-type features, categories, event
+types, and constraints, the constraints by family, the share of approximate projections, whether
+the relation proportions were estimated from a sample of pairs, the event types with fewer sampled
+pairs than requested, and the event types the generator could not bring inside the density range
+(stage a6, Jon's ruling 6 on the a5b questions). It is null in a world without two-place event
+types.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from semantic_world.world.event_types import EventTypes
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.history import History
+
+if TYPE_CHECKING:
+    from semantic_world.world.statics import StaticWorld
 
 
 def enabling_edges(event_types: EventTypes) -> list[tuple[str, str]]:
@@ -146,8 +156,38 @@ def episode_stats(
     }
 
 
+def relation_stats(statics: StaticWorld) -> dict[str, Any] | None:
+    """The ``relations`` block of ``world_stats.yaml``, or None without two-place event types."""
+    relations, projections, stats = statics.relations, statics.projections, statics.relation_stats
+    if relations is None or projections is None or stats is None or statics.event_tree is None:
+        return None
+    families: dict[str, int] = {}
+    for constraint in relations.constraints:
+        families[constraint.family] = families.get(constraint.family, 0) + 1
+    approximate = int(projections.agent_approximate.sum() + projections.patient_approximate.sum())
+    total = 2 * len(projections.event_type_labels)
+    block: dict[str, Any] = {
+        "event_type_features": len(statics.event_tree.features),
+        "event_type_categories": len(statics.event_tree.categories)
+        - len(statics.event_tree.event_types),
+        "event_types": len(statics.event_tree.event_types),
+        "constraints": len(relations.constraints),
+        "constraint_families": families,
+        "approximate_projections": round(approximate / total, 6) if total else 0.0,
+        "proportions_estimated": stats.estimated,
+        "pairs_short": {label: dict(short) for label, short in stats.pairs_short.items()},
+    }
+    if relations.event_type_density is not None:
+        block["outside_density"] = len(relations.outside_range)
+        block["outside_density_labels"] = list(relations.outside_range)
+    return block
+
+
 def world_stats(
-    fluents: Fluents, event_types: EventTypes, episodes: dict[str, Any] | None = None
+    fluents: Fluents,
+    event_types: EventTypes,
+    episodes: dict[str, Any] | None = None,
+    statics: StaticWorld | None = None,
 ) -> dict[str, Any]:
     leaves = event_types.leaves
     by_kind = {
@@ -191,5 +231,6 @@ def world_stats(
             "longest_chain": longest_chain([et.label for et in leaves], edges),
         },
         "absorbing_fluents": absorbing_fluents(event_types, fluents),
+        "relations": relation_stats(statics) if statics is not None else None,
         "episodes": episodes,
     }

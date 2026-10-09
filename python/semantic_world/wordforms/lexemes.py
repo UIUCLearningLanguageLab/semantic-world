@@ -20,7 +20,7 @@ happens to use never change which word a lexeme gets.
 
 **Two passes.** The assignment comes first. The inflect entries that name lexemes are then
 turned into inflected forms of whatever form each lexeme got, a marked form of branch-marker mode
-included (``W.12.M.2.AF.1``), and those forms are synthesized and embedded with the rest.
+included (``WORD.12.MARKER.2.AFFIX.1``), and those forms are synthesized and embedded with the rest.
 
 **Function words.** A request lists its function words in order of frequency in the corpus, and
 their forms depend on that order. So the function words are made after the assignment, and they

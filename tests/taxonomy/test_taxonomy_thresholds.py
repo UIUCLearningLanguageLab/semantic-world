@@ -37,8 +37,8 @@ DATA = REPO / "data" / "taxonomy"
 
 TINY_SCALARS = {
     "features": {
-        "is": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
-        "has": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
+        "property": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
+        "part": {"count": 8, "proportion_determined": 0.25, "expected_true_free": 2},
     },
     "taxonomy": {"superordinates": 2, "depth": 2, "branching": 2},
     "instances": {"per_leaf": 3},
@@ -130,8 +130,8 @@ def test_arity_pool_counts_scalars() -> None:
     # Two free PROPERTY features and three determined ones, whose rules want three inputs.
     small = {
         "features": {
-            "is": {"count": 5, "proportion_determined": 0.6, "expected_true_free": 1},
-            "has": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
+            "property": {"count": 5, "proportion_determined": 0.6, "expected_true_free": 1},
+            "part": {"count": 0, "proportion_determined": 0, "expected_true_free": 0},
         },
         "rules": {"arity": {3: 1}},
     }
@@ -145,20 +145,28 @@ def test_arity_pool_counts_scalars() -> None:
             {
                 **small,
                 "scalars": {"count": 1},
-                "rules": {"arity": {3: 1}, "input_type_weights": {"is": 1, "has": 1, "scalar": 0}},
+                "rules": {
+                    "arity": {3: 1},
+                    "input_type_weights": {"property": 1, "part": 1, "scalar": 0},
+                },
             }
         )
 
 
 def test_scalars_alone_can_feed_rules() -> None:
     only_scalars = {
-        "rules": {"input_type_weights": {"is": 0, "has": 0, "scalar": 1}, "arity": {1: 1, 2: 1}},
+        "rules": {
+            "input_type_weights": {"property": 0, "part": 0, "scalar": 1},
+            "arity": {1: 1, 2: 1},
+        },
         "scalars": {"count": 3},
     }
     config = config_from_mapping(only_scalars)
     assert config.rules.sampling.input_types == ()
     with pytest.raises(ConfigError) as error:
-        config_from_mapping({"rules": {"input_type_weights": {"is": 0, "has": 0, "scalar": 1}}})
+        config_from_mapping(
+            {"rules": {"input_type_weights": {"property": 0, "part": 0, "scalar": 1}}}
+        )
     assert error.value.field == "rules.input_type_weights"
 
 
@@ -211,13 +219,16 @@ def test_rules_read_threshold_literals() -> None:
 
 def test_threshold_weight_controls_their_use() -> None:
     _, none = rules_for(
-        {"scalars": {"count": 2}, "rules": {"input_type_weights": {"is": 1, "has": 1, "scalar": 0}}}
+        {
+            "scalars": {"count": 2},
+            "rules": {"input_type_weights": {"property": 1, "part": 1, "scalar": 0}},
+        }
     )
     assert not none.has_thresholds
     _, many = rules_for(
         {
             "scalars": {"count": 2},
-            "rules": {"input_type_weights": {"is": 1, "has": 1, "scalar": 60}},
+            "rules": {"input_type_weights": {"property": 1, "part": 1, "scalar": 60}},
         }
     )
     # At most one literal per scalar caps a rule at two thresholds.
@@ -229,7 +240,7 @@ def test_threshold_weight_controls_their_use() -> None:
         {
             "scalars": {"count": 4},
             "rules": {
-                "input_type_weights": {"is": 0, "has": 0, "scalar": 1},
+                "input_type_weights": {"property": 0, "part": 0, "scalar": 1},
                 "arity": {1: 1, 2: 1, 3: 1},
             },
         }
@@ -240,10 +251,13 @@ def test_threshold_weight_controls_their_use() -> None:
 def test_thresholds_in_layered_rules() -> None:
     chained = {
         "features": {
-            "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-            "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+            "property": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+            "part": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
         },
-        "rules": {"max_chain_depth": 3, "input_type_weights": {"is": 1, "has": 1, "scalar": 5}},
+        "rules": {
+            "max_chain_depth": 3,
+            "input_type_weights": {"property": 1, "part": 1, "scalar": 5},
+        },
         "scalars": {"count": 3},
     }
     for seed in range(3):
@@ -384,8 +398,8 @@ def test_bad_threshold_literals_in_explicit_rules(
 def test_threshold_literals_are_layer_zero_in_explicit_rules(tmp_path: Path) -> None:
     chained = {
         "features": {
-            "is": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
-            "has": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+            "property": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
+            "part": {"count": 20, "proportion_determined": 0.5, "expected_true_free": 3},
         },
         "rules": {"max_chain_depth": 2},
         "scalars": {"count": 1},
@@ -412,7 +426,7 @@ def test_expected_proportion_treats_thresholds_as_independent_inputs() -> None:
         {
             "scalars": {"count": 4},
             "rules": {
-                "input_type_weights": {"is": 0, "has": 0, "scalar": 1},
+                "input_type_weights": {"property": 0, "part": 0, "scalar": 1},
                 "arity": {1: 1, 2: 1},
                 "operator_mix": {"AND": 1},
                 "negation_probability": 0,
@@ -430,7 +444,7 @@ def test_expected_proportion_matches_simulation_with_scalars() -> None:
     config, rules = rules_for(
         {
             "scalars": {"count": 2},
-            "rules": {"input_type_weights": {"is": 1, "has": 1, "scalar": 10}},
+            "rules": {"input_type_weights": {"property": 1, "part": 1, "scalar": 10}},
         }
     )
     rng = np.random.default_rng(5)
@@ -490,7 +504,7 @@ def test_thresholds_are_fixed_everywhere_when_every_drift_is_zero(seed: int) -> 
         {
             **TINY_SCALARS,
             "scalars": {"count": 2, "drift": 0, "instance_drift": 0},
-            "rules": {"input_type_weights": {"is": 1, "has": 1, "scalar": 20}},
+            "rules": {"input_type_weights": {"property": 1, "part": 1, "scalar": 20}},
         },
         seed=seed,
     )
@@ -538,7 +552,7 @@ def test_fixed_thresholds_below_a_level() -> None:
             **TINY_SCALARS,
             "scalars": {"count": 2, "drift": schedule, "instance_drift": 0},
             "rules": {
-                "input_type_weights": {"is": 0, "has": 0, "scalar": 1},
+                "input_type_weights": {"property": 0, "part": 0, "scalar": 1},
                 "arity": {1: 1, 2: 1},
             },
         }
@@ -590,6 +604,9 @@ def test_infeasible_threshold_pool_is_reported() -> None:
         config_from_mapping(
             {
                 "scalars": {"count": 1},
-                "rules": {"input_type_weights": {"is": 0, "has": 0, "scalar": 1}, "arity": {2: 1}},
+                "rules": {
+                    "input_type_weights": {"property": 0, "part": 0, "scalar": 1},
+                    "arity": {2: 1},
+                },
             }
         )
