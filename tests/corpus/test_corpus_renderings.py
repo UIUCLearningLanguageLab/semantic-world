@@ -67,8 +67,8 @@ def test_formal_rendering(tiny_world) -> None:
     (noun,) = lexicon.lexemes_of("CATEGORY.1.1")
     (verb,) = lexicon.lexemes_of("EVENTTYPE1.2")
     # a content lexeme's gloss is its concept's label, and a function word's is its English gloss
-    assert formal([the, noun, verb]) == "the/LEXEME.38 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.24"
-    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.42"
+    assert formal([the, noun, verb]) == "the/LEXEME.42 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.28"
+    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.46"
     assert formal([]) == ""
     for lexeme in lexicon.lexemes:
         gloss, label = formal_word(lexeme).split("/")

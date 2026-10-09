@@ -77,6 +77,7 @@ python tests/taxonomy/make_golden_hashes.py                      # rewrite the t
 python -m semantic_world.world check-fixtures [tests/fixtures/world]   # run the Python runtime and the brute-force evaluator on every conformance fixture
 python -m semantic_world.world make-fixtures data/world/tiny.yaml [--out tests/fixtures/world] [--count N] [--steps N]   # regenerate the tiny world's fixtures (expected values from the brute-force evaluator)
 python tests/world/hand_world.py                                 # rewrite the hand-written fixtures from the hand world and its hand-typed cases
+python examples/two_place_levers.py [--seeds 1,2,3] [--only TEXT] [--out FILE]   # the default world with one setting changed at a time: the two-place share, the one-place capacity rate, and the two-place pair density (about half an hour)
 pytest tests/world                                               # the world package's tests alone (matrices, identity, derived values, the world generator, event types and relations, the runtime, the fixtures, episodes and histories)
 ```
 

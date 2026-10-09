@@ -948,12 +948,14 @@ def test_a_capacity_and_an_event_can_have_the_same_words(tiny) -> None:
                 read = interpret(sentence.tree, lexicon, sentence.referents, sentence.events)
                 assert read == sentence.plan
     # with "can" kept, or with the tense marked, each sentence has one reading
+    # ("can" itself expresses ABLE and ABLE_NOW alike, so a capacity with "can" keeps the
+    # reading able_now beside capacity)
     for grammar, expected in (
-        ({}, (("capacity",), ("event",))),
+        ({}, (("capacity", "able_now"), ("event",))),
         ({**BARE, "morphology": {"tense": {"enabled": True}}}, (("capacity",), ("event",))),
         (
             {"can_rate": {"instance": 1.0}, "morphology": {"aspect": {"enabled": True}}},
-            (("capacity",), ("event",)),
+            (("capacity", "able_now"), ("event",)),
         ),
     ):
         config, lexicon = tiny.config(grammar=grammar), tiny.lexicon(grammar=grammar)
@@ -984,11 +986,17 @@ QUANTIFIER_READINGS = {
 
 def test_readings_of_the_fixed_set(tiny) -> None:
     config, lexicon = tiny.config(), tiny.lexicon()
-    expected = {"instance": ("capacity",), "event": ("event",)}
     for name, plan in PLANS.items():
         sentence = realize(tiny, name)
         found = readings(sentence.tree, lexicon, config)
-        assert found == QUANTIFIER_READINGS.get(name, expected.get(plan.level)), name
+        if plan.level == "instance":
+            # a verb with "can" expresses ABLE and ABLE_NOW alike (lexicon.can_words: shared)
+            expected = (
+                ("capacity", "able_now") if plan.predication.kind in (CAN, VERB) else ("capacity",)
+            )
+        else:
+            expected = ("event",)
+        assert found == QUANTIFIER_READINGS.get(name, expected), name
     # which quantifiers "all" and "no" state is a setting of the language
     for words, universal in (("extensional", (ALL,)), ("either", (NEC_ALL, ALL))):
         config = tiny.config(quantifiers={"universal_words": words})
@@ -1012,7 +1020,8 @@ def test_readings_of_the_fixed_set(tiny) -> None:
         assert level in found[name]
     both = ("capacity", "event")
     assert {name for name, kinds in found.items() if kinds == both} == {"swims", "event", "ran"}
-    assert found["capacity"] == found["lacks"] == found["pronoun"] == ("capacity",)
+    assert found["capacity"] == ("capacity", "able_now")  # a negative capacity keeps "can"
+    assert found["lacks"] == found["pronoun"] == ("capacity",)
     assert found["generic"] == BARE_PLURAL and found["rule"] == ("generic", NEC_ALL)
     # a language whose events are always marked has no ambiguous sentence
     marked = {**BARE, "morphology": {"aspect": {"enabled": True}}}
@@ -1486,7 +1495,7 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
         "a report has a tense": SentencePlan(
             subject, Predication(CAN, "EVENTTYPE1.1", event="SCENE.1.EVENTINSTANCE.9")
         ),
-        "only a report of an event has a tense": SentencePlan(
+        "only a report of an event, or a sentence about a time point, has a tense": SentencePlan(
             subject, Predication(CAN, "EVENTTYPE1.1", tense="past")
         ),
         "a class-level relative clause holds": SentencePlan(

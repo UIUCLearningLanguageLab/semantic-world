@@ -54,6 +54,7 @@ def test_default_values() -> None:
     assert lexicon.named_proportion["patient_projection"] == 0.25
     assert all(v == 1.0 for k, v in lexicon.named_proportion.items() if k != "patient_projection")
     assert (lexicon.synonym_rate, lexicon.homonym_rate, lexicon.homonym_same_pos) == (0, 0, 0.5)
+    assert lexicon.can_words == "shared"
     documents = config.documents
     assert documents.count == 10000
     assert documents.mix == {
@@ -70,7 +71,14 @@ def test_default_values() -> None:
     assert documents.relation_fact_share is None
     assert documents.content_kind_weights == "equal"
     assert documents.progressive_rate == 0.3 and documents.one_aspect_per_event is True
-    assert config.propositions.negation_rate == {"class": 0.1, "instance": 0.1}
+    assert (documents.initial_state_rate, documents.result_rate) == (0.2, 0.5)
+    assert documents.blocked_rate == 0.1
+    assert config.propositions.negation_rate == {
+        "class": 0.1,
+        "instance": 0.1,
+        "state": 0.1,
+        "able_now": 0.8,
+    }
     assert config.propositions.rule_statement_rate == 0.3
     assert config.propositions.rule_max_literals is None
     assert config.propositions.restriction_rate == 0.1

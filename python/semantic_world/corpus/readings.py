@@ -6,7 +6,15 @@ one of three kinds of logical form, one for each level:
 - ``generic``: a class-level sentence, about a category ("penguins swim");
 - ``capacity``: an instance-level sentence, about what an instance is, has, or can do ("the
   penguin can swim");
-- ``event``: an event-level sentence, about what happened ("the penguin swam").
+- ``event``: an event-level sentence, about what happened ("the penguin swam");
+- ``state``: a sentence about a fluent at a time point ("the mouse was asleep", "the mouse
+  became asleep"): the predicate word is a state adjective, or ``become`` stands before it;
+- ``able_now``: what a participant could do at a time point ("the owl could not eat the
+  mouse"). With ``lexicon.can_words: shared``, "can" expresses ``ABLE`` and ``ABLE_NOW`` alike,
+  so a sentence about an instance with "can" has both the ``capacity`` and the ``able_now``
+  readings; with ``distinct``, "can" allows ``capacity`` only and the word ``can_now`` allows
+  ``able_now`` only. A tense marker beside the auxiliary leaves ``able_now`` alone, because a
+  capacity has no tense.
 
 A noun phrase shows whether it names a category or an instance, so a class-level sentence has the
 one level reading ``generic``, followed by its quantifier readings: the quantifiers that its
@@ -40,15 +48,24 @@ that every one of its verb phrases allows:
 from __future__ import annotations
 
 from semantic_world.corpus.config import Config
-from semantic_world.corpus.lexicon import Lexicon
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, Lexicon
 from semantic_world.corpus.propositions import ALL, COUNTERPART, MOST, NEC_ALL, NEC_NO, NO, SOME
 from semantic_world.corpus.realize import Tree, token_parts
-from semantic_world.corpus.world import CATEGORY_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX
+from semantic_world.corpus.world import (
+    CATEGORY_PREFIX,
+    FLUENT_PREFIX,
+    PROPERTY_PREFIX,
+    SCALAR_PREFIX,
+)
 
 GENERIC = "generic"
 CAPACITY = "capacity"
 EVENT = "event"
-READINGS = (GENERIC, CAPACITY, EVENT)
+STATE = "state"
+ABLE_NOW = "able_now"
+READINGS = (GENERIC, CAPACITY, EVENT, STATE, ABLE_NOW)
+LEVEL_READINGS = READINGS
+"""The readings that name a level, in the order they are listed."""
 QUANTIFIER_READINGS = (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO)
 """The quantifier readings of a class-level sentence, in the order they are listed."""
 
@@ -69,6 +86,12 @@ class _Reader:
         events = config.propositions
         self.bare_capacity = config.grammar.can_rate["instance"] < 1
         """Whether an instance's capacity can be said without ``can``."""
+        shared = config.lexicon.can_words == "shared"
+        self.auxiliary_readings: dict[str, set[str]] = {
+            "can": {CAPACITY, ABLE_NOW} if shared else {CAPACITY},
+            ABLE_NOW_WORD: {ABLE_NOW},
+        }
+        """The readings that "can" and ``can_now`` allow before a verb."""
         self.bare_event = (not morphology.tense.enabled or events.event_tense == "present") and (
             not morphology.aspect.enabled or config.documents.progressive_rate < 1
         )
@@ -179,7 +202,7 @@ class _Reader:
 
     def walk(self, node: Tree) -> set[str]:
         """The readings that every verb phrase below a node allows."""
-        allowed = {CAPACITY, EVENT}
+        allowed = {CAPACITY, EVENT, STATE, ABLE_NOW}
         previous: str | None = None
         for child in node[1:]:
             if isinstance(child, str):
@@ -197,15 +220,26 @@ class _Reader:
         phrase can leave out."""
         verb = self.child(node, "V")
         negated = self.child(node, "Neg") is not None
+        auxiliary = self.child(node, "AUX")
+        auxiliary_gloss = None if auxiliary is None else self.gloss(auxiliary)
+        if auxiliary_gloss is None and previous is not None:
+            auxiliary_gloss = previous
         if verb is None:
             adjective = self.child(node, "A")
-            if in_clause and negated and adjective is not None:
+            if adjective is not None:
                 concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
-                if concept.startswith(PROPERTY_PREFIX):
+                if concept.startswith(FLUENT_PREFIX) or auxiliary_gloss == "become":
+                    return {STATE}
+                if in_clause and negated and concept.startswith(PROPERTY_PREFIX):
                     # "that is not red" restricts its noun phrase, at any level
-                    return {CAPACITY, EVENT}
+                    return {CAPACITY, EVENT, STATE, ABLE_NOW}
             return {CAPACITY}
-        if negated or self.child(node, "AUX") is not None:
+        if auxiliary_gloss in self.auxiliary_readings:
+            allowed = set(self.auxiliary_readings[auxiliary_gloss])
+            if auxiliary is not None and self.marks(auxiliary) & _EVENT_MARKS:
+                allowed.discard(CAPACITY)  # a capacity has no tense
+            return allowed
+        if negated or auxiliary is not None:
             return {CAPACITY}
         if self.marks(verb) & _EVENT_MARKS:
             return {EVENT}

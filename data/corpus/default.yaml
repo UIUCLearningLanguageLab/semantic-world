@@ -13,11 +13,12 @@ seed: 1                          # the corpus's master seed, independent of the 
 world: {config: data/world/default.yaml, seed: 1}
 
 lexicon:
-  # the proportion of concepts of each type that get a word (state: stage a7)
+  # the proportion of concepts of each type that get a word (state: the fluents, whose words are state adjectives)
   named_proportion: {category: 1.0, property: 1.0, part: 1.0, state: 1.0, event_unary: 1.0, event: 1.0, event_category: 1.0, patient_projection: 0.25, scalar: 1.0}
   synonym_rate: 0.0              # the probability that a content concept gets a second lexeme
   homonym_rate: 0.0              # the probability that a content lexeme shares its word form
   homonym_same_pos: 0.5          # the share of homonym pairs within one part of speech
+  can_words: shared              # shared: "can" expresses ABLE and ABLE_NOW alike; distinct: ABLE_NOW gets a function word of its own (can_now)
 
 documents:
   count: 10000
@@ -31,9 +32,12 @@ documents:
   content_kind_weights: equal          # how a category document draws its next kind of content: each kind with the same chance (equal), or in proportion to the facts of each kind it can still state (proportional)
   progressive_rate: 0.3          # the share of event reports that are progressive; each report chooses its aspect
   one_aspect_per_event: true     # every report of one event in one document uses the aspect of its first report
+  initial_state_rate: 0.2        # the probability that the event sentence that first mentions a participant is followed by a sentence stating one of its fluents at the time point before the event
+  result_rate: 0.5               # the probability that an event sentence is followed by a sentence stating a change the event's own effects made
+  blocked_rate: 0.1              # the probability that an event sentence is followed by a sentence saying what a participant could not (or could) do at that time point
 
 propositions:
-  negation_rate: {class: 0.1, instance: 0.1}
+  negation_rate: {class: 0.1, instance: 0.1, state: 0.1, able_now: 0.8}   # state: initial-state sentences; able_now: blocked sentences ("could not" rather than "could")
   rule_statement_rate: 0.3       # share of feature-topic sentences that state rules
   rule_statements: {max_literals: null}   # a number skips the rule terms with more literals; null: no cap
   restriction_rate: 0.1          # the probability that a class-level subject takes a restriction ("red penguins")

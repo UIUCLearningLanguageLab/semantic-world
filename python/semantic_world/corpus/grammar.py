@@ -9,7 +9,8 @@ predication. It holds everything that the planner decides, and nothing that the 
   restriction (adjectives, with-phrases, and negated PROPERTY literals) and one relative clause;
 - a :class:`Predication` is the content of one verb phrase: a predicate, a polarity, an object
   noun phrase for a verb, and, at the event level, the event it reports with its tense and
-  aspect;
+  aspect. At the state, change, and able_now levels it holds the time point it is about
+  (``SCENE.8.TIME.2``) and the tense, and a change says ``become``;
 - a :class:`RelativeClause` is a subject relative, with one or more predications about the head
   joined by "and", or an object relative, with the clause's own subject (``agent``) and one verb.
 
@@ -39,10 +40,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from semantic_world.corpus.errors import CorpusError
+from semantic_world.corpus.histories import split_time_key
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     ALL,
     ASPECTS,
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     HAS,
@@ -57,6 +61,8 @@ from semantic_world.corpus.propositions import (
     QUANTIFIERS,
     SCALAR,
     SOME,
+    STATE,
+    STATE_KIND,
     TENSES,
     VERB,
     CategoryTerm,
@@ -132,7 +138,8 @@ class NounPhrase:
 @dataclass(frozen=True)
 class Predication:
     kind: str
-    """``is``, ``has``, ``can``, ``scalar``, ``member``, ``projection``, or ``verb``."""
+    """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
+    ``event_type2``, or ``state``."""
     label: str
     polarity: bool = True
     object: NounPhrase | None = None
@@ -143,9 +150,28 @@ class Predication:
     (``SCENE.8.EVENTINSTANCE.5``). In a test item it is the label of the scene (``SCENE.8``):
     some event of the scene."""
     tense: str | None = None
-    """Event level only: ``past`` or ``present``."""
+    """Event, state, change, and able_now levels: ``past`` or ``present``."""
     aspect: str | None = None
     """Event level only: ``simple`` or ``progressive``."""
+    time: str | None = None
+    """State, change, and able_now levels: the time point the verb phrase is about, qualified
+    by its scene (``SCENE.8.TIME.2``)."""
+    become: bool = False
+    """A change: the fluent came to have the value at the time point (``become``), rather than
+    held it (the copula)."""
+
+    @property
+    def timed(self) -> bool:
+        return self.time is not None
+
+    @property
+    def timed_level(self) -> str | None:
+        """``able_now``, ``change``, or ``state`` for a predication about a time point."""
+        if self.time is None:
+            return None
+        if self.kind in (CAN, VERB):
+            return ABLE_NOW
+        return CHANGE if self.become else STATE
 
 
 @dataclass(frozen=True)
@@ -173,7 +199,10 @@ class SentencePlan:
     def level(self) -> str:
         if self.subject.kind == CLASS_NP:
             return CLASS
-        return EVENT if self.predication.event is not None else INSTANCE
+        if self.predication.event is not None:
+            return EVENT
+        timed = self.predication.timed_level
+        return INSTANCE if timed is None else timed
 
     @property
     def bare_plural(self) -> bool:
@@ -204,6 +233,17 @@ class SentencePlan:
                 event=event_of(predication.event),
                 tense=predication.tense,
                 aspect=predication.aspect,
+            )
+        if predication.time is not None:
+            scene, time = split_time_key(predication.time)
+            return Proposition(
+                self.level,
+                self.subject.referent,
+                Predicate(predication.kind, predication.label, patient),
+                predication.polarity,
+                scene=scene,
+                time=time,
+                tense=predication.tense,
             )
         comparison = self.subject.noun if predication.kind == SCALAR else None
         return Proposition(
@@ -383,8 +423,28 @@ def _check_predication(
             f"a relative clause does not hold a predicate of kind {kind!r}: an IS literal, a "
             "scalar pole, and a HAS literal belong in the restriction"
         )
-    if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB):
+    if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND):
         raise GrammarError(f"unknown predicate kind {kind!r}")
+    if in_clause and predication.time is not None:
+        raise GrammarError("a relative clause is never about a time point")
+    if (kind == STATE_KIND) != (predication.time is not None and kind not in (CAN, VERB)):
+        raise GrammarError(
+            "a fluent is stated at a time point of a scene (a state or a change), and a time "
+            "point belongs to a fluent or to what was possible then (able_now)"
+        )
+    if predication.become and kind != STATE_KIND:
+        raise GrammarError("only a change of a fluent says become")
+    if predication.time is not None:
+        if level not in (STATE, CHANGE, ABLE_NOW) or subject.kind != INSTANCE_NP:
+            raise GrammarError("a sentence about a time point is about an instance")
+        if predication.event is not None or predication.aspect is not None:
+            raise GrammarError("a sentence about a time point reports no event and has no aspect")
+        if predication.tense not in TENSES:
+            raise GrammarError("a sentence about a time point has a tense (past or present)")
+        try:
+            split_time_key(predication.time)
+        except ValueError as error:
+            raise GrammarError(str(error)) from None
     if in_clause and level == CLASS and (kind not in (CAN, VERB) or not predication.polarity):
         raise GrammarError(
             "a class-level relative clause holds a one-place or a two-place event type, and is "
@@ -407,7 +467,11 @@ def _check_predication(
             raise GrammarError(
                 "a report has a tense (past or present) and an aspect (simple or progressive)"
             )
-    elif predication.tense is not None or predication.aspect is not None:
-        raise GrammarError("only a report of an event has a tense and an aspect")
+    elif predication.time is None and (
+        predication.tense is not None or predication.aspect is not None
+    ):
+        raise GrammarError(
+            "only a report of an event, or a sentence about a time point, has a tense"
+        )
     if predication.object is not None:
         _check_phrase(predication.object, level)

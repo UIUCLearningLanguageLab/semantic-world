@@ -20,12 +20,20 @@ There are four document types (``documents.mix``):
   ``entity.scenes`` scenes that involve the instance, in time order, scene by scene;
 - **situational narrative.** One scene. The document narrates its events in time order.
 
-In a narrative, an event sentence is followed by an instance-level description at
-``documents.instance_description_rate``: of the topic in an entity narrative, and of a
+In a narrative, an event sentence can be followed by four kinds of sentence, each at its rate,
+in this order: an initial-state sentence about each participant the event sentence first
+mentioned, stating one of its fluents at the time point before its first reported event
+(``documents.initial_state_rate``, negative at ``propositions.negation_rate.state``); a result
+sentence, stating one change that the event's own effects made in its step to a participant of
+the event, a base fluent or a derived fluent (``documents.result_rate``); a blocked sentence,
+saying what a participant of the event could not do at that time point, a binding that is able
+and not legal (``documents.blocked_rate``), or, at one minus
+``propositions.negation_rate.able_now``, could do and did not; and an instance-level description
+(``documents.instance_description_rate``): of the topic in an entity narrative, and of a
 participant of the event in a situational narrative, a newly introduced one first. Each report
 of an event chooses its aspect at ``documents.progressive_rate`` (CG.64); with
 ``documents.one_aspect_per_event`` every report of one event in one document uses the aspect of
-its first report.
+its first report. Modifiers stay static: a mention never states a fluent.
 
 **Restricted subjects.** The subject of a class-level fact takes a restriction ("red penguins")
 at ``propositions.restriction_rate``, and a restrictive relative clause ("penguins that can
@@ -68,7 +76,14 @@ from semantic_world.corpus.config import DOCUMENT_TYPES, Config
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.facts import Facts
 from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
-from semantic_world.corpus.histories import SceneEvent, SceneGenerator, involving, scene_events
+from semantic_world.corpus.histories import (
+    SceneEvent,
+    SceneGenerator,
+    involving,
+    scene_events,
+    time_key,
+    time_label,
+)
 from semantic_world.corpus.lexicon import Lexicon, build_lexicon
 from semantic_world.corpus.logical import logical_form
 from semantic_world.corpus.mentions import (
@@ -80,7 +95,9 @@ from semantic_world.corpus.mentions import (
     plan_for,
 )
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     HAS,
@@ -91,6 +108,8 @@ from semantic_world.corpus.propositions import (
     PROGRESSIVE,
     SCALAR,
     SIMPLE,
+    STATE,
+    STATE_KIND,
     UNIVERSALS,
     VERB,
     CategoryTerm,
@@ -98,12 +117,12 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
 )
-from semantic_world.corpus.readings import readings
+from semantic_world.corpus.readings import LEVEL_READINGS, readings
 from semantic_world.corpus.realize import Realizer, Sentence, as_json
 from semantic_world.corpus.renderings import propositional
 from semantic_world.corpus.streams import Streams
 from semantic_world.corpus.world import World, load_world
-from semantic_world.world.history import History
+from semantic_world.world.history import History, HistoryEvent
 
 CATEGORY, FEATURE, ENTITY, SITUATIONAL = DOCUMENT_TYPES
 
@@ -128,6 +147,13 @@ CONTRAST = "contrast"
 """A sibling contrast: it stays right after the fact it matches."""
 EVENT_SECTION = "event"
 DESCRIPTION = "description"
+INITIAL_STATE = "initial_state"
+RESULT = "result"
+BLOCKED = "blocked"
+NARRATIVE_SECTIONS = (EVENT_SECTION, INITIAL_STATE, RESULT, BLOCKED, DESCRIPTION)
+"""What a sentence of a narrative does: reports an event, states a participant's initial
+state, states a result of an event, says what a participant could or could not do then, or
+describes a participant."""
 POLE = "pole"
 """The strength of a scalar-pole fact, which takes no quantifier word."""
 
@@ -165,6 +191,10 @@ class DocumentSentence:
     @property
     def plan(self) -> SentencePlan:
         return self.sentence.plan
+
+    @property
+    def section_kind(self) -> str:
+        return self.section
 
     @property
     def bare_plural(self) -> bool:
@@ -295,7 +325,7 @@ def reading_counts(documents: Sequence[Document]) -> dict[str, Any]:
     for document in documents:
         for sentence in document.sentences:
             total += 1
-            levels = tuple(r for r in sentence.readings if r in ("generic", "capacity", "event"))
+            levels = tuple(r for r in sentence.readings if r in LEVEL_READINGS)
             ambiguous += len(levels) > 1
             key = "+".join(levels)
             sets[key] = sets.get(key, 0) + 1
@@ -357,6 +387,8 @@ class Planner:
             facts.features[IS] + facts.features[HAS] + facts.features[CAN] + facts.verbs
         )
         self._available: dict[str, dict[str, tuple[tuple, ...]]] = {}
+        self._tense = config.propositions.event_tense
+        self._derived_fluents = tuple(f for f in facts.fluents if f in self.world.derived_fluents)
 
     # Documents -------------------------------------------------------------------------------
 
@@ -909,6 +941,7 @@ class Planner:
         rate = self.config.documents.instance_description_rate
         items: list[_Item] = []
         stated: set = set()
+        settings = self.config.documents
         for scene in scenes:
             events = involving(scene, seed) if kind == ENTITY else scene_events(scene)
             for event in events:
@@ -918,9 +951,29 @@ class Planner:
                 if report is None:
                     continue  # no word can report the event
                 known = set(mentions.referents)
-                items.append(
-                    self._event_sentence(mention_rng, report, event, scene, mentions, aspects)
+                sentence = self._event_sentence(
+                    mention_rng, report, event, scene, mentions, aspects
                 )
+                items.append(sentence)
+                # the participants the sentence first mentioned, in the order of first mention
+                introduced = [p for p in mentions.referents if p not in known]
+                for participant in introduced:
+                    if len(items) < length and facts_rng.random() < settings.initial_state_rate:
+                        assert sentence.plan is not None
+                        step = self._first_step(sentence.plan, scene, participant, event)
+                        stated_state = self._initial_state(
+                            facts_rng, mention_rng, participant, scene, step, mentions
+                        )
+                        if stated_state is not None:
+                            items.append(stated_state)
+                if len(items) < length and facts_rng.random() < settings.result_rate:
+                    result = self._result(facts_rng, mention_rng, event, scene, mentions)
+                    if result is not None:
+                        items.append(result)
+                if len(items) < length and facts_rng.random() < settings.blocked_rate:
+                    blocked = self._blocked(facts_rng, mention_rng, event, scene, mentions)
+                    if blocked is not None:
+                        items.append(blocked)
                 if len(items) < length and facts_rng.random() < rate:
                     if kind == ENTITY:
                         about = seed
@@ -987,6 +1040,197 @@ class Planner:
         assert plan is not None
         mentions.end_sentence(event.agent)
         return _Item(EVENT_SECTION, report, plan)
+
+    # States, changes, and what was possible ------------------------------------------------
+
+    def _history_events(self, scene: History) -> dict[str, HistoryEvent]:
+        return {event.label: event for step in scene.steps for event in step.events}
+
+    def _first_step(
+        self, plan: SentencePlan, scene: History, participant: str, event: SceneEvent
+    ) -> int:
+        """The step of the earliest event the sentence reports that the participant takes part
+        in: the time point before it is where an initial-state sentence looks."""
+        by_label = {e.label: e for e in self.truth.events_of(scene.label)}
+        labels = [plan.predication.event]
+        for phrase in plan.noun_phrases():
+            if phrase.clause is not None:
+                labels += [p.event for p in phrase.clause.predications]
+        steps = [
+            by_label[label].step
+            for label in labels
+            if label is not None and label in by_label and by_label[label].involves(participant)
+        ]
+        return min(steps) if steps else event.step
+
+    def _timed(
+        self,
+        level: str,
+        subject: str,
+        predicate: Predicate,
+        polarity: bool,
+        scene: History,
+        step: int,
+    ) -> Proposition:
+        proposition = self.truth.grounded(
+            Proposition(
+                level,
+                subject,
+                predicate,
+                polarity,
+                scene=scene.label,
+                time=time_label(step),
+                tense=self._tense,
+            )
+        )
+        if proposition is None:
+            raise CorpusError(f"a {level} sentence about {scene.label} at step {step} is not true")
+        return proposition
+
+    def _timed_plan(
+        self, rng: np.random.Generator, proposition: Proposition, mentions: Mentions
+    ) -> SentencePlan:
+        """The plan of a timed proposition: its subject and its patient as the document's next
+        mentions, with static modifiers only."""
+        assert isinstance(proposition.subject, str)
+        predicate = proposition.predicate
+        subject = mentions.noun_phrase(rng, proposition.subject)
+        target = None
+        if isinstance(predicate.patient, str):
+            target = mentions.noun_phrase(rng, predicate.patient)
+        assert proposition.scene is not None and proposition.time is not None
+        plan = SentencePlan(
+            subject,
+            Predication(
+                predicate.kind,
+                predicate.label,
+                proposition.polarity,
+                target,
+                tense=proposition.tense,
+                time=time_key(proposition.scene, proposition.time),
+                become=proposition.level == CHANGE,
+            ),
+        )
+        mentions.end_sentence(proposition.subject)
+        return plan
+
+    def _initial_state(
+        self,
+        facts_rng: np.random.Generator,
+        rng: np.random.Generator,
+        participant: str,
+        scene: History,
+        step: int,
+        mentions: Mentions,
+    ) -> _Item | None:
+        """A sentence stating one of a participant's fluents at ``TIME.<step>``: the polarity
+        at ``propositions.negation_rate.state``, the fluent drawn among those with a word that
+        have the value then (the other polarity when none has)."""
+        fluents = self.facts.fluents
+        if not fluents:
+            return None
+        negative = bool(facts_rng.random() < self.config.propositions.negation_rate[STATE])
+        for polarity in (not negative, negative):
+            pool = [
+                f
+                for f in fluents
+                if self.truth.fluent_value(scene.label, step, participant, f) == polarity
+            ]
+            if pool:
+                break
+        else:
+            return None
+        fluent = pool[int(facts_rng.integers(len(pool)))]
+        proposition = self._timed(
+            STATE, participant, Predicate(STATE_KIND, fluent), polarity, scene, step
+        )
+        return _Item(INITIAL_STATE, proposition, self._timed_plan(rng, proposition, mentions))
+
+    def _result(
+        self,
+        facts_rng: np.random.Generator,
+        rng: np.random.Generator,
+        event: SceneEvent,
+        scene: History,
+        mentions: Mentions,
+    ) -> _Item | None:
+        """A sentence stating one change that the event's own effects made in its step: a base
+        fluent the event changed, or a derived fluent of a participant of the event that the
+        event's own changes alone bring to its new value. None when the event changed nothing
+        that has a word."""
+        truth = self.truth
+        named = set(self.facts.fluents)
+        recorded = self._history_events(scene)[event.label]
+        candidates = [
+            (change.entity, change.fluent, change.to)
+            for change in recorded.changes
+            if change.fluent in named
+        ]
+        step = event.step
+        for entity in [event.agent] + ([event.patient] if event.patient is not None else []):
+            for fluent in self._derived_fluents:
+                before = truth.fluent_value(scene.label, step, entity, fluent)
+                after = truth.fluent_value(scene.label, step + 1, entity, fluent)
+                if before != after and truth.made_by(
+                    scene.label, step, entity, fluent, event.label
+                ):
+                    candidates.append((entity, fluent, after))
+        if not candidates:
+            return None
+        entity, fluent, value = candidates[int(facts_rng.integers(len(candidates)))]
+        proposition = self._timed(CHANGE, entity, Predicate(STATE_KIND, fluent), value, scene, step)
+        return _Item(RESULT, proposition, self._timed_plan(rng, proposition, mentions))
+
+    def _blocked(
+        self,
+        facts_rng: np.random.Generator,
+        rng: np.random.Generator,
+        event: SceneEvent,
+        scene: History,
+        mentions: Mentions,
+    ) -> _Item | None:
+        """A sentence saying what a participant of the event could not do at the event's time
+        point (an event type with a word for which the binding is able and not legal), or, at
+        one minus ``propositions.negation_rate.able_now``, could do and did not do in that
+        step. The patient of a two-place event type is another participant of the scene."""
+        truth, facts = self.truth, self.facts
+        step = event.step
+        negative = bool(facts_rng.random() < self.config.propositions.negation_rate[ABLE_NOW])
+        agents = [event.agent] + ([event.patient] if event.patient is not None else [])
+        done = [e for e in truth.events_of(scene.label) if e.step == step]
+
+        def happened(label: str, agent: str, patient: str | None) -> bool:
+            return any(
+                e.agent == agent and e.patient == patient and label in truth.verb_names(e.type)
+                for e in done
+            )
+
+        candidates: list[tuple[str, str, str, str | None]] = []
+        for agent in agents:
+            bindings: list[tuple[str, str, str | None]] = [
+                (CAN, label, None) for label in facts.features[CAN]
+            ]
+            bindings += [
+                (VERB, label, patient)
+                for label in facts.verbs
+                for patient in scene.participants
+                if patient != agent
+            ]
+            for kind, label, patient in bindings:
+                if not truth.allows(label, agent, patient):
+                    continue
+                legal_now = truth.legal_at(scene.label, step, label, agent, patient)
+                if negative and not legal_now:
+                    candidates.append((kind, label, agent, patient))
+                elif not negative and legal_now and not happened(label, agent, patient):
+                    candidates.append((kind, label, agent, patient))
+        if not candidates:
+            return None
+        kind, label, agent, patient = candidates[int(facts_rng.integers(len(candidates)))]
+        proposition = self._timed(
+            ABLE_NOW, agent, Predicate(kind, label, patient), not negative, scene, step
+        )
+        return _Item(BLOCKED, proposition, self._timed_plan(rng, proposition, mentions))
 
     def _description(
         self,

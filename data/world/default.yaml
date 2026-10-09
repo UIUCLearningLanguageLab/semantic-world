@@ -1,8 +1,17 @@
-# The default world configuration. Every parameter is shown with its default value, except the
-# event-type tree: the default world has about as many two-place event types as one-place ones
-# (stage a6, Jon's ruling on the two-place share), so its tree is set larger than the code's
-# default of 3 superordinates with 2 to 3 event types each. See docs/specs/WORLD_AND_LANGUAGE.md,
-# "Configuration".
+# The default world configuration. Every parameter is shown with its default value, except five
+# settings of the event types, retuned so that the default world's events are not almost all
+# one-place (stage a6, Jon's ruling on the two-place share, and stage a7a, Jon's ruling on the
+# requirement densities): the event-type tree is larger than the code's default of 3
+# superordinates with 2 to 3 event types each; a two-place event type has no constraint of its
+# own beside those of its event-type features, so that a requirement is a conjunction of about
+# three constraints rather than four; the key-lock constraint family, the sparsest, has half the
+# weight of the others; the constraints weigh OR four times as much as AND and XOR, so that each
+# holds for more pairs; and the one-place requirements weigh AND three times as much as OR and
+# XOR, so that they hold for about half of the entities rather than two thirds. Two-place
+# requirements then hold for about a sixth of the ordered pairs of the default world, every
+# category of event types keeps a word, and about a third of the events of the statistics
+# episodes are two-place (docs/proposals/2026-10-09-world-stage-a7a-decisions.md). See
+# docs/specs/WORLD_AND_LANGUAGE.md, "Configuration".
 
 name: default
 seed: 1
@@ -15,9 +24,14 @@ fluents:
   initial_rates: [0.0, 0.2, 0.8, 1.0]        # each base fluent's initial rate is drawn from this list
 
 event_types:
-  unary: {count: 20, rules: {}}              # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
+  unary:                                      # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
+    count: 20
+    rules: {operator_mix: {AND: 3, OR: 1, XOR: 1}}   # stricter requirements than the taxonomy's equal mix (the code's default): about half of the entities meet one
   binary:                                     # the two-place event types (the old `verbs` block of the taxonomy); null turns them off
     taxonomy: {superordinates: 5, depth: 2, branching: 4}   # 20 two-place event types in 5 categories, as many as the one-place event types (the code's default is 3 superordinates with 2 to 3 each)
+    own_constraint: false                     # a requirement is the constraints of the event type's features alone (the code's default adds one constraint per event type)
+    constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 0.5, comparison: 1}   # the key-lock family holds for the fewest pairs (the code's default weighs every family 1)
+    rules: {operator_mix: {AND: 1, OR: 4, XOR: 1}}   # constraints that hold for more pairs than the taxonomy's equal mix (the code's default) gives
   preconditions:
     literals: {0: 0.3, 1: 0.5, 2: 0.2}        # weights over the number of an event type's own precondition literals
     feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal

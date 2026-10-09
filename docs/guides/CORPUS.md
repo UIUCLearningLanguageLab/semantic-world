@@ -6,7 +6,7 @@ The corpus is a controlled source of language for models. Settings decide which 
 
 This guide covers running the generator, the ideas behind it, the output files, the test sets, the configuration file, and the Python interface. The design is specified in `docs/specs/CORPUS_GENERATOR.md`, and every design decision is listed in `docs/DECISIONS.md`.
 
-**Status.** Complete on the world package (stages a5a and a5b of `docs/specs/WORLD_AND_LANGUAGE.md`): the lexicon, propositions and their truth, scenes as histories of the world, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline. Every label is the world's own, and nothing translates. States, changes, and causal statements in the documents come with stage a7.
+**Status.** Complete on the world package (stages a5a to a7a of `docs/specs/WORLD_AND_LANGUAGE.md`): the lexicon, propositions and their truth, scenes as histories of the world, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline. Every label is the world's own, and nothing translates. Since stage a7a, narratives state states and changes and what a participant could not do, and the test sets include state, `able_now`, and blocked-event sets. Causal statements and descriptions come with stage a7b.
 
 ## Quick start
 
@@ -30,7 +30,7 @@ The default corpus is 10,000 documents about the default world, `data/world/defa
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints `10000 documents, 89434 sentences, 389275 tokens, 10064 scenes, 16 test sets with 7790 pairs`, and takes about a minute and a half on a laptop.
+It prints `10000 documents, 99456 sentences, 465539 tokens, 10088 scenes, 27 test sets with 13208 pairs`, and takes about two minutes on a laptop.
 
 Two options change a run without editing the configuration:
 
@@ -46,16 +46,16 @@ The example configurations in `data/corpus/` are:
 
 ## One sentence, four renderings
 
-Every sentence is written four ways. Here is a sentence from an entity narrative of the tiny corpus (`DOC.2.SENT.6`):
+Every sentence is written four ways. Here is a sentence from an entity narrative of the tiny corpus (`DOC.19.SENT.3`):
 
 | Rendering | The sentence |
 | --- | --- |
-| Conceptual | `IT EVENTTYPE2.1.2 A PROPERTY.2 CATEGORY.1.1 THAT EVENTTYPE1.2` |
-| Formal | `it/LEXEME.51 EVENTTYPE2.1.2/LEXEME.28 a/LEXEME.37 PROPERTY.2/LEXEME.8 CATEGORY.1.1/LEXEME.2 that/LEXEME.50 EVENTTYPE1.2/LEXEME.24` |
-| Propositional | `CATEGORY.1.1(REF.3) AND PROPERTY.2(REF.3) AND EVENT(SCENE.2.EVENTINSTANCE.4, PAST, SIMPLE, EVENTTYPE1.2(REF.3)) AND EVENT(SCENE.2.EVENTINSTANCE.11, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.3))` |
-| Spelled | `ut ized ove cunshal sprost vay mickum` |
+| Conceptual | `THE PROPERTY.4 CATEGORY.2.1 THAT EVENTTYPE2.1.2 THE SCALARDIM.1.LOW CATEGORY.1.1 EVENTTYPE1.4` |
+| Formal | `the/LEXEME.42 PROPERTY.4/LEXEME.10 CATEGORY.2.1/LEXEME.5 that/LEXEME.54 EVENTTYPE2.1.2/LEXEME.32 the/LEXEME.42 SCALARDIM.1.LOW/LEXEME.39 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.4/LEXEME.30` |
+| Propositional | `CATEGORY.2.1(REF.1) AND PROPERTY.4(REF.1) AND CATEGORY.1.1(REF.2) AND SCALARDIM.1.LOW(REF.2, CATEGORY.1.1) AND EVENT(SCENE.16.EVENTINSTANCE.1, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.2)) AND EVENT(SCENE.16.EVENTINSTANCE.3, PAST, SIMPLE, EVENTTYPE1.4(REF.1))` |
+| Spelled | `eem camascuck clonstanzive ut skence eem tulden sprost cannagzus` |
 
-In English, with made-up glosses, the sentence says "it was eating a red penguin that dove". `CATEGORY.1.1` is a category, `PROPERTY.2` a property, `EVENTTYPE1.2` a one-place event type, and `EVENTTYPE2.1.2` a two-place one. The relative clause reports an earlier event of the same scene; the main clause reports a later one, in the progressive, whose agent is the document's topic, mentioned with "it".
+In English, with made-up glosses, the sentence says "the red owl that was eating the small penguin ran". `CATEGORY.2.1` and `CATEGORY.1.1` are categories, `PROPERTY.4` a property, `SCALARDIM.1.LOW` the low pole of a scalar dimension (small for a `CATEGORY.1.1`), `EVENTTYPE2.1.2` a two-place event type, and `EVENTTYPE1.4` a one-place one. The relative clause reports an earlier event of the same scene, in the progressive; the main clause reports a later one, whose agent is the document's topic.
 
 - **Conceptual.** The sentence's words in order, each replaced by its concept's label. The conceptual rendering is a perfectly tokenized version of the language: it has the same word order, morphology, and ambiguities as the spelled rendering, but every word is a symbol for its meaning.
 - **Formal.** Each word as its gloss and its lexeme label (`LEXEME.3`). It differs from the conceptual rendering only when synonyms are on, because two synonyms share a concept but are different lexemes.
@@ -92,6 +92,7 @@ Every concept of the world gets a word:
 | Every category, at every level | noun | penguin, bird, animal |
 | PROPERTY feature | adjective | red |
 | PART feature | part noun | fins |
+| Fluent (base or derived) | state adjective | asleep |
 | One-place event type | intransitive verb | swim |
 | Two-place event type | transitive verb | chase |
 | Category of two-place event types | transitive verb, more general | hunt |
@@ -99,9 +100,9 @@ Every concept of the world gets a word:
 | Scalar dimension | two adjectives, one per pole | big, small |
 | The generic noun | noun | thing |
 
-The language also has 15 function words: `a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that`, and `it`. Grammar settings can add more (see "Grammar").
+The language also has 16 function words: `a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that`, `it`, and `become`. Grammar settings can add more (see "Grammar"), and `lexicon.can_words: distinct` adds `can_now`, a word for what a participant could do at a time point (see "States, changes, and what was possible").
 
-The default world gives 206 lexemes: 191 content words and the 15 function words. One patient capacity in four gets a word (`lexicon.named_proportion.patient_projection: 0.25`). A two-place event type that is able for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such event types under `lexicon.event_types_without_word`. The concept type `state` is listed for stage a7, and names nothing yet.
+The default world gives 215 lexemes: 199 content words and the 16 function words. One patient capacity in four gets a word (`lexicon.named_proportion.patient_projection: 0.25`). A two-place event type, or a category of them, that is able for every pair of instances, or for none, gets no word, because it says nothing. `stats.yaml` lists such event types under `lexicon.event_types_without_word` (none in the default world). Every fluent gets a state adjective (`lexicon.named_proportion.state: 1.0`); the lexeme tells a state adjective from a static one, because it names a fluent.
 
 Two settings, both 0 by default, add lexical ambiguity. `lexicon.synonym_rate` gives a concept a second word. `lexicon.homonym_rate` makes two words of different concepts share one word form. `lexicon.named_proportion` leaves some concepts without a word, so propositions that need them are never stated.
 
@@ -127,11 +128,13 @@ ALL PROPERTY.2 THING WITH PART.1 HAS PART.8
 THING THAT IS NOT PROPERTY.2 CAN EVENTTYPE1.4
 ```
 
-A negated PROPERTY feature becomes a relative clause ("that is not red"). A rule statement's quantifier is `nec_all`, said with "all" or with a bare plural, as in the second line. The second line states a term of a one-place event type's requirement, which is a rule of the world package over the taxonomy's features. Rule statements are exempt from the limits on sentence length, because rules of every complexity must be stateable. In the default world, 94 of the 111 rule terms are stated. The rest read a scalar threshold, which no adjective states exactly, or have no instance.
+A negated PROPERTY feature becomes a relative clause ("that is not red"). A rule statement's quantifier is `nec_all`, said with "all" or with a bare plural, as in the second line. The second line states a term of a one-place event type's requirement, which is a rule of the world package over the taxonomy's features. Rule statements are exempt from the limits on sentence length, because rules of every complexity must be stateable. In the default world, 88 of the 102 rule terms are stated. The rest read a scalar threshold, which no adjective states exactly, or have no instance.
 
 **Instance level.** A statement about one instance: "the penguin can swim", "the penguin has stripes", "the penguin is a bird". Truth is read from the instance's own values.
 
 **Event level.** A report that something happened in a scene: "the owl chased the mouse". Every report has a tense and an aspect (simple or progressive), which the logical form always records, even when the language does not mark them. The event itself has no aspect: a document chooses the aspect of each report, at `documents.progressive_rate`, and both aspects are true of an event that happened. The report's grounding says whether the binding is `able` (the world allows it) and `legal` (its preconditions held at some time point of the scene).
+
+**State, change, and `able_now` levels.** Three levels about one participant of a scene at a time point (see "States, changes, and what was possible" below): a state, "the mouse was asleep"; a change, "the mouse became asleep"; and what a participant could or could not do then, "the owl could not eat the mouse". Their truth is read from the scene's history.
 
 Class-level and instance-level propositions can be negative: "penguins can not fly", "no fish have fur". About 10% are, by default (`propositions.negation_rate`). Events are never negated.
 
@@ -139,7 +142,17 @@ Class-level and instance-level propositions can be negative: "penguins can not f
 
 Narratives need things to happen, so the generator makes scenes. A scene is an episode of the world package. It starts with a seed instance and adds 2 to 6 other instances. Instances that are thematically related to the seed are more likely to join: a scene with an owl tends to have mice in it. Each scene then runs for 3 to 8 time steps. At each step, events are drawn among the events that are legal: the agent, or the agent and the patient, must be able to take part (the world's requirements), and the event type's preconditions on their fluents must hold. An event's effects change fluents, so later events depend on earlier ones, and the history records every change. `scenes.jsonl` holds the histories: each scene's seed, participants, initial fluent values, and the events of every step with their changes.
 
-Events never contradict the world. The selection policy is `scene.policy`: `uniform_event` (the default) draws uniformly among the legal events, so an event type that is legal for many bindings is drawn more often; `uniform_event_type` draws the kind of event by `scene.transitive_share`, then the event type, then the binding, as the old scene generator did. `scene.event_type_weights` rebalances the event types under either policy. In the default world, two-place events are rare: about 5% of the events of a scene have a patient, because the world has 20 one-place event types against 7 two-place ones, and a scene's few participants give far more able agents than able pairs.
+Events never contradict the world. The selection policy is `scene.policy`: `uniform_event` (the default) draws uniformly among the legal events, so an event type that is legal for many bindings is drawn more often; `uniform_event_type` draws the kind of event by `scene.transitive_share`, then the event type, then the binding, as the old scene generator did. `scene.event_type_weights` rebalances the event types under either policy. In the default world, about a third of the events of a scene have a patient (32% of the events of the world's statistics episodes): the world's two-place requirements hold for about a sixth of the ordered pairs of entities and its one-place requirements for about half of the entities, by the retuned settings of `data/world/default.yaml` (see `docs/guides/TAXONOMY.md`, "Where CAN features and verbs went"). `examples/two_place_levers.py` reports how each setting moves the share.
+
+### States, changes, and what was possible
+
+Events change state, and since stage a7a narratives say so. After an event sentence, three kinds of sentence can follow, each at its rate:
+
+- **An initial state.** When an event sentence first mentions a participant, a sentence states one of the participant's fluents at the time point before the participant's first reported event, at `documents.initial_state_rate` (default 0.2): "a mouse was asleep". It is negative ("was not asleep") at `propositions.negation_rate.state` (default 0.1). The proposition is `HOLDS(SCENE.8, TIME.2, PAST, BOOLFL.3(REF.1))`, or `NOT BOOLFL.3(REF.1)` inside for a negative state.
+- **A result.** At `documents.result_rate` (default 0.5), a sentence states one change that the event's own effects made in its step to a participant of the event: a base fluent the event changed, or a derived fluent that the event's own changes bring to its new value. "The mouse became awake" is `BECOME(SCENE.8, TIME.2, PAST, BOOLFL.3(REF.1))`: the fluent was false at `TIME.2` and true at `TIME.3`; `BECOME(..., NOT BOOLFL.3(REF.1))` is the opposite change. A change says nothing of its cause; its grounding records the event whose own effect made it (`caused_by`). An event that changed nothing with a word has no result sentence. In the default corpus, 26% of event sentences are followed by a result.
+- **A blocked event.** At `documents.blocked_rate` (default 0.1), a sentence says what a participant of the event could not do at that time point: an event type for which the binding is able (the world's requirement holds) and not legal (a precondition fails), "the owl could not eat the mouse", `NOT ABLE_NOW(SCENE.8, TIME.2, PAST, EVENTTYPE2.1.2(REF.1, REF.2))`. At one minus `propositions.negation_rate.able_now` (default 0.8), the sentence instead says what a participant could do and did not do in that step. `ABLE` holds the static facts fixed, and `ABLE_NOW` the state at a time point too.
+
+Mentions stay static: a definite mention never tells referents apart by a fluent. States and changes are realized with the copula or `become` and the state adjective; what was possible is said with "can" (`lexicon.can_words: shared`, the default: "can" expresses `ABLE` and `ABLE_NOW` alike, as in English) or with the function word `can_now` (`distinct`). The tense of such a sentence is marked on its auxiliary when the morphology realizes tense as a separate word, and not at all when tense is an affix, since an affix never joins a function word. A sentence's `readings` say `state` for a state or a change, and, with "can" shared, `capacity` and `able_now` for every sentence about an instance with "can". The propositional rendering writes the scene, the time point, and the tense in every case, so it stays unambiguous.
 
 ### Documents
 
@@ -152,7 +165,7 @@ The corpus mixes four document types (`documents.mix`):
 | Entity narrative | 20% | An instance | The instance's features, and the events it takes part in, across 2 to 5 scenes |
 | Situational narrative | 30% | A scene | The scene's events in time order, with descriptions of the participants |
 
-Narratives often end early. In the default corpus, about 74% of entity narratives and 63% of situational narratives end before their drawn length, because their scenes run out of events. `stats.yaml` reports the counts.
+Narratives often end early. In the default corpus, about 46% of entity narratives and 43% of situational narratives end before their drawn length, because their scenes run out of events (the follow-up sentences of stage a7a fill some of the length that events alone did not). `stats.yaml` reports the counts.
 
 A category document draws the kind of each sentence (membership, a fact about the topic, a fact about a subcategory, or a relation fact) with the same chance for each kind (`documents.content_kind_weights: equal`). With `proportional`, it draws the kind in proportion to the number of facts of that kind that it can still state; a category has far more relation facts to state than facts about itself, so most sentences of a category document are then relation facts. How a document divides its sentences among kinds of content is a choice of discourse, not a frequency of the world, so the balanced form is the default. Part of an encyclopedic document about category `CATEGORY.1`, in the conceptual rendering:
 
@@ -167,27 +180,28 @@ SOME CATEGORY.1 IS PROPERTY.1
 
 The first sentence is a bare plural that states `nec_all`: the taxonomy makes every `CATEGORY.1.1` a `CATEGORY.1`. The second says "all" for `nec_all`: a rule fixes the property for the subcategory. The third restricts its subject: a rule fixes the part for the `CATEGORY.1.1` that are `PROPERTY.8`. A sibling contrast follows a fact with the same predicate about a sibling of the topic, with the other polarity, at `documents.sibling_contrast_rate`.
 
-Sentences from a situational narrative:
+The first sentences of a situational narrative of the tiny corpus (`DOC.9`):
 
 ```
-A CATEGORY.2.1 EVENTTYPE1.2
-A CATEGORY.1.2 EVENTTYPE1.1
-IT CAN EVENTTYPE2.1 A CATEGORY.1.1
-THE CATEGORY.1.1 WITH PART.5 EVENTTYPE1.2
-THE SCALARDIM.1.HIGH CATEGORY.1.2 EVENTTYPE2.1.2 A CATEGORY.1.1
+A CATEGORY.1.1 EVENTTYPE2.1.2 A CATEGORY.1.1
+THE SCALARDIM.1.LOW CATEGORY.1.1 IS BOOLFL.1
+THE CATEGORY.1 WITH PART.5 AND WITHOUT PART.6 BECOME NOT BOOLFL.3
+A CATEGORY.1.2 EVENTTYPE1.2
+THE SCALARDIM.1.HIGH CATEGORY.1.1 THAT EVENTTYPE2.1.2 THE SCALARDIM.1.LOW CATEGORY.1.1 EVENTTYPE2.2.2 A CATEGORY.2.1
+THE CATEGORY.2.1 IS NOT BOOLFL.4
 ```
 
-In narratives, an instance is introduced with "a" and mentioned later with "the" or "it". A mention can name an instance by a higher category ("the bird" for a penguin). When a scene has two things that the noun fits, a definite mention adds adjectives or with-phrases until it picks out one: "the CATEGORY.1.1 with PART.5" against the other `CATEGORY.1.1`. The third sentence is a description of a participant, at `documents.instance_description_rate`: the `CATEGORY.1.2` can hunt a `CATEGORY.1.1`, said with the category of event types `EVENTTYPE2.1`.
+In narratives, an instance is introduced with "a" and mentioned later with "the" or "it". A mention can name an instance by a higher category ("the bird" for a penguin: `CATEGORY.1` for the `CATEGORY.1.1`). When a scene has two things that the noun fits, a definite mention adds adjectives or with-phrases until it picks out one: "the small CATEGORY.1.1" against "the big CATEGORY.1.1", or "the CATEGORY.1 with PART.5 and without PART.6". The second sentence states a participant's initial state, the third a result of the first event (the agent's `BOOLFL.3` became false), and the sixth the initial state of the participant the fifth sentence introduced (see "States, changes, and what was possible"). The fifth sentence reports an event with a relative clause that reports the first. A sentence like "it can EVENTTYPE2.1 a CATEGORY.1.1", at `documents.instance_description_rate`, is a description of a participant: it can hunt a `CATEGORY.1.1`, said with the category of event types `EVENTTYPE2.1`. A blocked sentence, "the CATEGORY.1.1 can not EVENTTYPE2.1 the CATEGORY.2.2", says what a participant could not do at that time point.
 
 **The document mix is a lever.** Which words occur together in a document depends on the document type. Narratives put thematically related things together. Category documents put taxonomic neighbors together, and, with their relation facts, thematically related things as well. In the default corpus:
 
 | Documents | Co-occurrence with thematic relatedness | Co-occurrence with taxonomic similarity |
 | --- | --- | --- |
-| Entity narratives | 0.46 | 0.21 |
-| Situational narratives | 0.39 | 0.17 |
-| Category documents | 0.22 | 0.50 |
-| Category documents, `relation_fact_share: 0` | 0.15 | 0.47 |
-| Feature documents | 0.17 | 0.26 |
+| Entity narratives | 0.72 | 0.18 |
+| Situational narratives | 0.58 | 0.15 |
+| Category documents | 0.18 | 0.43 |
+| Category documents, `relation_fact_share: 0` | 0.06 | 0.46 |
+| Feature documents | 0.36 | 0.12 |
 
 The numbers are Pearson's correlations over the 741 pairs of leaf categories, counting a leaf when its own noun appears (the last row comes from a run of 2,500 documents). Narratives carry the thematic signal and category documents the taxonomic one. The relation facts of a category document carry its small thematic signal, which `documents.relation_fact_share: 0` removes; `content_kind_weights: proportional` makes most of a category document's sentences relation facts, and moves its two correlations toward each other. `stats.yaml` also gives Spearman's correlations, the same correlations counted by referents, partial correlations that control each measure for the other, and a `check` block that says whether situational documents' co-occurrence tracks thematic relatedness more than encyclopedic documents' does, and taxonomic similarity less. In the default corpus, both hold, by both correlations and both counts.
 
@@ -214,7 +228,7 @@ aspect as a word:             THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 PRO
 
 With number on, verbs agree with their subjects (`number.agreement`), and `is` and `has` become `are` and `have` in the plural. Agreement holds across relative clauses, which creates long-distance dependencies. A word takes at most one affix.
 
-**Ambiguity.** The logical form is never ambiguous, but the surface can be. `grammar.can_rate` gives the share of capacities that say "can". At the class level, it is 0.5 by default, so "penguins can swim" and "penguins swim" both occur. At the instance level, it is 1.0, so "the penguin can swim" always has "can". With the instance rate below 1, and tense unmarked, "the penguin swim" can be a capacity or an event. Each sentence records its possible readings (`readings`), worked out from its words alone, and `stats.yaml` reports how many sentences are ambiguous. Under the default grammar, none are. A class-level sentence also lists the quantifiers its words allow: "all" allows `nec_all` in the default language, and a bare plural allows `nec_all` and `most`.
+**Ambiguity.** The logical form is never ambiguous, but the surface can be. `grammar.can_rate` gives the share of capacities that say "can". At the class level, it is 0.5 by default, so "penguins can swim" and "penguins swim" both occur. At the instance level, it is 1.0, so "the penguin can swim" always has "can". With the instance rate below 1, and tense unmarked, "the penguin swim" can be a capacity or an event. Each sentence records its possible readings (`readings`), worked out from its words alone, and `stats.yaml` reports how many sentences are ambiguous. Under the default grammar, the only ambiguous sentences are those about an instance with "can", which expresses a capacity (`ABLE`) and what was possible at a time point (`ABLE_NOW`) alike; `lexicon.can_words: distinct` removes the ambiguity with a second word. A class-level sentence also lists the quantifiers its words allow: "all" allows `nec_all` in the default language, and a bare plural allows `nec_all` and `most`.
 
 ## Reading the outputs
 
@@ -229,7 +243,7 @@ A run writes one folder:
 | `corpus_formal.txt`, `corpus_conceptual.txt`, `corpus_propositional.txt` | The same documents in the other renderings. |
 | `scenes.jsonl` | One history per scene: its seed, its participants, their initial fluent values, and the events of each time step with the changes they made. The schema is the world package's (`tests/fixtures/world/README.md`, "Histories"). |
 | `tests/<set>.jsonl` | The test sets (see "Test sets"). |
-| `stats.yaml` | Counts, lengths, the quantifier mix, ambiguity, mentions, the co-occurrence check, and the size of each test set. |
+| `stats.yaml` | Counts, lengths, the quantifier mix, the state, result, and blocked sentences (`states`), ambiguity, mentions, the co-occurrence check, and the size of each test set, with the share of `changed` items in each state set. |
 | `wordform_request.yaml`, `wordform_meanings.csv` | The request for the word-form pipeline (see "Spoken word forms"). |
 
 The text files are the easiest way into a corpus. For training a language model, one of the four `corpus*.txt` files is usually all we need.
@@ -240,10 +254,10 @@ Each document holds its `label`, `type`, `topic`, `scenes`, `referents` (each re
 
 - `label`, `tokens` (lexeme labels), and `words` (word-form labels, after rendering);
 - `text`, `formal`, `conceptual`, and `propositional`: the four renderings;
-- `tree`: the parse tree, as nested lists. The sentence above is `["S", ["NP-SBJ", ["Det", "LEXEME.37"], ["N", "LEXEME.3"], ["PP", ...], ["RC", ...]], ["VP", ["V", "LEXEME.25"]]]`. The subject and object are labeled by function, so a tree reads the same in every word order;
-- `logical_form`: the proposition as JSON, with its truth `grounding`: how the truth was decided, and the proportion it rests on. A predicate has a `kind` (`property`, `part`, `event_type1`, `event_type2`, `patient_capacity`, `scalar`, or `member`) and names its symbol under `label`; a scalar predicate adds its comparison `class`, and a two-place predicate its `patient`;
-- `referents`, `events`, `coreference`, and `distinguished`: for each noun phrase, the thing it refers to and the noun that names it; for each verb, the event it reports; and whether each definite mention picks out its referent alone;
-- `readings`: the kinds of meaning that the sentence's words allow: its level, and, for a class-level sentence, the quantifiers.
+- `tree`: the parse tree, as nested lists. The sentence "the CATEGORY.1.2 with PART.5 that EVENTTYPE1.1 EVENTTYPE1.3" of the tiny language is `["S", ["NP-SBJ", ["Det", "LEXEME.42"], ["N", "LEXEME.3"], ["PP", ...], ["RC", ...]], ["VP", ["V", "LEXEME.29"]]]`. The subject and object are labeled by function, so a tree reads the same in every word order;
+- `logical_form`: the proposition as JSON, with its truth `grounding`: how the truth was decided, and the proportion it rests on. The `level` is `class`, `instance`, `event`, `state`, `change`, or `able_now`; a sentence about a time point carries its `scene`, its `time` (`TIME.2`), and its `tense`. A predicate has a `kind` (`property`, `part`, `event_type1`, `event_type2`, `patient_capacity`, `scalar`, `member`, or `state`) and names its symbol under `label`, or, for a `state` predicate, under `fluent`; a scalar predicate adds its comparison `class`, and a two-place predicate its `patient`;
+- `referents`, `events`, `coreference`, and `distinguished`: for each noun phrase, the thing it refers to and the noun that names it; for each verb, the event it reports, or the time point it is about (`SCENE.8.TIME.2`); and whether each definite mention picks out its referent alone;
+- `readings`: the kinds of meaning that the sentence's words allow: its level (`generic`, `capacity`, `event`, `state`, or `able_now`), and, for a class-level sentence, the quantifiers.
 
 ## Test sets
 
@@ -253,7 +267,9 @@ Every corpus comes with test sets of matched pairs. Each true item is followed b
 | --- | --- |
 | Class | `class_predicate`, `class_subject`, `class_quantifier`, `class_role`, and law-like twins of the first three |
 | Instance | `instance_predicate`, `instance_subject`, `instance_role` |
-| Event | `event_predicate`, `event_subject`, `event_role`, each split into `_possible` and `_impossible` |
+| Event | `event_predicate`, `event_subject`, `event_role`, each split into `_possible`, `_blocked`, and `_impossible` |
+| State | `state_predicate` and `state_subject`, each split into `_changed` and `_unchanged` |
+| Able now | `able_now_predicate` and `able_now_subject`, each split into `_blocked` and `_impossible` |
 
 The changes are:
 
@@ -272,14 +288,16 @@ false:  ALL CATEGORY.1.2 HAS PART.8
 Three kinds of item have sets of their own:
 
 - **Law-like items.** A false `nec_all` or `nec_no` item whose extensional twin is true: every `CATEGORY.1.2` has `PART.8`, but no rule fixes it, so "all CATEGORY.1.2 have PART.8" is false as a law. No observation contradicts such an item, so it tests whether a model grasps lawfulness. These items are in the `_lawlike` sets. The pair above is one.
-- **Possible and impossible events.** A false event is one that never happened in its document's scenes. It is possible when the world allows the binding (the agent, or the pair, is `able`), and impossible when the world rules it out. A possible false event tests memory of the episode. An impossible one can be rejected by world knowledge alone. The grounding also says whether the event was `legal` at some time point of the scene.
-- **Items in context.** An instance-level or event-level item names a narrative document, and is tested as a continuation of it. "The penguin" in the item refers to that document's penguin.
+- **Possible, blocked, and impossible events.** A false event is one that never happened in its document's scenes. It is possible when its binding was legal at some time point of the scene (the requirement and the preconditions held, and the event still did not happen), blocked when the world allows the binding (the agent, or the pair, is `able`) but a precondition never held in the scene, and impossible when the world rules the binding out. A possible false event tests memory of the episode, a blocked one knowledge of the preconditions and the states, and an impossible one can be rejected by world knowledge alone.
+- **States.** A state item continues a situational narrative and states a fluent of one of its participants at the scene's final time point, `HOLDS(SCENE.8, TIME.6, PAST, BOOLFL.3(REF.1))`. The false item names another fluent that is false of the referent then (a predicate swap), or another participant of which the fluent is false (a subject swap). Each item is marked `changed` when the fluent's value at the final time point differs from its value at `TIME.1`, and a pair whose true or false item changed goes into the `_changed` set: only tracking what the events did can answer it. A pair in `_unchanged` can be answered from the initial state alone. `stats.yaml` gives the share of changed items in each state set (about half in the `_changed` sets of the default corpus).
+- **Able now.** An `able_now` item continues a situational narrative and says that a participant could do something at the scene's final time point, `ABLE_NOW(SCENE.8, TIME.6, PAST, EVENTTYPE1.3(REF.1))`. A false item is blocked (the binding is able, and not legal then) or impossible (not able), with the same two changes.
+- **Items in context.** An instance-level, event-level, state, or `able_now` item names a narrative document, and is tested as a continuation of it. "The penguin" in the item refers to that document's penguin.
 
 Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, and `seen`. An event item's aspect is drawn for the item, and its false item keeps it. True and false items never differ in the format of `input`, so the format never gives the answer away.
 
-**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 2% (`instance_role`) to about 99% (`event_predicate_possible`). `stats.yaml` gives the share for each set.
+**Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 2% (`instance_role`) to 96% (`event_predicate_possible`); the state and `able_now` items are about the scene's final time point, which no document states, so none is seen. `stats.yaml` gives the share for each set.
 
-The default corpus has 500 pairs in each set, except two: the default world runs out of law-like false items at 432 pairs (`class_predicate_lawlike`) and 358 pairs (`class_subject_lawlike`). `test_sets.size` sets the size, and `test_sets.changes` chooses the changes. Test-set settings never change the documents.
+The default corpus has 500 pairs in each set, except two: the default world runs out of law-like false items at 395 pairs (`class_predicate_lawlike`) and 313 pairs (`class_subject_lawlike`). `test_sets.size` sets the size, and `test_sets.changes` chooses the changes (the state and `able_now` sets take the predicate and subject changes). Test-set settings never change the documents.
 
 ## Spoken word forms
 
@@ -313,7 +331,11 @@ The most useful parameters:
 | `documents.relation_fact_share` | null | Share of relation facts in category documents; 0 leaves them out. Null leaves the share to `content_kind_weights`. |
 | `documents.progressive_rate` | 0.3 | Share of reports in the progressive aspect. With `documents.one_aspect_per_event` (true), a document reports an event in one aspect. |
 | `documents.sibling_contrast_rate` | 0.2 | How often a category fact is followed by a contrasting sibling fact. |
-| `propositions.negation_rate` | 0.1 | Share of negative propositions, by level. |
+| `documents.initial_state_rate` | 0.2 | How often a participant's first mention is followed by a sentence stating one of its fluents at the time point before its first event. |
+| `documents.result_rate` | 0.5 | How often an event sentence is followed by a sentence stating a change the event's own effects made. |
+| `documents.blocked_rate` | 0.1 | How often an event sentence is followed by a sentence saying what a participant could not (or could) do then. |
+| `propositions.negation_rate` | class 0.1, instance 0.1, state 0.1, able_now 0.8 | Share of negative propositions: at the class and instance levels, among initial-state sentences, and among blocked sentences ("could not" rather than "could"). |
+| `lexicon.can_words` | shared | Whether "can" expresses both `ABLE` and `ABLE_NOW` (`shared`), or `ABLE_NOW` gets the word `can_now` (`distinct`). |
 | `propositions.events.tense` | past | The tense of every report. |
 | `quantifiers.universal_words` | nec | What "all" and "no" state: the `nec` quantifiers, the `extensional` ones, or `either`. |
 | `quantifiers.most.usage_min` | 0.7 | The share from which a true `most` is stated. |
@@ -385,7 +407,7 @@ corpus = generate(config_from_mapping(settings))
 - **A document shorter than its range.** Narratives end when their events run out, and encyclopedic documents end when they have nothing more to say. `stats.yaml` reports drawn and achieved lengths for each type.
 - **A small test set.** A world can run out of true items for a set. `stats.yaml` reports the number of pairs in each set.
 - **"the run was not made from this corpus's request".** `render` needs a word-form run made from this corpus's own `wordform_request.yaml`. A corpus generated again with other settings needs a new word-form run.
-- **Too few words.** The word-form pipeline stops when its configuration makes fewer content words than the corpus has content lexemes. The default corpus has 191 content lexemes.
+- **Too few words.** The word-form pipeline stops when its configuration makes fewer content words than the corpus has content lexemes. The default corpus has 199 content lexemes.
 - **Relative paths.** Paths in a configuration are read from the folder the command runs in. Run from the root of the repository, as the examples do.
 
 ## Reference

@@ -49,7 +49,8 @@ def tiny_world():
 
 @pytest.fixture(scope="session")
 def default_world():
-    """The default world: 56 categories, 2 scalars, 7 two-place event types, and 8 fluents."""
+    """The default world: 56 categories, 2 scalars, 20 one-place and 20 two-place event types,
+    and 8 fluents."""
     return _world(DEFAULT_WORLD)
 
 

@@ -143,3 +143,13 @@ What the next stage (states, changes, causal statements, and descriptions) must 
 - **`world_stats.yaml`** carries `relations` beside `episodes`; `episodes.two_place_share` is the share Jon asked for.
 - **Timings.** The default world's static side builds in about a second; `define` with the statistics episodes takes about half a minute; the default corpus about 90 seconds; `pytest tests/corpus` about 11 minutes; the whole suite about 17 minutes alone (longer beside other runs).
 - **The reference runs** for this stage are kept outside the repository in `/Users/jon/Documents/Projects/semantic-world-reference/a6/` (the tiny corpus and its word forms from `main` at 0082b80, with the script that made them).
+
+## Jon's rulings (October 9, 2026, in the stage a7a prompt)
+
+Choices 1 to 9 are approved, and WM.E120 to WM.E128 are decided. The open questions are answered:
+
+1. **The augmented and mapped token labels** (choice 2): keep `<token>.AUGMENTED.<recipe>` and `<token>.MAPPED` as built. Jon added both rows to the "Labels" table of `docs/specs/WORLD_AND_LANGUAGE.md`.
+2. **The two-place share** (choice 6): handled by the retune of the default world's requirement densities in stage a7a (item 1 of its scope), not by the balanced policy. The stage a7a proposal file records the settings and the share reached.
+3. **The redraw fix** (choice 7): approved.
+
+Stage a7 is built in two halves, a7a and a7b; the split is recorded in the stage a7a proposal file.

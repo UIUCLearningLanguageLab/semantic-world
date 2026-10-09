@@ -18,7 +18,10 @@ The reading undoes the grammar's fixed choices:
   instance as its subject, a verb with ``can`` states a capacity, and a verb without ``can``
   reports an event or states a capacity. The words cannot tell the two apart when the tense and
   the aspect are not marked, so the record decides: the verb phrase reports the event that the
-  record gives, and states a capacity when the record gives none;
+  record gives, and states a capacity when the record gives none. A verb with ``can`` (or the
+  word ``can_now``) whose record gives a time point says what was possible then (``able_now``);
+- a state adjective (the word of a fluent) states the fluent at the time point the record
+  gives: a state with the copula, and a change with ``become``;
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
 
@@ -45,7 +48,8 @@ from semantic_world.corpus.grammar import (
     RelativeClause,
     SentencePlan,
 )
-from semantic_world.corpus.lexicon import Lexicon
+from semantic_world.corpus.histories import is_time_key
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, Lexicon
 from semantic_world.corpus.propositions import (
     CAN,
     HAS,
@@ -55,23 +59,32 @@ from semantic_world.corpus.propositions import (
     NO,
     PROJECTION,
     SCALAR,
+    STATE_KIND,
     VERB,
     Literal,
 )
 from semantic_world.corpus.realize import NP_LABELS, Tree, preorder, token_parts
-from semantic_world.corpus.world import ONE_PLACE_PREFIX, PATIENT_CAPACITY_PREFIX, SCALAR_PREFIX
+from semantic_world.corpus.world import (
+    FLUENT_PREFIX,
+    ONE_PLACE_PREFIX,
+    PATIENT_CAPACITY_PREFIX,
+    SCALAR_PREFIX,
+)
+
+ABLE_NOW_AUXILIARIES = ("can", ABLE_NOW_WORD)
 
 
 def interpret(
     tree: Tree,
     lexicon: Lexicon,
     referents: Sequence[tuple[str, str | None]] | Sequence[str],
-    events: Sequence[tuple[str, str, str] | None] = (),
+    events: Sequence[tuple[str, str, str | None] | None] = (),
     quantifier: str | None = None,
 ) -> SentencePlan:
     """The sentence plan that a tree realizes. ``referents`` gives the referent of every noun
     phrase, ``events`` the event of every verb phrase, as its label, its tense, and its aspect,
-    or None, in the order of the tree, and ``quantifier`` the quantifier of a class-level
+    or the time point a verb phrase is about (``SCENE.8.TIME.2``), its tense, and None, or
+    None, in the order of the tree, and ``quantifier`` the quantifier of a class-level
     sentence."""
     return _Reader(tree, lexicon, referents, events, quantifier).sentence()
 
@@ -238,7 +251,7 @@ class _Reader:
         if auxiliary is None and previous is not None:
             # an auxiliary that is not said again, when it fits the predicate word
             fits = (
-                (previous == "can" and verb is not None)
+                (previous in ABLE_NOW_AUXILIARIES and verb is not None)
                 or (previous in ("is", "are") and (adjective is not None or nominal is not None))
                 or (previous in ("has", "have") and nominal is not None)
             )
@@ -249,6 +262,17 @@ class _Reader:
             kind = CAN if concept.startswith(ONE_PLACE_PREFIX) else VERB
             patient = None if target is None else self.noun_phrase(target)
             report = self.event[id(node)]
+            if report is not None and is_time_key(report[0]):
+                if auxiliary not in ABLE_NOW_AUXILIARIES or subject_kind != INSTANCE_NP:
+                    raise GrammarError(
+                        "what was possible at a time point is said with can (or can_now) and an "
+                        "instance as its subject"
+                    )
+                time, tense, _ = report
+                return (
+                    Predication(kind, concept, polarity, patient, tense=tense, time=time),
+                    auxiliary,
+                )
             if report is None:
                 marks = self.marks(verb) & {"PAST", "PROGRESSIVE"}
                 if marks:
@@ -266,6 +290,28 @@ class _Reader:
             return Predication(kind, concept, polarity, patient, event, tense, aspect), auxiliary
         if adjective is not None:
             concept = self.concept(adjective)
+            if concept.startswith(FLUENT_PREFIX):
+                report = self.event[id(node)]
+                if report is None or not is_time_key(report[0]):
+                    raise GrammarError(
+                        f"the state adjective {concept} states a fluent at a time point, and no "
+                        "time point was given for its verb phrase"
+                    )
+                if auxiliary not in ("is", "are", "become"):
+                    raise GrammarError("a fluent is stated with the copula or with become")
+                time, tense, _ = report
+                become = auxiliary == "become"
+                return (
+                    Predication(
+                        STATE_KIND, concept, polarity, tense=tense, time=time, become=become
+                    ),
+                    auxiliary,
+                )
+            if self.event[id(node)] is not None:
+                raise GrammarError(
+                    f"the adjective {concept} is static, and a time point was given for its "
+                    "verb phrase"
+                )
             if concept.startswith(SCALAR_PREFIX):
                 kind = SCALAR
             elif concept.startswith(PATIENT_CAPACITY_PREFIX):

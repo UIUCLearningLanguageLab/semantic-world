@@ -9,6 +9,9 @@ They hold:
 - ``sentences``: counts by proposition level and by what a sentence does in its document, the
   share of negative sentences, the share of progressive reports among the event sentences, the
   lengths, and the depths of the relative clauses;
+- ``states``: the initial-state, result, and blocked sentences of the narratives, the share of
+  event sentences followed by a result sentence, and the share of blocked sentences that are
+  negative;
 - ``quantifiers``: the quantifier mix of the class-level sentences, by the quantifier of each
   fact (the strongest true one the language can state, which ``quantifiers.weights``
   reweights), and how many are said with a bare plural;
@@ -20,8 +23,9 @@ They hold:
   ``lexicon`` (with the event types that get no word), and ``rule_statements`` (with the rule
   terms that were skipped, and why);
 - ``cooccurrence``: the co-occurrence check;
-- ``test_sets``: for each test set, the number of pairs, and the share of its true items whose
-  logical form appears in a document.
+- ``test_sets``: for each test set, the number of pairs, the share of its true items whose
+  logical form appears in a document, and, for a state set, the share of its items marked
+  ``changed``.
 
 **The co-occurrence check.** Over the unordered pairs of leaves, we correlate within-document
 co-occurrence with thematic relatedness and with taxonomic similarity, separately for each
@@ -60,13 +64,25 @@ import polars as pl
 
 from semantic_world.corpus.config import DOCUMENT_TYPES
 from semantic_world.corpus.grammar import INSTANCE_NP
-from semantic_world.corpus.planner import POLE, Document, Planner, reading_counts
+from semantic_world.corpus.planner import (
+    BLOCKED,
+    EVENT_SECTION,
+    INITIAL_STATE,
+    POLE,
+    RESULT,
+    Document,
+    Planner,
+    reading_counts,
+)
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     CLASS,
     EVENT,
     INSTANCE,
+    LEVELS,
     PROGRESSIVE,
     QUANTIFIERS,
+    STATE,
 )
 from semantic_world.corpus.realize import token_parts
 from semantic_world.corpus.testsets import ItemSet
@@ -263,14 +279,31 @@ def _sentences(documents: Sequence[Document]) -> dict[str, Any]:
     progressive = sum(s.proposition.aspect == PROGRESSIVE for s in reports)
     return {
         "count": len(sentences),
-        "by_level": {level: levels[level] for level in (CLASS, INSTANCE, EVENT)},
+        "by_level": {level: levels[level] for level in LEVELS},
         "by_section": dict(sorted(Counter(s.section for s in sentences).items())),
         "negative_share": {
-            level: _share(negative[level], levels[level]) for level in (CLASS, INSTANCE)
+            level: _share(negative[level], levels[level])
+            for level in (CLASS, INSTANCE, STATE, ABLE_NOW)
         },
         "progressive_share": _share(progressive, len(reports)),
         "length_in_tokens": {**_summary(lengths), "histogram": _histogram(lengths)},
         "relative_clause_depth": _histogram([s.plan.depth() for s in sentences]),
+    }
+
+
+def _states(documents: Sequence[Document]) -> dict[str, Any]:
+    """The state, change, and blocked sentences of the narratives."""
+    sentences = [s for d in documents for s in d.sentences]
+    sections = Counter(s.section for s in sentences)
+    blocked = [s for s in sentences if s.section == BLOCKED]
+    negative = sum(not s.proposition.polarity for s in blocked)
+    return {
+        "initial_state_sentences": sections[INITIAL_STATE],
+        "result_sentences": sections[RESULT],
+        "blocked_sentences": sections[BLOCKED],
+        "event_sentences": sections[EVENT_SECTION],
+        "events_with_result_share": _share(sections[RESULT], sections[EVENT_SECTION]),
+        "blocked_negative_share": _share(negative, len(blocked)),
     }
 
 
@@ -348,6 +381,7 @@ def corpus_stats(
     return {
         "documents": _documents(documents),
         "sentences": _sentences(documents),
+        "states": _states(documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,
         "ambiguity": ambiguity,

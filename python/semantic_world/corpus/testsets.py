@@ -21,9 +21,20 @@ kinds of item have test sets of their own:
   world swims, but nothing fixes it. The ordinary sets hold only items that observing the
   instances could decide;
 - ``instance_<change>``;
-- ``event_<change>_possible`` and ``event_<change>_impossible``. A false event is one whose
-  binding is able (its requirement holds), or one that is not. Stage a7 splits the able ones
-  into those that were legal at some time point of the scene and those that were blocked.
+- ``event_<change>_possible``, ``event_<change>_blocked``, and ``event_<change>_impossible``.
+  A false event is one of three kinds: its binding was legal at some time point of the scene and
+  the event did not happen (``possible``), its binding is able and was never legal in the scene
+  (``blocked``), or its binding is not able (``impossible``);
+- ``state_<change>_changed`` and ``state_<change>_unchanged``. A state item continues a
+  situational narrative and states a fluent of one of its participants at the scene's final time
+  point. Each item is marked ``changed`` when the fluent's value at the final time point differs
+  from its value at ``TIME.1``; a pair whose true item or false item changed goes into the
+  ``_changed`` set, because only tracking what the events did can answer it, and a pair with
+  neither into ``_unchanged``;
+- ``able_now_<change>_blocked`` and ``able_now_<change>_impossible``. An ``able_now`` item
+  continues a situational narrative and says that a participant could do something at the
+  scene's final time point. A false item's binding is able and not legal then (``blocked``), or
+  not able (``impossible``).
 
 **Context.** An instance-level or event-level item names a narrative document, and is a
 continuation of it: its noun phrases are definite mentions of referents that the document has
@@ -67,13 +78,22 @@ import numpy as np
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.facts import Facts
 from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
-from semantic_world.corpus.histories import SceneEvent, is_scene_label
+from semantic_world.corpus.histories import (
+    SceneEvent,
+    is_event_label,
+    is_scene_label,
+    is_time_key,
+    time_index,
+    time_key,
+)
 from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.logical import logical_form
 from semantic_world.corpus.mentions import Mentions, clause_propositions, plan_for
-from semantic_world.corpus.planner import CONTENT_KINDS, RELATION, Document, Planner
+from semantic_world.corpus.planner import CONTENT_KINDS, RELATION, SITUATIONAL, Document, Planner
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     FEATURE_KINDS,
@@ -90,6 +110,9 @@ from semantic_world.corpus.propositions import (
     SCALAR,
     SIMPLE,
     SOME,
+    STATE,
+    STATE_KIND,
+    TIMED_LEVELS,
     VERB,
     CategoryTerm,
     Predicate,
@@ -98,7 +121,7 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import as_json
-from semantic_world.corpus.renderings import propositional
+from semantic_world.corpus.renderings import TIMED_OPERATORS, propositional
 from semantic_world.corpus.world import PROPERTY_PREFIX
 from semantic_world.world.history import History
 
@@ -110,8 +133,13 @@ CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, ROLE)
 
 LAWLIKE = "lawlike"
 POSSIBLE = "possible"
+BLOCKED = "blocked"
 IMPOSSIBLE = "impossible"
+CHANGED = "changed"
+UNCHANGED = "unchanged"
 _ORDINARY = ""
+ITEM_LEVELS = (CLASS, INSTANCE, EVENT, STATE, ABLE_NOW)
+"""The levels that have test sets, in file order (a change is stated in documents only)."""
 
 _DRAWS_PER_PAIR = 60
 _DRAWS = 300
@@ -123,8 +151,11 @@ LEVEL_CHANGES = {
     CLASS: (PREDICATE, SUBJECT, QUANTIFIER, ROLE),
     INSTANCE: (PREDICATE, SUBJECT, ROLE),
     EVENT: (PREDICATE, SUBJECT, ROLE),
+    STATE: (PREDICATE, SUBJECT),
+    ABLE_NOW: (PREDICATE, SUBJECT),
 }
-"""The changes that can apply at each level: only a class-level proposition has a quantifier."""
+"""The changes that can apply at each level: only a class-level proposition has a quantifier,
+and the state and ``able_now`` sets take a predicate swap and a subject swap."""
 
 INPUT_FIELDS = (
     "document",
@@ -174,10 +205,12 @@ def candidates(
         ]
 
     if change == PREDICATE:
-        if proposition.level == EVENT:
+        if proposition.level in (EVENT, ABLE_NOW):
             # an event is a two-place event type with a patient, or a one-place one: the kind
             # is kept
             return with_predicate(facts.verbs if predicate.kind == VERB else facts.features[CAN])
+        if predicate.kind == STATE_KIND:
+            return with_predicate(facts.fluents)
         if predicate.kind in FEATURE_KINDS:
             return with_predicate(facts.features[predicate.kind])
         if predicate.kind == PROJECTION:
@@ -202,7 +235,7 @@ def candidates(
         pool: Sequence[str]
         if instances is not None:
             pool = instances
-        elif proposition.level == EVENT:
+        elif proposition.level == EVENT or proposition.timed:
             scene = truth.scenes.get(proposition.scene)
             pool = () if scene is None else scene.participants
         else:
@@ -446,9 +479,15 @@ def input_problems(item: dict[str, Any]) -> list[str]:
             problems.append("the logical form names an event")
         if f"EVENT({form['scene']}, " not in item["propositional"]:
             problems.append("the propositional rendering does not name the scene")
+    elif form["level"] in TIMED_LEVELS:
+        operator = TIMED_OPERATORS[form["level"]]
+        if f"{operator}({form['scene']}, {form['time']}, " not in item["propositional"]:
+            problems.append("the propositional rendering does not name the scene and the time")
     for label in item["events"]:
-        if label is not None and not is_scene_label(label):
-            problems.append(f"the verb phrase names {label!r}, which is not a scene")
+        if label is not None and not (is_scene_label(label) or is_time_key(label)):
+            problems.append(
+                f"the verb phrase names {label!r}, which is not a scene or a time point"
+            )
     if (item["document"] is None) != (form["level"] == CLASS):
         problems.append("an instance-level or event-level item, and no other, names a document")
     return problems
@@ -498,17 +537,24 @@ class ItemSet:
 
     def stats(self) -> dict[str, Any]:
         seen = sum(true.meta["seen"] for true, _ in self.pairs)
-        return {
+        record = {
             "pairs": len(self.pairs),
             "true_items_seen": seen,
             "true_items_seen_share": round(seen / len(self.pairs), 6) if self.pairs else None,
         }
+        if self.level == STATE:
+            changed = sum(item.meta["changed"] for item in self.items)
+            record["items_changed"] = changed
+            record["items_changed_share"] = (
+                round(changed / len(self.items), 6) if self.items else None
+            )
+        return record
 
 
 def set_names(changes: Sequence[str]) -> tuple[tuple[str, str, str, str], ...]:
     """The test sets of a run, as ``(name, level, change, kind)``, in file order."""
     names: list[tuple[str, str, str, str]] = []
-    for level in (CLASS, INSTANCE, EVENT):
+    for level in ITEM_LEVELS:
         for change in changes:
             if change not in LEVEL_CHANGES[level]:
                 continue
@@ -521,7 +567,13 @@ def _kinds(level: str, change: str) -> tuple[str, ...]:
     if level == CLASS:
         # a role swap is about a verb, which is never judged by the fixed test
         return (_ORDINARY,) if change == ROLE else (_ORDINARY, LAWLIKE)
-    return (POSSIBLE, IMPOSSIBLE) if level == EVENT else (_ORDINARY,)
+    if level == EVENT:
+        return (POSSIBLE, BLOCKED, IMPOSSIBLE)
+    if level == STATE:
+        return (CHANGED, UNCHANGED)
+    if level == ABLE_NOW:
+        return (BLOCKED, IMPOSSIBLE)
+    return (_ORDINARY,)
 
 
 def _set_name(level: str, change: str, kind: str) -> str:
@@ -554,17 +606,19 @@ class TestSetBuilder:
                 label
                 for sentence in document.sentences
                 for label in sentence.sentence.event_labels
-                if label is not None
+                if label is not None and is_event_label(label)
             )
             self._reports[document.label] = tuple(labels)
         self.reporting = [d for d in self.narratives if self._reports[d.label]]
+        self.situational = [d for d in self.narratives if d.type == SITUATIONAL]
+        self._tense = self.config.propositions.event_tense
 
     # The sets --------------------------------------------------------------------------------
 
     def build(self) -> list[ItemSet]:
         """Every test set of the run, in file order."""
         sets: list[ItemSet] = []
-        for level in (CLASS, INSTANCE, EVENT):
+        for level in ITEM_LEVELS:
             for change in self.config.test_sets.changes:
                 if change in LEVEL_CHANGES[level]:
                     sets += self._group(level, change)
@@ -578,7 +632,13 @@ class TestSetBuilder:
         kinds = _kinds(level, change)
         pairs: dict[str, list[tuple[Item, Item]]] = {kind: [] for kind in kinds}
         used: set = set()
-        draw = {CLASS: self._draw_class, INSTANCE: self._draw_instance, EVENT: self._draw_event}
+        draw = {
+            CLASS: self._draw_class,
+            INSTANCE: self._draw_instance,
+            EVENT: self._draw_event,
+            STATE: self._draw_state,
+            ABLE_NOW: self._draw_able_now,
+        }
         idle = 0
         for _ in range(_DRAWS_PER_PAIR * self.size + _DRAWS if self.size else 0):
             open_kinds = {kind for kind in kinds if len(pairs[kind]) < self.size}
@@ -598,15 +658,16 @@ class TestSetBuilder:
             def accept(
                 candidate: Proposition,
                 document: Document | None = document,
+                true: Proposition = true,
                 open_kinds: set[str] = open_kinds,
             ) -> bool:
-                return self._kind(level, document, candidate) in open_kinds
+                return self._kind(level, document, true, candidate) in open_kinds
 
             referents = None if document is None else tuple(document.referents.values())
             false = falsify(self.facts, true, change, rng, instances=referents, accept=accept)
             if false is None:
                 continue
-            kind = self._kind(level, document, false)
+            kind = self._kind(level, document, true, false)
             assert kind is not None
             name = _set_name(level, change, kind)
             pair = self._pair(
@@ -622,17 +683,27 @@ class TestSetBuilder:
             for kind in kinds
         ]
 
-    def _kind(self, level: str, document: Document | None, false: Proposition) -> str | None:
-        """The kind of test set that a false item belongs to, or None for a false item that no
-        set takes."""
+    def _kind(
+        self, level: str, document: Document | None, true: Proposition, false: Proposition
+    ) -> str | None:
+        """The kind of test set that a pair belongs to, by its false item (and, for a state
+        pair, its true item too), or None for a false item that no set takes."""
         if level == CLASS:
             return LAWLIKE if law_like(self.truth, false) else _ORDINARY
         if level == INSTANCE:
             return _ORDINARY
         assert document is not None and false.grounding is not None
+        if level == STATE:
+            assert true.grounding is not None
+            changed = true.grounding["changed"] or false.grounding["changed"]
+            return CHANGED if changed else UNCHANGED
+        if level == ABLE_NOW:
+            return BLOCKED if false.grounding["able"] else IMPOSSIBLE
         if happened(self.truth, document.scenes, false):
             return None  # the words would be true of another scene
-        return POSSIBLE if false.grounding["able"] else IMPOSSIBLE
+        if false.grounding["legal"]:
+            return POSSIBLE
+        return BLOCKED if false.grounding["able"] else IMPOSSIBLE
 
     # True items ------------------------------------------------------------------------------
 
@@ -687,6 +758,74 @@ class TestSetBuilder:
         unnamed = self.truth.grounded(dataclasses.replace(report, event=None, grounding=None))
         return None if unnamed is None else (document, unnamed, False)
 
+    def _draw_state(
+        self, rng: np.random.Generator, change: str, aspects: np.random.Generator
+    ) -> tuple[Document, Proposition, bool] | None:
+        """A fluent with a word that holds of a participant of a situational narrative at the
+        scene's final time point."""
+        if not self.situational or not self.facts.fluents:
+            return None
+        document = self.situational[int(rng.integers(len(self.situational)))]
+        scene = document.scenes[0]
+        referents = tuple(document.referents.values())
+        instance = referents[int(rng.integers(len(referents)))]
+        final = time_index(scene.final)
+        fluents = self.facts.fluents
+        fluent = fluents[int(rng.integers(len(fluents)))]
+        if not self.truth.fluent_value(scene.label, final, instance, fluent):
+            return None
+        proposition = self.truth.grounded(
+            Proposition(
+                STATE,
+                instance,
+                Predicate(STATE_KIND, fluent),
+                scene=scene.label,
+                time=scene.final,
+                tense=self._tense,
+            )
+        )
+        return None if proposition is None else (document, proposition, False)
+
+    def _draw_able_now(
+        self, rng: np.random.Generator, change: str, aspects: np.random.Generator
+    ) -> tuple[Document, Proposition, bool] | None:
+        """Something a participant of a situational narrative could do at the scene's final
+        time point: an event type with a word, one-place or two-place with another participant
+        as its patient, whose binding is legal then."""
+        if not self.situational:
+            return None
+        document = self.situational[int(rng.integers(len(self.situational)))]
+        scene = document.scenes[0]
+        referents = tuple(document.referents.values())
+        agent = referents[int(rng.integers(len(referents)))]
+        final = time_index(scene.final)
+        facts, truth = self.facts, self.truth
+        options: list[tuple[str, str, str | None]] = [
+            (CAN, label, None) for label in facts.features[CAN]
+        ]
+        options += [
+            (VERB, label, patient)
+            for label in facts.verbs
+            for patient in referents  # a definite mention of a referent of the document
+            if patient != agent
+        ]
+        if not options:
+            return None
+        kind, label, patient = options[int(rng.integers(len(options)))]
+        if not truth.legal_at(scene.label, final, label, agent, patient):
+            return None
+        proposition = truth.grounded(
+            Proposition(
+                ABLE_NOW,
+                agent,
+                Predicate(kind, label, patient),
+                scene=scene.label,
+                time=scene.final,
+                tense=self._tense,
+            )
+        )
+        return None if proposition is None else (document, proposition, False)
+
     # Items -----------------------------------------------------------------------------------
 
     def _pair(
@@ -735,8 +874,10 @@ class TestSetBuilder:
                 meta["law_like"] = not truth and law_like(self.truth, proposition)
                 rule = proposition.rule
                 meta["rule"] = None if rule is None else {"feature": rule[0], "term": rule[1]}
-            elif level == EVENT:
+            elif level in (EVENT, ABLE_NOW):
                 meta["possible"] = proposition.grounding["able"]
+            elif level == STATE:
+                meta["changed"] = proposition.grounding["changed"]
             meta["grounding"] = proposition.grounding
             items.append(Item(record, meta, proposition))
         problems = format_differences(items[0].input, items[1].input)
@@ -801,6 +942,17 @@ class TestSetBuilder:
                     proposition.scene,
                     proposition.tense,
                     proposition.aspect,
+                )
+            elif proposition.timed:
+                assert proposition.scene is not None and proposition.time is not None
+                said = Predication(
+                    predicate.kind,
+                    predicate.label,
+                    proposition.polarity,
+                    target,
+                    tense=proposition.tense,
+                    time=time_key(proposition.scene, proposition.time),
+                    become=proposition.level == CHANGE,
                 )
             else:
                 said = Predication(predicate.kind, predicate.label, proposition.polarity, target)

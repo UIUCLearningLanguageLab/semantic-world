@@ -23,6 +23,13 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   ``EVENT(SCENE.8.EVENTINSTANCE.5, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.2))``. The tense
   and the aspect are always written. A test item names only the scene, ``EVENT(SCENE.8, PAST,
   SIMPLE, EVENTTYPE2.1.2(REF.1, REF.2))``: some event of the scene was this one;
+- a state is ``HOLDS(<scene>, <time point>, <tense>, <atom>)``: ``HOLDS(SCENE.8, TIME.2, PAST,
+  BOOLFL.3(REF.1))``, and a negative state has ``NOT`` before the atom. A change is ``BECOME``
+  with the same arguments: the fluent came to have the atom's value from that time point to the
+  next, ``BECOME(SCENE.8, TIME.2, PAST, NOT BOOLFL.3(REF.1))`` for the change to false. What was
+  possible at a time point is ``ABLE_NOW(SCENE.8, TIME.2, PAST, EVENTTYPE2.1.2(REF.1,
+  REF.2))``, and ``NOT ABLE_NOW(...)`` says that the binding was not legal then. The tense is
+  written in all three, as in ``EVENT``, so that the rendering parses back to the logical form;
 - ``REF.n`` is one individual, a referent of the document, and ``VAR.n`` is a variable bound by
   a quantifier;
 - a class-level form is a quantifier with a restrictor and a scope:
@@ -53,8 +60,11 @@ from typing import Any
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.lexicon import THING, Lexeme
 from semantic_world.corpus.propositions import (
+    _JSON_KEY,
+    ABLE_NOW,
     ALL,
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     HAS,
@@ -69,6 +79,9 @@ from semantic_world.corpus.propositions import (
     PROJECTION,
     SCALAR,
     SOME,
+    STATE,
+    STATE_KIND,
+    TIMED_LEVELS,
     VERB,
     CategoryTerm,
     Clause,
@@ -80,6 +93,7 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.world import (
     CATEGORY_PREFIX,
+    FLUENT_PREFIX,
     ONE_PLACE_PREFIX,
     PART_PREFIX,
     PATIENT_CAPACITY_PREFIX,
@@ -155,6 +169,27 @@ class Report:
 
     def __str__(self) -> str:
         return f"EVENT({self.event}, {self.tense.upper()}, {self.aspect.upper()}, {self.body})"
+
+
+@dataclass(frozen=True)
+class Timed:
+    """A state (``HOLDS``), a change (``BECOME``), or what was possible (``ABLE_NOW``) at a
+    time point of a scene: the operator, the scene, the time point, the tense, and the atom,
+    negated inside for a state or a change (the fluent's value), and outside for ``ABLE_NOW``
+    (``Not(Timed(...))``)."""
+
+    operator: str
+    scene: str
+    time: str
+    tense: str
+    body: Any
+
+    def __str__(self) -> str:
+        return f"{self.operator}({self.scene}, {self.time}, {self.tense.upper()}, {self.body})"
+
+
+TIMED_OPERATORS = {STATE: "HOLDS", CHANGE: "BECOME", ABLE_NOW: "ABLE_NOW"}
+_LEVEL_OF_OPERATOR = {operator: level for level, operator in TIMED_OPERATORS.items()}
 
 
 @dataclass(frozen=True)
@@ -248,10 +283,30 @@ def _predication(
     patient: str | None,
     polarity: bool = True,
     report: tuple[str, str, str] | None = None,
+    timed: tuple[str, str, str, str] | None = None,
 ) -> Any:
-    """The proposition of one predicate: an atom, a capacity, or an event."""
+    """The proposition of one predicate: an atom, a capacity, an event, or, with ``timed`` (the
+    level, the scene, the time point, and the tense), a state, a change, or what was
+    possible."""
     kind = predicate["kind"]
-    label = predicate[LABEL_KEY]
+    label = predicate[_JSON_KEY[kind]]
+    if timed is not None:
+        level, scene, time, tense = timed
+        if kind == STATE_KIND:
+            atom = Atom(label, (subject,))
+            return Timed(
+                TIMED_OPERATORS[level], scene, time, tense, atom if polarity else Not(atom)
+            )
+        if kind == VERB:
+            if patient is None:
+                raise RenderingError(f"the verb {label} has no patient")
+            atom = Atom(label, (subject, patient))
+        else:
+            atom = Atom(label, (subject,))
+        body = Timed(TIMED_OPERATORS[level], scene, time, tense, atom)
+        return body if polarity else Not(body)
+    if kind == STATE_KIND:
+        raise RenderingError(f"the fluent {label} is stated at a time point of a scene")
     if kind == VERB:
         if patient is None:
             raise RenderingError(f"the verb {label} has no patient")
@@ -325,11 +380,13 @@ def formula(form: dict[str, Any], referents: str = "local") -> Formula:
     if "patient" in predicate:
         parts += mention_parts(predicate["patient"])
         patient = name(predicate["patient"])
-    report = None
+    report = timed = None
     if form["level"] == EVENT:
         # a test item names no event: it is written with the label of its scene
         report = (form["event"] or form["scene"], form["tense"], form["aspect"])
-    main = _predication(predicate, name(form["subject"]), patient, form["polarity"], report)
+    elif form["level"] in TIMED_LEVELS:
+        timed = (form["level"], form["scene"], form["time"], form["tense"])
+    main = _predication(predicate, name(form["subject"]), patient, form["polarity"], report, timed)
     # a noun phrase said twice gives the same proposition twice: it is written once
     return tuple(dict.fromkeys(part for part in parts if part != main)) + (main,)
 
@@ -404,6 +461,21 @@ class _Parser:
             body = self.conjunction()
             self.take(")")
             return Exists(variable, body)
+        if word in _LEVEL_OF_OPERATOR:
+            scene = self.take()
+            self.take(",")
+            time = self.take()
+            self.take(",")
+            tense = self.take().lower()
+            self.take(",")
+            body = self.item()
+            self.take(")")
+            inner = body.body if isinstance(body, Not) else body
+            if not isinstance(inner, Atom) or (
+                isinstance(body, Not) and word == TIMED_OPERATORS[ABLE_NOW]
+            ):
+                raise RenderingError(f"{word} holds an atom in {self.text!r}")
+            return Timed(word, scene, time, tense, body)
         if word == NEC:
             inner = self.item()
             self.take(")")
@@ -438,6 +510,7 @@ def _kind(label: str) -> str:
     for prefix, kind in (
         (PROPERTY_PREFIX, IS),
         (PART_PREFIX, HAS),
+        (FLUENT_PREFIX, STATE_KIND),
         (PATIENT_CAPACITY_PREFIX, PROJECTION),
         (ONE_PLACE_PREFIX, CAN),
         (SCALAR_PREFIX, SCALAR),
@@ -520,6 +593,25 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         )
     polarity = not isinstance(main, Not)
     body = main if polarity else main.body
+    if isinstance(body, Timed):
+        level = _LEVEL_OF_OPERATOR[body.operator]
+        inner = body.body
+        if isinstance(inner, Not):
+            polarity, inner = False, inner.body
+        kind = _kind(inner.label)
+        subject = names.get(inner.arguments[0], inner.arguments[0])
+        patient = None
+        if kind == VERB:
+            patient = names.get(inner.arguments[1], inner.arguments[1])
+        return Proposition(
+            level,
+            subject,
+            Predicate(kind, inner.label, patient),
+            polarity,
+            scene=body.scene,
+            time=body.time,
+            tense=body.tense,
+        )
     atom = body.body if isinstance(body, Able | Report) else body
     kind = _kind(atom.label)
     if kind == SCALAR and _is_category(atom.arguments[0]):

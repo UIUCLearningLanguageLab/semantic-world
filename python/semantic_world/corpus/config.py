@@ -58,7 +58,13 @@ RENAMED_CONCEPT_TYPES = {
     "verb_category": "event_category",
 }
 DOCUMENT_TYPES = ("encyclopedic_category", "encyclopedic_feature", "entity", "situational")
-NEGATION_LEVELS = ("class", "instance")
+NEGATION_LEVELS = ("class", "instance", "state", "able_now")
+"""The keys of ``propositions.negation_rate``: the class level, the instance level, the state
+sentences of narratives (initial states), and the blocked sentences (``ABLE_NOW``)."""
+NEGATION_DEFAULTS = {"class": 0.1, "instance": 0.1, "state": 0.1, "able_now": 0.8}
+CAN_WORDS = ("shared", "distinct")
+"""``lexicon.can_words``: with ``shared``, "can" expresses both ``ABLE`` and ``ABLE_NOW``; with
+``distinct``, ``ABLE_NOW`` gets a function word of its own (``can_now``)."""
 UNIVERSAL_WORDS = ("nec", "extensional", "either")
 BARE_PLURAL_QUANTIFIERS = ("nec_all", "all", "most", "some")
 """The quantifiers a bare plural can be set to express. A negative bare plural expresses the
@@ -133,6 +139,9 @@ class LexiconConfig:
     synonym_rate: float
     homonym_rate: float
     homonym_same_pos: float
+    can_words: str
+    """``shared``: "can" expresses ``ABLE`` and ``ABLE_NOW`` alike. ``distinct``: ``ABLE_NOW``
+    has a function word of its own."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -140,6 +149,7 @@ class LexiconConfig:
             "synonym_rate": self.synonym_rate,
             "homonym_rate": self.homonym_rate,
             "homonym_same_pos": self.homonym_same_pos,
+            "can_words": self.can_words,
         }
 
 
@@ -169,6 +179,15 @@ class DocumentsConfig:
     aspect; both aspects are true of any event that occurred."""
     one_aspect_per_event: bool
     """Whether every report of one event in one document uses the aspect of its first report."""
+    initial_state_rate: float
+    """The probability that the event sentence that first mentions a participant is followed by
+    a sentence stating one of the participant's fluents at the time point before the event."""
+    result_rate: float
+    """The probability that an event sentence is followed by a sentence stating a change that
+    the event's own effects made."""
+    blocked_rate: float
+    """The probability that an event sentence is followed by a sentence saying what a
+    participant could, or could not, do at that time point (``ABLE_NOW``)."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -183,13 +202,17 @@ class DocumentsConfig:
             "content_kind_weights": self.content_kind_weights,
             "progressive_rate": self.progressive_rate,
             "one_aspect_per_event": self.one_aspect_per_event,
+            "initial_state_rate": self.initial_state_rate,
+            "result_rate": self.result_rate,
+            "blocked_rate": self.blocked_rate,
         }
 
 
 @dataclass(frozen=True)
 class PropositionsConfig:
     negation_rate: dict[str, float]
-    """The rate of negative propositions at the class level and at the instance level."""
+    """The rate of negative propositions at the class level, at the instance level, among the
+    initial-state sentences (``state``), and among the blocked sentences (``able_now``)."""
     rule_statement_rate: float
     rule_max_literals: int | None
     """The most literals in the term of a rule statement; a longer term is skipped and counted.
@@ -544,6 +567,7 @@ def _read_lexicon(node: _Node) -> LexiconConfig:
         synonym_rate=node.probability("synonym_rate", 0.0),
         homonym_rate=node.probability("homonym_rate", 0.0),
         homonym_same_pos=node.probability("homonym_same_pos", 0.5),
+        can_words=node.choice("can_words", "shared", CAN_WORDS),
     )
     node.finish()
     return config
@@ -593,6 +617,9 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         content_kind_weights=node.choice("content_kind_weights", "equal", CONTENT_KIND_WEIGHTS),
         progressive_rate=node.probability("progressive_rate", 0.3),
         one_aspect_per_event=node.bool("one_aspect_per_event", True),
+        initial_state_rate=node.probability("initial_state_rate", 0.2),
+        result_rate=node.probability("result_rate", 0.5),
+        blocked_rate=node.probability("blocked_rate", 0.1),
     )
     node.finish()
     return config
@@ -614,7 +641,7 @@ def _read_propositions(node: _Node) -> PropositionsConfig:
     event_tense = events.choice("tense", "past", EVENT_TENSES)
     events.finish()
     config = PropositionsConfig(
-        negation_rate=_probabilities(node.mapping("negation_rate"), NEGATION_LEVELS, 0.1),
+        negation_rate=_probabilities(node.mapping("negation_rate"), NEGATION_DEFAULTS),
         rule_statement_rate=node.probability("rule_statement_rate", 0.3),
         rule_max_literals=max_literals,
         restriction_rate=node.probability("restriction_rate", 0.1),
@@ -624,8 +651,8 @@ def _read_propositions(node: _Node) -> PropositionsConfig:
     return config
 
 
-def _probabilities(node: _Node, keys: tuple[str, ...], default: float) -> dict[str, float]:
-    values = {key: node.probability(key, default) for key in keys}
+def _probabilities(node: _Node, defaults: dict[str, float]) -> dict[str, float]:
+    values = {key: node.probability(key, default) for key, default in defaults.items()}
     node.finish()
     return values
 

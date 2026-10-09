@@ -58,6 +58,7 @@ from semantic_world.corpus.propositions import (
     PROJECTION,
     SCALAR,
     SIMPLE,
+    STATE_KIND,
     VERB,
     CategoryTerm,
     Clause,
@@ -89,6 +90,7 @@ _NEGATIVE_OPTIONS = tuple((q, q in (NEC_NO, NO)) for q in NEGATIVE_ORDER)
 CONCEPT_KIND = {
     "property": IS,
     "part": HAS,
+    "state": STATE_KIND,
     "event_unary": CAN,
     "event": VERB,
     "event_category": VERB,
@@ -125,6 +127,8 @@ class Facts:
         }
         self.projections = of_type("patient_projection")
         self.poles = of_type("scalar")
+        self.fluents = of_type("state")
+        """The fluents that have a state adjective, base then derived."""
         self.verbs = of_type("event", "event_category")
         """The two-place event types and categories of them that have a word, in tree order."""
         self.level = {label: info.level for label, info in world.category.items()}

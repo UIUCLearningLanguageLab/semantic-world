@@ -340,5 +340,6 @@ def test_the_generated_sentences_cover_the_grammar(cases, plans) -> None:
     }  # fmt: skip
     # every function word of the language is used, apart from the pronoun, which the planner
     # of the documents brings in
-    assert function_words == {x.gloss for x in lexicon.function_lexemes} - {"it"}
+    # "it" needs a document, and "become" a change of a fluent (test_corpus_states.py)
+    assert function_words == {x.gloss for x in lexicon.function_lexemes} - {"it", "become"}
     assert affixes == {None, "PLURAL", "PAST"}

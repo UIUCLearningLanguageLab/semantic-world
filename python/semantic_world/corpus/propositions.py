@@ -46,6 +46,21 @@ aspects are true of any event that occurred (CG.64). Its grounding says whether 
 ``able`` (the requirement holds) and ``legal`` (the binding was legal at some time point of the
 scene), which is what tells an impossible false test item from one that merely did not happen.
 
+**State, change, and ``able_now`` levels** (``docs/specs/WORLD_AND_LANGUAGE.md``, "States and
+changes" and "'Can': what is held fixed"). All three are about one participant of a scene at a
+time point, and take the scene's tense and no aspect:
+
+- a *state* says that a fluent, base or derived, held of the subject at the time point:
+  ``HOLDS(SCENE.8, TIME.2, PAST, BOOLFL.3(REF.1))``, or with ``NOT`` the negative state;
+- a *change* says that the fluent was false at the time point and true at the next, or the
+  reverse: ``BECOME(SCENE.8, TIME.2, PAST, BOOLFL.3(REF.1))``. A change says nothing of its
+  cause; the grounding records the event of the step whose own effect made it, when one did;
+- an *able_now* proposition says that the binding was legal at the time point, the state of
+  the scene held fixed: ``ABLE_NOW(SCENE.8, TIME.2, PAST, EVENTTYPE2.1.2(REF.1, REF.2))``. The
+  negative one with the requirement true says that a precondition blocked the event.
+
+Their truth is read from the scene's history, replayed through the runtime.
+
 **The language's words** decide what a proposition's words mean, never what the proposition
 means: which quantifiers "all" and "no" express (``quantifiers.universal_words``), the least
 share at which a speaker says "most" (``quantifiers.most.usage_min``), and the implicature of
@@ -67,6 +82,8 @@ from semantic_world.corpus.histories import (
     event_of,
     scene_events,
     scene_of,
+    time_index,
+    time_label,
 )
 from semantic_world.corpus.world import (
     PART_PREFIX,
@@ -77,12 +94,17 @@ from semantic_world.corpus.world import (
 )
 from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT
 from semantic_world.world.history import History, replay
-from semantic_world.world.runtime import State, legal
+from semantic_world.world.runtime import State, derive, legal, legal_bindings
 
 CLASS = "class"
 INSTANCE = "instance"
 EVENT = "event"
-LEVELS = (CLASS, INSTANCE, EVENT)
+STATE = "state"
+CHANGE = "change"
+ABLE_NOW = "able_now"
+LEVELS = (CLASS, INSTANCE, EVENT, STATE, CHANGE, ABLE_NOW)
+TIMED_LEVELS = (STATE, CHANGE, ABLE_NOW)
+"""The levels whose proposition is about one time point of a scene."""
 
 NEC_ALL = "nec_all"
 ALL = "all"
@@ -113,7 +135,9 @@ PROJECTION = "patient_capacity"
 """The kind of a patient-capacity predicate (the old ``projection`` kind)."""
 VERB = "event_type2"
 """The kind of a two-place event-type predicate (the old ``verb`` kind)."""
-KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB)
+STATE_KIND = "state"
+"""The kind of a fluent predicate: a state (``HOLDS``) or a change (``BECOME``)."""
+KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND)
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
 PART feature, or a one-place event type (the capacity to be its agent)."""
@@ -146,7 +170,12 @@ OCCURRED = "event"
 
 LABEL_KEY = "label"
 """The key under which every predicate and clause of the JSON logical form names its symbol."""
-_JSON_KEY = dict.fromkeys(KINDS, LABEL_KEY)
+FLUENT_KEY = "fluent"
+"""The key under which a state predicate names its fluent (``{"kind": "state", "fluent":
+"BOOLFL.3"}``, as "States and changes" writes it)."""
+_JSON_KEY = {**dict.fromkeys(KINDS, LABEL_KEY), STATE_KIND: FLUENT_KEY}
+HISTORY = "history"
+"""A state, a change, or an ``able_now`` proposition: judged by replaying the scene."""
 _LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2}
 
 
@@ -286,11 +315,11 @@ class CategoryTerm:
 class Predicate:
     kind: str
     """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
-    or ``event_type2``."""
+    ``event_type2``, or ``state``."""
     label: str
     """The predicate's concept: a PROPERTY or PART feature, a one-place event type, a scalar
-    pole, a category, a patient capacity (``CANBE.<event type>``), or a two-place event type or
-    a category of them."""
+    pole, a category, a patient capacity (``CANBE.<event type>``), a two-place event type or
+    a category of them, or a fluent (``BOOLFL.3``)."""
     patient: CategoryTerm | str | None = None
     """Two-place event types only: the patient category (class level) or the patient instance
     (instance level)."""
@@ -337,15 +366,23 @@ class Proposition:
     """For a rule statement: the determined feature, and the number of the term of its rule's
     minimal DNF, from 1."""
     scene: str | None = None
-    """Event level only: the scene the event belongs to."""
+    """Event, state, change, and able_now levels: the scene."""
     event: str | None = None
     """Event level only: the event that the proposition reports
     (``SCENE.8.EVENTINSTANCE.5``). A test item, true or false, names only its scene, and has
     None: it says that some event of the scene was this one."""
     tense: str | None = None
-    """Event level only: ``past`` or ``present``."""
+    """Event, state, change, and able_now levels: ``past`` or ``present``."""
     aspect: str | None = None
     """Event level only: ``simple`` or ``progressive``, the report's choice."""
+    time: str | None = None
+    """State, change, and able_now levels: the time point of the scene (``TIME.2``). A change
+    is from this time point to the next."""
+
+    @property
+    def timed(self) -> bool:
+        """Whether the proposition is about one time point of a scene."""
+        return self.level in TIMED_LEVELS
 
     @property
     def negative(self) -> bool:
@@ -384,6 +421,10 @@ class Proposition:
                 data["event"] = self.event
                 data["tense"] = self.tense
                 data["aspect"] = self.aspect
+            elif self.level in TIMED_LEVELS:
+                data["scene"] = self.scene
+                data["time"] = self.time
+                data["tense"] = self.tense
             data["polarity"] = self.polarity
             data["subject"] = {"instance": self.subject}
         data["predicate"] = self.predicate.to_json()
@@ -416,6 +457,7 @@ class Proposition:
             event=data.get("event"),
             tense=data.get("tense"),
             aspect=data.get("aspect"),
+            time=data.get("time"),
         )
 
 
@@ -465,6 +507,8 @@ class Truth:
         """The scenes that event-level propositions are judged against, by label."""
         self._events: dict[str, tuple[SceneEvent, ...]] = {}
         self._states: dict[str, list[State]] = {}
+        self._derived: dict[tuple[str, int], dict[str, np.ndarray]] = {}
+        self._legal: dict[tuple[str, int], dict[str, set[tuple[int, ...]]]] = {}
         self._members: dict[CategoryTerm, np.ndarray] = {}
         self._fixed: dict[tuple[CategoryTerm, str], tuple[int | None, str]] = {}
         universal = self.quantifiers.universal_words
@@ -595,6 +639,8 @@ class Truth:
             return self._evaluate_instance(proposition)
         if proposition.level == EVENT:
             return self._evaluate_event(proposition)
+        if proposition.level in TIMED_LEVELS:
+            return self._evaluate_timed(proposition)
         return _invalid(f"unknown level {proposition.level!r}")
 
     def is_true(self, proposition: Proposition) -> bool:
@@ -671,6 +717,9 @@ class Truth:
         elif kind == VERB:
             if label not in world.binary:
                 return f"unknown two-place event type {label!r}"
+        elif kind == STATE_KIND:
+            if label not in world.fluents:
+                return f"unknown fluent {label!r}"
         else:
             return f"unknown predicate kind {kind!r}"
         if (kind == VERB) != (predicate.patient is not None):
@@ -829,11 +878,15 @@ class Truth:
             return _invalid("an instance-level proposition has no quantifier")
         if proposition.scene is not None or proposition.event is not None:
             return _invalid("only an event-level proposition has a scene and an event")
+        if proposition.time is not None:
+            return _invalid("only a state, a change, or an able_now proposition has a time point")
         if not isinstance(subject, str) or subject not in self.instance_index:
             return _invalid(f"unknown instance {subject!r}")
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
+        if predicate.kind == STATE_KIND:
+            return _invalid("a fluent is stated at a time point of a scene, never timelessly")
         index = self.instance_index[subject]
         kind, label = predicate.kind, predicate.label
         if (kind == SCALAR) != (predicate.comparison is not None):
@@ -878,6 +931,10 @@ class Truth:
         self.scenes[history.label] = history
         self._events[history.label] = scene_events(history)
         self._states.pop(history.label, None)
+        for key in [k for k in self._derived if k[0] == history.label]:
+            del self._derived[key]
+        for key in [k for k in self._legal if k[0] == history.label]:
+            del self._legal[key]
 
     def events_of(self, scene: str) -> tuple[SceneEvent, ...]:
         return self._events[scene]
@@ -920,6 +977,8 @@ class Truth:
         subject, predicate = proposition.subject, proposition.predicate
         if proposition.quantifier is not None:
             return _invalid("an event-level proposition has no quantifier")
+        if proposition.time is not None:
+            return _invalid("an event-level proposition has no time point")
         if not proposition.polarity:
             return _invalid("an event-level proposition is never negated")
         if proposition.tense != self.event_tense:
@@ -969,17 +1028,189 @@ class Truth:
         grounding["test"] = OCCURRED
         return Evaluation(True, bool(matching), bool(matching), grounding)
 
+    # States, changes, and what was possible at a time point -----------------------------------
+
+    def fluent_value(self, scene: str, time: int, entity: str, fluent: str) -> bool:
+        """The value of a fluent, base or derived, of a participant at ``TIME.<time>`` of a
+        scene, from the replayed history."""
+        world = self.world
+        row = self.instance_index[entity]
+        state = self.states_of(scene)[time - 1]
+        definition = world.definition
+        if definition.is_base_fluent(fluent):
+            return bool(state.values[row, definition.base_fluent_index(fluent)])
+        key = (scene, time)
+        if key not in self._derived:
+            participants = [self.instance_index[p] for p in self.scenes[scene].participants]
+            facts = derive(definition, state, participants)
+            self._derived[key] = {
+                label: facts.fluent[:, j] for j, label in enumerate(facts.fluent_labels)
+            }
+            self._derived[key]["__rows__"] = np.asarray(participants)
+        rows = self._derived[key]["__rows__"]
+        position = int(np.flatnonzero(rows == row)[0])
+        return bool(self._derived[key][fluent][position])
+
+    def legal_at(self, scene: str, time: int, label: str, agent: str, patient: str | None) -> bool:
+        """Whether a binding was legal at ``TIME.<time>`` of a scene, for the event type or for
+        some event type below the category."""
+        world = self.world
+        binding = tuple(self.instance_index[x] for x in (agent, patient) if x is not None)
+        table = self.legal_table(scene, time)
+        return any(binding in table[event_type] for event_type in world.event_types_below(label))
+
+    def legal_table(self, scene: str, time: int) -> dict[str, set[tuple[int, ...]]]:
+        """The legal bindings of every event type among the participants of a scene at
+        ``TIME.<time>``, as sets of entity-index tuples, computed once per time point."""
+        key = (scene, time)
+        if key not in self._legal:
+            world = self.world
+            state = self.states_of(scene)[time - 1]
+            participants = [self.instance_index[p] for p in self.scenes[scene].participants]
+            self._legal[key] = {
+                label: set(legal_bindings(world.definition, state, label, participants))
+                for label in world.binary_leaves + world.unary
+            }
+        return self._legal[key]
+
+    def made_by(self, scene: str, time: int, entity: str, fluent: str, event: str) -> bool:
+        """Whether the event's own effect made the change of a participant's fluent from
+        ``TIME.<time>`` to the next time point: for a base fluent, the event records the
+        change; for a derived fluent, the event's own changes, applied alone to the state at
+        ``TIME.<time>``, already change it."""
+        definition = self.world.definition
+        history = self.scenes[scene]
+        step = next((s for s in history.steps if s.step == time), None)
+        if step is None:
+            return False
+        recorded = next((e for e in step.events if e.label == event), None)
+        if recorded is None:
+            return False
+        if definition.is_base_fluent(fluent):
+            return any(c.entity == entity and c.fluent == fluent for c in recorded.changes)
+        if not recorded.changes:
+            return False
+        before = self.states_of(scene)[time - 1]
+        row = self.instance_index[entity]
+        j = definition.derived_fluent_index(fluent)
+        was = bool(derive(definition, before, [row]).fluent[0, j])
+        values = np.array(before.values, dtype=np.uint8, copy=True)
+        for change in recorded.changes:
+            values[
+                self.instance_index[change.entity], definition.base_fluent_index(change.fluent)
+            ] = int(change.to)
+        return bool(derive(definition, State(values), [row]).fluent[0, j]) != was
+
+    def caused_by(self, scene: str, time: int, entity: str, fluent: str) -> str | None:
+        """The event of step ``time`` of a scene whose own effect changed a participant's
+        fluent from ``TIME.<time>`` to the next time point: for a base fluent, the event that
+        records the change; for a derived fluent, the first event of the step whose own
+        changes, applied alone to the state at ``TIME.<time>``, already change it. None when
+        no event of the step made the change on its own."""
+        history = self.scenes[scene]
+        step = next((s for s in history.steps if s.step == time), None)
+        if step is None:
+            return None
+        for event in step.events:
+            if self.made_by(scene, time, entity, fluent, event.label):
+                return event.label
+        return None
+
+    def _evaluate_timed(self, proposition: Proposition) -> Evaluation:
+        subject, predicate = proposition.subject, proposition.predicate
+        level = proposition.level
+        if proposition.quantifier is not None:
+            return _invalid(f"a {level} proposition has no quantifier")
+        if proposition.event is not None or proposition.aspect is not None:
+            return _invalid(f"a {level} proposition reports no event and has no aspect")
+        if proposition.tense != self.event_tense:
+            return _invalid(
+                f"states and changes take the scene's tense, the {self.event_tense} "
+                f"(propositions.events.tense), and the proposition has {proposition.tense!r}"
+            )
+        scene = self.scenes.get(proposition.scene)
+        if scene is None:
+            return _invalid(f"unknown scene {proposition.scene!r}")
+        try:
+            time = time_index(proposition.time or "")
+        except ValueError:
+            return _invalid(f"{proposition.time!r} is not a time point (TIME.<k>)")
+        final = time_index(scene.final)
+        last = final - 1 if level == CHANGE else final
+        if not 1 <= time <= last:
+            what = "a change is from a time point before the last" if level == CHANGE else ""
+            return _invalid(
+                f"{proposition.time} is not a time point of {scene.label}, which runs from "
+                f"{time_label(1)} to {scene.final}" + (f": {what}" if what else "")
+            )
+        problem = self._predicate_problem(predicate)
+        if problem:
+            return _invalid(problem)
+        patient = predicate.patient
+        if level == ABLE_NOW:
+            if predicate.kind not in (CAN, VERB):
+                return _invalid(
+                    "an able_now proposition is about a one-place event type, or a two-place "
+                    "event type with a patient instance"
+                )
+            if predicate.kind == VERB and not isinstance(patient, str):
+                return _invalid("the patient of an able_now proposition is an instance")
+        elif predicate.kind != STATE_KIND:
+            return _invalid(f"a {level} proposition is about a fluent")
+        for instance in (subject, patient):
+            if instance is not None and instance not in scene.participants:
+                return _invalid(f"{instance!r} takes no part in the scene {scene.label}")
+        if patient == subject:
+            return _invalid("an instance is never related to itself")
+        assert isinstance(subject, str)
+        grounding: dict[str, Any] = {"scene": scene.label, "time": proposition.time}
+        if level == ABLE_NOW:
+            able = self.allows(predicate.label, subject, patient)
+            legal_now = self.legal_at(scene.label, time, predicate.label, subject, patient)
+            grounding.update({"able": able, "legal": legal_now, "test": HISTORY})
+            return Evaluation(True, legal_now == proposition.polarity, True, grounding)
+        fluent = predicate.label
+        value = self.fluent_value(scene.label, time, subject, fluent)
+        initial = self.fluent_value(scene.label, 1, subject, fluent)
+        if level == STATE:
+            grounding.update(
+                {
+                    "value": int(value),
+                    "initial": int(initial),
+                    "changed": value != initial,
+                    "test": HISTORY,
+                }
+            )
+            return Evaluation(True, value == proposition.polarity, True, grounding)
+        after = self.fluent_value(scene.label, time + 1, subject, fluent)
+        true = value != proposition.polarity and after == proposition.polarity
+        grounding.update(
+            {
+                "from": int(value),
+                "to": int(after),
+                "caused_by": self.caused_by(scene.label, time, subject, fluent)
+                if value != after
+                else None,
+                "test": HISTORY,
+            }
+        )
+        return Evaluation(True, true, True, grounding)
+
 
 __all__ = [
+    "ABLE_NOW",
     "ALL",
     "ASPECTS",
     "CAN",
+    "CHANGE",
     "CLASS",
     "COUNTERPART",
     "EVENT",
     "EXACT",
     "FEATURE_KINDS",
+    "FLUENT_KEY",
     "HAS",
+    "HISTORY",
     "INSTANCE",
     "IS",
     "KINDS",
@@ -1005,7 +1236,10 @@ __all__ = [
     "SCALAR",
     "SIMPLE",
     "SOME",
+    "STATE",
+    "STATE_KIND",
     "TENSES",
+    "TIMED_LEVELS",
     "TREE",
     "UNIVERSALS",
     "VALUE",

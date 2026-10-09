@@ -29,6 +29,8 @@ from semantic_world.world.history import History, HistoryEvent
 
 SCENE_PREFIX = "SCENE."
 EVENT_INFIX = ".EVENTINSTANCE."
+TIME_PREFIX = "TIME."
+TIME_INFIX = ".TIME."
 
 
 def scene_label(number: int) -> str:
@@ -52,7 +54,37 @@ def is_event_label(label: str) -> bool:
 
 
 def is_scene_label(label: str) -> bool:
-    return label.startswith(SCENE_PREFIX) and EVENT_INFIX not in label
+    return label.startswith(SCENE_PREFIX) and EVENT_INFIX not in label and TIME_INFIX not in label
+
+
+def time_label(index: int) -> str:
+    """``TIME.<k>``: the time point before step k (``TIME.1`` is the start of a scene)."""
+    return f"{TIME_PREFIX}{index}"
+
+
+def time_index(label: str) -> int:
+    """The number of a time point: 2 for ``TIME.2``."""
+    if not label.startswith(TIME_PREFIX) or not label[len(TIME_PREFIX) :].isdecimal():
+        raise ValueError(f"{label!r} is not a time point (TIME.<k>)")
+    return int(label[len(TIME_PREFIX) :])
+
+
+def time_key(scene: str, time: str) -> str:
+    """A time point qualified by its scene, ``SCENE.8.TIME.2``: what the record of a sentence
+    holds for a verb phrase about a state, a change, or what was possible at that time."""
+    return f"{scene}.{time}"
+
+
+def split_time_key(key: str) -> tuple[str, str]:
+    """The scene and the time point of a qualified time point."""
+    scene, infix, number = key.partition(TIME_INFIX)
+    if not infix or not scene.startswith(SCENE_PREFIX) or not number.isdecimal():
+        raise ValueError(f"{key!r} is not a qualified time point (SCENE.<n>.TIME.<k>)")
+    return scene, f"{TIME_PREFIX}{number}"
+
+
+def is_time_key(label: str) -> bool:
+    return label.startswith(SCENE_PREFIX) and TIME_INFIX in label
 
 
 @dataclass(frozen=True)
@@ -201,7 +233,12 @@ __all__ = [
     "involving",
     "is_event_label",
     "is_scene_label",
+    "is_time_key",
     "scene_events",
     "scene_label",
     "scene_of",
+    "split_time_key",
+    "time_index",
+    "time_key",
+    "time_label",
 ]

@@ -172,7 +172,7 @@ def test_the_request_of_a_language_without_inflection(chains) -> None:
     corpus, before, _, _, _ = chains("tiny")
     request = yaml.safe_load(before[REQUEST_FILE])
     assert request["takes"] == {} and request["affixes"] == [] and request["inflect"] == []
-    assert len(request["function_words"]) == 15
+    assert len(request["function_words"]) == 16 and "become" in request["function_words"]
     assert len(request["lexemes"]) == len(corpus.planner.lexicon.content_lexemes)
 
 
@@ -452,7 +452,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     printed = capsys.readouterr().out
     assert "rendered" in printed and "the word forms of corpus_tiny (seed 1)" in printed
     text = (out / "corpus.txt").read_text(encoding="utf-8")
-    assert "/LEXEME." not in text and len(text.split()) == 1075
+    assert "/LEXEME." not in text and len(text.split()) == 1122
     spellings = set(pl.read_csv(forms / "words.csv")["spelling"].to_list())
     assert set(text.split()) <= spellings
     # the word forms of tiny.yaml are too few for the tiny corpus, as the specification says
@@ -479,9 +479,9 @@ def test_the_word_form_configuration_for_the_default_corpus() -> None:
     assert (corpus.name, corpus.seed) == ("default", 1)  # the run folder that the request is in
     lexicon = build_lexicon(corpus, load_world(corpus), Streams(corpus.seed))
     content = lexicon.content_lexemes
-    assert len(content) == 191 <= config.wordforms.count
-    assert sum(x.same_form_as is None for x in content) == 191
-    assert len(lexicon.function_lexemes) == 15
+    assert len(content) == 199 <= config.wordforms.count
+    assert sum(x.same_form_as is None for x in content) == 199
+    assert len(lexicon.function_lexemes) == 16
 
 
 def test_render_errors_leave_the_folder_unchanged(cases, chains, tmp_path, capsys) -> None:

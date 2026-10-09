@@ -458,13 +458,13 @@ def test_rule_statement_counts_of_the_default_world(cases) -> None:
     # 20 rules of the taxonomy and 20 one-place requirements
     assert report == {
         "rules": 40,
-        "terms": 111,
-        "stated": 94,
+        "terms": 102,
+        "stated": 88,
         "skipped": {
             SKIP_THRESHOLD: 6,
             SKIP_MAX_LITERALS: 0,
             SKIP_NO_WORD: 0,
-            SKIP_NO_INSTANCE: 11,
+            SKIP_NO_INSTANCE: 8,
             SKIP_UNCONFIRMED: 0,
         },
     }
@@ -477,7 +477,7 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
     # rule statements are exempt from the limits on adjectives and with-phrases: some of the
     # default world's statements have four adjectives, and the limit is three (before stage
     # a5b, one statement had four with-phrases, and the limit is two)
-    assert lengths == {1: 24, 2: 30, 3: 9, 4: 31}
+    assert lengths == {1: 23, 2: 28, 3: 11, 4: 26}
     mention = case.config().mention
     assert (mention.max_adjectives, mention.max_with_phrases) == (3, 2)
     adjectives = [
@@ -500,7 +500,7 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
         skipped = capped.rule_report["skipped"]
         # a term that is skipped for another reason is not counted against the cap
         assert skipped[SKIP_MAX_LITERALS] >= over
-        assert capped.rule_report["stated"] + sum(skipped.values()) == 111
+        assert capped.rule_report["stated"] + sum(skipped.values()) == 102
 
 
 def test_negated_property_literals_share_one_relative_clause(cases) -> None:
@@ -511,7 +511,7 @@ def test_negated_property_literals_share_one_relative_clause(cases) -> None:
         sum(not x.positive and x.feature.startswith("PROPERTY.") for x in s.subject.restriction)
         for s in facts.rule_statements()
     ]
-    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 25
+    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 23
     assert max(negated) == 4
     assert "relative_clauses" not in facts.rule_report["skipped"]
     # only a term that reads a scalar threshold, or that no instance satisfies, stays unstated
@@ -535,7 +535,7 @@ def test_a_drawn_rule_statement_is_always_nec_all(cases) -> None:
         assert oracle.truth(statement.to_json()) is True
         assert statement.rule is not None and statement.polarity
         assert statement.subject.category == THING
-    assert len({p.rule for p in drawn}) == 94  # every rule statement is drawn
+    assert len({p.rule for p in drawn}) == 88  # every rule statement is drawn
     # a pool limits the draw: the sufficient conditions of one feature
     feature = facts.rule_statements()[0].predicate.label
     pool = facts.rule_statements(feature)
@@ -610,7 +610,12 @@ def test_the_negation_rate(cases, level) -> None:
         share = sum(p.negative for p in drawn) / len(drawn)
         assert abs(share - rate) < 0.04, (rate, share)
     # the default rate is 0.1 at each level
-    assert case.config().propositions.negation_rate == {CLASS: 0.1, INSTANCE: 0.1}
+    assert case.config().propositions.negation_rate == {
+        CLASS: 0.1,
+        INSTANCE: 0.1,
+        "state": 0.1,
+        "able_now": 0.8,
+    }
 
 
 def test_draws_are_reproducible(cases) -> None:

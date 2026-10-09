@@ -60,6 +60,7 @@ SCALAR_PREFIX = "SCALARDIM."
 PROPERTY_PREFIX = "PROPERTY."
 PART_PREFIX = "PART."
 CATEGORY_PREFIX = "CATEGORY."
+FLUENT_PREFIX = "BOOLFL."
 SCALAR_POLES = ("HIGH", "LOW")
 
 PROPERTY_KIND = "property"
@@ -324,6 +325,13 @@ class World:
         """The taxonomic similarity of every pair of leaves, NaN where undefined."""
 
         self.initial_rates: dict[str, float] = dict(self.definition.initial_rates)
+
+        # Fluents: the base ones, then the derived ones, as the definition orders them. A
+        # fluent's value at a time point of a scene comes from the scene's history (``Truth``).
+        self.base_fluents: tuple[str, ...] = tuple(self.definition.base_fluents)
+        self.derived_fluents: tuple[str, ...] = tuple(self.definition.derived_fluents)
+        self.fluents: tuple[str, ...] = self.base_fluents + self.derived_fluents
+        """Every fluent, base then derived: the concepts of the state adjectives."""
         self._rules = statics.rules
         self._rules_by_output = {r.output.label: r for r in statics.rules.rules}
         self._free_index = {f.label: i for i, f in enumerate(features.free)}

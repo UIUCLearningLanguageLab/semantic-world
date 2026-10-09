@@ -303,23 +303,27 @@ def test_relations_imply_their_ancestors_base_relations(
 
 
 def test_relations_include_true_features_and_the_own_constraint(default: StaticWorld) -> None:
-    relations = default.relations
-    for event_type in default.event_tree.event_types:
-        relation = relations.relation(event_type)
+    # with the own constraint (the code's default): the constraints of the true features, then
+    # the event type's own
+    _, with_own = relations_of(world_config())
+    for event_type in with_own.event_tree.event_types:
+        relation = with_own.relation(event_type)
         labels = [c.label for c in relation.constraints]
         expected = [
             f"CONSTRAINT.EVENTFEAT.{i + 1}" for i in np.flatnonzero(event_type.values == 1)
         ] + [constraint_label(event_type.label)]
         assert labels == expected
         assert relation.expression.count(" AND ") >= len(labels) - 1
+    # without it (the default world since the retune of stage a7a): the true features' alone
     _, without_own = relations_of(world_config(event_types={"binary": {"own_constraint": False}}))
-    for event_type in without_own.event_tree.event_types:
-        assert all(
-            c.label.startswith("CONSTRAINT.EVENTFEAT.")
-            for c in without_own.relation(event_type).constraints
-        )
-    assert len(without_own.constraints) == 12
-    assert without_own.own_constraints == {}
+    for relations in (without_own, default.relations):
+        for event_type in relations.event_tree.event_types:
+            labels = [c.label for c in relations.relation(event_type).constraints]
+            assert labels == [
+                f"CONSTRAINT.EVENTFEAT.{i + 1}" for i in np.flatnonzero(event_type.values == 1)
+            ]
+        assert len(relations.constraints) == 12
+        assert relations.own_constraints == {}
 
 
 def test_relation_records_name_the_constraints(tiny: StaticWorld) -> None:
