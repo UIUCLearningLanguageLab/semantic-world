@@ -63,9 +63,10 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
     phrase_of,
 )
-from semantic_world.corpus.histories import SceneEvent, event_of, scene_of
+from semantic_world.corpus.histories import SceneEvent, event_of, scene_of, time_key
 from semantic_world.corpus.propositions import (
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     HAS,
@@ -144,6 +145,20 @@ def plan_for(
             }
     subject = phrase(proposition.subject, noun)
     target = None if predicate.patient is None else phrase(str(predicate.patient))
+    if proposition.timed:
+        assert proposition.scene is not None and proposition.time is not None
+        return SentencePlan(
+            subject,
+            Predication(
+                predicate.kind,
+                predicate.label,
+                proposition.polarity,
+                target,
+                tense=proposition.tense,
+                time=time_key(proposition.scene, proposition.time),
+                become=proposition.level == CHANGE,
+            ),
+        )
     if proposition.level != EVENT:
         return SentencePlan(
             subject, Predication(predicate.kind, predicate.label, proposition.polarity, target)

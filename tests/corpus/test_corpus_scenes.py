@@ -146,7 +146,7 @@ def test_the_thematic_weight_draws_thematically_related_participants(cases) -> N
     similar = mean_relatedness(thematic=0, taxonomic=3.0, constant=0.1)
     assert similar[1] > plain[1] + 0.02
     # with every weight but the constant at 0, participants are a uniform draw
-    assert abs(plain[0] - case.world.thematic.mean()) < 0.1
+    assert abs(plain[0] - case.world.thematic.mean()) < 0.05 * case.world.thematic.mean()
 
 
 def test_participants_are_the_old_scene_generators_on_a_static_world(world_files) -> None:
@@ -222,9 +222,14 @@ def test_participant_weights_are_the_weighted_sum(cases) -> None:
 
 
 def test_an_instance_with_no_weight_is_never_drawn(cases) -> None:
-    case = cases("default")
+    # the still world: some pairs of leaves are related by no event type (in the default world
+    # of stage a7a every pair is, so no instance has the weight 0 there)
+    case = cases("still")
+    count = case.world.count
     weights = {"thematic": 1.0, "taxonomic": 0, "constant": 0}
-    generator = case.scenes(**scene_settings(participant_weights=weights, size=[283, 283]))
+    generator = case.scenes(
+        **scene_settings(participant_weights=weights, size=[count - 1, count - 1])
+    )
     smaller = 0
     for scene in make(generator, 60):
         drawn = generator.participant_weights(scene.seed)
@@ -232,7 +237,7 @@ def test_an_instance_with_no_weight_is_never_drawn(cases) -> None:
             assert drawn[case.world.instance_index[participant]] > 0
         related = int(np.count_nonzero(drawn))
         assert len(scene.participants) - 1 == related  # every related instance, and no other
-        smaller += related < 283
+        smaller += related < count - 1
     assert smaller > 0  # a scene can be smaller than asked
 
 
@@ -863,6 +868,10 @@ def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None
                 assert facts.event_fact(event).predicate == Predicate(CAN, event.type)
                 continue
             parent = world.event_types[event.type].parent
+            if parent not in facts.named:
+                # a category that holds for every pair has no word (3 of 5 since stage a7a)
+                assert names == (event.type,)
+                continue
             assert names == (event.type, parent)
             general = facts.event_fact(event, parent)
             assert general.predicate.label == parent and general.event == event.label
@@ -882,7 +891,11 @@ def test_the_event_level_is_drawn_by_weight(cases) -> None:
     case = cases("default")
     scenes = make(case.scenes(), 200)
     events = [e for s in scenes for e in scene_events(s)]
-    transitive = [e for e in events if e.transitive]
+    named = case.facts().named
+    # events whose category has a word, so that both levels can name them
+    transitive = [
+        e for e in events if e.transitive and case.world.event_types[e.type].parent in named
+    ]
 
     def category_share(weights) -> float:
         facts = knowing(case.facts(mention={"event_level_weights": weights}), scenes)

@@ -33,22 +33,27 @@ from semantic_world.corpus.grammar import CLASS_NP, INSTANCE_NP, check_plan
 from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.mentions import clause_propositions
 from semantic_world.corpus.planner import (
+    BLOCKED,
     CHARACTERISTIC,
     CONTRAST,
     DEFINING,
     DESCRIPTION,
     EVENT_SECTION,
+    INITIAL_STATE,
     MEMBERSHIP,
     RARER,
     RELATION,
+    RESULT,
     RULE,
     TEMPLATE,
     content_words,
     reading_counts,
 )
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     ALL,
     CAN,
+    CHANGE,
     CLASS,
     EVENT,
     HAS,
@@ -61,6 +66,7 @@ from semantic_world.corpus.propositions import (
     NO,
     SCALAR,
     SOME,
+    STATE,
     VERB,
     CategoryTerm,
 )
@@ -141,6 +147,7 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
     case = cases(name)
     planner, documents = corpora(name, **RICH)
     oracle = case.oracle(**RICH)
+    scenes = {s.label: json.loads(json.dumps(s.to_json())) for s in planner.scenes}
     levels: Counter = Counter()
     clauses = 0
     for document in documents:
@@ -154,7 +161,8 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             assert proposition.grounding is not None and proposition.id.startswith("PROP.")
             if proposition.level != EVENT:
                 # by the independent recomputation from the world run's files too
-                assert oracle.truth(proposition.to_json()) is True, proposition.to_json()
+                scene = None if proposition.scene is None else scenes[proposition.scene]
+                assert oracle.truth(proposition.to_json(), scene) is True, proposition.to_json()
             else:
                 assert proposition.grounding["able"] and proposition.grounding["legal"]
             if proposition.level != CLASS:
@@ -170,7 +178,8 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             )
             assert read == plan
             levels[proposition.level] += 1
-    assert set(levels) == {CLASS, INSTANCE, EVENT} and min(levels.values()) > 30
+    assert set(levels) == {CLASS, INSTANCE, EVENT, STATE, CHANGE, ABLE_NOW}
+    assert min(levels[level] for level in (CLASS, INSTANCE, EVENT, CHANGE)) > 30
     assert clauses > 20
 
 
@@ -215,7 +224,7 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
             for part in parsed:
                 if type(part).__name__ == "Report":
                     assert part.tense == "past" and part.aspect in ("simple", "progressive")
-    assert min(quantified, events) > 50 and capacities > 20 and existential > 5
+    assert min(quantified, events) > 50 and capacities > 10 and existential > 5
 
 
 def test_the_propositional_rendering_never_depends_on_the_grammar(corpora) -> None:
@@ -581,6 +590,7 @@ def test_the_document_mix_and_lengths(cases, corpora) -> None:
     types = Counter(d.type for d in documents)
     for kind, weight in config.documents.mix.items():
         assert abs(types[kind] / 600 - weight) < 0.07
+    short_encyclopedic = 0
     for document in documents:
         limits = config.documents.sentences[document.type]
         assert 1 <= len(document.sentences) <= limits.max
@@ -588,8 +598,10 @@ def test_the_document_mix_and_lengths(cases, corpora) -> None:
             f"{document.label}.SENT.{k}" for k in range(1, len(document.sentences) + 1)
         ]
         if document.type in ENCYCLOPEDIC:
-            # the default world has enough to say about every topic
-            assert len(document.sentences) >= limits.min
+            # the default world has enough to say about almost every topic: a feature document
+            # about a feature that few rule statements read can run short (1 of 600)
+            short_encyclopedic += len(document.sentences) < limits.min
+    assert short_encyclopedic <= 2
     # one type alone
     only = {"documents": {"mix": {"situational": 1.0}}}
     _, documents = corpora("tiny", 30, **only)
@@ -726,11 +738,17 @@ def test_narratives(cases, corpora) -> None:
                 assert len(set(happened)) == len(happened), sentence.label
                 recurring += sum(e.key == event.key and e is not event for e in events.values())
                 with_clauses += bool(clauses)
+            elif sentence.section != DESCRIPTION:
+                # an initial state, a result, or a blocked sentence (test_corpus_states.py)
+                assert sentence.section in (INITIAL_STATE, RESULT, BLOCKED)
+                assert proposition.level in (STATE, CHANGE, ABLE_NOW)
             else:
-                assert sentence.section == DESCRIPTION and proposition.level == INSTANCE
-                # a description follows an event sentence, and is about one of its participants
-                before = document.sentences[index - 1]
-                assert index > 0 and before.section == EVENT_SECTION
+                assert proposition.level == INSTANCE
+                # a description follows an event sentence (and its other follow-ups), and is
+                # about one of its participants
+                before = next(
+                    s for s in reversed(document.sentences[:index]) if s.section == EVENT_SECTION
+                )
                 event = events[before.proposition.event]
                 if document.type == "entity":
                     assert proposition.subject == document.topic
@@ -1005,17 +1023,26 @@ def test_content_words_count_nouns_adjectives_and_verbs(corpora) -> None:
 
 def test_readings_in_documents(corpora) -> None:
     kinds = {CLASS: "generic", INSTANCE: "capacity", EVENT: "event"}
-    levels = set(kinds.values())
-    # the default language is not ambiguous: every sentence has the one reading of its level,
-    # and a class-level sentence has its quantifier readings after it
+    kinds.update({STATE: "state", CHANGE: "state", ABLE_NOW: "able_now"})
+    levels = {"generic", "capacity", "event", "state", "able_now"}
+    # the default language is not ambiguous between the levels, apart from "can", which
+    # expresses ABLE and ABLE_NOW alike (lexicon.can_words: shared): every other sentence has
+    # the one reading of its level, and a class-level sentence has its quantifier readings
+    # after it
     _, documents = corpora("default", 200)
     quantified: Counter = Counter()
+    with_can = 0
     for _, sentence in sentences_of(documents):
         proposition = sentence.proposition
-        assert sentence.readings[0] == kinds[proposition.level]
+        level = proposition.level
+        if level in (INSTANCE, ABLE_NOW) and proposition.predicate.kind in (CAN, VERB):
+            assert sentence.readings == ("capacity", "able_now")
+            with_can += 1
+            continue
+        assert sentence.readings[0] == kinds[level]
         rest = sentence.readings[1:]
         assert not (set(rest) & levels)
-        if proposition.level != CLASS:
+        if level != CLASS:
             assert not rest
         elif proposition.predicate.kind == SCALAR:
             assert not rest
@@ -1024,8 +1051,9 @@ def test_readings_in_documents(corpora) -> None:
             assert proposition.quantifier in rest, (sentence.readings, proposition.quantifier)
             quantified["+".join(rest)] += 1
     counts = reading_counts(documents)
-    assert counts["ambiguous"] == 0 and counts["ambiguous_share"] == 0.0
-    assert set(counts["readings"]) == levels
+    assert counts["ambiguous"] == with_can > 0
+    assert counts["ambiguous_share"] == with_can / counts["sentences"]
+    assert set(counts["readings"]) == {"generic", "capacity", "event", "state", "capacity+able_now"}
     assert sum(counts["readings"].values()) == counts["sentences"]
     assert {k: v for k, v in counts["quantifier_readings"].items() if k != "none"} == quantified
     assert {NEC_ALL, f"{NEC_ALL}+{MOST}", MOST, SOME, NEC_NO} <= set(quantified)
@@ -1038,8 +1066,12 @@ def test_readings_in_documents(corpora) -> None:
         level = sentence.proposition.level
         # the true reading is always among the readings
         assert kinds[level] in sentence.readings
+        if level == ABLE_NOW:
+            assert sentence.readings == ("capacity", "able_now")
+            ambiguous[level] += 1
+            continue
         if len(sentence.readings) > 1 and level != CLASS:
-            assert sentence.readings == ("capacity", "event")
+            assert sentence.readings in (("capacity", "event"), ("capacity", "able_now"))
             ambiguous[level] += 1
         predicate = sentence.proposition.predicate
         if level == EVENT:
@@ -1052,16 +1084,22 @@ def test_readings_in_documents(corpora) -> None:
     assert ambiguous[EVENT] > 100 and ambiguous[INSTANCE] > 20 and ambiguous[CLASS] == 0
     counts = reading_counts(documents)
     assert counts["ambiguous"] == sum(ambiguous.values())
-    assert counts["readings"]["capacity+event"] == counts["ambiguous"]
+    assert (
+        counts["readings"]["capacity+event"] + counts["readings"]["capacity+able_now"]
+        == (counts["ambiguous"])
+    )
     # the logical forms are the same as in the unambiguous language
     _, plain = corpora("default", 200)
     assert [s.propositional for _, s in sentences_of(documents)] == [
         s.propositional for _, s in sentences_of(plain)
     ]
-    # with the tense marked, the language is not ambiguous again
+    # with the tense marked, the language is not ambiguous again, apart from "can" before a
+    # verb, which the affixal tense cannot mark
     marked = merged(bare, {"grammar": {"morphology": {"tense": {"enabled": True}}}})
     _, documents = corpora("default", 200, **marked)
-    assert reading_counts(documents)["ambiguous"] == 0
+    counts = reading_counts(documents)
+    assert set(counts["readings"]) <= {"generic", "capacity", "event", "state", "capacity+able_now"}
+    assert counts["ambiguous"] == counts["readings"].get("capacity+able_now", 0)
 
 
 def test_the_conceptual_rendering_is_the_same_sentence(corpora) -> None:

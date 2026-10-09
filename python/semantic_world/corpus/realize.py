@@ -40,6 +40,14 @@ progressive marker when aspect is on. The present and the simple aspect are neve
 ``grammar.can_rate``, for a category and for an instance. Without ``can``, and without a tense
 or aspect marker, an instance's capacity and an event have the same words and the same tree.
 
+**States, changes, and ``able_now``.** A state is the copula with the state adjective ("the
+mouse is asleep", "is not asleep"); a change is ``become`` with the state adjective ("the mouse
+become asleep", "become not asleep": the ``not`` gives the fluent's new value); an ``able_now``
+sentence is "can" (``lexicon.can_words: shared``) or the word ``can_now`` (``distinct``) with
+the verb, always with the auxiliary, and ``not`` for a blocked event. The tense of such a
+sentence is marked on its auxiliary when the morphology realizes the tense as a separate word;
+an affix never attaches to a function word, so with an affixal tense the auxiliary stays bare.
+
 The grammar's own choices are drawn from the generator it is given: a synonym for a concept
 with two lexemes, the adjective order when it is not fixed, and the ``can`` of a positive
 capacity. The draws are made in one order, whatever the word order, so a word-order setting
@@ -62,8 +70,8 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
     check_plan,
 )
-from semantic_world.corpus.lexicon import ADJECTIVE, Lexeme, Lexicon
-from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, NEC_NO, NO, VERB
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, ADJECTIVE, Lexeme, Lexicon
+from semantic_world.corpus.propositions import CAN, HAS, IS, MEMBER, NEC_NO, NO, STATE_KIND, VERB
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
 from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
@@ -119,13 +127,16 @@ class Sentence:
     instance or category it refers to, and the category its noun names (None for a pronoun)."""
     phrases: tuple[NounPhrase, ...]
     """For each noun phrase, in the same order: its part of the plan."""
-    events: tuple[tuple[str, str, str] | None, ...]
+    events: tuple[tuple[str, str, str | None] | None, ...]
     """For each verb phrase (``VP``), a node before its children: the event it reports, with
-    its tense and its aspect, or None."""
+    its tense and its aspect; for a verb phrase about a time point (a state, a change, or what
+    was possible then), the qualified time point (``SCENE.8.TIME.2``), the tense, and None;
+    or None."""
 
     @property
     def event_labels(self) -> tuple[str | None, ...]:
-        """For each verb phrase, the label of the event it reports, or None."""
+        """For each verb phrase, the label of the event it reports, the time point it is
+        about, or None."""
         return tuple(None if e is None else e[0] for e in self.events)
 
 
@@ -137,6 +148,8 @@ class Realizer:
         self.order = config.grammar.word_order
         self.morphology = config.grammar.morphology
         self.lexicon = lexicon
+        self.able_now_word = "can" if config.lexicon.can_words == "shared" else ABLE_NOW_WORD
+        """The auxiliary of an ``able_now`` sentence."""
         self._marker = {
             PLURAL: self.morphology.number,
             PAST: self.morphology.tense,
@@ -204,11 +217,24 @@ class _Builder:
             return lexemes[0]
         return lexemes[int(self.rng.integers(len(lexemes)))]
 
-    def function(self, label: str, gloss: str) -> Tree:
+    def function(self, label: str, gloss: str, marks: tuple[str, ...] = ()) -> Tree:
+        """A function word, with the inflections among ``marks`` that are realized as separate
+        words standing beside it; an affix never attaches to a function word."""
         try:
-            return [label, self.lexicon.function_word(gloss).label]
+            token = self.lexicon.function_word(gloss).label
         except KeyError as error:
             raise GrammarError(str(error.args[0])) from None
+        words = [m for m in marks if self.realizer._marker[m].realization == "word"]
+        if not words:
+            return [label, token]
+        before = [m for m in words if self.realizer._marker[m].position == "before"]
+        after = [m for m in words if self.realizer._marker[m].position == "after"]
+        return [
+            label,
+            *(self.function(m, m) for m in before),
+            [label, token],
+            *(self.function(m, m) for m in after),
+        ]
 
     def word(self, label: str, concept: str, marks: tuple[str, ...] = ()) -> Tree:
         """A content word with its inflections: an affix joins the token, and an inflection
@@ -307,11 +333,14 @@ class _Builder:
 
     def verb_node(self, parts: list[Tree], predication: Predication) -> Tree:
         node = ["VP", *parts]
-        if predication.event is None:
-            self.events[id(node)] = None
-        else:
+        if predication.event is not None:
             assert predication.tense is not None and predication.aspect is not None
             self.events[id(node)] = (predication.event, predication.tense, predication.aspect)
+        elif predication.time is not None:
+            assert predication.tense is not None
+            self.events[id(node)] = (predication.time, predication.tense, None)
+        else:
+            self.events[id(node)] = None
         return node
 
     def verb_phrase(
@@ -334,7 +363,22 @@ class _Builder:
         auxiliary: str | None = None
         negated = False
         target: Tree | None = None
-        if kind in (CAN, VERB):
+        # the tense of a sentence about a time point, marked on its auxiliary when the
+        # morphology realizes the tense as a word
+        timed_marks: tuple[str, ...] = ()
+        if predication.time is not None:
+            if morphology.tense.enabled and predication.tense == PAST_TENSE:
+                timed_marks = (PAST,)
+        if kind == STATE_KIND:
+            auxiliary = "become" if predication.become else ("are" if plural and agree else "is")
+            negated = not polarity
+            head = self.word("A", predication.label)
+        elif kind in (CAN, VERB) and predication.time is not None:
+            auxiliary, negated = self.realizer.able_now_word, not polarity
+            head = self.word("V", predication.label)
+            if predication.object is not None:
+                target = self.noun_phrase(predication.object, "NP-OBJ")
+        elif kind in (CAN, VERB):
             marks: tuple[str, ...] = ()
             if predication.event is not None:
                 if morphology.tense.enabled and predication.tense == PAST_TENSE:
@@ -379,7 +423,7 @@ class _Builder:
         negation = self.function("Neg", "not") if negated else None
         before = self.order.auxiliary == "before"
         if auxiliary is not None and auxiliary != elide:
-            group = [self.function("AUX", auxiliary)]
+            group = [self.function("AUX", auxiliary, timed_marks)]
             if negation is not None:
                 after = self.order.negation == "after_auxiliary"
                 group = group + [negation] if after else [negation] + group

@@ -23,6 +23,7 @@ from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.histories import happened_in, scene_events, scene_of
 from semantic_world.corpus.planner import Planner
 from semantic_world.corpus.propositions import (
+    ABLE_NOW,
     CAN,
     CLASS,
     EVENT,
@@ -31,12 +32,14 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     SIMPLE,
+    STATE,
     VERB,
     Predicate,
     Proposition,
 )
 from semantic_world.corpus.realize import leaves, preorder
 from semantic_world.corpus.testsets import (
+    BLOCKED,
     CHANGES,
     IMPOSSIBLE,
     INPUT_FIELDS,
@@ -72,11 +75,22 @@ ALL_SETS = (
     "instance_subject",
     "instance_role",
     "event_predicate_possible",
+    "event_predicate_blocked",
     "event_predicate_impossible",
     "event_subject_possible",
+    "event_subject_blocked",
     "event_subject_impossible",
     "event_role_possible",
+    "event_role_blocked",
     "event_role_impossible",
+    "state_predicate_changed",
+    "state_predicate_unchanged",
+    "state_subject_changed",
+    "state_subject_unchanged",
+    "able_now_predicate_blocked",
+    "able_now_predicate_impossible",
+    "able_now_subject_blocked",
+    "able_now_subject_impossible",
 )
 GRAMMARS = {
     "default": {},
@@ -140,8 +154,8 @@ def test_the_layout_of_the_test_sets(runs) -> None:
     assert [name for name, *_ in set_names(CHANGES)] == list(ALL_SETS)
     size = corpus.config.test_sets.size
     for test_set in corpus.test_sets:
-        level, change, *kind = test_set.name.split("_")
-        assert (test_set.level, test_set.change, test_set.kind) == (level, change, "".join(kind))
+        level, change, kind = test_set.level, test_set.change, test_set.kind
+        assert test_set.name == "_".join(part for part in (level, change, kind) if part)
         assert len(test_set.pairs) <= size
         assert len(test_set.items) == 2 * len(test_set.pairs)
         for number, (true, false) in enumerate(test_set.pairs, start=1):
@@ -152,11 +166,10 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 assert list(item.to_json()) == ["input", "meta"]
                 assert list(item.input) == list(INPUT_FIELDS)
                 assert item.proposition.level == level
-    # the default world fills every set but some of the law-like ones and the possible role
-    # swaps of events: its two-place event types hold for few pairs (since stage a5b), so few
-    # swapped bindings are able (1 pair in 200 documents)
+    # the default world fills every set but some of the law-like ones (since the retune of
+    # stage a7a, the possible and blocked role swaps of events fill too)
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
-    unfilled = {name for name in ALL_SETS if LAWLIKE in name} | {"event_role_possible"}
+    unfilled = {name for name in ALL_SETS if LAWLIKE in name}
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
     assert all(sizes[name] > 0 for name in ALL_SETS), sizes
     # a true item is used once in the sets of one level and change
@@ -179,7 +192,12 @@ def test_the_changes_and_the_size_are_settings(cases, runs) -> None:
         "class_quantifier_lawlike",
         "instance_subject",
         "event_subject_possible",
+        "event_subject_blocked",
         "event_subject_impossible",
+        "state_subject_changed",
+        "state_subject_unchanged",
+        "able_now_subject_blocked",
+        "able_now_subject_impossible",
     ]
     assert all(len(s.pairs) <= 5 for s in corpus.test_sets)
     empty = runs("tiny", test_sets={"size": 0})
@@ -204,7 +222,17 @@ def test_a_corpus_without_narratives_has_class_level_sets_only(runs) -> None:
 
 def differences(true: Proposition, false: Proposition) -> set[str]:
     a, b = true.to_json(), false.to_json()
-    keys = ("level", "quantifier", "polarity", "subject", "predicate", "scene", "tense", "aspect")
+    keys = (
+        "level",
+        "quantifier",
+        "polarity",
+        "subject",
+        "predicate",
+        "scene",
+        "tense",
+        "aspect",
+        "time",
+    )
     return {key for key in keys if a.get(key) != b.get(key)}
 
 
@@ -225,7 +253,7 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             if test_set.level == EVENT:
                 assert oracle.event(form, scenes[form["scene"]]) is item.truth
             else:
-                assert oracle.truth(form) is item.truth, form
+                assert oracle.truth(form, scenes.get(form.get("scene"))) is item.truth, form
             assert corpus.planner.facts.expressible(item.proposition)
         changed = differences(true.proposition, false.proposition)
         a, b = true.proposition, false.proposition
@@ -319,6 +347,13 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
                     assert form["event"] is None and record["events"] == [form["scene"]]
                     assert f"EVENT({form['scene']}, " in record["propositional"]
                     assert item.proposition.event is None
+                elif test_set.level in (STATE, ABLE_NOW):
+                    # the verb phrase's record is the scene's final time point
+                    assert record["events"] == [f"{form['scene']}.{form['time']}"]
+                    operator = "HOLDS" if test_set.level == STATE else "ABLE_NOW"
+                    assert (
+                        f"{operator}({form['scene']}, {form['time']}, " in record["propositional"]
+                    )
                 else:
                     assert all(event is None for event in record["events"])
     assert sum(checked.values()) > 150
@@ -500,11 +535,12 @@ def test_event_items(cases, runs, name) -> None:
         patient = predicate["patient"]["instance"] if "patient" in predicate else None
         able = oracle.able(label, other["subject"]["instance"], patient)
         assert false.meta["possible"] is able is false.meta["grounding"]["able"]
-        assert test_set.kind == (POSSIBLE if able else IMPOSSIBLE)
-        assert "step" not in false.meta["grounding"]
-        assert false.meta["grounding"]["legal"] is oracle.legal(
+        legal_ever = oracle.legal(
             scenes[other["scene"]], label, other["subject"]["instance"], patient
         )
+        assert test_set.kind == (POSSIBLE if legal_ever else (BLOCKED if able else IMPOSSIBLE))
+        assert "step" not in false.meta["grounding"]
+        assert false.meta["grounding"]["legal"] is legal_ever
         kinds[test_set.kind] += 1
         event_types = corpus.planner.world.event_types
         category_names += label in event_types and event_types[label].category
@@ -514,6 +550,7 @@ def test_event_items(cases, runs, name) -> None:
         assert patient is None or patient in participants
     assert kinds[POSSIBLE] > 10 and kinds[IMPOSSIBLE] > 10, kinds
     if name == "default":
+        assert kinds[BLOCKED] > 10, kinds
         assert category_names > 0  # some false items name their verb with a verb category
 
 
@@ -747,6 +784,9 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
     for level in (CLASS, INSTANCE):
         assert seen[(level, True)] > 0 and seen[(level, False)] > 0, seen
     assert seen[(EVENT, True)] > 0
+    # a state or able_now item is about the scene's final time point, which no document states
+    for level in (STATE, ABLE_NOW):
+        assert seen[(level, True)] == 0 and seen[(level, False)] > 0, seen
     if name in ("tiny", "default"):
         assert seen[(EVENT, False)] > 0, seen
 

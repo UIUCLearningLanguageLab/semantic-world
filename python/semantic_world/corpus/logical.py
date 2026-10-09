@@ -12,7 +12,8 @@ that eat mice") and as ``agent`` when the head is the patient ("mice that owls e
 predicate of a scalar pole also holds its comparison class (``class``): the subject category's
 parent, or ``THING`` for a top-level category.
 
-**Instance and event level.** The subject, and the patient of a verb, are mentions:
+**Instance, event, state, change, and able_now levels.** The subject, and the patient of a
+verb, are mentions:
 
 ```json
 {"instance": "INSTANCE.1.3.2.5", "referent": "REF.1", "noun": "CATEGORY.1.3.2",
@@ -34,7 +35,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
-from semantic_world.corpus.propositions import CLASS, LABEL_KEY, SCALAR, Proposition
+from semantic_world.corpus.propositions import _JSON_KEY, CLASS, SCALAR, Proposition
 
 
 def logical_form(
@@ -63,7 +64,7 @@ def logical_form(
         return data
 
     def predication(part: Predication, agent: NounPhrase | None) -> dict[str, Any]:
-        data: dict[str, Any] = {"kind": part.kind, LABEL_KEY: part.label}
+        data: dict[str, Any] = {"kind": part.kind, _JSON_KEY[part.kind]: part.label}
         if agent is not None:
             data["agent"] = mention(agent)
         elif part.object is not None:

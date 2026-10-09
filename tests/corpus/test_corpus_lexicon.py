@@ -66,7 +66,9 @@ def test_concepts_of_the_default_world(default_world) -> None:
         labels["property"] == list(world.features[PROPERTY_KIND]) and len(labels["property"]) == 40
     )
     assert labels["part"] == list(world.features[PART_KIND]) and len(labels["part"]) == 40
-    assert labels["state"] == []  # state adjectives come in stage a7
+    # one state adjective per fluent, base and derived, in the definition's order
+    assert labels["state"] == list(world.fluents) and len(labels["state"]) == 8
+    assert all(label.startswith("BOOLFL.") for label in labels["state"])
     assert labels["event_unary"] == list(world.features[EVENT_TYPE1_KIND])
     assert len(labels["event_unary"]) == 20
     assert labels["event"] == [
@@ -113,7 +115,7 @@ def test_parts_of_speech(default_world) -> None:
 def test_concept_order_follows_the_specification_table(default_world) -> None:
     lexicon = lexicon_of(default_world)
     types = [c.type for c in lexicon.concepts]
-    order = [t for t in CONCEPT_TYPES if t != "state"] + [GENERIC, FUNCTION]
+    order = list(CONCEPT_TYPES) + [GENERIC, FUNCTION]
     assert [t for i, t in enumerate(types) if i == 0 or types[i - 1] != t] == order
 
 
@@ -244,27 +246,27 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "category": 56,
         "property": 40,
         "part": 40,
-        "state": 0,
+        "state": 8,
         "event_unary": 20,
         "event": 20,
         "event_category": 5,
         "patient_projection": 20,
         "scalar": 4,
         GENERIC: 1,
-        FUNCTION: 15,
+        FUNCTION: 16,
     }
     assert counts["named_concepts"] == {
         "category": 28,
         "property": 4,
         "part": 40,
-        "state": 0,
+        "state": 8,
         "event_unary": 15,
         "event": 8,
         "event_category": 0,
         "patient_projection": 10,
         "scalar": 2,  # one of the two dimensions, with both of its poles
         GENERIC: 1,
-        FUNCTION: 15,
+        FUNCTION: 16,
     }
 
 
@@ -336,15 +338,16 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
 
 def test_lexeme_labels(default_world) -> None:
     lexicon = lexicon_of(default_world)
-    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 207)]
-    assert len(lexicon.content_lexemes) == 191 and len(lexicon.function_lexemes) == 15
+    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 216)]
+    assert len(lexicon.content_lexemes) == 199 and len(lexicon.function_lexemes) == 16
     # content lexemes come first, then the function words
-    assert all(x.content for x in lexicon.lexemes[:191])
+    assert all(x.content for x in lexicon.lexemes[:199])
     assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
-    assert lexicon.lexeme("LEXEME.191").concept == THING
-    assert lexicon.lexeme("LEXEME.192").gloss == "a"
+    assert lexicon.lexeme("LEXEME.199").concept == THING
+    assert lexicon.lexeme("LEXEME.200").gloss == "a"
+    assert lexicon.lexeme("LEXEME.215").gloss == "become"
     with pytest.raises(KeyError, match="unknown lexeme"):
-        lexicon.lexeme("LEXEME.207")
+        lexicon.lexeme("LEXEME.216")
     with pytest.raises(KeyError, match="unknown concept"):
         lexicon.concept("CATEGORY.99")
 
@@ -371,18 +374,22 @@ def test_the_same_seed_gives_the_same_lexicon(default_world) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def function_glosses(world, **morphology: Any) -> list[str]:
-    lexicon = lexicon_of(world, TINY_WORLD, grammar={"morphology": morphology})
+def function_glosses(world, can_words: str = "shared", **morphology: Any) -> list[str]:
+    lexicon = lexicon_of(
+        world, TINY_WORLD, grammar={"morphology": morphology}, lexicon={"can_words": can_words}
+    )
     return [x.gloss for x in lexicon.function_lexemes]
 
 
 def test_function_words(tiny_world) -> None:
     base = [
         "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-        "and", "that", "it",
+        "and", "that", "it", "become",
     ]  # fmt: skip
     assert list(FUNCTION_WORDS) == base and AGREEMENT_WORDS == ("are", "have")
     assert function_glosses(tiny_world) == base
+    # with distinct words for ABLE and ABLE_NOW, the language has can_now too
+    assert function_glosses(tiny_world, can_words="distinct") == base + ["can_now"]
     # with agreement on, are and have are the plural forms of is and has
     assert function_glosses(tiny_world, number={"enabled": True}) == base + ["are", "have"]
     assert function_glosses(tiny_world, number={"enabled": True, "agreement": False}) == base
@@ -460,7 +467,7 @@ def test_the_realized_synonym_rate_is_within_tolerance(default_world) -> None:
             ]
             for seed in SEEDS
         ]
-        # 191 content concepts and 20 seeds: the standard error of the mean is under 0.01
+        # 199 content concepts and 20 seeds: the standard error of the mean is under 0.01
         assert abs(np.mean(rates) - rate) < 0.03, (rate, np.mean(rates))
         assert all(abs(r - rate) < 0.15 for r in rates)
     assert lexicon_of(default_world, lexicon={"synonym_rate": 1.0}).stats()["synonym_rate"] == 1
@@ -474,17 +481,17 @@ def test_synonyms(default_world) -> None:
     for concept in lexicon.concepts:
         expected = (0,) if concept.label in lexicon.unnamed else (1, 2)
         assert len(lexicon.lexemes_of(concept.label)) in expected
-    assert len(lexicon.content_lexemes) == 191 + len(doubled)
+    assert len(lexicon.content_lexemes) == 199 + len(doubled)
     for concept in doubled:
         first, second = lexicon.lexemes_of(concept.label)
         assert concept.content  # function words never get synonyms
         assert (first.concept, first.pos, first.gloss) == (second.concept, second.pos, second.gloss)
         assert first.label != second.label
     # first lexemes keep their labels, second lexemes follow them, then the function words
-    assert lexicon.lexemes[:191] == base.lexemes[:191]
-    seconds = lexicon.lexemes[191 : 191 + len(doubled)]
+    assert lexicon.lexemes[:199] == base.lexemes[:199]
+    seconds = lexicon.lexemes[199 : 199 + len(doubled)]
     assert [x.concept for x in seconds] == [c.label for c in doubled]
-    assert [x.gloss for x in lexicon.lexemes[191 + len(doubled) :]] == [
+    assert [x.gloss for x in lexicon.lexemes[199 + len(doubled) :]] == [
         x.gloss for x in base.function_lexemes
     ]
     assert [x.label for x in lexicon.lexemes] == [
@@ -522,11 +529,11 @@ def test_the_realized_homonym_rate_is_within_tolerance(default_world) -> None:
             stats = lexicon.stats()
             shared = [x for x in lexicon.content_lexemes if x.same_form_as is not None]
             assert stats["homonym_pairs"] == len(shared)
-            assert stats["homonym_rate"] == 2 * len(shared) / 191
+            assert stats["homonym_rate"] == 2 * len(shared) / 199
             # the number of pairs is rate x lexemes / 2, rounded down or up
-            assert abs(stats["homonym_rate"] - rate) <= 2 / 191
+            assert abs(stats["homonym_rate"] - rate) <= 2 / 199
     every = lexicon_of(default_world, lexicon={"homonym_rate": 1.0}).stats()
-    assert every["homonym_pairs"] == 95  # 191 lexemes: one is left over
+    assert every["homonym_pairs"] == 99  # 199 lexemes: one is left over
 
 
 def test_the_share_of_same_pos_pairs_is_within_tolerance(default_world) -> None:
@@ -570,7 +577,7 @@ def test_a_homonym_never_pairs_a_concept_with_its_own_synonym(tiny_world) -> Non
     for seed in SEEDS:
         knobs = {"homonym_rate": 1.0, "synonym_rate": 1.0}
         lexicon = lexicon_of(tiny_world, TINY_WORLD, seed=seed, lexicon=knobs)
-        assert len(lexicon.content_lexemes) == 72  # 36 content concepts, each with a synonym
+        assert len(lexicon.content_lexemes) == 80  # 40 content concepts, each with a synonym
         pairs = lexicon.homonym_pairs()
         assert len(pairs) >= 33
         assert all(a.concept != b.concept for a, b in pairs)

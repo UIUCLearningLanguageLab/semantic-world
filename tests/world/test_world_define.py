@@ -107,15 +107,40 @@ def test_default_configuration_lists_every_default() -> None:
         "max_tries": 200,
     }
     assert config.event_types.binary.constraint_min_density is None
-    # The file shows every default but the event-type tree (stage a6: the default world has 20
-    # two-place event types, as many as its one-place ones; the code's default is 3 superordinates
-    # with 2 to 3 each).
+    # The file shows every default but five settings of the event types: the event-type tree
+    # (stage a6: the default world has 20 two-place event types, as many as its one-place ones;
+    # the code's default is 3 superordinates with 2 to 3 each), and the retune of stage a7a (no
+    # own constraint, the key-lock family at half weight, the constraints' operator mix weighing
+    # OR 4, and the one-place requirements' operator mix weighing AND 3).
     resolved = config.resolved()
-    assert resolved["event_types"]["binary"]["taxonomy"]["superordinates"] == 5
+    binary = resolved["event_types"]["binary"]
+    assert binary["taxonomy"]["superordinates"] == 5
     assert config.event_types.binary.taxonomy.depth == 2
+    assert binary["own_constraint"] is False
+    assert binary["constraint_families"]["key_lock"] == 0.5
+    assert binary["rules"]["operator_mix"] == {"AND": 1, "OR": 4, "XOR": 1}
+    assert resolved["event_types"]["unary"]["rules"]["operator_mix"] == {
+        "AND": 3,
+        "OR": 1,
+        "XOR": 1,
+    }
     defaults = config_from_mapping({}).resolved()
     assert defaults["event_types"]["binary"]["taxonomy"]["superordinates"] == 3
-    resolved["event_types"]["binary"]["taxonomy"] = defaults["event_types"]["binary"]["taxonomy"]
+    assert defaults["event_types"]["binary"]["own_constraint"] is True
+    assert defaults["event_types"]["binary"]["constraint_families"]["key_lock"] == 1
+    assert defaults["event_types"]["binary"]["rules"]["operator_mix"] == {
+        "AND": 1,
+        "OR": 1,
+        "XOR": 1,
+    }
+    assert defaults["event_types"]["unary"]["rules"]["operator_mix"] == {
+        "AND": 1,
+        "OR": 1,
+        "XOR": 1,
+    }
+    for key in ("taxonomy", "own_constraint", "constraint_families", "rules"):
+        binary[key] = defaults["event_types"]["binary"][key]
+    resolved["event_types"]["unary"]["rules"] = defaults["event_types"]["unary"]["rules"]
     assert defaults == {**resolved, "taxonomy": {**resolved["taxonomy"]}}
 
 

@@ -1,13 +1,14 @@
 """Layer 1: the lexicon. Concepts from the world get words.
 
 A **concept** is something the language can name: a category, a PROPERTY or PART feature, a
-one-place event type, a two-place event type or a category of them, a patient capacity, a pole
-of a scalar dimension, the generic head noun, or a function word. Each concept has a concept
-label: the world's label (``CATEGORY.1.3.2``, ``PROPERTY.12``, ``EVENTTYPE2.1.2``,
-``CANBE.EVENTTYPE2.1.1``). A scalar pole is its dimension's label with ``HIGH`` or ``LOW``
-(``SCALARDIM.1.HIGH``). The generic head noun is ``THING``, and a function word's concept label
-is its gloss in capitals (``THE``). Fluents become state adjectives in stage a7; the concept type
-``state`` is listed, and names nothing yet.
+fluent (base or derived), a one-place event type, a two-place event type or a category of them,
+a patient capacity, a pole of a scalar dimension, the generic head noun, or a function word. Each
+concept has a concept label: the world's label (``CATEGORY.1.3.2``, ``PROPERTY.12``,
+``BOOLFL.3``, ``EVENTTYPE2.1.2``, ``CANBE.EVENTTYPE2.1.1``). A scalar pole is its dimension's
+label with ``HIGH`` or ``LOW`` (``SCALARDIM.1.HIGH``). The generic head noun is ``THING``, and a
+function word's concept label is its gloss in capitals (``THE``). A fluent's word is a **state
+adjective** (concept type ``state``), which the lexeme tells from a static adjective: it names a
+fluent, and a static adjective a PROPERTY feature, a patient capacity, or a scalar pole.
 
 A **lexeme** is a word of the language, labeled ``LEXEME.<n>``. Every lexeme has exactly one
 concept. By default there is one lexeme per named concept. Two knobs add ambiguity:
@@ -63,9 +64,14 @@ LEXEME_PREFIX = "LEXEME."
 
 FUNCTION_WORDS = (
     "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-    "and", "that", "it",
+    "and", "that", "it", "become",
 )  # fmt: skip
-"""The glosses of the function words every language has, in the order of the specification."""
+"""The glosses of the function words every language has, in the order of the specification:
+the fifteen of the corpus generator, then ``become`` (``docs/specs/WORLD_AND_LANGUAGE.md``,
+"States and changes")."""
+ABLE_NOW_WORD = "can_now"
+"""The gloss of the function word that expresses ``ABLE_NOW`` when ``lexicon.can_words`` is
+``distinct``; with ``shared``, "can" expresses ``ABLE`` and ``ABLE_NOW`` alike."""
 AGREEMENT_WORDS = ("are", "have")
 """The plural forms of ``is`` and ``has``, added when verbs agree with their subjects."""
 
@@ -216,6 +222,8 @@ def function_word_glosses(config: Config) -> tuple[str, ...]:
     inflection that is realized as a separate word (``PLURAL``, ``PAST``, ``PROGRESSIVE``)."""
     morphology = config.grammar.morphology
     glosses = FUNCTION_WORDS
+    if config.lexicon.can_words == "distinct":
+        glosses += (ABLE_NOW_WORD,)
     if morphology.agreement:
         glosses += AGREEMENT_WORDS
     return glosses + morphology.inflection_words()
@@ -241,6 +249,7 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
     concepts = [Concept(c, "category", NOUN, c) for c in world.categories]
     concepts += [Concept(f, "property", ADJECTIVE, f) for f in world.features[PROPERTY_KIND]]
     concepts += [Concept(f, "part", PART_NOUN, f) for f in world.features[PART_KIND]]
+    concepts += [Concept(f, "state", ADJECTIVE, f) for f in world.fluents]
     concepts += [
         Concept(f, "event_unary", INTRANSITIVE_VERB, f) for f in world.features[EVENT_TYPE1_KIND]
     ]

@@ -20,6 +20,12 @@ Events are judged against scenes as ``scenes.jsonl`` holds them (histories): ``e
 ``happened``; ``able`` says whether a binding's requirement holds, and ``legal`` whether it was
 legal at some time point of a scene, by replaying the history with the brute-force evaluator. A
 category of event types names the event types below it.
+
+States, changes, and what was possible at a time point (stage a7a) are judged on the replayed
+states too: ``state`` (the fluent's value at the time point), ``change`` (its value at the time
+point and at the next), ``able_now`` (legality at the time point), ``changed`` (the value at
+the scene's final time point against ``TIME.1``), and ``made_by`` (whether one event's own
+recorded changes, applied alone to the state at the time point, change the fluent).
 """
 
 from __future__ import annotations
@@ -366,6 +372,80 @@ class Oracle:
             self._states[scene["label"]] = states
         return self._states[scene["label"]]
 
+    def legal_at(
+        self, scene: dict[str, Any], time: int, label: str, agent: str, patient: str | None
+    ) -> bool:
+        """Whether the binding was legal at ``TIME.<time>`` of the scene."""
+        binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
+        state = self.states(scene)[time - 1]
+        return any(
+            self.brute.legal(BruteEvent(event_type, binding), state)
+            for event_type in self.leaves_below(label)
+        )
+
+    def fluent_at(self, scene: dict[str, Any], time: int, entity: str, fluent: str) -> bool:
+        """A fluent's value, base or derived, of a participant at ``TIME.<time>``."""
+        return bool(self.brute.fluent(fluent, entity, self.states(scene)[time - 1]))
+
+    def changed(self, scene: dict[str, Any], entity: str, fluent: str) -> bool:
+        """Whether the fluent's value at the scene's final time point differs from its value
+        at ``TIME.1``."""
+        final = int(scene["final"].split(".")[1])
+        return self.fluent_at(scene, final, entity, fluent) != self.fluent_at(
+            scene, 1, entity, fluent
+        )
+
+    def made_by(
+        self, scene: dict[str, Any], time: int, entity: str, fluent: str, event_label: str
+    ) -> bool:
+        """Whether the event's own recorded changes, applied alone to the state at
+        ``TIME.<time>``, change the fluent of the participant."""
+        step = next(s for s in scene["steps"] if s["step"] == time)
+        event = next((e for e in step["events"] if e["label"] == event_label), None)
+        if event is None:
+            return False
+        if not self.symbols[fluent]["derived"]:
+            return any(c["entity"] == entity and c["fluent"] == fluent for c in event["changes"])
+        before = self.states(scene)[time - 1]
+        after = {e: set(v) for e, v in before.items()}
+        for change in event["changes"]:
+            if change["to"]:
+                after[change["entity"]].add(change["fluent"])
+            else:
+                after[change["entity"]].discard(change["fluent"])
+        after_state = {e: frozenset(v) for e, v in after.items()}
+        return self.brute.fluent(fluent, entity, before) != self.brute.fluent(
+            fluent, entity, after_state
+        )
+
+    def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
+        """Whether a state form (``HOLDS``) is true of the scene."""
+        time = int(form["time"].split(".")[1])
+        value = self.fluent_at(
+            scene, time, form["subject"]["instance"], form["predicate"]["fluent"]
+        )
+        return value == form["polarity"]
+
+    def change(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
+        """Whether a change form (``BECOME``) is true of the scene: the fluent had the other
+        value at the time point and the stated value at the next."""
+        time = int(form["time"].split(".")[1])
+        entity, fluent = form["subject"]["instance"], form["predicate"]["fluent"]
+        before = self.fluent_at(scene, time, entity, fluent)
+        after = self.fluent_at(scene, time + 1, entity, fluent)
+        return before != form["polarity"] and after == form["polarity"]
+
+    def able_now(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
+        """Whether an able_now form is true of the scene: the binding was legal at the time
+        point (positive) or was not (negative)."""
+        time = int(form["time"].split(".")[1])
+        predicate = form["predicate"]
+        patient = predicate["patient"]["instance"] if "patient" in predicate else None
+        legal_now = self.legal_at(
+            scene, time, predicate["label"], form["subject"]["instance"], patient
+        )
+        return legal_now == form["polarity"]
+
     def legal(self, scene: dict[str, Any], label: str, agent: str, patient: str | None) -> bool:
         """Whether the binding was legal at some time point of the scene, for the event type or
         for some event type below the category."""
@@ -403,9 +483,13 @@ class Oracle:
 
     # Truth -----------------------------------------------------------------------------------
 
-    def truth(self, form: dict[str, Any]) -> bool | None:
+    def truth(self, form: dict[str, Any], scene: dict[str, Any] | None = None) -> bool | None:
         if form["level"] == "class":
             return self._class(form)
+        if form["level"] in ("state", "change", "able_now"):
+            assert scene is not None and scene["label"] == form["scene"]
+            judge = {"state": self.state, "change": self.change, "able_now": self.able_now}
+            return judge[form["level"]](form, scene)
         return self._instance(form)
 
     def _counts(self, form: dict[str, Any]) -> tuple[int, int]:

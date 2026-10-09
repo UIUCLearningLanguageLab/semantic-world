@@ -1,5 +1,5 @@
 # The word forms of the default corpus (data/corpus/default.yaml), with the default word-form
-# settings: 500 content words for its 191 content lexemes, 45 speakers (40 Piper voices and 5
+# settings: 500 content words for its 199 content lexemes, 45 speakers (40 Piper voices and 5
 # espeak-ng variants, 2 tokens each), and all five embeddings. Parameters not listed keep their
 # defaults (see default.yaml and docs/specs/WORDFORM_PIPELINE.md). Generate the corpus first, so
 # that its request exists:
