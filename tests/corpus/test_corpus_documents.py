@@ -1263,13 +1263,13 @@ def test_documents_are_deterministic(cases) -> None:
 def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     case = cases("default")
 
-    def made(**weights):
+    def made(count: int = 300, **weights):
         # the default equal kinds of content, so the category documents state scalar poles too
         sections = {}
         if weights:
             sections["quantifiers"] = {"weights": weights}
         planner = Planner(case.config(**sections), case.world)
-        documents = planner.generate(300)
+        documents = planner.generate(count)
         strengths = Counter(
             s.strength
             for _, s in sentences_of(documents, *ENCYCLOPEDIC)
@@ -1327,11 +1327,12 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     _, _, without = made(some=0)
     assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
-    # the mix among the negative facts: "no" against "most ... not" and "some ... not"
-    # (1.3 in the default world of stage a6, with 300 documents; 1.5 and more in the a5b world;
-    # 1.23 since stage a7b, whose feature documents draw other facts)
-    _, _, heavier = made(nec_none=4)
-    assert share(heavier, NEC_NO) > 1.2 * share(strengths, NEC_NO)
+    # the mix among the negative facts: "no" against "most ... not" and "some ... not". About 3%
+    # of the class-level sentences are "no", so the rise needs 1,000 documents to settle: 1.47
+    # on this seed, 1.31 to 1.47 on seeds 1 to 6 (stage a8; 300 documents gave 1.10 to 1.44)
+    _, _, base_many = made(count=1000)
+    _, _, heavier = made(count=1000, nec_none=4)
+    assert share(heavier, NEC_NO) > 1.25 * share(base_many, NEC_NO)
     with pytest.raises(ConfigError, match="quantifiers.weights.no"):
         case.config(quantifiers={"weights": {"no": 4}})
 

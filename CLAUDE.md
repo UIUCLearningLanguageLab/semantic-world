@@ -8,6 +8,8 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 
 ## What to read, in order
 
+For work on the world package or the corpus (the disembodied simulation), read `docs/specs/WORLD_AND_LANGUAGE.md` (item 9) and the world guide `docs/guides/WORLD.md` first, then the corpus guide and the older specifications as needed. Items 1 to 3 are the 3D engine's.
+
 1. `docs/specs/MILESTONE_1.md` — the current build specification: scope, world content, build stages, and acceptance tests. Start here.
 2. `docs/CONTRACTS.md` — the ten contracts between the engine, the world, the agents, and the viewer. The contracts are the source of truth for every interface and file format.
 3. `docs/ENTITY_DEFINITIONS.md` — how bodies, sensors, actuators, and minds are defined.
@@ -16,9 +18,9 @@ Semantic World is an artificial world for comparing cognitive models. A simulate
 6. `docs/specs/WORDFORM_PIPELINE.md` — the word-form pipeline: a Python program in `python/semantic_world/wordforms/` that makes spoken word forms, synthesizes them, and builds sound embeddings.
 7. `docs/specs/CORPUS_GENERATOR.md` — the corpus generator: a Python program in `python/semantic_world/corpus/` that writes documents about the taxonomy's world in an artificial language, with a parse tree and a logical form for every sentence. Its numbered decisions, and the proposals they point to, are part of the specification.
 8. `docs/specs/CONNECTED_SPEECH.md` — the plan for spoken sentences: whole utterances, alignment, pauses, speakers, and register. Planned, not built.
-9. `docs/specs/WORLD_AND_LANGUAGE.md` — the world-and-language refactor: one world model of state and change for both simulation modes (fluents, event types with preconditions and effects, time steps), a new package `python/semantic_world/world/`, and the corpus rebuilt on that model. Built in phases and stages. Its decisions were reviewed by Jon on October 7, 2026, and are logged as WM.1 to WM.33 in `docs/DECISIONS.md`. Built through stage a5a (the corpus runs on the world package); the engineering choices of each stage are in `docs/proposals/` and logged as WM.E rows.
+9. `docs/specs/WORLD_AND_LANGUAGE.md` — the world-and-language refactor: one world model of state and change for both simulation modes (fluents, event types with preconditions and effects, time steps), a new package `python/semantic_world/world/`, and the corpus rebuilt on that model. Built in phases and stages. Its decisions were reviewed by Jon on October 7, 2026, and are logged as WM.1 to WM.33 in `docs/DECISIONS.md`. Phase (a) is built (stages a1 to a8: the world package, the cut-over of the taxonomy and the corpus, the labels, states, changes, causal statements, descriptions, the documentation, and the regenerated datasets); the engineering choices of each stage are in `docs/proposals/` and logged as WM.E rows. Phase (b) starts with stage b1 (conditional effects).
 10. `docs/DECISIONS.md` — the log of every design decision of the taxonomy, word-form, and corpus programs, and of the world model. Append new decisions to it.
-11. `docs/guides/` — user guides for the taxonomy generator (`TAXONOMY.md`), the word-form pipeline (`WORDFORMS.md`), and the corpus generator (`CORPUS.md`).
+11. `docs/guides/` — user guides for the world package (`WORLD.md`: what a world is, the commands, the outputs, the configuration, the default world's figures, the two-place share and its levers), the taxonomy generator (`TAXONOMY.md`), the word-form pipeline (`WORDFORMS.md`), and the corpus generator (`CORPUS.md`). `README.md` there has the full chain.
 12. `docs/ENVIRONMENT_SURVEY.md` — background only: why the stack was chosen.
 
 The project's planning documents (decisions, to-do lists, research goals, and the first study) live in a private folder that is not available in this repository. Everything needed to build is in `docs/`. If something seems missing, ask rather than guess.
@@ -80,6 +82,17 @@ python tests/world/hand_world.py                                 # rewrite the h
 python examples/two_place_levers.py [--seeds 1,2,3] [--only TEXT] [--out FILE]   # the default world with one setting changed at a time: the two-place share, the one-place capacity rate, and the two-place pair density (about half an hour)
 pytest tests/world                                               # the world package's tests alone (matrices, identity, derived values, the world generator, event types and relations, the runtime, the fixtures, episodes and histories)
 ```
+
+The full chain of the disembodied simulation, at default scale (the world and the corpus take about 3 minutes together, the word forms with audio and embeddings about half an hour; `docs/guides/README.md`, "The full chain"):
+
+```
+python -m semantic_world.world define data/world/default.yaml                                      # the world run (optional: generate defines the world in memory from the same file)
+python -m semantic_world.corpus generate data/corpus/default.yaml                                  # the corpus: documents, test sets, statistics, and the word-form request
+python -m semantic_world.wordforms all data/wordforms/corpus_default.yaml                          # the word forms of the corpus's lexicon, with audio and embeddings
+python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms runs/wordforms/corpus_default_seed1   # the spelled rendering
+```
+
+The same four commands with `tiny` in place of `default` (`data/world/tiny.yaml`, `data/corpus/tiny.yaml`, `data/wordforms/corpus_tiny.yaml`, `runs/corpus/tiny_seed1`, `runs/wordforms/corpus_tiny_seed1`) run the tiny chain in under a minute.
 
 The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speech]"`) and, for the espeak-ng engine and the IPA check, the system program espeak-ng (`brew install espeak-ng`).
 
