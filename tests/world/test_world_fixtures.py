@@ -36,6 +36,12 @@ HAND_CASES = (
     "precondition_blocks",
     "two_events_independent",
     "two_events_interfere",
+    # stage b1: conditional effects
+    "condition_holds",
+    "condition_fails",
+    "fluent_condition_holds",
+    "fluent_condition_fails",
+    "condition_read_by_another_event",
 )
 
 
@@ -110,7 +116,7 @@ def test_hand_fixtures_are_what_the_hand_world_script_writes() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     fixtures = module.hand_fixtures()
-    assert len(fixtures) == 12
+    assert len(fixtures) == 17
     for fixture in fixtures:
         path = FIXTURES_DIR / f"{fixture['name']}.json"
         assert (

@@ -583,6 +583,13 @@ def _invalid(reason: str) -> Evaluation:
 # ---------------------------------------------------------------------------------------------
 
 
+def unconditional_effects(record: Any) -> tuple:
+    """The effects of an event-type record that hold after every event: those without a
+    condition (stage b1). A conditional effect guarantees its fluent only when its condition
+    held, which no unconditional causal statement says."""
+    return tuple(e for e in record.effects if not e.condition)
+
+
 class Truth:
     """The truth tests of one world, under one corpus configuration."""
 
@@ -1042,11 +1049,14 @@ class Truth:
     def has_entry(self, event_type: str, kind: str, role: str, fluent: str, value: bool) -> bool:
         """Whether an event type's definition has the effect (``kind`` ``effect``) or the
         precondition literal (``precondition``) that sets, or requires, the fluent of the role
-        to the value. A category of event types has it when every event type below it does."""
+        to the value. A category of event types has it when every event type below it does. An
+        effect with a condition is no entry (stage b1): it guarantees nothing after every event,
+        so until stage b3 states conditional causal statements it makes no causal statement
+        true."""
         definition = self.world.definition
         for label in self.world.event_types_below(event_type):
             record = definition.event_type(label)
-            entries = record.effects if kind == EFFECT else record.precondition
+            entries = unconditional_effects(record) if kind == EFFECT else record.precondition
             if not any(e.role == role and e.fluent == fluent and e.value == value for e in entries):
                 return False
         return True
@@ -1084,7 +1094,9 @@ class Truth:
         holding = 0
         for label in below:
             record = definition.event_type(label)
-            entries = record.effects if predicate.kind == EFFECT else record.precondition
+            entries = (
+                unconditional_effects(record) if predicate.kind == EFFECT else record.precondition
+            )
             holding += any(
                 e.role == subject.role
                 and e.fluent == predicate.label

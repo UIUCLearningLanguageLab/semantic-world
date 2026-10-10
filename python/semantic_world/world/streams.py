@@ -6,9 +6,11 @@ of the master seed and the stream's full name. The world's streams are ``world:r
 ``world:constraints`` (the constraints of two-place event types, and the samples of the
 capacities' local test), ``world:pairs`` (the sampled pairs and estimates of the relation
 statistics), ``world:fluents`` (fluent rules and initial rates), ``world:initial`` (initial
-values), ``world:preconditions``, ``world:effects``, ``world:stats`` (the statistics episodes),
-and ``world:episodes`` (``simulate``). An event type whose preconditions are redrawn draws from
-its own part, ``world:preconditions:<label>``.
+values), ``world:preconditions``, ``world:effects``, ``world:conditions`` (the conditions of
+effects, stage b1: a stream of its own, so that a world with ``conditional_share: 0`` is the same
+world as before the stage), ``world:stats`` (the statistics episodes), and ``world:episodes``
+(``simulate``). An event type whose preconditions are redrawn draws from its own part,
+``world:preconditions:<label>``.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ STREAM_NAMES = (
     "initial",
     "preconditions",
     "effects",
+    "conditions",
     "stats",
     "episodes",
 )
@@ -43,6 +46,7 @@ class WorldStreams:
     initial: np.random.Generator
     preconditions: np.random.Generator
     effects: np.random.Generator
+    conditions: np.random.Generator
     stats: np.random.Generator
     episodes: np.random.Generator
 

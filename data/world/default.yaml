@@ -41,4 +41,6 @@ event_types:
     count: {1: 0.7, 2: 0.3}                   # weights over the number of an event type's own effects
     feature_rate: 0.5
     roles: {agent: 0.4, patient: 0.6}
+    conditional_share: 0.2                    # the share of effects that get a condition (stage b1); 0 gives the unconditional world of phase (a)
+    condition_literals: {1: 0.7, 2: 0.3}      # weights over the number of literals of a condition
   event_file: null                            # a file of explicit event types

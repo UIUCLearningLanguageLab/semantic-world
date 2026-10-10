@@ -191,15 +191,49 @@ class BruteForce:
         return found
 
     def writes(self, event: BruteEvent) -> dict[tuple[str, str], bool]:
+        """What the event may write: every effect, whatever its condition."""
         et = self.event_types[event.event_type]
         return {(event.binding[e["role"]], e["fluent"]): bool(e["value"]) for e in et["effects"]}
 
+    def condition_holds(
+        self, effect: Mapping[str, Any], binding: Mapping[str, str], state: BruteState
+    ) -> bool:
+        """Whether an effect's condition holds for the binding in the state: each literal's
+        symbol, a static feature or a fluent of the literal's role, has the literal's value. An
+        effect without a condition holds."""
+        for lit in (effect.get("condition") or {}).get("literals", ()):
+            entity = binding[lit["role"]]
+            if lit["kind"] == "feature":
+                value = self.feature(lit["symbol"], entity)
+            else:
+                value = self.fluent(lit["symbol"], entity, state)
+            if value != int(lit["value"]):
+                return False
+        return True
+
+    def fired(self, event: BruteEvent, state: BruteState) -> dict[tuple[str, str], bool]:
+        """What the event writes in the state: its effects whose conditions hold there."""
+        et = self.event_types[event.event_type]
+        return {
+            (event.binding[e["role"]], e["fluent"]): bool(e["value"])
+            for e in et["effects"]
+            if self.condition_holds(e, event.binding, state)
+        }
+
     def reads(self, event: BruteEvent) -> set[tuple[str, str]]:
+        """The base fluents the precondition and the effects' conditions read, through the
+        cones of derived fluents; a static literal reads nothing an event can write."""
         et = self.event_types[event.event_type]
         found: set[tuple[str, str]] = set()
         for lit in et["precondition"]["literals"]:
             for base in self.cone(lit["fluent"]):
                 found.add((event.binding[lit["role"]], base))
+        for effect in et["effects"]:
+            for lit in (effect.get("condition") or {}).get("literals", ()):
+                if lit["kind"] != "fluent":
+                    continue
+                for base in self.cone(lit["symbol"]):
+                    found.add((event.binding[lit["role"]], base))
         return found
 
     def interfere(self, a: BruteEvent, b: BruteEvent) -> bool:
@@ -209,10 +243,11 @@ class BruteForce:
         return bool(wa & wb) or bool(wa & self.reads(b)) or bool(wb & self.reads(a))
 
     def apply(self, state: BruteState, events: Sequence[BruteEvent]) -> BruteState:
-        """The next state. The caller has checked legality and non-interference."""
+        """The next state. The caller has checked legality and non-interference. Every
+        condition is judged in ``state``, before any effect of the step."""
         new = {e: set(v) for e, v in state.items()}
         for event in events:
-            for (entity, fluent), value in self.writes(event).items():
+            for (entity, fluent), value in self.fired(event, state).items():
                 if value:
                     new[entity].add(fluent)
                 else:

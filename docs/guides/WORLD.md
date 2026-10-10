@@ -4,7 +4,7 @@ The world package defines a world and runs it. A world is a set of entities with
 
 This guide covers running the package, what a world is, the commands, the output files, the configuration file, the default world's figures, the conformance fixtures, the two-place share, and the Python interface. The design is specified in `docs/specs/WORLD_AND_LANGUAGE.md`, and every design decision is listed in `docs/DECISIONS.md` (WM.1 to WM.34, and the engineering choices WM.E1 and following).
 
-**Status.** Phase (a) of the world-and-language refactor is complete (stages a1 to a8): Boolean fluents, one-place and two-place event types with requirements, preconditions, and effects, time steps with inertia, the Python runtime, episodes with selection policies, histories, views, world statistics, and the conformance fixtures. Numeric fluents, comparisons derived from scalars, and conditional effects come in phase (b); stored relations and places in phase (c); sorts and parts in phase (d). The Rust runtime is not built yet: the fixtures are its tests, waiting.
+**Status.** Phase (a) of the world-and-language refactor is complete (stages a1 to a8): Boolean fluents, one-place and two-place event types with requirements, preconditions, and effects, time steps with inertia, the Python runtime, episodes with selection policies, histories, views, world statistics, and the conformance fixtures. Phase (b) has begun: stage b1 adds conditional effects (an effect that applies only when a condition on the binding holds). Numeric fluents and comparisons derived from scalars come in stage b2, and the corpus's conditional causal statements and comparatives in stage b3; stored relations and places in phase (c); sorts and parts in phase (d). The Rust runtime is not built yet: the fixtures are its tests, waiting.
 
 ## Quick start
 
@@ -17,13 +17,13 @@ PYTHONPATH=python python -m semantic_world.world define data/world/tiny.yaml
 The program prints one line, and a note for each event type whose preconditions had to be drawn again:
 
 ```
-wrote runs/world/tiny_seed1: 12 entities, 4 fluents (1 derived), 4 one-place and 4 two-place event types, 12 constraints; rule set bd02c67e7286
+wrote runs/world/tiny_seed1: 12 entities, 4 fluents (1 derived), 4 one-place and 4 two-place event types, 12 constraints; rule set 6777fdc1b604
 note: the preconditions of EVENTTYPE1.4 were drawn again 1 time(s)
 note: the preconditions of EVENTTYPE2.1.2 were drawn again 2 time(s)
 note: the preconditions of EVENTTYPE2.2.1 were drawn again 1 time(s)
 ```
 
-The tiny world builds on the tiny relations taxonomy (6 categories, 12 instances, 8 PROPERTY and 8 PART features, 1 scalar dimension) and adds 4 fluents, 4 one-place event types, and 4 two-place event types in a tree of 2 categories. The 12 constraints are the rules of the requirements: one for each one-place event type, and one for each constraint of the two-place event types. The run is small enough to read every file by eye. The whole run, with its 1,000 statistics episodes, takes about 3 seconds.
+The tiny world builds on the tiny relations taxonomy (6 categories, 12 instances, 8 PROPERTY and 8 PART features, 1 scalar dimension) and adds 4 fluents, 4 one-place event types, and 4 two-place event types in a tree of 2 categories. The 12 constraints are the rules of the requirements: one for each one-place event type, and one for each constraint of the two-place event types. One of its 10 effects is conditional (`when agent.BOOLFL.3 AND NOT agent.PROPERTY.1 then agent.BOOLFL.2 := 1`, on `EVENTTYPE1.1`). The run is small enough to read every file by eye. The whole run, with its 1,000 statistics episodes, takes about 3 seconds.
 
 Two options change a run without editing the configuration:
 
@@ -49,8 +49,8 @@ A world definition has three parts: the entities' base facts, the feature rules,
 - **Event types** are the kinds of thing that can happen. A **one-place event type** (`EVENTTYPE1.4`) has one role, the agent. A **two-place event type** (`EVENTTYPE2.1.2`) has an agent and a patient; two-place event types form a tree, and a category of the tree (`EVENTTYPE2.1`) is a more general kind of event, as "hunt" is to "chase". A **binding** assigns entities to the roles, never the same entity twice.
 - **The requirement** of an event type is a rule over the static facts of a binding. When it holds, the entities are **able** to take part: the owl can eat the mouse. Capacities ("can") are requirements. A one-place requirement is a rule over the agent's features, sampled as the taxonomy's rules are. A two-place requirement is the conjunction of constraints over both roles, which can compare the two entities' scalars (the agent is bigger than the patient) or match their features (barbers cut hair).
 - **The precondition** is a conjunction of fluent literals over the binding, `agent.BOOLFL.2 AND NOT patient.BOOLFL.5`. It says whether the event can happen now: the owl is awake. A binding is **legal** in a state when its requirement holds and its precondition holds in that state.
-- **The effects** set base fluents of the participants, `patient.BOOLFL.3 := 1`. An event type never has two effects that set the same fluent of the same role to different values, and never an effect that sets a fluent to the value its own precondition requires. Effects are unconditional in phase (a).
-- **Time.** An episode has time points `TIME.1`, `TIME.2`, and so on. Step k takes the state at `TIME.k` to the state at `TIME.k+1`. Every event of a step must be legal at `TIME.k`, and the events of one step must not interfere: no two write the same fluent of the same entity, and none writes a fluent that another's precondition reads. The effects are applied, every other base fluent keeps its value (inertia), and the derived fluents are recomputed. Applying a step's events together gives the same state as applying them one at a time in any order.
+- **The effects** set base fluents of the participants, `patient.BOOLFL.3 := 1`. An event type never has two effects that set the same fluent of the same role to different values, and never an effect that sets a fluent to the value its own precondition requires. Since stage b1 an effect may carry a **condition**, `when patient.PROPERTY.4 AND patient.BOOLFL.2 then patient.BOOLFL.3 := 1`: a conjunction of one or two literals over the binding, each a static feature (PROPERTY or PART, free or determined) or a Boolean fluent (base or derived) of one role, positive or negated. The condition is judged in the state at the start of the step, before any effect of the step; when it is false, the effect does nothing. A condition never bears on whether the event is legal. A share of the effects (`event_types.effects.conditional_share`, 0.2 by default) gets a condition when the world is generated; with the share at 0 the world is the unconditional world of phase (a), byte for byte.
+- **Time.** An episode has time points `TIME.1`, `TIME.2`, and so on. Step k takes the state at `TIME.k` to the state at `TIME.k+1`. Every event of a step must be legal at `TIME.k`, and the events of one step must not interfere: no two write the same fluent of the same entity (every effect counts as a write, whatever its condition), and none writes a fluent that another's precondition, or a condition of another's effect, reads (a condition on a derived fluent reads every base fluent the derived fluent depends on; a condition on a static feature reads nothing an event can write). The effects whose conditions hold are applied, every other base fluent keeps its value (inertia), and the derived fluents are recomputed. Applying a step's events together gives the same state as applying them one at a time in any order.
 - **Episodes and histories.** An episode runs the world over a few participants for a few steps. Participants are drawn around a seed entity, weighted by thematic relatedness and taxonomic similarity. At each step a selection policy draws events among the legal ones; by default (`uniform_event`) it draws uniformly among all legal events, so an event type that is legal for many bindings happens more often, as in a world where some things simply happen more. An episode ends after its steps, or earlier when nothing is legal (quiescence). A **history** records the episode: its participants, its initial state, and each step's events with the changes they made. The corpus calls an episode a scene.
 - **Views** choose which columns of the base facts and the derived values a model sees. A view is an experiment setting, never part of the world.
 
@@ -91,7 +91,7 @@ Every command runs from the root of the repository. With the repository's virtua
 PYTHONPATH=python python -m semantic_world.world define data/world/tiny.yaml [--seed N] [--out DIR]
 ```
 
-Generates a world and writes its folder (see "Reading the outputs"). The run embeds the taxonomy run, draws the fluents and the event types, builds the definition, runs the agreement test and the checks of the dynamics (no requirement reads a fluent, no effect writes a derived fluent, no contradiction, every precondition literal achievable), and runs 1,000 statistics episodes. An event type that is never legal in the statistics episodes has its own precondition literals drawn again, up to a few times; the command prints a note for each redraw, and a warning for each event type that is still never legal. The default world takes about 8 seconds, of which the static side is about a second.
+Generates a world and writes its folder (see "Reading the outputs"). The run embeds the taxonomy run, draws the fluents and the event types, builds the definition, runs the agreement test and the checks of the dynamics (no requirement reads a fluent, no effect writes a derived fluent, no contradiction, every precondition literal achievable), and runs 1,000 statistics episodes. An event type that is never legal in the statistics episodes has its own precondition literals drawn again, up to a few times; the command prints a note for each redraw, and a warning for each event type that is still never legal. The default world takes about 8 seconds, of which the static side is about a second. Every stage records this time, measured with nothing else running, and flags a growth of more than half in its proposal file; there is no hard time limit, and no step is made cheaper by changing what it produces by default (Jon's ruling 3 on stage a8).
 
 ### `simulate`
 
@@ -127,7 +127,7 @@ Writes one table for a model, by default to `RUN/views/<preset>.csv`, with a sid
 PYTHONPATH=python python -m semantic_world.world check-fixtures [tests/fixtures/world]
 ```
 
-Runs the Python runtime and then the brute-force evaluator on every conformance fixture of the folder, prints one line per fixture, and exits with status 1 at the first failure. On the committed fixtures it ends with `18 fixtures passed the runtime and the brute-force evaluator`. See "The conformance fixtures" below.
+Runs the Python runtime and then the brute-force evaluator on every conformance fixture of the folder, prints one line per fixture, and exits with status 1 at the first failure. On the committed fixtures it ends with `23 fixtures passed the runtime and the brute-force evaluator`. See "The conformance fixtures" below.
 
 ```
 PYTHONPATH=python python -m semantic_world.world make-fixtures data/world/tiny.yaml [--out tests/fixtures/world] [--count N] [--steps N]
@@ -168,7 +168,7 @@ The language-neutral part of the definition, with no code in it. Its top-level k
 - `literals`: everything the rules read, each with its `index`, its `key`, its `kind` (`feature`, `threshold`, `fluent`, `comparison`, `constraint`), its `role` (null for the entity itself, `agent`, `patient`, or `binding`), and the fields of its kind;
 - `rules`: every rule's `output`, `scope` (`entity` or `binding`), `family`, `inputs` (literal indices), `truth_table`, and `expression`. A derived feature and a derived fluent are entity rules; a constraint and a requirement are binding rules;
 - `layers`: the matrix form, written sparsely: for each layer its `terms` (the literals of one term of the rule's minimal DNF, whether each is complemented, and the threshold) and its `outputs`;
-- `event_types`: one entry per event type and category: `label`, `kind`, `arity`, `roles`, `parent`, `level`, `features`, `explicit`, the `requirement` (its constraints, the rule that is the requirement, and the expression), the `precondition` (its literals, each a `role`, `fluent`, and `value`, and the expression), and the `effects` (each a `role`, `fluent`, `value`, and expression).
+- `event_types`: one entry per event type and category: `label`, `kind`, `arity`, `roles`, `parent`, `level`, `features`, `explicit`, the `requirement` (its constraints, the rule that is the requirement, and the expression), the `precondition` (its literals, each a `role`, `fluent`, and `value`, and the expression), and the `effects` (each a `role`, `fluent`, `value`, and expression, and, for a conditional effect, a `condition` with its literals, each a `role`, `kind` (`feature` or `fluent`), `symbol`, and `value`, and its expression; an unconditional effect has no `condition` key).
 
 Floating-point numbers are written with 17 significant digits, so both runtimes read the same values. `tests/fixtures/world/README.md` describes every field, and how the layers are evaluated.
 
@@ -195,8 +195,8 @@ Nothing in `derived/` is an input to anything, and nothing there is edited by ha
 
 - `fluents`: the counts of base and derived fluents.
 - `event_types`: the counts of one-place event types, two-place event types, and categories.
-- `precondition_literals` and `effects`: the totals, by kind of event type, by role, and how many come from event-type features.
-- `fix_ups`: the effects and literals redrawn or dropped while the dynamics were drawn (a contradiction, a duplicate, an effect that changes nothing, a literal that nothing can make true).
+- `precondition_literals` and `effects`: the totals, by kind of event type, by role, and how many come from event-type features; under `effects`, the `conditional` effects by kind of event type and the `condition_literals` by symbol kind (`feature` or `fluent`), by role, and from event-type features (stage b1).
+- `fix_ups`: the effects, literals, and conditions redrawn or dropped while the dynamics were drawn (a contradiction, a duplicate, an effect that changes nothing, a literal that nothing can make true, a condition that breaks a rule of "Conditional effects": `conditions_redrawn` and `conditions_dropped`).
 - `enabling_graph`: the edges from an event type whose effect produces a value to an event type whose precondition requires it, and the longest chain.
 - `absorbing_fluents`: the base fluents that some effect sets to one value and no effect sets back.
 - `relations`: the event-type features, categories, event types, and constraints by family, and the density report.
@@ -218,7 +218,7 @@ A history is one JSON object per episode: its `label`, its `seed` entity, its `p
  "final": "TIME.5", "quiescent": false}
 ```
 
-`changes` lists only the base fluents whose value changed: an effect that sets a fluent to the value it already has records nothing, and a derived fluent's change is never recorded, because it is recomputed. The corpus's `scenes.jsonl` holds the same schema, and the 3D engine will write it too. `tests/fixtures/world/README.md`, "Histories", gives every field.
+`changes` lists only the base fluents whose value changed: an effect that sets a fluent to the value it already has records nothing, an effect whose condition failed records nothing, and a derived fluent's change is never recorded, because it is recomputed. The corpus's `scenes.jsonl` holds the same schema, and the 3D engine will write it too. `tests/fixtures/world/README.md`, "Histories", gives every field.
 
 ## The configuration file
 
@@ -254,11 +254,13 @@ A configuration file is YAML. Any parameter left out takes its default, unknown 
 | `event_types.effects.count` | `{1: 0.7, 2: 0.3}` | Weights over the number of an event type's own effects. |
 | `event_types.effects.feature_rate` | 0.5 | The probability that an event-type feature carries an effect. |
 | `event_types.effects.roles` | `{agent: 0.4, patient: 0.6}` | Weights over the role of a two-place effect. |
+| `event_types.effects.conditional_share` | 0.2 | The share of effects that get a condition (stage b1): a conjunction of one or two literals over the binding, judged in the step's starting state, under which alone the effect applies. An inherited effect brings its condition to every event type with the feature. 0 gives the unconditional world of phase (a). |
+| `event_types.effects.condition_literals` | `{1: 0.7, 2: 0.3}` | Weights over the number of literals of a condition. |
 | `event_types.event_file` | null | A file of explicit event types, read relative to the configuration file's folder. |
 
-Every precondition literal must be achievable (its value is some entity's initial value, or some effect produces it) and consistent (a precondition never holds a literal and its negation for one role); the generator redraws or drops a literal that is not, and counts it under `fix_ups`.
+Every precondition literal must be achievable (its value is some entity's initial value, or some effect produces it) and consistent (a precondition never holds a literal and its negation for one role); the generator redraws or drops a literal that is not, and counts it under `fix_ups`. Every condition must be satisfiable with its event type's requirement and precondition: some able binding satisfies its static literals (for every event type that inherits the effect), each fluent literal is achievable, names no fluent of a role that the precondition names, and never names the fluent the effect sets; the conditions are drawn from a stream of their own (`world:conditions`), so changing their settings changes nothing else, and a condition that breaks a rule is drawn again (`fix_ups.conditions_redrawn`).
 
-**The event file.** An event file defines fluents and event types by hand, over the world's abstract labels, as a rule file defines rules: a base fluent's initial rate, and an event type's requirement, precondition, and effects. An entry replaces the sampled dynamics of the event type it names; event types without an entry are sampled. `data/world/events/chain_example.yaml` builds a chain of two event types, catch and eat, whose second needs the first's effect:
+**The event file.** An event file defines fluents and event types by hand, over the world's abstract labels, as a rule file defines rules: a base fluent's initial rate, and an event type's requirement, precondition, and effects. An entry replaces the sampled dynamics of the event type it names; event types without an entry are sampled. An effect may carry a condition, written `when agent.PROPERTY.1 AND NOT patient.BOOLFL.2 then patient.BOOLFL.2 := 1`. `data/world/events/chain_example.yaml` builds a chain of two event types, catch and eat, whose second needs the first's effect:
 
 ```yaml
 fluents:
@@ -275,11 +277,11 @@ event_types:
     effects: ["patient.BOOLFL.1 := 0"]
 ```
 
-An entry that breaks a rule of the world (an effect on a derived fluent, a requirement that reads a fluent, a contradiction, an unachievable literal) is an error that names the file and the entry. `data/world/tiny_chain.yaml` uses the file with the tiny world.
+An entry that breaks a rule of the world (an effect on a derived fluent, a requirement that reads a fluent, a contradiction, an unachievable literal, a condition that no able binding satisfies or that reads the effect's own fluent or a fluent the precondition fixes) is an error that names the file and the entry. `data/world/tiny_chain.yaml` uses the file with the tiny world.
 
 ## The default world
 
-The figures of `data/world/default.yaml` with seed 1, from a run of October 9, 2026 (stage a8); `define` took 8 seconds.
+The figures of `data/world/default.yaml` with seed 1, from a run of October 9, 2026 (stage b1); `define` took 8 seconds (7.6 s; 7.8 s in stage a8).
 
 | What | Figure |
 | --- | --- |
@@ -288,34 +290,35 @@ The figures of `data/world/default.yaml` with seed 1, from a run of October 9, 2
 | Event types | 20 one-place; 20 two-place in 5 categories of 4, with 12 event-type features and 12 constraints (4 patient, 3 agent, 2 cross, 2 comparison, 1 key-lock) |
 | Precondition literals | 62: 18 on one-place and 44 on two-place event types; 35 on the agent, 27 on the patient; 5 inherited from event-type features |
 | Effects | 81: 22 on one-place and 59 on two-place event types; 52 on the agent, 29 on the patient; 5 inherited from event-type features |
-| Fix-ups | 11 effects redrawn and 6 dropped as changing nothing; 4 literals redrawn and 17 dropped as unachievable |
+| Conditional effects | 25 of the 81 (2 on one-place and 23 on two-place event types): 6 own effects, and 2 effects of event-type features that 14 and 5 event types inherit (`when NOT patient.PROPERTY.6 then agent.BOOLFL.4 := 1`, `when agent.PROPERTY.37 then patient.BOOLFL.3 := 1`); 26 condition literals, 24 on static features and 2 on fluents, 11 on the agent and 15 on the patient |
+| Fix-ups | 11 effects redrawn and 6 dropped as changing nothing; 4 literals redrawn and 17 dropped as unachievable; 8 conditions redrawn, none dropped |
 | Enabling graph | 323 edges; longest chain 1 |
 | Absorbing fluents | `BOOLFL.3` |
 | One-place requirements | hold for 58% of the entities on average (13% to 98% by event type) |
 | Two-place requirements | hold for 17.1% of the ordered pairs on average (0.4% to 96.5% by event type) |
-| Statistics episodes | 1,000 episodes, 5,490 steps, 8,337 events; 0.56 changes per event; no quiescent episode; every event type legal at some step; no precondition redraw |
-| Two-place share | 0.318 of the events of the statistics episodes |
+| Statistics episodes | 1,000 episodes, 5,490 steps, 8,337 events; 0.50 changes per event (0.56 before the conditions: an effect whose condition fails changes nothing); no quiescent episode; every event type legal at some step; no precondition redraw |
+| Two-place share | 0.313 of the events of the statistics episodes (0.318 before the conditions) |
 
-Every category of event types keeps a word in the corpus: a category whose base relation holds for every pair, or for none, would get none, because it says nothing. The world's rule set is `123a4a6eb9f3...`.
+Every category of event types keeps a word in the corpus: a category whose base relation holds for every pair, or for none, would get none, because it says nothing. The world's rule set is `32356b8c6be9...` (`123a4a6eb9f3...` with `conditional_share: 0`, the world of stage a8: the conditions are the only difference).
 
 ## The two-place share
 
 Two-place events are the events with a patient. Their share among all events is a frequency of the world, and follows from the world's constraints ("A principle for defaults" in the specification): a scene of a few participants has many able agents and few able pairs, so one-place events dominate unless the requirements make room. Stage a7a retuned five settings of `data/world/default.yaml` so that the share is about a third on the default world (Jon's ruling): the event-type tree has 5 superordinates with 4 event types each (as many two-place event types as one-place ones); a two-place event type has no constraint of its own beside its features' (`own_constraint: false`), so a requirement is a conjunction of about three constraints rather than four; the key-lock family, which holds for the fewest pairs, has half the weight of the others; the constraints weigh OR four times as much as AND and XOR, so each holds for more pairs; and the one-place requirements weigh AND three times as much as OR and XOR, so they are stricter. Without own constraints, two event types that share their true event-type features have the same requirement, and one whose true features are a subset of another's has the weaker one; the tree keeps every pair of event types apart on some feature.
 
-**The target is the default world's share**, 0.318 on seed 1 (Jon's ruling, October 9, 2026). Other seeds draw other constraints, and the share varies with the densities they draw:
+**The target is the default world's share**, 0.318 on seed 1 before the conditional effects of stage b1 and 0.313 with them (Jon's ruling, October 9, 2026). Other seeds draw other constraints, and the share varies with the densities they draw (the table gives the densities and rates of the static side, which conditions do not touch, and the shares of stage a8 and of stage b1):
 
-| Seed | Two-place pair density, mean over event types (min, max) | One-place capacity rate, mean | Two-place share of the statistics episodes | Categories of event types with a word | Never legal | Precondition redraws |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 (the default world) | 0.171 (0.004, 0.965) | 0.580 | 0.318 | 5 of 5 | none | none |
-| 2 | 0.212 (0.004, 0.757) | 0.473 | 0.546 | 5 | `EVENTTYPE1.12` (never able) | none |
-| 3 | 0.067 (0.000, 0.569) | 0.440 | 0.374 | 5 | none | `EVENTTYPE2.3.3`, `EVENTTYPE2.5.1`, once each |
-| 4 | 0.060 (0.000, 0.629) | 0.463 | 0.118 | 4 | `EVENTTYPE2.1.2` to `.1.4`, `EVENTTYPE2.2.1` to `.2.3` (never able) | `EVENTTYPE2.3.1`, once |
-| 5 | 0.129 (0.001, 0.940) | 0.542 | 0.538 | 3 | `EVENTTYPE1.17`, `EVENTTYPE2.5.1`, `.5.2`, `.5.4` (never able) | 4 event types (1, 5, 5, 5) |
-| Mean | 0.128 | 0.500 | 0.379 | | | |
+| Seed | Two-place pair density, mean over event types (min, max) | One-place capacity rate, mean | Two-place share, stage a8 | Two-place share, stage b1 | Categories of event types with a word | Never legal | Precondition redraws (stage b1) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 (the default world) | 0.171 (0.004, 0.965) | 0.580 | 0.318 | 0.313 | 5 of 5 | none | none |
+| 2 | 0.212 (0.004, 0.757) | 0.473 | 0.546 | 0.519 | 5 | `EVENTTYPE1.12` (never able) | none |
+| 3 | 0.067 (0.000, 0.569) | 0.440 | 0.374 | 0.379 | 5 | none | `EVENTTYPE2.1.4`, `EVENTTYPE2.3.3`, `EVENTTYPE2.5.1` once each, `EVENTTYPE2.2.4` twice |
+| 4 | 0.060 (0.000, 0.629) | 0.463 | 0.118 | 0.119 | 4 | `EVENTTYPE2.1.2` to `.1.4`, `EVENTTYPE2.2.1` to `.2.3` (never able) | `EVENTTYPE2.3.1`, once |
+| 5 | 0.129 (0.001, 0.940) | 0.542 | 0.538 | 0.509 | 3 | `EVENTTYPE1.17`, `EVENTTYPE2.5.1`, `.5.2`, `.5.4` (never able) | 4 event types (1, 5, 5, 5) |
+| Mean | 0.128 | 0.500 | 0.379 | 0.368 | | | |
 
-Before the retune the share was 0.090, 0.193, 0.264, 0.074, and 0.083 on the same seeds. The spread (0.12 to 0.55) follows the spread of the pair densities: seeds 3 and 4 draw sparse constraints. The one-place strictness moves the share little; the two-place densities set it.
+Before the retune the share was 0.090, 0.193, 0.264, 0.074, and 0.083 on the same seeds. The spread (0.12 to 0.52) follows the spread of the pair densities: seeds 3 and 4 draw sparse constraints. The one-place strictness moves the share little; the two-place densities set it. The conditional effects of stage b1 move the shares by a few hundredths at most (an effect whose condition fails leaves the state as it was, so other events are legal later), and change nothing on the static side.
 
-**The levers.** `examples/two_place_levers.py` runs the default world with one setting changed at a time, on seeds 1 to 3, and reports the share, the one-place capacity rate, and the two-place pair density (the baseline row is the retuned default; the scene settings and the event-type weights are those of the statistics episodes, which belong to the corpus configuration):
+**The levers.** `examples/two_place_levers.py` runs the default world with one setting changed at a time, on seeds 1 to 3, and reports the share, the one-place capacity rate, and the two-place pair density (the baseline row is the retuned default; the scene settings and the event-type weights are those of the statistics episodes, which belong to the corpus configuration). The table is from stage a7a, before the conditional effects of stage b1, which move the baseline on seed 1 from 0.32 to 0.31 and leave the rates and densities as they are:
 
 | Lever | Two-place share (seeds 1, 2, 3) | Mean | One-place capacity rate | Two-place pair density |
 | --- | --- | --- | --- | --- |
@@ -362,7 +365,7 @@ What each lever does, against the baseline's share of 0.41 over seeds 1 to 3:
 
 The Rust runtime, when it is built, must give the same results as the Python runtime. The conformance fixtures in `tests/fixtures/world/` are its tests, written now. Each fixture is one JSON file with a complete definition inline, the entities' static facts, the initial state, and a list of steps; each step gives its events and what must come out: the legal bindings of every event type before the step, and the state and the derived fluents after it. A fixture can end in an error that `apply` must raise, an illegal event or interfering events.
 
-Two kinds are committed: twelve hand-written fixtures over a hand world of three entities, with every expected value worked out by hand (a fluent with no event; an effect that sets, clears, or leaves a fluent; a derived fluent that changes; a precondition that blocks; two events that do not interfere; and the kinds of interference), and six generated from the tiny world, with expected values from a brute-force evaluator that reads the truth tables and never the matrices. `check-fixtures` runs every fixture through the runtime and then through the evaluator, so the two implementations check each other. `tests/fixtures/world/README.md` is written for whoever builds the Rust runtime: the fixture format, the definition record, the canonical JSON behind the rule-set identity, how literals and layers are evaluated, and the semantics of each operation.
+Two kinds are committed: seventeen hand-written fixtures over a hand world of three entities, with every expected value worked out by hand (a fluent with no event; an effect that sets, clears, or leaves a fluent; a derived fluent that changes; a precondition that blocks; two events that do not interfere; the kinds of interference; and, since stage b1, a static condition that holds and one that fails, a condition on a derived fluent that holds and one that fails, and interference through a condition), and six generated from the tiny world, with expected values from a brute-force evaluator that reads the truth tables and never the matrices. `check-fixtures` runs every fixture through the runtime and then through the evaluator, so the two implementations check each other. `tests/fixtures/world/README.md` is written for whoever builds the Rust runtime: the fixture format, the definition record, the canonical JSON behind the rule-set identity, how literals and layers are evaluated, and the semantics of each operation.
 
 ## Using the package from Python
 
@@ -393,6 +396,7 @@ legal = legal_bindings(definition, state, "EVENTTYPE2.1.2")   # every legal bind
 ## Recipes
 
 - **Several worlds with the same settings.** Run the same configuration with `--seed 1`, `--seed 2`, and so on. The two-place share and the densities vary with the seed, as the table above shows.
+- **A world without conditions.** `event_types: {effects: {conditional_share: 0}}` gives the unconditional world of phase (a), with the same definition and identity as before stage b1; `conditional_share: 1` makes every effect conditional.
 - **A world without change.** `fluents: {count: 0}`. Every able binding is legal at every time point, histories record no change, and `scene.policy: uniform_event_type` in the corpus then gives the scenes of the corpus's old scene generator.
 - **A known chain of events.** Write an event file (above), and name it under `event_types.event_file`. `simulate` on the world shows the chain's events in the order the preconditions force.
 - **More two-place events.** Lower `event_types.binary.features.expected_true`, or weigh the two-place event types in `scene.event_type_weights` of the corpus configuration; see "The two-place share" for every lever.
@@ -405,7 +409,7 @@ legal = legal_bindings(definition, state, "EVENTTYPE2.1.2")   # every legal bind
 - **"never able".** An event type whose requirement holds for no entity or no pair gets no events and no word. The world keeps it; another seed, or looser `event_types.unary.rules`, gives another requirement.
 - **A derived file is refused.** The file's rule-set identity differs from the definition's. The run folder holds files of two runs; regenerate it.
 - **The agreement test fails.** The error names the rule and the first disagreement. The two forms of one rule set must agree, so this is a bug in the generator, not in the configuration. Keep the configuration and seed and report it.
-- **An event file entry is refused.** The error names the file and the entry: an effect on a derived fluent, a requirement that reads a fluent, a contradiction, or a literal that nothing can make true.
+- **An event file entry is refused.** The error names the file and the entry: an effect on a derived fluent, a requirement that reads a fluent, a contradiction, a literal that nothing can make true, or a condition that breaks a rule (no able binding satisfies it, or it reads the effect's own fluent or a fluent the precondition fixes).
 - **`taxonomy.config` is not found.** Paths in a configuration are read from the folder the command runs in. Run from the root of the repository, as the examples do.
 
 ## Reference

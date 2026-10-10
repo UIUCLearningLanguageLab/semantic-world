@@ -1,7 +1,7 @@
 {
  "version": 1,
- "name": "hand_07_two_events_independent",
- "description": "Three events in one step that do not interfere: EVENTTYPE2.1 (INSTANCE.1.1.1, INSTANCE.1.1.2) writes BOOLFL.2 of the patient and reads BOOLFL.1 of the agent; EVENTTYPE1.3 (INSTANCE.1.1.2) writes BOOLFL.1 of the same patient entity, a different fluent, and reads nothing; EVENTTYPE1.1 (INSTANCE.1.2.1) touches a third entity.",
+ "name": "hand_16_fluent_condition_fails",
+ "description": "A fluent condition that fails, judged in the step's starting state (stage b1): EVENTTYPE1.5 on INSTANCE.1.1.1, which has BOOLFL.2 but not BOOLFL.1, so BOOLFL.3 is false and the effect does nothing; in the same step EVENTTYPE1.1 on INSTANCE.1.2.1 sets BOOLFL.1 of another entity. In step 2 EVENTTYPE1.1 sets BOOLFL.1 of INSTANCE.1.1.1, so BOOLFL.3 becomes true; in step 3 EVENTTYPE1.5 fires and clears BOOLFL.2.",
  "rule_set_id": "5b8332acfbbce478e6a2c3efce549ed8fcb1ded3107055a6272098f2c0bf2cbb",
  "definition": {
   "version": 1,
@@ -228,17 +228,13 @@
   {"label": "INSTANCE.1.1.2", "leaf": "CATEGORY.1.1", "PROPERTY.1": 0, "SCALARDIM.1": 0.5},
   {"label": "INSTANCE.1.2.1", "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25}
  ],
- "initial": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
+ "initial": {"INSTANCE.1.1.1": ["BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
  "steps": [
   {
    "events": [
     {
-     "event_type": "EVENTTYPE2.1",
-     "binding": {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"}
-    },
-    {
-     "event_type": "EVENTTYPE1.3",
-     "binding": {"agent": "INSTANCE.1.1.2"}
+     "event_type": "EVENTTYPE1.5",
+     "binding": {"agent": "INSTANCE.1.1.1"}
     },
     {
      "event_type": "EVENTTYPE1.1",
@@ -247,8 +243,71 @@
    ],
    "legal": {
     "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.2.1"}
     ],
+    "EVENTTYPE1.2": [],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE2.1": [],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.5": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+  },
+  {
+   "events": [
+    {
+     "event_type": "EVENTTYPE1.1",
+     "binding": {"agent": "INSTANCE.1.1.1"}
+    }
+   ],
+   "legal": {
+    "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.1"}
+    ],
+    "EVENTTYPE1.2": [],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE2.1": [],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.5": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": ["BOOLFL.3"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+  },
+  {
+   "events": [
+    {
+     "event_type": "EVENTTYPE1.5",
+     "binding": {"agent": "INSTANCE.1.1.1"}
+    }
+   ],
+   "legal": {
+    "EVENTTYPE1.1": [],
     "EVENTTYPE1.2": [],
     "EVENTTYPE1.3": [
      {"agent": "INSTANCE.1.1.1"},
@@ -270,7 +329,7 @@
     ]
    },
    "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": ["BOOLFL.2"], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
   }
  ],
  "error": null

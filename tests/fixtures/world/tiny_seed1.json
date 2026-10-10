@@ -2,10 +2,10 @@
  "version": 1,
  "name": "tiny_seed1",
  "description": "6 random steps of the tiny world from its initial state, fixture seed 1: at each step, up to three non-interfering legal events.",
- "rule_set_id": "bd02c67e7286e1193748013574607bdb4b6207d04e7d9a454977bf98bb988e68",
+ "rule_set_id": "6777fdc1b604932160b8a6c9a9912675d6b53f0dd440e41238f6bf8aaeb2d43f",
  "definition": {
   "version": 1,
-  "rule_set_id": "bd02c67e7286e1193748013574607bdb4b6207d04e7d9a454977bf98bb988e68",
+  "rule_set_id": "6777fdc1b604932160b8a6c9a9912675d6b53f0dd440e41238f6bf8aaeb2d43f",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": false, "fluent": false, "arity": 1},
@@ -244,7 +244,19 @@
     "requirement": {"constraints": ["CONSTRAINT.EVENTTYPE1.1"], "output": "REQUIREMENT.EVENTTYPE1.1", "expression": "CONSTRAINT.EVENTTYPE1.1"},
     "precondition": {"literals": [], "expression": "TRUE"},
     "effects": [
-     {"role": "agent", "fluent": "BOOLFL.2", "value": true, "expression": "agent.BOOLFL.2 := 1"}
+     {
+      "role": "agent",
+      "fluent": "BOOLFL.2",
+      "value": true,
+      "expression": "when agent.BOOLFL.3 AND NOT agent.PROPERTY.1 then agent.BOOLFL.2 := 1",
+      "condition": {
+       "literals": [
+        {"role": "agent", "kind": "fluent", "symbol": "BOOLFL.3", "value": true},
+        {"role": "agent", "kind": "feature", "symbol": "PROPERTY.1", "value": false}
+       ],
+       "expression": "agent.BOOLFL.3 AND NOT agent.PROPERTY.1"
+      }
+     }
     ]
    },
    {

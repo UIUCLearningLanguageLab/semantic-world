@@ -453,7 +453,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     printed = capsys.readouterr().out
     assert "rendered" in printed and "the word forms of corpus_tiny (seed 1)" in printed
     text = (out / "corpus.txt").read_text(encoding="utf-8")
-    assert "/LEXEME." not in text and len(text.split()) == 1105
+    assert "/LEXEME." not in text and len(text.split()) == 1078  # 1105 before stage b1
     spellings = set(pl.read_csv(forms / "words.csv")["spelling"].to_list())
     assert set(text.split()) <= spellings
     # the word forms of tiny.yaml are too few for the tiny corpus, as the specification says

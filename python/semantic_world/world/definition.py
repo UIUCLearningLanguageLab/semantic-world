@@ -33,7 +33,7 @@ from semantic_world.world.constraints import (
     RoleThreshold,
     ScalarComparison,
 )
-from semantic_world.world.dynamics import ROLES, Effect, Literal
+from semantic_world.world.dynamics import ROLES, ConditionLiteral, Effect, Literal
 from semantic_world.world.errors import DefinitionError, WorldError
 from semantic_world.world.event_types import ConstraintSpec, EventTypes
 from semantic_world.world.fluents import Fluents, ThresholdLiteral
@@ -583,7 +583,8 @@ ENTITY_COLUMNS = ("label", "leaf")
 @dataclass(frozen=True)
 class EventTypeRecord:
     """One event type as the runtime reads it: its roles, the output label of its requirement,
-    its precondition literals, and its effects. A category of event types has no events."""
+    its precondition literals, and its effects, each with its condition when it has one. A
+    category of event types has no events."""
 
     label: str
     kind: str
@@ -941,8 +942,34 @@ def _runtime_definition(
                 effect["fluent"] in base_fluents,
                 f"an effect of {label} writes {effect['fluent']}, which is not a base fluent",
             )
+            condition = []
+            for lit in (effect.get("condition") or {}).get("literals", ()):
+                key = f"{lit.get('role')}.{lit.get('symbol')}"
+                _expect(
+                    lit["role"] in ROLES[:arity],
+                    f"the condition of an effect of {label} reads the role {lit['role']!r}",
+                )
+                kind = symbols.get(lit["symbol"], {}).get("kind")
+                _expect(
+                    (lit["kind"] == "fluent" and kind == "fluent")
+                    or (lit["kind"] == "feature" and kind in STATIC_KINDS),
+                    f"the condition literal {key} of {label} is a {lit['kind']!r} literal, but "
+                    f"{lit['symbol']} is {'not a symbol' if kind is None else 'a ' + kind}",
+                )
+                condition.append(
+                    ConditionLiteral(str(lit["role"]), str(lit["symbol"]), bool(lit["value"]))
+                )
+            _expect(
+                len({(c.role, c.symbol) for c in condition}) == len(condition),
+                f"the condition of an effect of {label} reads a symbol twice",
+            )
             effects.append(
-                Effect(str(effect["role"]), str(effect["fluent"]), bool(effect["value"]))
+                Effect(
+                    str(effect["role"]),
+                    str(effect["fluent"]),
+                    bool(effect["value"]),
+                    tuple(condition),
+                )
             )
         event_types.append(
             EventTypeRecord(

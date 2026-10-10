@@ -331,7 +331,7 @@ def test_interfering_events_raise_the_documented_error(
             if "both write" in message:
                 found["same fluent"] += 1
             else:
-                assert "which the precondition of" in message
+                assert "which the precondition of" in message or "which a condition of" in message
                 found["reads"] += 1
         if events:
             with pytest.raises(InterferenceError, match="occurs twice"):
