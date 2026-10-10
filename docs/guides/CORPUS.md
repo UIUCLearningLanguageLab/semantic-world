@@ -6,7 +6,7 @@ The corpus is a controlled source of language for models. Settings decide which 
 
 This guide covers running the generator, the ideas behind it, the output files, the test sets, the configuration file, and the Python interface. The design is specified in `docs/specs/CORPUS_GENERATOR.md`, and every design decision is listed in `docs/DECISIONS.md`.
 
-**Status.** Complete on the world package (stages a5a to a7b of `docs/specs/WORLD_AND_LANGUAGE.md`): the lexicon, propositions and their truth, scenes as histories of the world, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline. Every label is the world's own, and nothing translates. Since stage a7a, narratives state states and changes and what a participant could not do, and the test sets include state, `able_now`, and blocked-event sets. Since stage a7b, feature documents state what events do and need (causal statements), the logical form tells descriptions from assertions, and the test sets include causal sets.
+**Status.** Complete on the world package (stages a5a to a8 of `docs/specs/WORLD_AND_LANGUAGE.md`): the lexicon, propositions and their truth, scenes as histories of the world, the grammar, the four document types, the test sets, the statistics, and spoken word forms through the word-form pipeline. Every label is the world's own, and nothing translates. Since stage a7a, narratives state states and changes and what a participant could not do, and the test sets include state, `able_now`, and blocked-event sets. Since stage a7b, feature documents state what events do and need (causal statements), the logical form tells descriptions from assertions, and the test sets include causal sets. Since stage a8, a document about a fluent holds one causal statement per sentence, and the causal sets pair every true statement with every valid false item. The world itself is the world package's; `WORLD.md` is its guide.
 
 ## Quick start
 
@@ -19,10 +19,10 @@ PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/tiny.yaml
 The program prints one line:
 
 ```
-wrote runs/corpus/tiny_seed1: 20 documents, 203 sentences, 1105 tokens, 17 scenes, 43 test sets with 518 pairs
+wrote runs/corpus/tiny_seed1: 20 documents, 203 sentences, 1105 tokens, 17 scenes, 41 test sets with 550 pairs
 ```
 
-The tiny corpus is about the tiny world, `data/world/tiny.yaml`: the tiny relations taxonomy (6 categories, 12 instances, 1 scalar dimension, 4 one-place and 4 two-place event types) with 4 fluents. It is small enough to read every file by eye. The generator defines the world in memory from its configuration file, so no world run needs to exist first.
+The tiny corpus is about the tiny world, `data/world/tiny.yaml`: the tiny relations taxonomy (6 categories, 12 instances, 1 scalar dimension, 4 one-place and 4 two-place event types) with 4 fluents (`WORLD.md`). It is small enough to read every file by eye. The generator defines the world in memory from its configuration file, so no world run needs to exist first; `world: {run: runs/world/tiny_seed1}` reads a world run instead, and checks it against the regenerated world.
 
 The default corpus is 10,000 documents about the default world, `data/world/default.yaml`:
 
@@ -30,7 +30,7 @@ The default corpus is 10,000 documents about the default world, `data/world/defa
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints `10000 documents, 99448 sentences, 470380 tokens, 10088 scenes, 43 test sets with 13726 pairs`, and takes about two minutes on a laptop.
+It prints `10000 documents, 99448 sentences, 470381 tokens, 10088 scenes, 41 test sets with 15509 pairs`, and takes about 2.6 minutes (158 seconds) on a laptop (October 9, 2026, stage a8). The world itself takes 8 seconds (`WORLD.md`).
 
 Two options change a run without editing the configuration:
 
@@ -165,7 +165,7 @@ Every event type of the world has effects, which set base fluents of its partici
 
 A statement is true exactly when the definition has the entry; a statement about a category of event types ("things that things hunt become caught") is true when every event type below the category has it. Statements are about base fluents only, because the definition guarantees nothing about a derived fluent after an event. The subject is the generic noun "thing" with a relative clause that names the event: a subject relative for the agent ("things that catch things"), an object relative for the patient ("things that things catch"), and a one-place event type for its agent ("things that sleep"); the other participant is the bare plural "things". An effect's predicate is `become` with the state adjective, and a precondition's the copula with the state adjective and the function word `before`, which stands at the end of the verb phrase or, with `grammar.word_order.before: before_predicate`, at its start. Causal statements are in the present tense and take "all" or the bare plural, by the language's settings for `nec_all`. In the JSON logical form, the subject is `{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}`, the predicate `{"kind": "effect", "label": "BOOLFL.3", "value": true}` or `{"kind": "precondition", ...}`, and `causal` repeats the definition entry the statement states. A sentence with `become` or `before` and a category as its subject has the reading `causal`.
 
-Feature documents state them. A document about an event type, or a category of event types, draws a causal statement at `propositions.causal_statement_rate` (default 0.5) before its other content: what its events do and need. A document about a fluent, a new kind of topic, holds causal statements alone: the event types that set it, clear it, and need it. Narratives keep their result sentences, so the corpus carries both the general statement and its instances.
+Feature documents state them. A document about an event type, or a category of event types, draws a causal statement at `propositions.causal_statement_rate` (default 0.5) before its other content: what its events do and need. A document about a fluent, a new kind of topic, holds causal statements alone, one per sentence, until it reaches its drawn length or has stated every statement about its fluent: the event types that set it, clear it, and need it. The rate does not apply to a fluent document (stage a8). Narratives keep their result sentences, so the corpus carries both the general statement and its instances. In the default corpus, 2,657 sentences are causal statements (1,629 effects and 1,028 preconditions).
 
 ### Descriptions and assertions
 
@@ -186,7 +186,7 @@ The corpus mixes four document types (`documents.mix`):
 | Type | Default share | Topic | What it says |
 | --- | --- | --- | --- |
 | Encyclopedic, category | 30% | A category | Membership, the category's features, its subcategories' features, and relation facts ("owls eat mice"), with contrasts to sibling categories |
-| Encyclopedic, feature | 20% | A feature, an event type, or a fluent | Which categories have it, which lack it, the rules it takes part in, and what its events do and need (causal statements); a fluent document holds causal statements alone |
+| Encyclopedic, feature | 20% | A feature, an event type, or a fluent | Which categories have it, which lack it, the rules it takes part in, and what its events do and need (causal statements); a fluent document holds causal statements alone, one per sentence |
 | Entity narrative | 20% | An instance | The instance's features, and the events it takes part in, across 2 to 5 scenes |
 | Situational narrative | 30% | A scene | The scene's events in time order, with descriptions of the participants |
 
@@ -268,7 +268,7 @@ A run writes one folder:
 | `corpus_formal.txt`, `corpus_conceptual.txt`, `corpus_propositional.txt` | The same documents in the other renderings. |
 | `scenes.jsonl` | One history per scene: its seed, its participants, their initial fluent values, and the events of each time step with the changes they made. The schema is the world package's (`tests/fixtures/world/README.md`, "Histories"). |
 | `tests/<set>.jsonl` | The test sets (see "Test sets"). |
-| `stats.yaml` | Counts, lengths, the quantifier mix, the state, result, and blocked sentences (`states`), the causal statements by kind (`causal`), ambiguity, mentions, the co-occurrence check, and the size of each test set, with the share of `changed` items and the counts of pairs by which item changed in each state set. |
+| `stats.yaml` | Counts, lengths, the quantifier mix, the state, result, and blocked sentences (`states`), the causal statements by kind (`causal`), ambiguity, mentions, the co-occurrence check, and the size of each test set, with the share of `changed` items and the counts of pairs by which item changed in each state set, and the number of distinct true statements in each causal set. |
 | `wordform_request.yaml`, `wordform_meanings.csv` | The request for the word-form pipeline (see "Spoken word forms"). |
 
 The text files are the easiest way into a corpus. For training a language model, one of the four `corpus*.txt` files is usually all we need.
@@ -295,7 +295,7 @@ Every corpus comes with test sets of matched pairs. Each true item is followed b
 | Event | `event_predicate`, `event_subject`, `event_role`, each split into `_possible`, `_blocked`, and `_impossible` |
 | State | `state_predicate` and `state_subject`, each split into `_changed` and `_unchanged` |
 | Able now | `able_now_predicate` and `able_now_subject`, each split into `_blocked` and `_impossible` |
-| Causal | `causal_effect_<change>` and `causal_precondition_<change>`, with the changes `predicate`, `polarity`, `event`, and `role`, and a law-like twin of each |
+| Causal | `causal_effect_<change>` and `causal_precondition_<change>`, with the changes `predicate`, `polarity`, `event`, and `role`, and a law-like twin of each but the polarity sets |
 
 The changes are:
 
@@ -319,14 +319,14 @@ Three kinds of item have sets of their own:
 - **Possible, blocked, and impossible events.** A false event is one that never happened in its document's scenes. It is possible when its binding was legal at some time point of the scene (the requirement and the preconditions held, and the event still did not happen), blocked when the world allows the binding (the agent, or the pair, is `able`) but a precondition never held in the scene, and impossible when the world rules the binding out. A possible false event tests memory of the episode, a blocked one knowledge of the preconditions and the states, and an impossible one can be rejected by world knowledge alone.
 - **States.** A state item continues a situational narrative and states a fluent of one of its participants at the scene's final time point, `HOLDS(SCENE.8, TIME.6, PAST, BOOLFL.3(REF.1))`. The false item names another fluent that is false of the referent then (a predicate swap), or another participant of which the fluent is false (a subject swap). Each item is marked `changed` when the fluent's value at the final time point differs from its value at `TIME.1`, and a pair whose true or false item changed goes into the `_changed` set: only tracking what the events did can answer it. A pair in `_unchanged` can be answered from the initial state alone. `stats.yaml` gives the share of changed items in each state set (about half in the `_changed` sets of the default corpus).
 - **Able now.** An `able_now` item continues a situational narrative and says that a participant could do something at the scene's final time point, `ABLE_NOW(SCENE.8, TIME.6, PAST, EVENTTYPE1.3(REF.1))`. A false item is blocked (the binding is able, and not legal then) or impossible (not able), with the same two changes.
-- **Causal statements.** A causal item states an effect or a precondition of an event type, and every false item is false under `NEC`: the definition lacks the entry. A false item that held after (an effect) or before (a precondition) every event of its type in the corpus's scenes, of which there was at least one, is marked `observed` and goes into the `_lawlike` twin of its set, as a law-like class item does: no observation contradicts it. A polarity swap is never observed, because the true entry guarantees the opposite value, so the two polarity law-like sets are always empty.
+- **Causal statements.** A causal item states an effect or a precondition of an event type, and every false item is false under `NEC`: the definition lacks the entry. A false item that held after (an effect) or before (a precondition) every event of its type in the corpus's scenes, of which there was at least one, is marked `observed` and goes into the `_lawlike` twin of its set, as a law-like class item does: no observation contradicts it. A polarity swap is never observed, because the true effect or precondition guarantees the opposite value, so the polarity sets have no law-like twin. The causal sets are not drawn like the others: every true causal statement of the world is paired with every valid false item of the set's change, so a statement appears in several pairs of a set, and a set with more than `test_sets.size` such pairs keeps a uniform draw of them (stage a8). Both items of a pair record the true statement they test under `statement` (its propositional rendering), so that an analysis can group a set's pairs by statement; `stats.yaml` counts the distinct statements of each causal set (`true_statements`).
 - **Items in context.** An instance-level, event-level, state, or `able_now` item names a narrative document, and is tested as a continuation of it. "The penguin" in the item refers to that document's penguin.
 
-Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, `changed` and `changed_item` (which item of the pair changed: `true_item`, `false_item`, `both`, or null) for state items, `observed` and the `causal` record for causal items, and `seen`. An event item's aspect is drawn for the item, and its false item keeps it. True and false items never differ in the format of `input`, so the format never gives the answer away.
+Each item has two parts. `input` holds what a model sees: the document it continues, the sentence's tokens, renderings, tree, and logical form. `meta` holds the answer and the bookkeeping: `truth`, the change, the grounding, `possible` for events, `law_like` for class-level items, `changed` and `changed_item` (which item of the pair changed: `true_item`, `false_item`, `both`, or null) for state items, `observed`, the `causal` record, and `statement` for causal items, and `seen`. An event item's aspect is drawn for the item, and its false item keeps it. True and false items never differ in the format of `input`, so the format never gives the answer away.
 
 **Seen and unseen.** True test items are not held out of the documents. Instead, `seen` records whether an item's proposition appears in any training document. A false item is never seen. Scoring seen and unseen items separately tells memory apart from generalization. A report counts as seen in either aspect. In the default corpus, the share of true items that are seen runs from 2% (`instance_role`) to 96% (`event_predicate_possible`); the state and `able_now` items are about the scene's final time point, which no document states, so none is seen; every causal item is seen, because the default corpus's feature documents state every causal statement of the world. `stats.yaml` gives the share for each set.
 
-The default corpus has 500 pairs in each set, except the law-like class sets, where the default world runs out of law-like false items at 395 pairs (`class_predicate_lawlike`) and 313 pairs (`class_subject_lawlike`), and the causal sets, which hold at most one pair per true causal statement of the world (32 to 87 pairs in the ordinary sets and 4 to 24 in the law-like ones; the polarity law-like sets are empty). `test_sets.size` sets the size, and `test_sets.changes` chooses the changes (the state and `able_now` sets take the predicate and subject changes). Test-set settings never change the documents.
+The default corpus has 500 pairs in each set, except the law-like class sets, where the default world runs out of law-like false items at 395 pairs (`class_predicate_lawlike`) and 313 pairs (`class_subject_lawlike`), and the causal sets, which hold every pair of a true statement and a valid false item, capped at 500: the two event-swap sets are full (500 pairs, from 73 and 51 statements, with 299 and 95 pairs in their law-like twins), and the others hold what the world gives, 321 and 220 pairs for the predicate swaps (88 and 42 law-like), 87 and 54 for the polarity swaps, and 42 and 32 for the role swaps (17 and 4 law-like), effects before preconditions. `test_sets.size` sets the size, and `test_sets.changes` chooses the changes (the state and `able_now` sets take the predicate and subject changes). Test-set settings never change the documents.
 
 ## Spoken word forms
 
@@ -340,7 +340,7 @@ PYTHONPATH=python python -m semantic_world.corpus render runs/corpus/tiny_seed1 
 
 `generate` writes `wordform_request.yaml`: the lexemes with their parts of speech, the function words in order of their frequency in the corpus, the affixes the grammar needs, and the categories' meaning vectors. The word-form pipeline reads the request, makes pseudowords, assigns them to lexemes, and synthesizes them. `render` fills the spelled rendering, `corpus.txt`, the word columns of `lexicon.csv`, and the word-form run's identity in `config.yaml`. It changes nothing else in the corpus run.
 
-For the tiny corpus, the three steps take under 20 seconds. Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs. The rendered tiny corpus has 1105 tokens. For the default corpus, `data/wordforms/corpus_default.yaml` is the matching word-form configuration: it reads the request in `runs/corpus/default_seed1`, and writes `runs/wordforms/corpus_default_seed1`.
+For the tiny corpus, the three steps take under a minute (about 9 seconds for the word forms with audio and embeddings, and under a second for the other two). Using `forms` in place of `all` makes the word forms without audio, which is all that `render` needs. The rendered tiny corpus has 1105 tokens. For the default corpus, `data/wordforms/corpus_default.yaml` is the matching word-form configuration: it reads the request in `runs/corpus/default_seed1`, and writes `runs/wordforms/corpus_default_seed1`; its 199 content lexemes and 17 function words take about 30 minutes with audio and all five embeddings, and `render` about 2 seconds (October 9, 2026).
 
 The word-form pipeline decides how sound relates to meaning: arbitrary, correlated at a target, marked by branch, or shaped by features. Its guide, `WORDFORMS.md`, covers this under "Assigning words to meanings" and "Word forms for a corpus". The words a lexeme gets never depend on the number of documents or the test sets, so a corpus can grow without its words changing.
 
@@ -364,7 +364,7 @@ The most useful parameters:
 | `documents.result_rate` | 0.5 | How often an event sentence is followed by a sentence stating a change the event's own effects made. |
 | `documents.blocked_rate` | 0.1 | How often an event sentence is followed by a sentence saying what a participant could not (or could) do then. |
 | `propositions.negation_rate` | class 0.1, instance 0.1, state 0.1, able_now 0.8 | Share of negative propositions: at the class and instance levels, among initial-state sentences, and among blocked sentences ("could not" rather than "could"). |
-| `propositions.causal_statement_rate` | 0.5 | How often a sentence of a feature document about an event type or a fluent is a causal statement. |
+| `propositions.causal_statement_rate` | 0.5 | How often a sentence of a feature document about an event type or a category of event types is a causal statement. A document about a fluent holds causal statements alone, whatever the rate. |
 | `lexicon.can_words` | shared | Whether "can" expresses both `ABLE` and `ABLE_NOW` (`shared`), or `ABLE_NOW` gets the word `can_now` (`distinct`). |
 | `propositions.events.tense` | past | The tense of every report. |
 | `quantifiers.universal_words` | nec | What "all" and "no" state: the `nec` quantifiers, the `extensional` ones, or `either`. |
@@ -400,7 +400,7 @@ corpus.write()                       # writes runs/corpus/tiny_seed1/
 document = corpus.documents[5]
 document.type, document.topic        # ('situational', 'SCENE.4')
 sentence = document.to_json()["sentences"][14]
-sentence["conceptual"]               # 'THE CATEGORY.1.2 WITH PART.5 THAT EVENTTYPE1.1 EVENTTYPE1.3'
+sentence["conceptual"]               # 'THE SCALARDIM.1.LOW CATEGORY.1.1 BECOME BOOLFL.2'
 corpus.stats["ambiguity"]            # the ambiguity counts of stats.yaml
 corpus.planner.world                 # the corpus's view of the world (semantic_world.corpus.World)
 corpus.planner.world.result          # the WorldResult of the world package behind it
@@ -448,5 +448,5 @@ corpus = generate(config_from_mapping(settings))
 - `docs/specs/CORPUS_GENERATOR.md`: the full design, including the logical-form schema, the propositional notation, and the test-item schema.
 - `docs/DECISIONS.md`: every design decision, with who proposed and who decided it.
 - `docs/proposals/`: the decisions made during the build, stage by stage.
-- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model, the labels, and the corpus's move onto it (stages a5a and a5b), with the decisions WM.1 to WM.33 and the engineering choices WM.E1 and following in `docs/DECISIONS.md`.
-- `docs/guides/TAXONOMY.md` and `docs/guides/WORDFORMS.md`: the taxonomy inside the world and the word forms that the corpus builds on.
+- `docs/specs/WORLD_AND_LANGUAGE.md`: the world model, the labels, and the corpus's move onto it (stages a5a to a8), with the decisions WM.1 to WM.34 and the engineering choices WM.E1 and following in `docs/DECISIONS.md`.
+- `docs/guides/WORLD.md`: the world the corpus is about; `docs/guides/TAXONOMY.md` and `docs/guides/WORDFORMS.md`: the taxonomy inside the world and the word forms that the corpus builds on.

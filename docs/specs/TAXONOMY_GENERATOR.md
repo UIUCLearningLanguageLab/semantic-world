@@ -17,6 +17,8 @@ Out of scope for now:
 
 ## Terms
 
+**Note (world-and-language refactor).** Since stage a5b, CAN features are not a feature type of the taxonomy: they are the one-place event types of the world package, and "IS" and "HAS" are the PROPERTY and PART features. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Terms" and "Taxonomy outputs".
+
 - **Category.** A node in the tree. Superordinates are level 1. Leaves are at level `depth`.
 - **Instance.** An individual object. Instances belong to leaves only.
 - **Feature types.** ISA, IS (properties), HAS (parts), and CAN (actions). All features are binary.
@@ -26,6 +28,8 @@ Out of scope for now:
 - **Role.** At each category, each free feature has one of three roles for that category's members: defining, characteristic, or undiagnostic.
 
 ## Labels
+
+**Note (world-and-language refactor).** Since stage a5b, the generator writes the labels `CATEGORY.<path>`, `INSTANCE.<path>.<k>`, `PROPERTY.<n>`, `PART.<n>`, `ISA.CATEGORY.<path>`, and `SCALARDIM.<n>`. The labels below are the record of what was built before. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels".
 
 All labels are formal. Indices start at 1. Periods separate every index.
 
@@ -57,9 +61,13 @@ Determined IS and HAS features have no base rate. Their frequencies emerge from 
 
 ### CAN
 
+**Note (world-and-language refactor).** Since stage a5b, CAN features leave the taxonomy. Their rules are the requirements of the one-place event types `EVENTTYPE1.<n>`, sampled by the world package with the same settings, under `event_types.unary` of the world configuration. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs" and "Event types", and `docs/guides/WORLD.md`.
+
 The number of CAN features is a parameter. Every CAN feature is determined by a rule. Rules for CAN features read IS and HAS features only. No rule may read a CAN feature.
 
 ## Rules
+
+**Note (world-and-language refactor).** Everything below still holds for the rules of determined PROPERTY and PART features. The rules of CAN features are the one-place requirements of the world package since stage a5b, drawn with these settings and the overrides of `event_types.unary.rules`. Every rule is also written in matrix form (`rule_matrices.json`), with an agreement test. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs" and "Rules: Boolean form and matrices".
 
 The rule set is global: one rule set holds for the whole world, at every category and every instance.
 
@@ -180,9 +188,13 @@ The child's determined features are then computed from the rules. A defining val
 
 ### Distinct leaves
 
+**Note (world-and-language refactor).** Since stage a5b, two leaves must differ on their PROPERTY and PART features; the taxonomy has no CAN features. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs".
+
 With `require_distinct_leaves` on, no two leaves may have the same generative vector on their IS, HAS, and CAN features. When a new leaf duplicates an earlier leaf, the generator redraws the new leaf's non-defining free features from its parent, up to `distinct_max_tries` times, and then stops with an error. Leaves are checked in category order. Whether or not the option is on, the similarity output lets us inspect distinctness by observation.
 
 ## Instances
+
+**Note (world-and-language refactor).** Since stage a5b, an instance has no CAN features. Its one-place capacities are derived values of the world package (`derived/capacities.csv` of a world run). See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs" and "Rule-set identity and derived values".
 
 Each leaf gets a number of instances, set by its own parameter: a fixed number, or a range `[min, max]` drawn for each leaf. The instance count is independent of the branching parameters.
 
@@ -207,6 +219,8 @@ Branching accepts a bare value (a number or a range) or a list with one value pe
 
 ## Node vectors
 
+**Note (world-and-language refactor).** Since stage a5b, the three vectors hold the ISA, PROPERTY, and PART features and the scalars, without CAN features. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs".
+
 Every category, including every leaf, gets three vectors over all features (ISA, IS, HAS, CAN):
 
 1. **Generative vector.** The vector the category's children were generated from.
@@ -221,6 +235,8 @@ Every category, including every leaf, gets three vectors over all features (ISA,
 A determined feature is fixed by rule at category N when its output is the same for every setting of the free features that are not defining at N. For example, an AND rule with a defining input of 0 is fixed at 0. The test uses each determined feature's cone: the free features it depends on, directly or through other determined features. When the number of non-defining features in the cone is at most 20, the generator enumerates all their settings, which is exact. Above 20, the generator uses a local test that treats each non-fixed input of the rule as independent. The local test never marks a feature fixed when it is not, but it can miss a fixed feature. The roles output marks which test was used.
 
 ## Configuration
+
+**Note (world-and-language refactor).** Since stage a5b, `features.can` and `rules.overrides.can` are keys of the world configuration (`event_types.unary.count` and `event_types.unary.rules`), and a taxonomy configuration that still has them gets an error that names the new key. Since stage a6, the feature types are `features.property` and `features.part`, and `rules.input_type_weights` takes `property` and `part`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs" and "Configuration".
 
 A run is defined by one YAML file. Unknown keys are errors. Every error names the file and the field. The example below shows every parameter with its default value.
 
@@ -278,6 +294,8 @@ Validation checks, at least: counts are non-negative; the two role proportions s
 
 ## Determinism
 
+**Note (world-and-language refactor).** Since stage a5b, the one-place requirements (the old CAN rules) draw from the world's stream `world:requirements`, not from `taxonomy:rules`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Phase (a): determinism".
+
 Follow the determinism section of `docs/specs/MILESTONE_1.md`, implemented in Python. A stream's seed is SHA-256 of the master seed (8 bytes, little-endian) followed by the stream name (UTF-8). The digest, read as an integer, seeds `numpy.random.default_rng`. The streams are:
 
 - `taxonomy:base_rates`
@@ -290,6 +308,8 @@ Follow the determinism section of `docs/specs/MILESTONE_1.md`, implemented in Py
 Separate streams mean that changing the instance count never changes the rules or the tree, and changing the tree never changes the rules. All loops run in category order and feature order. No result may depend on set or dictionary iteration order.
 
 ## Outputs
+
+**Note (world-and-language refactor).** Since stage a5b, `instances.csv` is replaced by `base.csv` (the free features and the scalars) and `derived/static_features.csv` with its manifest, the run writes `rule_matrices.json`, every file uses the new labels, and no file holds CAN columns. A table with the old columns comes from `python -m semantic_world.world view --preset classic`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs", "Rule-set identity and derived values", and "Views".
 
 A run writes one folder, by default `runs/taxonomy/<name>_seed<seed>/`. The `runs/` folder is ignored by git. CSV files have a header row and one ID column first. Binary values are written as 0 and 1. Missing values are written as `NaN`. Means are written with 6 decimal places. Feature columns are ordered ISA (in category order), then IS, HAS, and CAN (in index order).
 

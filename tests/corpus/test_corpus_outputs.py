@@ -769,7 +769,7 @@ def test_the_generate_command(tmp_path, capsys) -> None:
     assert main(["generate", "data/corpus/tiny.yaml", "--out", str(out)]) == 0
     message = capsys.readouterr().out
     assert message.startswith(f"wrote {out}: 20 documents, ")
-    assert "43 test sets" in message
+    assert "41 test sets" in message
     config = load_config(out / "config.yaml")
     assert (config.name, config.seed, config.documents.count) == ("tiny", 1, 20)
     assert len(lines(out / "documents.jsonl")) == 20

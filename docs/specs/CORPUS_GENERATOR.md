@@ -27,10 +27,14 @@ Out of scope for now:
 
 ## Inputs
 
+**Note (world-and-language refactor).** Since stage a5a, the corpus reads a world of the world package (`world: {config: <file>, seed: N}` or `world: {run: <folder>}`), which embeds the taxonomy and adds fluents, event types with preconditions and effects, and time. A configuration that still has `taxonomy` gets an error that names the new key. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Inputs".
+
 - **A taxonomy** (required): a taxonomy configuration file with a taxonomy seed, or a taxonomy output folder. In Python, a `TaxonomyResult` works too. A configuration file is generated in memory, so nothing needs to be saved on disk. An output folder is regenerated in memory from its `config.yaml`, and the run stops with an error when the regenerated result differs from the folder's files. Verbs and scalar dimensions are used when the result has them. Without verbs, there are no transitive sentences and no thematic scene sampling.
 - **A word-form run** (optional): a word-form pipeline run (`WORDFORM_PIPELINE.md`) made from the corpus's own request. The corpus is generated first, without word forms, and the word forms are attached afterwards (see "Word forms for the corpus"). Without a word-form run, the corpus has every rendering except the spelled one (see "Renderings").
 
 ## Labels
+
+**Note (world-and-language refactor).** Since stage a5a, the labels are `LEXEME.<n>`, `DOC.<n>`, `DOC.<n>.SENT.<k>`, `SCENE.<n>`, `SCENE.<n>.EVENTINSTANCE.<k>`, `PROP.<n>`, `REF.<n>`, `VAR.<n>`, `EVENTVAR.<n>`, and `TIME.<k>`. The labels below are the record of what was built before. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels".
 
 Labels follow the project convention: formal labels, indices starting at 1, and periods between indices.
 
@@ -47,6 +51,8 @@ Labels follow the project convention: formal labels, indices starting at 1, and 
 ## Layer 1: the lexicon
 
 ### Concepts that get words
+
+**Note (world-and-language refactor).** Since stage a5a, the concepts are the world's: PROPERTY and PART features, one-place and two-place event types and their categories (for CAN features and verbs), patient capacities, and, since stage a7a, a state adjective for every fluent; the keys of `lexicon.named_proportion` are renamed to match. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Lexicon".
 
 | Concept | Part of speech | Example gloss |
 | --- | --- | --- |
@@ -71,6 +77,8 @@ Lexeme labels are numbered in this order: the first lexeme of every named conten
 
 ### Function words
 
+**Note (world-and-language refactor).** Since stage a7, the function words include `become` (changes and effect statements), `before` (precondition statements), and, with `lexicon.can_words: distinct`, `can_now`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Lexicon", "States and changes", "Causal statements", and "'Can': what is held fixed".
+
 `a`, `the`, `all`, `most`, `some`, `no`, `not`, `can`, `is`, `has`, `with`, `without`, `and`, `that` (relative clauses), and `it` (pronoun). With verb agreement on, `are` and `have` are added as the plural forms of `is` and `has`. When an inflection is realized as a separate word, one function word is added for each inflectional value, glossed like the affix (`PLURAL`, `PAST`, `PROGRESSIVE`; see "Morphology"). The set is fixed by the settings. Function words are ordinary lexemes with their own word forms.
 
 ### Synonyms and homonyms
@@ -88,9 +96,13 @@ When a word-form run is given, every lexeme gets a word form. Function words hav
 
 ## Layer 2: propositions
 
+**Note (world-and-language refactor).** Since stage a7, propositions have six levels: `class`, `instance`, `event`, and the timed levels `state`, `change`, and `able_now`, each about a participant of a scene at a time point; class-level causal statements state what event types do and need. See `docs/specs/WORLD_AND_LANGUAGE.md`, "States and changes", "'Can': what is held fixed", and "Causal statements".
+
 A proposition is a logical form with a type, a polarity, and a truth grounding. There are three levels.
 
 ### Class level
+
+**Note (world-and-language refactor).** Since stage a5a, the quantifiers are `nec_all`, `all`, `most`, `some`, `no`, and `nec_no` (CG.59 to CG.62): `GEN` is removed, `all` and `no` are extensional and available for every predicate, the `nec` quantifiers are the fixed test, and which quantifiers the words "all", "no", and the bare plural express are settings of the language. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Quantifiers (CG.59 to CG.62)".
 
 A class-level proposition says something about a category: "all penguins can swim", "red penguins swim", "penguins are birds".
 
@@ -134,6 +146,8 @@ An instance-level proposition says something about one instance: "the penguin ca
 
 ### Event level
 
+**Note (world-and-language refactor).** Since stage a5a, an event is an event of a history of the world package: it changes state, each report chooses its aspect (CG.64), and the grounding holds `able` and `legal` in place of `possible`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Events" and "Aspect (CG.64)".
+
 An event-level proposition says that something happened in a scene: "the penguin swims", "the owl chases the mouse".
 
 - **Content:** an event from the scene generator, which records the scene, the time step, the verb, the agent, and the patient if any. The proposition's verb is the event's own verb, or a verb category above it (see "Verb level" under "Mentioning referents").
@@ -144,11 +158,15 @@ Event-level propositions are never negated.
 
 ### Negation
 
+**Note (world-and-language refactor).** Since stage a7a, `propositions.negation_rate` has a rate for the levels `state` (0.1) and `able_now` (0.8) too. See `docs/specs/WORLD_AND_LANGUAGE.md`, "States and changes" and "'Can': what is held fixed".
+
 Class-level and instance-level propositions can be negative: "penguins cannot fly", "the owl has no fins", "no fish have fur". Negative propositions are true negations, grounded by the same tests with the predicate's value 0. The rate of negative propositions is a parameter for each level. The default is 0.1.
 
 In the logical form, a negative polarity denies the predicate: `most` with a negative polarity says that most members of the subject set lack the predicate ("most penguins can not fly"). The quantifier `no` replaces sentence negation. So `no` always has a positive polarity in the logical form and counts as a negative proposition, and `all` never has a negative polarity. For a negative fact, a document states `no` before "most ... not" before "some ... not".
 
 ### False propositions and test sets
+
+**Note (world-and-language refactor).** Since stage a5a, a law-like item is a false `nec_all` or `nec_no` item whose extensional twin is true; since stage a7, the event sets split into `_possible`, `_blocked`, and `_impossible`, and the state, `able_now`, and causal sets are added, with the changes `polarity` and `event`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Quantifiers (CG.59 to CG.62)" and "Test sets".
 
 Training documents contain true propositions only. False propositions go into separate test sets, each item labeled true or false. A false proposition is made from a true one by one minimal change:
 
@@ -174,6 +192,8 @@ Seven more rules shape the test sets.
 - **Seen and unseen.** The test-set settings never change the documents, so no item is held out of the corpus. Every item records instead whether its logical form appears in a training document (`seen`). A false item never does. A document states the proposition of every main clause. In a sentence about instances, a document also states the proposition of every relative clause, and what every noun phrase says of its referent: its noun and its modifiers. `stats.yaml` reports the share of true items that are seen, for each test set.
 
 ## Scenes and events
+
+**Note (world-and-language refactor).** Since stage a5a, scenes are episodes of the world package (`semantic_world.world.episodes`): participants are drawn as below, but events are drawn among the legal events of a state by a selection policy (`uniform_event` by default), change the participants' fluents, and are recorded as histories with initial states and changes. The scene settings stay in the corpus configuration. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Episodes and selection" and "Histories".
 
 Event-level sentences and situational documents need things to happen. The scene generator is a simple stand-in until event schemas or world-simulation logs can supply events.
 
@@ -201,6 +221,8 @@ Events are drawn verb first. `scene.transitive_share` decides the kind first: an
 ## Layer 3: documents
 
 ### Document types
+
+**Note (world-and-language refactor).** Since stage a7, feature documents also take an event type, a category of event types, or a fluent as their topic and state causal statements, and narratives state initial states, results, and blocked events after event sentences. See `docs/specs/WORLD_AND_LANGUAGE.md`, "States and changes", "'Can': what is held fixed", and "Causal statements".
 
 The corpus mixes four document types. Their proportions are parameters.
 
@@ -242,9 +264,13 @@ Each document's length is drawn from a configured range for its type. A document
 
 ### Ordering
 
+**Note (world-and-language refactor).** Since stage a7b, the template of encyclopedic documents ends with the causal statements, after the rule statements. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Causal statements".
+
 Encyclopedic documents follow a loose template: membership first, then defining facts (`all` and `no`), characteristic facts (`most`, and scalar poles), rarer facts (`some`), relation facts, and rule statements. A shuffle parameter moves from the strict template (0) to a random order (1): each sentence is displaced by a random amount scaled by the parameter. A sibling contrast stays right after the fact it matches. Narratives follow time order, with descriptions inserted near the referent's first mention.
 
 ### Mentioning referents
+
+**Note (world-and-language refactor).** Since stage a5a, `mention.verb_level_weights` is `mention.event_level_weights`, over the levels of the event-type tree. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Configuration changes".
 
 - **Noun level.** Noun levels apply to instances only. An instance is named with the noun of its own leaf or of any category above it ("the bird"). The level is drawn for each mention. `mention.level_weights` give the weights, with the leaf level heaviest by default. The logical form records which category the noun names. A class-level noun phrase is always named by its own noun, because a higher noun would make a different proposition. Propositions about higher categories come from the proposition layer.
 - **Verb level.** An event's verb is named at a level of the verb tree, in the same way: the verb itself, or a verb category above it ("chase" or "hunt"). `mention.verb_level_weights` give the weights, with the leaf level (the verb) heaviest by default. Words for verb categories are also used in class-level and instance-level capacity sentences ("owls hunt mice"), whose truth is the verb category's own base relation.
@@ -258,6 +284,8 @@ Encyclopedic documents follow a loose template: membership first, then defining 
 ## Layer 4: grammar
 
 ### Phrase structure
+
+**Note (world-and-language refactor).** Since stage a7, the grammar also realizes states (the copula with a state adjective), changes (`become` with a state adjective), blocked events ("can" or `can_now`), and causal statements (the generic noun with an event relative clause, `become` or the copula and `before`, an `Adv`). See `docs/specs/WORLD_AND_LANGUAGE.md`, "States and changes", "'Can': what is held fixed", and "Causal statements".
 
 The grammar below is written in the default English order. Word order parameters (next section) rearrange it.
 
@@ -301,6 +329,8 @@ When the drawn kind of clause has no true proposition, the other kind is used. A
 
 ### Word order
 
+**Note (world-and-language refactor).** Since stage a7b, `grammar.word_order.before` places the function word `before` of a precondition statement. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Causal statements".
+
 Each setting has an English default. The word-order and morphology settings never change a logical form. They change only how a logical form is realized.
 
 | Setting | Values | Default |
@@ -318,6 +348,8 @@ The auxiliary stands before or after the predicate word: the verb, the adjective
 
 ### Morphology
 
+**Note (world-and-language refactor).** Since stage a7a, the tense of a state, change, or blocked sentence is marked on its auxiliary when the realization is a separate word, and not at all when tense is an affix, because the word-form pipeline inflects content lexemes only. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Lexicon" and "States and changes".
+
 Number, tense, and aspect are each off by default. When on, each is realized either as an affix joined to the word form (`realization: affix`, "swim-s") or as a separate function word (`realization: word`), set separately for each.
 
 - **Number:** singular and plural on nouns. Generic subjects are plural. With number off, nouns and verbs have one form: "all penguin swim". Every class-level noun is plural, and every instance is singular. A part noun ("with fins", "has fur") is never marked. A plural predicate noun takes no `a`: "penguins are birds".
@@ -332,6 +364,8 @@ A morphology word stands right after the word it marks, or right before it with 
 With English function words (the Jabberwocky option of the word-form pipeline), every function-word gloss must be an English word. So `realization: word` is an error with English function words, because `PLURAL` is not an English word. The English affixes are the suffixes for `PLURAL`, `PAST`, and `PROGRESSIVE` only.
 
 ### Logical form and surface form
+
+**Note (world-and-language refactor).** Since stage a7, the readings include `state`, `able_now`, and `causal`, and with "can" shared a sentence about an instance with "can" has the readings `capacity` and `able_now`; every mention of the logical form says whether it is `descriptive` (CG.63). See `docs/specs/WORLD_AND_LANGUAGE.md`, "'Can': what is held fixed", "States and changes", "Causal statements", and "Referring content (CG.63)".
 
 The logical form of a sentence is never ambiguous. Capacity versus event, tense, aspect, and number are explicit in it, whatever the grammar settings. The propositional rendering writes the logical form (see "Renderings").
 
@@ -352,6 +386,8 @@ Readings are worked out from the tree and the lexeme tokens alone, never from th
 Each scalar dimension has two adjectives, one for each pole. An instance counts as "big" when its value is at least `scalar_adjectives.z` standard deviations above the mean of its comparison class, and "small" when at least that far below. The comparison class is the category named by the noun (instance level) or the subject category's parent (class level). Comparatives ("bigger than") are out of scope for now.
 
 ## Renderings
+
+**Note (world-and-language refactor).** Since stage a5a, the renderings use the new labels and the quantifiers `NEC(ALL(...))`, `ALL`, `MOST`, `SOME`, `NO`, and `NEC(NO(...))`; since stage a7, the propositional rendering has `HOLDS`, `BECOME`, `ABLE_NOW`, `AFTER`, and `BEFORE`, event variables, and the descriptions of a sentence about instances in braces before its assertion (CG.63). See `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels", "Quantifiers (CG.59 to CG.62)", "Referring content (CG.63)", "States and changes", and "Causal statements".
 
 Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 
@@ -392,6 +428,8 @@ Examples:
 Referents are numbered within each document in order of first mention (`R.1`, `R.2`), so a referent keeps its label across sentences and the propositional rendering shows coreference directly. With `renderings.propositional.referents: instance`, referents are named by their taxonomy instance labels instead. The document's `referents` field records each referent's instance either way.
 
 ## Outputs
+
+**Note (world-and-language refactor).** Since stage a5a, `scenes.jsonl` holds histories, `config.yaml` records the world run's identity, and `documents.jsonl`, the test items, and `stats.yaml` carry the new levels, fields, marks, and sets. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Histories", "Outputs", and "Test sets".
 
 A run writes one folder, by default `runs/corpus/<name>_seed<seed>/`.
 
@@ -566,6 +604,8 @@ Spoken sentences, with coarticulation across word boundaries and reduced functio
 
 ## Configuration
 
+**Note (world-and-language refactor).** Since stage a5a, several keys are renamed (`taxonomy` to `world`, `quantifiers.all_grounding` to `universal_words`, `quantifiers.most.min_proportion` to `usage_min`, `quantifiers.generic.means` to `bare_plural.expresses`, `propositions.events.progressive_rate` to `documents.progressive_rate`, `scene.verb_weights` to `event_type_weights`, `mention.verb_level_weights` to `event_level_weights`), every old key gets an error that names the new key, and new keys are added. `data/corpus/default.yaml` lists every key. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Configuration changes".
+
 ```yaml
 name: default
 seed: 1
@@ -657,6 +697,8 @@ Use the stream-seed function in `semantic_world.taxonomy.streams`. Streams: `cor
 
 ## Python package
 
+**Note (world-and-language refactor).** Since stage a5a, `scenes.py` is replaced by the episodes of the world package (`semantic_world.world.episodes`), `world.py` loads a world run, and `histories.py` reads histories. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Phase (a): Python package".
+
 Put the generator in `python/semantic_world/corpus/`. Suggested modules: `config.py`, `streams.py`, `world.py` (loading the taxonomy), `lexicon.py`, `propositions.py` (logical forms and truth tests), `facts.py` (the true propositions a document can state, the rule statements, and the naming of events), `scenes.py`, `planner.py` (document types and ordering), `grammar.py` (sentence plans: what a sentence says, in the form the grammar realizes), `realize.py` (phrase structure, word order, and morphology), `interpret.py` (tree to logical form, for tests), `readings.py` (the readings that a sentence's words allow), `mentions.py` (the sentence plan of a proposition, relative clauses, and the mentions of a document's referents), `logical.py` (the JSON logical form of a sentence), `testsets.py` (not `test_sets.py`, which pytest would collect as a test module), `renderings.py` (formal, conceptual, and propositional), `stats.py` (`stats.yaml`, with the co-occurrence check), `generate.py` (a whole run), `request.py` (the word-form request), `render.py` (attaching the word forms), `io.py`, and `__main__.py`. The command line is:
 
 ```
@@ -679,6 +721,8 @@ Work on one branch per stage (`corpus-stage-1`, and so on). Branch stage 1 from 
 7. **Word forms.** The request, the word-form pipeline changes in "Word forms for the corpus" (with their tests in the word-form pipeline's suite, and its spec and guide updated), and the `render` command. *Accept:* on the tiny configuration, with a new word-form configuration made for the tiny corpus (`data/wordforms/tiny.yaml` makes too few words, and stays unchanged), generate, make word forms, and render run end to end; every lexeme gets a word form, distinct lexemes get distinct forms unless they are homonyms, and category lexemes follow the assignment mode; function words are ordered by their corpus counts; only the inflections the corpus uses are synthesized; `corpus.txt` matches the spelled renderings; rendering leaves the rest of the output folder byte-identical; with branch markers and plural affixes, marked forms are inflected.
 
 ## Decisions to confirm
+
+**Note (world-and-language refactor).** Decision 4 (events never change state, CG.4) and decision 39 (one aspect per event) are superseded, and the quantifier decisions (1, 31, 34) are revised by CG.59 to CG.62; event-level propositions are still never negated. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Decisions this specification builds on" and "Decisions".
 
 These choices were made while writing this specification. Each one is the working design unless Jon changes it.
 

@@ -310,7 +310,7 @@ wordforms: {count: 60}
 assignment: {mode: arbitrary}
 ```
 
-`data/wordforms/corpus_tiny.yaml` is the example. `data/wordforms/corpus_default.yaml` does the same for the default corpus (`runs/corpus/default_seed1`), with the default word-form settings: 500 words, 45 speakers, and all five embeddings. On a laptop, the three steps take under 20 seconds for the tiny corpus. `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
+`data/wordforms/corpus_tiny.yaml` is the example. `data/wordforms/corpus_default.yaml` does the same for the default corpus (`runs/corpus/default_seed1`), with the default word-form settings: 500 words, 45 speakers, and all five embeddings. On a laptop, the three steps take about 15 seconds for the tiny corpus (about 9 of them the word forms with audio and embeddings), and the default corpus's word forms (199 content lexemes and 17 function words, with audio and all five embeddings) take about 30 minutes, measured on October 9, 2026 (stage a8 of the world-and-language refactor). `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
 
 The request lists:
 

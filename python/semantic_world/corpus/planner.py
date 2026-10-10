@@ -17,8 +17,9 @@ There are four document types (``documents.mix``):
   ``propositions.rule_statement_rate``, or says which categories have the feature and which lack
   it. About an event type, a sentence is first a causal statement, at
   ``propositions.causal_statement_rate``: what its events do and need. About a fluent, every
-  sentence is a causal statement, drawn at the same rate: the event types that set it, clear
-  it, and need it, because nothing else can be said of a fluent at the class level;
+  sentence is a causal statement, one per sentence without a rate: the event types that set it,
+  clear it, and need it, because nothing else can be said of a fluent at the class level; the
+  document ends at its drawn length or when it has stated every statement about its fluent;
 - **entity narrative.** The topic is one instance. The document narrates the events of
   ``entity.scenes`` scenes that involve the instance, in time order, scene by scene;
 - **situational narrative.** One scene. The document narrates its events in time order.
@@ -867,10 +868,14 @@ class Planner:
                 break
             left = [r for r in rules if self._key(r) not in stated]
             causal_left = [c for c in causal if self._key(c) not in stated]
-            if causal_left and facts_rng.random() < causal_rate:
+            if is_fluent:
+                # a document about a fluent holds causal statements alone, one per sentence,
+                # until it reaches its length or has stated every statement about its fluent
+                if not causal_left:
+                    break
                 fact: Proposition | None = causal_left[int(facts_rng.integers(len(causal_left)))]
-            elif is_fluent:
-                fact = None
+            elif causal_left and facts_rng.random() < causal_rate:
+                fact = causal_left[int(facts_rng.integers(len(causal_left)))]
             elif left and facts_rng.random() < rule_rate:
                 fact = left[int(facts_rng.integers(len(left)))]
             else:

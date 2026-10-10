@@ -4,7 +4,7 @@ The taxonomy generator builds an artificial world of categories and objects. The
 
 This guide covers running the generator, the ideas behind it, the configuration file, the output files, and the Python interface. The design is specified in `docs/specs/TAXONOMY_GENERATOR.md` and `docs/specs/TAXONOMY_RELATIONS.md`, with the changes of the world-and-language refactor (`docs/specs/WORLD_AND_LANGUAGE.md`, "Labels" and "Taxonomy outputs").
 
-**Status.** Complete: the base generator and scalar dimensions. Since stage a5b of the world-and-language refactor, the generator writes the labels of that specification (`CATEGORY.1.2`, `INSTANCE.1.2.3`, `PROPERTY.4`, `PART.5`, `SCALARDIM.1`), writes the base vector and the derived values apart (`base.csv` and `derived/`), and makes categories, instances, features, and scalars only. The actions (the old CAN features) and the verbs with their relations are made by the world package; see "Where CAN features and verbs went" below.
+**Status.** Complete: the base generator and scalar dimensions. Since stage a5b of the world-and-language refactor, the generator writes the labels of that specification (`CATEGORY.1.2`, `INSTANCE.1.2.3`, `PROPERTY.4`, `PART.5`, `SCALARDIM.1`), writes the base vector and the derived values apart (`base.csv` and `derived/`), and makes categories, instances, features, and scalars only. The actions (the old CAN features) and the verbs with their relations are made by the world package; see "Where CAN features and verbs went" below, and `WORLD.md` for the world package itself.
 
 ## Quick start
 
@@ -308,7 +308,7 @@ The rule file's path is read relative to the configuration file's folder. A temp
 
 ## Where CAN features and verbs went
 
-The taxonomy once made actions (CAN features) and verbs with their relations. Both are made by the world package since stage a5b, from the taxonomy's features, with the same machinery under new names: CAN features are the **one-place event types** `EVENTTYPE1.<n>`, and verbs are the **two-place event types** `EVENTTYPE2.<path>`. A world configuration (`data/world/default.yaml`) names a taxonomy configuration and adds the event types:
+The taxonomy once made actions (CAN features) and verbs with their relations. Both are made by the world package since stage a5b, from the taxonomy's features, with the same machinery under new names: CAN features are the **one-place event types** `EVENTTYPE1.<n>`, and verbs are the **two-place event types** `EVENTTYPE2.<path>`. The world package adds what the taxonomy never had: fluents, preconditions, effects, and time, so that an event type says what it needs and what it changes. `WORLD.md` is its guide; this section covers the part that came from the taxonomy. A world configuration (`data/world/default.yaml`) names a taxonomy configuration and adds the event types:
 
 ```yaml
 taxonomy: {config: data/taxonomy/relations.yaml, seed: null}   # null: the world's seed
@@ -418,5 +418,6 @@ features = base.select(pl.exclude("label", "leaf"))
 - `docs/specs/TAXONOMY_GENERATOR.md`: the full design of the base generator (with the old labels).
 - `docs/specs/TAXONOMY_RELATIONS.md`: scalars, verbs, and relations (with the old labels; the verbs are the world's two-place event types now).
 - `docs/specs/WORLD_AND_LANGUAGE.md`: the world model; "Labels", "Taxonomy outputs", "Event types", "Rules: Boolean form and matrices", and "Rule-set identity and derived values".
+- `docs/guides/WORLD.md`: the world package that the taxonomy's run is embedded in: fluents, event types, preconditions, effects, episodes, and views.
 - `docs/proposals/`: decisions made during the build, where the build differs from the first draft of a specification.
 - Shepard, R. N., Hovland, C. I., & Jenkins, H. M. (1961). Learning and memorization of classifications. *Psychological Monographs*, 75(13, Whole No. 517).

@@ -136,3 +136,13 @@ Every place where the code now departs from or adds to `docs/specs/WORLD_AND_LAN
 - **The grounding of a causal statement** is `{"event_types": n, "with_entry": k, "able_bindings": m, "test": "definition"}`; a statement about an event type with no able binding is invalid (the statement is about no event). "Truth" says nothing of a grounding or of vacuity.
 - **`stats.yaml`** gains the `causal` block (`causal_sentences`, `effect_sentences`, `precondition_sentences`) after `states`, and `by_section` the section `causal`.
 - **The guide's figures** of the default corpus changed as "Changed expectations" says; the datasets in `runs/` are stage a8's to regenerate.
+
+## Jon's rulings (October 9, 2026, in the stage a8 prompt)
+
+Choices 1 to 19 are approved, and WM.E146 to WM.E164 are decided. The open questions are answered:
+
+1. **The topics of feature documents** (choice 10): keep drawing fluents uniformly with the other topics of feature documents. But `propositions.causal_statement_rate` applies only to documents about an event type or a category. A document about a fluent draws a causal statement for every sentence, until it reaches its length or runs out of statements. Stage a8 builds the change (its follow-up 1).
+2. **The `observed` mark** (choice 16): keep it non-vacuous. A law-like item should be one the corpus gave evidence for.
+3. **The causal sets** (choice 15): do not reuse true statements just to reach `test_sets.size`. Instead, pair each true statement with every valid false item of the set's change, up to `test_sets.size`. Drop the two polarity law-like sets, which are empty by construction. Stage a8 builds the change (its follow-up 2).
+4. **`test_sets.changes`** (choice 15) keeps `polarity` and `event`, so that one setting chooses every set.
+5. **A pronoun's `descriptive` mark** (choice 12) stays false. The mention's own record already says it is a pronoun.

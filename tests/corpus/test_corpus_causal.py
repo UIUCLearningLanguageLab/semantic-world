@@ -78,6 +78,8 @@ from semantic_world.corpus.testsets import (
     PREDICATE,
     ROLE,
     TRUE_ITEM,
+    TestSetBuilder,
+    false_items,
     stated_propositions,
 )
 
@@ -271,6 +273,80 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
     if name == "default":
         assert kinds[("causal_effect", ROLE, "")] > 0
         assert sum(count for (_, _, kind), count in kinds.items() if kind == LAWLIKE) > 0
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_the_causal_sets_pair_every_statement_with_every_valid_false_item(runs, name) -> None:
+    """Stage a8 (Jon's ruling 3 on stage a7b): each true causal statement is paired with every
+    valid false item of the set's change, the pairs are capped at ``test_sets.size``, both items
+    record the statement they test, and the polarity change has no law-like twin."""
+    corpus = runs(name)
+    facts, truth = corpus.planner.facts, corpus.planner.truth
+    size = corpus.config.test_sets.size
+    by_group: dict = {}
+    for test_set in corpus.test_sets:
+        if test_set.level not in CAUSAL_LEVELS:
+            continue
+        assert len(test_set.pairs) <= size
+        if test_set.change == POLARITY:
+            assert test_set.kind != LAWLIKE
+        kind = EFFECT if test_set.level == "causal_effect" else PRECONDITION
+        for true, false in test_set.pairs:
+            assert true.proposition.predicate.kind == kind
+            assert true.proposition in facts.causal_statements(kind=kind)
+            # the statement record is the true item's rendering, on both items
+            assert true.meta["statement"] == true.input["propositional"]
+            assert false.meta["statement"] == true.input["propositional"]
+            assert true.meta["statement"].startswith("NEC(ALL(EVENT(EVENTVAR.1, ")
+            by_group.setdefault((test_set.level, test_set.change, test_set.kind), []).append(
+                (true.proposition, false.proposition)
+            )
+        stats = test_set.stats()
+        assert stats["true_statements"] == len({t.meta["statement"] for t, _ in test_set.pairs})
+    # every pair of a true statement and a valid false item is in a set, when the set is not
+    # capped; a capped set holds a subset, in enumeration order
+    for level in CAUSAL_LEVELS:
+        kind = EFFECT if level == "causal_effect" else PRECONDITION
+        for change in (PREDICATE, POLARITY, EVENT_SWAP, ROLE):
+            expected: dict = {}
+            for true in facts.causal_statements(kind=kind):
+                for false in false_items(facts, true, change):
+                    group = LAWLIKE if truth.observed(false) else ""
+                    expected.setdefault(group, []).append((true, false))
+            for group, pairs in expected.items():
+                made = by_group.get((level, change, group), [])
+                if len(pairs) <= size:
+                    assert made == pairs, (level, change, group)
+                else:
+                    assert len(made) == size
+                    positions = [pairs.index(pair) for pair in made]
+                    assert positions == sorted(positions) and len(set(positions)) == size
+            for group in ("", LAWLIKE):
+                if group not in expected:
+                    assert by_group.get((level, change, group), []) == []
+    # the same configuration and seed give the same pairs
+    again = TestSetBuilder(corpus.planner, corpus.documents).build()
+    for a, b in zip(corpus.test_sets, again, strict=True):
+        if a.level in CAUSAL_LEVELS:
+            assert [(t.proposition, f.proposition) for t, f in a.pairs] == [
+                (t.proposition, f.proposition) for t, f in b.pairs
+            ]
+            assert [(t.meta, f.meta) for t, f in a.pairs] == [(t.meta, f.meta) for t, f in b.pairs]
+
+
+def test_the_causal_sets_are_capped_at_the_size(runs) -> None:
+    corpus = runs("default", test_sets={"size": 3})
+    facts = corpus.planner.facts
+    for test_set in corpus.test_sets:
+        if test_set.level in CAUSAL_LEVELS:
+            assert len(test_set.pairs) <= 3
+    # the default world has more pairs of an effect statement and a valid other fluent than the
+    # test runs' size of 30, so the set is full and holds more than one pair per true statement
+    full = runs("default")
+    predicate = next(s for s in full.test_sets if s.name == "causal_effect_predicate")
+    assert len(predicate.pairs) == full.config.test_sets.size == 30
+    assert len({t.meta["statement"] for t, _ in predicate.pairs}) < len(predicate.pairs)
+    assert len(facts.causal_statements(kind=EFFECT)) > 30
 
 
 def test_an_observed_false_item_held_of_every_event_in_the_scenes(runs) -> None:
@@ -513,10 +589,14 @@ def test_feature_documents_about_event_types_and_fluents(runs) -> None:
         causal = [s for s in document.sentences if s.proposition.causal]
         others = [s for s in document.sentences if not s.proposition.causal]
         if topic in facts.base_fluents:
-            # a document about a fluent: the event types that set it, clear it, and need it
+            # a document about a fluent: the event types that set it, clear it, and need it,
+            # one causal statement per sentence, up to its drawn length or the statements
+            # about its fluent (stage a8, Jon's ruling 1 on stage a7b)
             topics["fluent"] += 1
             assert causal and not others
             assert all(s.proposition.predicate.label == topic for s in causal)
+            statements = facts.causal_statements(fluent=topic)
+            assert len(document.sentences) == min(document.drawn_length, len(statements))
         elif topic in facts.verbs or topic in facts.features[CAN]:
             topics["event_type"] += 1
             assert all(s.proposition.subject.event_type == topic for s in causal)
@@ -546,13 +626,14 @@ def test_the_causal_statement_rate_is_a_setting(runs) -> None:
         return found
 
     none = counts(0.0)
-    assert none["causal"] == 0 and none["fluent_sentences"] == 0
+    assert none["causal"] == 0
     low, high = counts(0.2), counts(0.9)
     assert 0 < low["causal"] < high["causal"]
     assert low["causal"] / low["sentences"] < high["causal"] / high["sentences"]
-    # a fluent document reaches its length at any rate above 0: a failed draw costs one of
-    # its many tries, and a document about a fluent has nothing else to say
-    assert low["fluent_sentences"] > 0 and high["fluent_sentences"] > 0
+    # the rate applies to documents about event types and categories only: a document about a
+    # fluent holds causal statements alone at any rate, and says the same at every rate
+    assert none["fluent_documents"] == low["fluent_documents"] == high["fluent_documents"] > 0
+    assert none["fluent_sentences"] == low["fluent_sentences"] == high["fluent_sentences"] > 0
     with pytest.raises(ConfigError, match="propositions.causal_statement_rate"):
         runs("tiny", 5, propositions={"causal_statement_rate": 2})
 
@@ -869,5 +950,5 @@ def test_the_tiny_corpus_holds_every_new_thing(runs) -> None:
     assert any(s.proposition.causal for d in corpus.documents for s in d.sentences)
     assert any("{" in s.propositional for d in corpus.documents for s in d.sentences)
     names = [s.name for s in corpus.test_sets]
-    assert len(names) == 43 and sum(n.startswith("causal") for n in names) == 16
+    assert len(names) == 41 and sum(n.startswith("causal") for n in names) == 14
     assert TEMPLATE[-1] == CAUSAL

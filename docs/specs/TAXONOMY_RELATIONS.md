@@ -23,6 +23,8 @@ Out of scope: verbs with three or more arguments, event schemas with changing st
 
 ## Labels
 
+**Note (world-and-language refactor).** Since stage a5b, the scalar dimension is `SCALARDIM.<n>`, and the verb labels are the world package's: `EVENTTYPE2.<path>` for a verb or verb category, `EVENTFEAT.<n>` for a verb feature, `CONSTRAINT.<owner>` for a constraint, `CAN.<event type>` and `CANBE.<event type>` for the projections, and `agent.` and `patient.` as the role prefixes. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels".
+
 Labels follow the base convention: formal labels, indices starting at 1, and periods between indices.
 
 | Object | Label | Example |
@@ -72,6 +74,8 @@ A rule's input can be a threshold literal on a scalar: `SC.2 > θ`. Inside the r
 
 ## Part B: transitive verbs
 
+**Note (world-and-language refactor).** Since stage a5b, all of Part B ("Relations" to "Thematic relatedness") is built by the world package, not the taxonomy, with "verb" read as "two-place event type": the verb tree, verb features, constraints, base relations, projections, relation statistics, and thematic relatedness are the two-place event types' requirements and the derived values of a world run. The `verbs` block is `event_types.binary` of the world configuration. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs", "Event types", and "Rule-set identity and derived values", and `docs/guides/WORLD.md`.
+
 ### Relations
 
 A verb v is a relation R_v(a, p) between an agent instance a and a patient instance p. R_v is a conjunction of constraints:
@@ -117,6 +121,8 @@ With `verbs.taxonomy.depth: 1` and no defining features, verbs are independent o
 
 ### Projections
 
+**Note (world-and-language refactor).** Since stage a5b, the projections are the capacities `CAN.<event type>` and `CANBE.<event type>` in `derived/capacities.csv` of a world run, and exposure (`verbs.projections.expose_*`) is removed (REL.16): a view chooses which columns a model sees. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Rule-set identity and derived values" and "Views".
+
 Every verb gives every object two derived one-place features:
 
 - **Agent projection** `CAN.<verb>`: true when some possible patient would make R_v true with this object as agent.
@@ -159,6 +165,8 @@ For every pair of leaves, the generator reports a thematic relatedness score: th
 None of these changes may alter any output when `scalars.count` is 0 and `verbs` is null. In particular, no existing stream may draw a different sequence of numbers when scalars are off.
 
 ## Configuration
+
+**Note (world-and-language refactor).** Since stage a5b, the `verbs` block is `event_types.binary` of the world configuration, with the same keys except `projections`, which is removed; a taxonomy configuration that still has `verbs` gets an error that names the new key. The scalar settings stay here. Since stage a6, `rules.input_type_weights` takes `property` and `part`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Taxonomy outputs" and "Configuration".
 
 New top-level keys, with defaults. The defaults keep scalars and verbs off, so existing configurations behave as before.
 
@@ -208,6 +216,8 @@ Add example configurations to `data/taxonomy/`: `relations.yaml` (the default ta
 
 ## Determinism
 
+**Note (world-and-language refactor).** Since stage a5b, the verb streams are the world's: `world:event_tree`, `world:constraints`, and `world:pairs`. The scalar streams stay the taxonomy's. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Phase (a): determinism".
+
 New streams, added to the stream list: `taxonomy:scalars` (superordinate values and drift in the tree), `taxonomy:scalar_instances` (instance drift), `taxonomy:verb_tree` (verb features, the verb tree, and its roles), `taxonomy:constraints` (constraint sampling, and the choice of exposed projections), and `taxonomy:pairs` (pair sampling and pair estimates). Thresholds in noun rules come from `taxonomy:rules`.
 
 The separate streams give these properties, and tests check each one:
@@ -220,6 +230,8 @@ The separate streams give these properties, and tests check each one:
 Constraints depend on the noun tree. The density checks (see "Configuration") measure every constraint and every verb over the leaves of the noun tree, so a change to the noun tree can change which constraints are kept and which verb features are redrawn. The noun tree is fixed before any verb is generated, and the instances play no part in the checks, so the properties above still hold.
 
 ## Outputs
+
+**Note (world-and-language refactor).** Since stage a5b, the taxonomy writes none of the verb files. The relation files (`relation_proportions.csv`, `relation_pairs.csv`, `event_type_stats.csv` for `verb_stats.csv`, `thematic.csv`), the projections (`capacities.csv`), and the constraints and relations (in `definition.json`) are written by a world run, with `event_type` for `verb`; `instances.csv` is replaced by `base.csv`. See `docs/specs/WORLD_AND_LANGUAGE.md`, "Files" and "Rule-set identity and derived values".
 
 New files, written only when the feature they describe is on:
 

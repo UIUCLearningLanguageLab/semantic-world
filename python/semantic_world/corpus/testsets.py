@@ -45,7 +45,13 @@ kinds of item have test sets of their own:
   there was at least one, is marked ``observed`` and goes into the ``_lawlike`` twin, as CG.59
   puts a false ``nec`` item whose extensional twin is true. The changes are a predicate swap
   (another fluent), a polarity swap (the opposite value), an event swap (another event type, or
-  category at the same level), and a role swap (the other role, for two-place event types).
+  category at the same level), and a role swap (the other role, for two-place event types). The
+  polarity swap has no ``_lawlike`` twin: the true effect or literal guarantees the opposite
+  value, so a polarity swap is never observed. The causal sets are not drawn: every true causal
+  statement of the world is paired with every valid false item of the set's change, and a set
+  with more than ``test_sets.size`` pairs keeps a uniform draw of them. Both items of a pair
+  record the true statement they test (``statement``: its propositional rendering), so that an
+  analysis can group the pairs of a set by statement.
 
 A state pair records which of its items changed (``changed_item``: ``true_item``,
 ``false_item``, ``both``, or null for a pair of the ``_unchanged`` set), beside each item's
@@ -83,7 +89,6 @@ item says, and the two items of a pair mention an instance in the same way.
 from __future__ import annotations
 
 import dataclasses
-import functools
 import re
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -355,19 +360,33 @@ def falsify(
     ``accept`` is one more condition on the false item."""
     options = candidates(facts, proposition, change, instances)
     for index in rng.permutation(len(options)):
-        candidate = dataclasses.replace(
-            options[int(index)], grounding=None, id=None, rule=None, event=None
-        )
-        if not facts.expressible(candidate):
-            continue
-        if candidate.level == CLASS and not facts.truth.statable(candidate):
-            continue
-        evaluation = facts.truth.evaluate(candidate)
-        if evaluation.valid and not evaluation.true:
-            candidate = dataclasses.replace(candidate, grounding=evaluation.grounding)
-            if accept is None or accept(candidate):
-                return candidate
+        candidate = _valid_false(facts, options[int(index)])
+        if candidate is not None and (accept is None or accept(candidate)):
+            return candidate
     return None
+
+
+def false_items(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
+    """Every false proposition that one change of a true one gives, in the order of
+    :func:`candidates`: the candidates that are expressible, that the language can state, and
+    that the truth tests judge false, each with the grounding that shows it false. The causal
+    sets pair a true statement with every one of them."""
+    valid = (_valid_false(facts, option) for option in candidates(facts, proposition, change))
+    return [candidate for candidate in valid if candidate is not None]
+
+
+def _valid_false(facts: Facts, option: Proposition) -> Proposition | None:
+    """``option`` as a false item, with its grounding, or None when the language cannot express
+    or state it, or the truth tests do not judge it false."""
+    candidate = dataclasses.replace(option, grounding=None, id=None, rule=None, event=None)
+    if not facts.expressible(candidate):
+        return None
+    if candidate.level == CLASS and not facts.truth.statable(candidate):
+        return None
+    evaluation = facts.truth.evaluate(candidate)
+    if not evaluation.valid or evaluation.true:
+        return None
+    return dataclasses.replace(candidate, grounding=evaluation.grounding)
 
 
 def changes_for(proposition: Proposition) -> tuple[str, ...]:
@@ -665,6 +684,8 @@ class ItemSet:
             )
             by_item = Counter(true.meta["changed_item"] or NEITHER_ITEM for true, _ in self.pairs)
             record["pairs_by_changed_item"] = {kind: by_item[kind] for kind in CHANGED_ITEMS}
+        if self.level in CAUSAL_LEVELS:
+            record["true_statements"] = len({true.meta["statement"] for true, _ in self.pairs})
         return record
 
 
@@ -691,7 +712,8 @@ def _kinds(level: str, change: str) -> tuple[str, ...]:
     if level == ABLE_NOW:
         return (BLOCKED, IMPOSSIBLE)
     if level in CAUSAL_LEVELS:
-        return (_ORDINARY, LAWLIKE)
+        # a polarity swap is never observed: the true entry guarantees the opposite value
+        return (_ORDINARY,) if change == POLARITY else (_ORDINARY, LAWLIKE)
     return (_ORDINARY,)
 
 
@@ -745,7 +767,10 @@ class TestSetBuilder:
 
     def _group(self, level: str, change: str) -> list[ItemSet]:
         """The test sets of one level and one change. True items are drawn until every set has
-        ``test_sets.size`` pairs, or the draws run out. A true item is used once."""
+        ``test_sets.size`` pairs, or the draws run out. A true item is used once. The causal
+        sets are enumerated instead (:meth:`_causal_group`)."""
+        if level in CAUSAL_LEVELS:
+            return self._causal_group(level, change)
         rng = self.streams.substream("tests", f"{level}_{change}")
         aspects = self.streams.substream("grammar", f"tests:{level}_{change}:aspect")
         kinds = _kinds(level, change)
@@ -757,8 +782,6 @@ class TestSetBuilder:
             EVENT: self._draw_event,
             STATE: self._draw_state,
             ABLE_NOW: self._draw_able_now,
-            CAUSAL_EFFECT: functools.partial(self._draw_causal, EFFECT),
-            CAUSAL_PRECONDITION: functools.partial(self._draw_causal, PRECONDITION),
         }
         idle = 0
         for _ in range(_DRAWS_PER_PAIR * self.size + _DRAWS if self.size else 0):
@@ -807,6 +830,47 @@ class TestSetBuilder:
             ItemSet(_set_name(level, change, kind), level, change, kind, tuple(pairs[kind]))
             for kind in kinds
         ]
+
+    def _causal_group(self, level: str, change: str) -> list[ItemSet]:
+        """The causal sets of one level and one change: every true causal statement of the
+        set's kind, in enumeration order, paired with every valid false item of the change
+        (:func:`false_items`), each pair in the ordinary set or the ``_lawlike`` twin by the
+        ``observed`` mark of its false item. A set with more than ``test_sets.size`` pairs keeps
+        a uniform draw of them, without replacement, in enumeration order, from the set's part
+        of ``corpus:tests``; the true item of each kept pair takes a bare plural at the generic
+        rate from the same part."""
+        rng = self.streams.substream("tests", f"{level}_{change}")
+        kinds = _kinds(level, change)
+        candidates_by_kind: dict[str, list[tuple[Proposition, Proposition]]] = {
+            kind: [] for kind in kinds
+        }
+        pool = self.facts.causal_statements(kind=_CAUSAL_KIND[level])
+        for true in pool:
+            for false in false_items(self.facts, true, change):
+                kind = LAWLIKE if self.truth.observed(false) else _ORDINARY
+                if kind not in candidates_by_kind:
+                    raise CorpusError(
+                        f"a {change} swap of a causal statement was observed in the scenes, "
+                        f"which the world's laws rule out: {true} against {false}"
+                    )
+                candidates_by_kind[kind].append((true, false))
+        sets: list[ItemSet] = []
+        for kind in kinds:
+            name = _set_name(level, change, kind)
+            chosen = candidates_by_kind[kind]
+            if not self.size:
+                chosen = []
+            elif len(chosen) > self.size:
+                kept = sorted(rng.choice(len(chosen), size=self.size, replace=False).tolist())
+                chosen = [chosen[index] for index in kept]
+            pairs: list[tuple[Item, Item]] = []
+            for true, false in chosen:
+                bare = self.planner._bare(rng, true)
+                pair = self._pair(name, level, change, len(pairs) + 1, None, true, false, bare)
+                if pair is not None:
+                    pairs.append(pair)
+            sets.append(ItemSet(name, level, change, kind, tuple(pairs)))
+        return sets
 
     def _kind(
         self, level: str, document: Document | None, true: Proposition, false: Proposition
@@ -953,20 +1017,6 @@ class TestSetBuilder:
         )
         return None if proposition is None else (document, proposition, False)
 
-    def _draw_causal(
-        self, kind: str, rng: np.random.Generator, change: str, aspects: np.random.Generator
-    ) -> tuple[None, Proposition, bool] | None:
-        """A true causal statement of the set's kind (an effect or a precondition), drawn
-        uniformly among the world's, with a bare plural at the generic rate as a feature
-        document draws it. A role swap needs a two-place event type."""
-        pool = self.facts.causal_statements(kind=kind)
-        if change == ROLE:
-            pool = tuple(p for p in pool if not p.subject.event_type.startswith("EVENTTYPE1."))
-        fact = self.facts.draw_causal_statement(rng, pool)
-        if fact is None:
-            return None
-        return None, fact, self.planner._bare(rng, fact)
-
     # Items -----------------------------------------------------------------------------------
 
     def _pair(
@@ -1035,6 +1085,10 @@ class TestSetBuilder:
                 meta["changed_item"] = changed_item
             meta["grounding"] = proposition.grounding
             items.append(Item(record, meta, proposition))
+        if level in CAUSAL_LEVELS:
+            # the true statement that the pair tests, on both items, for grouping
+            for item in items:
+                item.meta["statement"] = items[0].input["propositional"]
         problems = format_differences(items[0].input, items[1].input)
         for item in items:
             problems += input_problems(item.input)

@@ -601,6 +601,10 @@ class Truth:
         self.scenes: dict[str, History] = {}
         """The scenes that event-level propositions are judged against, by label."""
         self._events: dict[str, tuple[SceneEvent, ...]] = {}
+        self._events_by_type: dict[str, tuple[tuple[str, SceneEvent], ...]] | None = None
+        """Every known event by its event type, with its scene, built on first use; the causal
+        sets ask ``observed`` about thousands of candidates, and each needs the events of a few
+        event types only."""
         self._states: dict[str, list[State]] = {}
         self._derived: dict[tuple[str, int], dict[str, np.ndarray]] = {}
         self._legal: dict[tuple[str, int], dict[str, set[tuple[int, ...]]]] = {}
@@ -1105,12 +1109,12 @@ class Truth:
         observed is law-like: no observation contradicts it."""
         subject, predicate = proposition.subject, proposition.predicate
         assert isinstance(subject, EventTerm)
-        below = set(self.world.event_types_below(subject.event_type))
         offset = 1 if predicate.kind == EFFECT else 0
+        wanted = None if scenes is None else set(scenes)
         seen = False
-        for scene in self.scenes if scenes is None else scenes:
-            for event in self.events_of(scene):
-                if event.type not in below:
+        for event_type in self.world.event_types_below(subject.event_type):
+            for scene, event in self._events_of_type(event_type):
+                if wanted is not None and scene not in wanted:
                     continue
                 entity = event.agent if subject.role == AGENT else event.patient
                 if entity is None:
@@ -1121,12 +1125,23 @@ class Truth:
                     return False
         return seen
 
+    def _events_of_type(self, event_type: str) -> tuple[tuple[str, SceneEvent], ...]:
+        """The known events of one event type, each with its scene, in scene order."""
+        if self._events_by_type is None:
+            by_type: dict[str, list[tuple[str, SceneEvent]]] = {}
+            for scene, events in self._events.items():
+                for event in events:
+                    by_type.setdefault(event.type, []).append((scene, event))
+            self._events_by_type = {label: tuple(found) for label, found in by_type.items()}
+        return self._events_by_type.get(event_type, ())
+
     # Events ----------------------------------------------------------------------------------
 
     def add_scene(self, history: History) -> None:
         """Make a scene known, so that event-level propositions about it can be judged."""
         self.scenes[history.label] = history
         self._events[history.label] = scene_events(history)
+        self._events_by_type = None
         self._states.pop(history.label, None)
         for key in [k for k in self._derived if k[0] == history.label]:
             del self._derived[key]

@@ -97,7 +97,6 @@ ALL_SETS = (
     "causal_effect_predicate",
     "causal_effect_predicate_lawlike",
     "causal_effect_polarity",
-    "causal_effect_polarity_lawlike",
     "causal_effect_event",
     "causal_effect_event_lawlike",
     "causal_effect_role",
@@ -105,17 +104,15 @@ ALL_SETS = (
     "causal_precondition_predicate",
     "causal_precondition_predicate_lawlike",
     "causal_precondition_polarity",
-    "causal_precondition_polarity_lawlike",
     "causal_precondition_event",
     "causal_precondition_event_lawlike",
     "causal_precondition_role",
     "causal_precondition_role_lawlike",
 )
 CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
-EMPTY_SETS = ("causal_effect_polarity_lawlike", "causal_precondition_polarity_lawlike")
-"""The sets that no world can fill: the opposite value of an effect or a literal is never
-observed after (or before) an event of the type, because the true entry guarantees the
-value."""
+"""The causal sets: 14 since stage a8, which dropped the two polarity law-like sets (the
+opposite value of an effect or a literal is never observed after, or before, an event of the
+type, because the true entry guarantees the value)."""
 GRAMMARS = {
     "default": {},
     "marked": {
@@ -192,17 +189,17 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 # a causal item is a class-level proposition; its set is named by its kind
                 assert item.proposition.level == (CLASS if level in CAUSAL_LEVELS else level)
     # the default world fills every set but some of the law-like ones (since the retune of
-    # stage a7a, the possible and blocked role swaps of events fill too), and the causal sets,
-    # which hold one pair per true statement of the world
+    # stage a7a, the possible and blocked role swaps of events fill too) and some of the causal
+    # sets, which hold every pair of a true statement and a valid false item, capped at the size
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
     unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS}
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
-    # a polarity swap of a causal statement is never observed: the true entry guarantees the
-    # opposite value, so its law-like sets are empty by the world's own laws
-    assert all(sizes[name] > 0 for name in ALL_SETS if name not in EMPTY_SETS), sizes
-    assert all(sizes[name] == 0 for name in EMPTY_SETS), sizes
-    # a true item is used once in the sets of one level and change
-    for level, change in {(s.level, s.change) for s in corpus.test_sets}:
+    assert all(sizes[name] > 0 for name in ALL_SETS), sizes
+    # a true item is used once in the sets of one level and change, except in the causal sets,
+    # where a true statement is paired with every valid false item
+    for level, change in {
+        (s.level, s.change) for s in corpus.test_sets if s.level not in CAUSAL_LEVELS
+    }:
         used = [
             (true.input["document"], true.proposition)
             for test_set, true, _ in pairs_of(corpus)
@@ -248,9 +245,7 @@ def test_a_corpus_without_narratives_has_class_level_sets_only(runs) -> None:
         for name, count in sizes.items()
         if name not in CAUSAL_SETS
     ), sizes
-    assert any(sizes[name] > 0 for name in CAUSAL_SETS) and all(
-        sizes[name] == 0 for name in EMPTY_SETS
-    )
+    assert any(sizes[name] > 0 for name in CAUSAL_SETS)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -334,7 +329,7 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             assert b.predicate.label == a.predicate.label
     assert sum(made.values()) > 150, made
     if name == "default":
-        assert all(made[s] > 0 for s in ALL_SETS if s not in EMPTY_SETS)
+        assert all(made[s] > 0 for s in ALL_SETS)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -414,7 +409,7 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
     assert sum(checked.values()) > 150
     # every set of the default world is checked
     if name == "default":
-        assert all(checked[s] > 0 for s in ALL_SETS if s not in EMPTY_SETS), checked
+        assert all(checked[s] > 0 for s in ALL_SETS), checked
 
 
 def test_the_format_check_finds_planted_differences(runs) -> None:
