@@ -126,7 +126,8 @@ def define(config: Config) -> WorldResult:
         statics, fluents, config, streams, event_file, derived_initial
     )
     initial_present = _initial_present(fluents, derived_initial)
-    _check(event_types, fluents, initial_present)
+    features = tuple(f.label for f in taxonomy.features.features)
+    _check(event_types, fluents, initial_present, features)
     definition = build_definition(statics, fluents, event_types)
     fixed = set()
     if event_file is not None:
@@ -152,7 +153,7 @@ def define(config: Config) -> WorldResult:
         event_types = redraw_preconditions(
             event_types, never, fluents, config, parts, derived_initial
         )
-        _check(event_types, fluents, initial_present)
+        _check(event_types, fluents, initial_present, features)
         definition = build_definition(statics, fluents, event_types)
         episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
@@ -173,9 +174,11 @@ def define(config: Config) -> WorldResult:
     )
 
 
-def _check(event_types: EventTypes, fluents: Fluents, initial_present: set) -> None:
+def _check(
+    event_types: EventTypes, fluents: Fluents, initial_present: set, features: tuple[str, ...]
+) -> None:
     try:
-        check_dynamics(event_types, fluents, initial_present)
+        check_dynamics(event_types, fluents, initial_present, features)
     except ValueError as error:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
 

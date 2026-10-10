@@ -33,12 +33,14 @@ python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms run
 
 | Step | Output folder | What the step writes | Time at default scale |
 | --- | --- | --- | --- |
-| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the definition, the entities, the derived values, and the world's statistics | 8 seconds |
-| `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request | 2.6 minutes |
+| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the definition, the entities, the derived values, and the world's statistics | 8 seconds (7.6 s in stage b1, 7.8 s in stage a8) |
+| `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request | 2.6 minutes (157 s in stage b1, 158 s in stage a8) |
 | `wordforms all` | `runs/wordforms/corpus_default_seed1/` | Word forms, audio, auditory front ends, sound embeddings, and their evaluation | about 30 minutes |
 | `render` | `runs/corpus/default_seed1/` | The spelled rendering (`corpus.txt`) and the word columns of `lexicon.csv` | 2 seconds |
 
-The default chain ran on October 9, 2026 (stage a8): a world of 284 entities, 8 fluents, and 40 event types; 10,000 documents with 99,448 sentences; spoken words for 199 content lexemes and 17 function words with five sound embeddings; and 15,509 pairs of test items in 41 sets. The tiny configurations (`data/world/tiny.yaml`, `data/corpus/tiny.yaml`, and `data/wordforms/corpus_tiny.yaml`) run the same chain in under a minute. With `forms` in place of `all`, the word-form step skips the audio, which `render` does not need.
+Every stage records these times, measured with nothing else running, and its proposal file flags a growth of more than half, with its cause. There is no hard time limit, and no step is made cheaper by changing what it produces by default: a step that becomes too slow gets a setting that a study can turn on, with the full version as the default (Jon's ruling 3 on stage a8).
+
+The default chain ran on October 9, 2026 (the world and the corpus in stage b1, the word forms in stage a8, whose lexicon is unchanged): a world of 284 entities, 8 fluents, and 40 event types with 25 conditional effects; 10,000 documents with 99,233 sentences; spoken words for 199 content lexemes and 17 function words with five sound embeddings; and 15,210 pairs of test items in 41 sets. The tiny configurations (`data/world/tiny.yaml`, `data/corpus/tiny.yaml`, and `data/wordforms/corpus_tiny.yaml`) run the same chain in under a minute. With `forms` in place of `all`, the word-form step skips the audio, which `render` does not need.
 
 The taxonomy generator also runs on its own, when only the world's categories and feature vectors are needed (`TAXONOMY.md`), and the world package runs episodes of a world without a corpus (`WORLD.md`, "simulate").
 

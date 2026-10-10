@@ -400,8 +400,9 @@ def test_the_rates_are_settings(runs) -> None:
     for section in (INITIAL_STATE, RESULT, BLOCKED):
         assert 0 < low[section] < high[section]
     # the share of event sentences with a result sentence tracks the rate: not every event
-    # changes a fluent that has a word
-    assert 0.15 < low[RESULT] / low[EVENT_SECTION] < 0.35
+    # changes a fluent that has a word (fewer since stage b1, when an effect's condition can fail:
+    # 0.14 at the low rate in the default world)
+    assert 0.1 < low[RESULT] / low[EVENT_SECTION] < 0.35
     assert 0.4 < high[RESULT] / high[EVENT_SECTION] < 0.95
 
 

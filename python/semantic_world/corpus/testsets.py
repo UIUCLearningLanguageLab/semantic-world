@@ -721,6 +721,31 @@ def _set_name(level: str, change: str, kind: str) -> str:
     return f"{level}_{change}_{kind}" if kind else f"{level}_{change}"
 
 
+def _stratified(
+    rng: np.random.Generator, pairs: Sequence[tuple[Proposition, Proposition]], size: int
+) -> list[int]:
+    """The indices of ``size`` pairs drawn round-robin over their true statements: each
+    statement's pairs in a uniform random order from ``rng`` (one permutation per statement, in
+    the order the statements first appear), then one pair from each statement in turn until the
+    draw is full. Every statement appears before any appears twice. The indices come back
+    sorted, so the kept pairs stay in enumeration order."""
+    by_statement: dict[Proposition, list[int]] = {}
+    for index, (true, _) in enumerate(pairs):
+        by_statement.setdefault(true, []).append(index)
+    queues = [
+        [indices[int(i)] for i in rng.permutation(len(indices))]
+        for indices in by_statement.values()
+    ]
+    kept: list[int] = []
+    while len(kept) < size and any(queues):
+        for queue in queues:
+            if len(kept) >= size:
+                break
+            if queue:
+                kept.append(queue.pop(0))
+    return sorted(kept)
+
+
 class TestSetBuilder:
     """The test sets of one corpus, made after its documents."""
 
@@ -836,9 +861,13 @@ class TestSetBuilder:
         set's kind, in enumeration order, paired with every valid false item of the change
         (:func:`false_items`), each pair in the ordinary set or the ``_lawlike`` twin by the
         ``observed`` mark of its false item. A set with more than ``test_sets.size`` pairs keeps
-        a uniform draw of them, without replacement, in enumeration order, from the set's part
-        of ``corpus:tests``; the true item of each kept pair takes a bare plural at the generic
-        rate from the same part."""
+        a draw of them stratified by statement (stage b1, Jon's ruling 1 on stage a8): the pairs
+        of each statement are put in a uniform random order, from the set's part of
+        ``corpus:tests``, and the set takes one pair from each statement in turn, in the
+        enumeration order of the statements, round after round, until it is full, so that every
+        statement appears before any appears twice; the kept pairs are written in enumeration
+        order. The true item of each kept pair takes a bare plural at the generic rate from the
+        same part."""
         rng = self.streams.substream("tests", f"{level}_{change}")
         kinds = _kinds(level, change)
         candidates_by_kind: dict[str, list[tuple[Proposition, Proposition]]] = {
@@ -861,8 +890,7 @@ class TestSetBuilder:
             if not self.size:
                 chosen = []
             elif len(chosen) > self.size:
-                kept = sorted(rng.choice(len(chosen), size=self.size, replace=False).tolist())
-                chosen = [chosen[index] for index in kept]
+                chosen = [chosen[index] for index in _stratified(rng, chosen, self.size)]
             pairs: list[tuple[Item, Item]] = []
             for true, false in chosen:
                 bare = self.planner._bare(rng, true)
@@ -1086,9 +1114,14 @@ class TestSetBuilder:
             meta["grounding"] = proposition.grounding
             items.append(Item(record, meta, proposition))
         if level in CAUSAL_LEVELS:
-            # the true statement that the pair tests, on both items, for grouping
+            # the true statement that the pair tests, on both items, for grouping: its
+            # propositional rendering, and its causal record with its kind (stage b1, Jon's
+            # ruling 2 on stage a8)
+            record = true.causal_record()
+            assert record is not None
             for item in items:
                 item.meta["statement"] = items[0].input["propositional"]
+                item.meta["statement_record"] = {"kind": true.predicate.kind, **record}
         problems = format_differences(items[0].input, items[1].input)
         for item in items:
             problems += input_problems(item.input)

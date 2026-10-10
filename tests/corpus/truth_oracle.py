@@ -29,7 +29,8 @@ recorded changes, applied alone to the state at the time point, change the fluen
 
 Causal statements (stage a7b) are judged by re-reading the ``event_types`` block of
 ``definition.json``: ``causal`` says whether every event type below the statement's event type
-has the effect, or the precondition literal, that the statement names; ``observed`` says whether
+has the effect (an unconditional one: since stage b1 an effect with a ``condition`` key is no
+entry), or the precondition literal, that the statement names; ``observed`` says whether
 the statement held after (or before) every event of its type in the given scenes, with at
 least one such event, on the replayed states.
 """
@@ -496,9 +497,13 @@ class Oracle:
 
     def entries(self, event_type: str, kind: str) -> list[dict[str, Any]]:
         """The effects (``effect``) or the precondition literals (``precondition``) of an event
-        type, as ``definition.json`` records them."""
+        type, as ``definition.json`` records them. An effect with a ``condition`` key is left
+        out (stage b1): it holds only when its condition held, so it makes no unconditional
+        causal statement true."""
         record = self.event_types[event_type]
-        return record["effects"] if kind == "effect" else record["precondition"]["literals"]
+        if kind == "effect":
+            return [e for e in record["effects"] if not e.get("condition")]
+        return record["precondition"]["literals"]
 
     def causal(self, form: dict[str, Any]) -> bool | None:
         """Whether a causal statement is true: every event type below its event type (itself,

@@ -8,9 +8,13 @@ hand case uses: every case gives its initial state), and four event types: ``EVE
 (requires ``agent.PROPERTY.1``, needs ``NOT agent.BOOLFL.1``, sets ``agent.BOOLFL.1``),
 ``EVENTTYPE1.2`` (requires
 ``agent.PROPERTY.2``, needs ``agent.BOOLFL.3``, clears ``agent.BOOLFL.2``), ``EVENTTYPE1.3``
-(always able and legal, clears ``agent.BOOLFL.1``), and ``EVENTTYPE2.1`` (requires
+(always able and legal, clears ``agent.BOOLFL.1``), ``EVENTTYPE2.1`` (requires
 ``agent.PROPERTY.1 AND NOT patient.PROPERTY.1`` and the agent's scalar above the patient's, needs
-``agent.BOOLFL.1``, sets ``patient.BOOLFL.2``).
+``agent.BOOLFL.1``, sets ``patient.BOOLFL.2``), and, since stage b1, two event types with
+conditional effects, always able and legal: ``EVENTTYPE1.4`` (``when agent.PROPERTY.1 then
+agent.BOOLFL.2 := 1``, a static condition) and ``EVENTTYPE1.5`` (``when agent.BOOLFL.3 then
+agent.BOOLFL.2 := 0``, a condition on the derived fluent, whose cone is ``BOOLFL.1`` and
+``BOOLFL.2``).
 
 Every expected value in ``CASES`` (the legal bindings before each step, and the state and the
 derived fluents after it) is typed in by hand, never computed by the runtime or the brute-force
@@ -69,13 +73,24 @@ def lit(role, fluent, value):
     return {"role": role, "fluent": fluent, "value": value}
 
 
-def eff(role, fluent, value):
-    return {
+def eff(role, fluent, value, condition=None):
+    """An effect's record; ``condition`` is a list of ``(role, kind, symbol, value)``."""
+    record = {
         "role": role,
         "fluent": fluent,
         "value": value,
         "expression": f"{role}.{fluent} := {int(value)}",
     }
+    if condition:
+        text = " AND ".join(f"{r}.{sym}" if v else f"NOT {r}.{sym}" for r, _, sym, v in condition)
+        record["expression"] = f"when {text} then {record['expression']}"
+        record["condition"] = {
+            "literals": [
+                {"role": r, "kind": k, "symbol": sym, "value": v} for r, k, sym, v in condition
+            ],
+            "expression": text,
+        }
+    return record
 
 
 def et(label, arity, constraints, pre_literals, pre_text, effects):
@@ -112,6 +127,8 @@ DEFINITION = {
         sym("EVENTTYPE1.2", "event_type"),
         sym("EVENTTYPE1.3", "event_type"),
         sym("EVENTTYPE2.1", "event_type", arity=2),
+        sym("EVENTTYPE1.4", "event_type"),
+        sym("EVENTTYPE1.5", "event_type"),
     ],
     "literals": [
         feat(0, "PROPERTY.1", None, "PROPERTY.1"),
@@ -174,6 +191,8 @@ DEFINITION = {
             "01",
             "CONSTRAINT.EVENTTYPE2.1",
         ),
+        rule("REQUIREMENT.EVENTTYPE1.4", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE1.5", "binding", "requirement", [], "1", "TRUE"),
     ],
     "layers": [
         {
@@ -190,12 +209,16 @@ DEFINITION = {
                 term([4], [False]),
                 term([3, 5, 6], [False, True, False]),
                 term([], []),
+                term([], []),
+                term([], []),
             ],
             "outputs": [
                 out("CONSTRAINT.EVENTTYPE1.1", [0]),
                 out("CONSTRAINT.EVENTTYPE1.2", [1]),
                 out("CONSTRAINT.EVENTTYPE2.1", [2]),
                 out("REQUIREMENT.EVENTTYPE1.3", [3]),
+                out("REQUIREMENT.EVENTTYPE1.4", [4]),
+                out("REQUIREMENT.EVENTTYPE1.5", [5]),
             ],
         },
         {
@@ -235,6 +258,22 @@ DEFINITION = {
             "agent.BOOLFL.1",
             [eff("patient", "BOOLFL.2", True)],
         ),
+        et(
+            "EVENTTYPE1.4",
+            1,
+            [],
+            [],
+            "TRUE",
+            [eff("agent", "BOOLFL.2", True, [("agent", "feature", "PROPERTY.1", True)])],
+        ),
+        et(
+            "EVENTTYPE1.5",
+            1,
+            [],
+            [],
+            "TRUE",
+            [eff("agent", "BOOLFL.2", False, [("agent", "fluent", "BOOLFL.3", True)])],
+        ),
     ],
 }
 
@@ -255,11 +294,16 @@ def ev(label, agent, patient=None):
 
 
 def legal(e11, e12, e21):
+    """The legal bindings before a step. EVENTTYPE1.3, EVENTTYPE1.4, and EVENTTYPE1.5 are always
+    able and have no precondition, so every entity is a legal agent of each; a condition never
+    bears on legality."""
     return {
         "EVENTTYPE1.1": [{"agent": x} for x in e11],
         "EVENTTYPE1.2": [{"agent": x} for x in e12],
         "EVENTTYPE1.3": ALL,
         "EVENTTYPE2.1": AB if e21 else [],
+        "EVENTTYPE1.4": ALL,
+        "EVENTTYPE1.5": ALL,
     }
 
 
@@ -434,6 +478,100 @@ CASES = [
             {
                 "events": [ev("EVENTTYPE1.3", A), ev("EVENTTYPE1.3", A)],
                 "legal": legal([A, C], [], False),
+            }
+        ],
+        {"step": 1, "kind": "interference"},
+    ),
+    (
+        "hand_13_condition_holds",
+        "A static condition that holds (stage b1): EVENTTYPE1.4 sets agent.BOOLFL.2 when "
+        "agent.PROPERTY.1, and INSTANCE.1.1.1 has PROPERTY.1, so BOOLFL.2 of INSTANCE.1.1.1 goes "
+        "from 0 to 1. The event is legal whatever the condition.",
+        state([], [], []),
+        [
+            {
+                "events": [ev("EVENTTYPE1.4", A)],
+                "legal": legal([A, C], [], False),
+                "derived": state([], [], []),
+                "state": state([B2], [], []),
+            }
+        ],
+        None,
+    ),
+    (
+        "hand_14_condition_fails",
+        "A static condition that fails (stage b1): EVENTTYPE1.4 on INSTANCE.1.1.2, which lacks "
+        "PROPERTY.1, is legal but its effect does nothing, so the state does not change and a "
+        "history would record no change.",
+        state([], [], []),
+        [
+            {
+                "events": [ev("EVENTTYPE1.4", B)],
+                "legal": legal([A, C], [], False),
+                "derived": state([], [], []),
+                "state": state([], [], []),
+            }
+        ],
+        None,
+    ),
+    (
+        "hand_15_fluent_condition_holds",
+        "A fluent condition that holds (stage b1): EVENTTYPE1.5 clears agent.BOOLFL.2 when the "
+        "derived agent.BOOLFL.3 (BOOLFL.1 AND BOOLFL.2) holds. INSTANCE.1.1.1 has both base "
+        "fluents, so BOOLFL.2 is cleared and BOOLFL.3 goes false with it. In the same step "
+        "EVENTTYPE1.1 on INSTANCE.1.2.1 touches another entity and does not interfere.",
+        state([B1, B2], [], []),
+        [
+            {
+                "events": [ev("EVENTTYPE1.5", A), ev("EVENTTYPE1.1", C)],
+                "legal": legal([C], [], True),
+                "derived": state([], [], []),
+                "state": state([B1], [], [B1]),
+            }
+        ],
+        None,
+    ),
+    (
+        "hand_16_fluent_condition_fails",
+        "A fluent condition that fails, judged in the step's starting state (stage b1): "
+        "EVENTTYPE1.5 on INSTANCE.1.1.1, which has BOOLFL.2 but not BOOLFL.1, so BOOLFL.3 is "
+        "false and the effect does nothing; in the same step EVENTTYPE1.1 on INSTANCE.1.2.1 sets "
+        "BOOLFL.1 of another entity. In step 2 EVENTTYPE1.1 sets BOOLFL.1 of INSTANCE.1.1.1, so "
+        "BOOLFL.3 becomes true; in step 3 EVENTTYPE1.5 fires and clears BOOLFL.2.",
+        state([B2], [], []),
+        [
+            {
+                "events": [ev("EVENTTYPE1.5", A), ev("EVENTTYPE1.1", C)],
+                "legal": legal([A, C], [], False),
+                "derived": state([], [], []),
+                "state": state([B2], [], [B1]),
+            },
+            {
+                "events": [ev("EVENTTYPE1.1", A)],
+                "legal": legal([A], [], False),
+                "derived": state([B3], [], []),
+                "state": state([B1, B2], [], [B1]),
+            },
+            {
+                "events": [ev("EVENTTYPE1.5", A)],
+                "legal": legal([], [], True),
+                "derived": state([], [], []),
+                "state": state([B1], [], [B1]),
+            },
+        ],
+        None,
+    ),
+    (
+        "hand_17_condition_read_by_another_event",
+        "Interference through a condition (stage b1): EVENTTYPE1.5 (INSTANCE.1.1.1) reads the "
+        "derived BOOLFL.3, whose cone is BOOLFL.1 and BOOLFL.2, and EVENTTYPE1.3 (INSTANCE.1.1.1) "
+        "writes BOOLFL.1. Both are legal, and EVENTTYPE1.5 has no precondition: only its "
+        "condition makes the two interfere.",
+        state([B1, B2], [], []),
+        [
+            {
+                "events": [ev("EVENTTYPE1.5", A), ev("EVENTTYPE1.3", A)],
+                "legal": legal([C], [], True),
             }
         ],
         {"step": 1, "kind": "interference"},

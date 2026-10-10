@@ -225,3 +225,11 @@ Each criterion of the stage prompt, and how it was checked.
 - **The spec edits and the notes** are listed above by section.
 - **Every corpus test passes**: `pytest tests/corpus`, 875 seconds, every test passed, none skipped; the changed expectations are listed above.
 - **The full check list** of `CLAUDE.md`: `cargo fmt --all --check`, `cargo clippy` with warnings as errors, `cargo test --workspace --all-features`, `maturin develop --release`, `ruff check python tests`, and `pytest` (1,916 tests passed, none skipped, 1,391 seconds) all pass on the final code.
+
+## Jon's rulings (October 9, 2026, in the stage b1 prompt)
+
+Choices 1 to 9 are approved, and WM.E165 to WM.E173 are decided. The open questions are answered:
+
+1. **The size of the causal sets** (choice 2): a causal set with more pairs than `test_sets.size` keeps every statement. The pairs are drawn stratified by statement, round-robin over the statements, deterministically from the set's stream, until the set is full. Stage b1 builds the change (its follow-up 1).
+2. **The statement record** (choice 3): keep `statement`, the true item's propositional rendering, and add beside it a structured record, the true item's causal record with its kind. Stage b1 builds the change (its follow-up 2).
+3. **The default corpus's time budget**: no hard time limit on the default run, and no capping of the enumeration until a run actually gets slow. Instead, every stage records the default world's and corpus's run times in the guides, and the proposal file flags any growth of more than half, with its cause; a step is never made cheaper by changing what it produces by default. If a step becomes too slow, it gets a setting (for example a cap on an enumeration) that a study can turn on, with the full version as the default. Stage b1 records the rule in the specification, the guides, and `CLAUDE.md` (its follow-up 3).

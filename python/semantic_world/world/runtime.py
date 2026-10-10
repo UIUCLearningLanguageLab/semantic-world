@@ -10,8 +10,11 @@ Entities are referred to by index into the definition's entities table, and bind
 of entity indices in role order (``(agent,)`` or ``(agent, patient)``). A :class:`State` holds
 every entity's base fluents at one time point. ``apply`` takes the state at ``TIME.k`` and the
 events of step k to the state at ``TIME.k+1``: every event must be legal, the events must not
-interfere, every effect is applied, unwritten base fluents keep their values (inertia), and
-derived fluents are never carried over, only recomputed.
+interfere, every effect whose condition holds in the state at ``TIME.k`` is applied (an effect
+without a condition always is), unwritten base fluents keep their values (inertia), and derived
+fluents are never carried over, only recomputed. Non-interference counts every effect as a write
+of its fluent, whether or not its condition holds, and counts what a condition reads beside what
+a precondition reads (stage b1).
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from semantic_world.world.definition import EventTypeRecord, RuntimeDefinition
+from semantic_world.world.dynamics import Effect
 from semantic_world.world.errors import IllegalEventError, InterferenceError, WorldError
 from semantic_world.world.matrices import AgreementReport, check_agreement
 
@@ -549,24 +553,89 @@ def _check_legal(
 
 
 def _writes(event: Event, et: EventTypeRecord) -> dict[tuple[int, str], bool]:
-    """The base fluents the event writes, ``{(entity, fluent): value}``."""
+    """The base fluents the event may write, ``{(entity, fluent): value}``: every effect
+    counts, whether or not its condition holds in the state."""
     return {
         (event.binding[et.roles.index(effect.role)], effect.fluent): effect.value
         for effect in et.effects
     }
 
 
-def _reads(
+def _reads_by_reader(
     definition: RuntimeDefinition, event: Event, et: EventTypeRecord
-) -> set[tuple[int, str]]:
-    """The base fluents the event's precondition reads, through the cone of every derived
-    fluent: ``{(entity, base fluent)}``."""
-    found: set[tuple[int, str]] = set()
+) -> dict[tuple[int, str], str]:
+    """The base fluents the event's precondition and its effects' conditions read, through the
+    cone of every derived fluent: ``{(entity, base fluent): reader}``, the reader being ``"the
+    precondition"`` or ``"a condition"`` (the precondition when both read). A static literal of
+    a condition reads nothing that an event can write."""
+    found: dict[tuple[int, str], str] = {}
+    for effect in et.effects:
+        for lit in effect.condition:
+            if lit.kind != "fluent":
+                continue
+            entity = event.binding[et.roles.index(lit.role)]
+            for base in definition.cone(lit.symbol):
+                found[(entity, base)] = "a condition"
     for lit in et.precondition:
         entity = event.binding[et.roles.index(lit.role)]
         for base in definition.cone(lit.fluent):
-            found.add((entity, base))
+            found[(entity, base)] = "the precondition"
     return found
+
+
+def _reads(
+    definition: RuntimeDefinition, event: Event, et: EventTypeRecord
+) -> set[tuple[int, str]]:
+    """The base fluents the event's precondition and its effects' conditions read, through the
+    cone of every derived fluent: ``{(entity, base fluent)}``."""
+    return set(_reads_by_reader(definition, event, et))
+
+
+def _condition_holds(
+    definition: RuntimeDefinition,
+    state: State,
+    event: Event,
+    et: EventTypeRecord,
+    effect: Effect,
+    facts: DerivedFacts | None,
+) -> bool:
+    """Whether the effect's condition holds for the event's binding in ``state``: every literal
+    has its value, a static feature from the static facts, a base fluent from the state, a
+    derived fluent from ``facts`` (the derived facts of the bound entities in the state). An
+    effect without a condition always holds."""
+    statics = static_facts(definition)
+    for lit in effect.condition:
+        row = et.roles.index(lit.role)
+        entity = event.binding[row]
+        if lit.kind == "feature":
+            value = statics.values[lit.symbol][entity]
+        elif definition.is_base_fluent(lit.symbol):
+            value = state.values[entity, definition.base_fluent_index(lit.symbol)]
+        else:
+            assert facts is not None
+            value = facts.fluent[row, definition.derived_fluent_index(lit.symbol)]
+        if int(value) != int(lit.value):
+            return False
+    return True
+
+
+def _fired(
+    definition: RuntimeDefinition, state: State, event: Event, et: EventTypeRecord
+) -> dict[tuple[int, str], bool]:
+    """The base fluents the event writes in ``state``: its effects whose conditions hold there,
+    judged before any effect of the step."""
+    facts = None
+    if any(
+        lit.kind == "fluent" and not definition.is_base_fluent(lit.symbol)
+        for effect in et.effects
+        for lit in effect.condition
+    ):
+        facts = derive(definition, state, list(event.binding))
+    return {
+        (event.binding[et.roles.index(effect.role)], effect.fluent): effect.value
+        for effect in et.effects
+        if _condition_holds(definition, state, event, et, effect, facts)
+    }
 
 
 def _fact(definition: RuntimeDefinition, key: tuple[int, str]) -> str:
@@ -574,8 +643,9 @@ def _fact(definition: RuntimeDefinition, key: tuple[int, str]) -> str:
 
 
 def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
-    """Whether two well-formed events interfere: both write the same fluent of the same entity,
-    one writes a base fluent that the other's precondition reads (through the cones of derived
+    """Whether two well-formed events interfere: both write the same fluent of the same entity
+    (an effect counts whatever its condition), one writes a base fluent that the other's
+    precondition or a condition of one of its effects reads (through the cones of derived
     fluents), or the two are the same event."""
     if a == b:
         return True
@@ -591,14 +661,18 @@ def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
 def apply(definition: RuntimeDefinition, state: State, events: Iterable[Event]) -> State:
     """The state after one step. Every event must be legal in ``state``, and the events must
     not interfere; otherwise :class:`IllegalEventError` or :class:`InterferenceError` names the
-    event and the reason. Effects are applied; unwritten base fluents keep their values."""
+    event and the reason. The effects whose conditions hold in ``state`` are applied (every
+    condition is judged in the starting state, before any effect of the step); unwritten base
+    fluents keep their values."""
     _check_state(definition, state)
     events = tuple(events)
     types = [_check_event(definition, event) for event in events]
     for event, et in zip(events, types, strict=True):
         _check_legal(definition, state, event, et)
     writes = [_writes(event, et) for event, et in zip(events, types, strict=True)]
-    reads = [_reads(definition, event, et) for event, et in zip(events, types, strict=True)]
+    reads = [
+        _reads_by_reader(definition, event, et) for event, et in zip(events, types, strict=True)
+    ]
     for a in range(len(events)):
         for b in range(a + 1, len(events)):
             first, second = events[a].describe(definition), events[b].describe(definition)
@@ -613,17 +687,35 @@ def apply(definition: RuntimeDefinition, state: State, events: Iterable[Event]) 
                 (first, second, writes[a], reads[b]),
                 (second, first, writes[b], reads[a]),
             ):
-                shared = sorted(set(w) & r)
+                shared = sorted(set(w) & set(r))
                 if shared:
                     raise InterferenceError(
                         f"{writer} and {reader} interfere: {writer} writes "
-                        f"{_fact(definition, shared[0])}, which the precondition of {reader} reads"
+                        f"{_fact(definition, shared[0])}, which {r[shared[0]]} of {reader} reads"
                     )
     values = np.array(state.values, dtype=np.uint8, copy=True)
-    for written in writes:
-        for (entity, fluent), value in written.items():
+    for event, et in zip(events, types, strict=True):
+        for (entity, fluent), value in _fired(definition, state, event, et).items():
             values[entity, definition.base_fluent_index(fluent)] = int(value)
     return State(values)
+
+
+def fired_effects(definition: RuntimeDefinition, state: State, event: Event) -> tuple[Effect, ...]:
+    """The effects of a well-formed event whose conditions hold in ``state`` (every
+    unconditional effect among them): what the event writes when it is applied in that state."""
+    et = _check_event(definition, event)
+    facts = None
+    if any(
+        lit.kind == "fluent" and not definition.is_base_fluent(lit.symbol)
+        for effect in et.effects
+        for lit in effect.condition
+    ):
+        facts = derive(definition, state, list(event.binding))
+    return tuple(
+        effect
+        for effect in et.effects
+        if _condition_holds(definition, state, event, et, effect, facts)
+    )
 
 
 __all__ = [
@@ -637,6 +729,7 @@ __all__ = [
     "apply",
     "check_definition_agreement",
     "derive",
+    "fired_effects",
     "initial_state",
     "interferes",
     "legal",

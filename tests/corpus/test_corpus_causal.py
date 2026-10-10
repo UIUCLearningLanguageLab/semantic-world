@@ -160,10 +160,12 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
                 if proposition.predicate.kind == EFFECT
                 else event_types[leaf]["precondition"]["literals"]
             )
+            # an effect with a condition is no entry (stage b1)
             assert any(
                 e["role"] == proposition.subject.role
                 and e["fluent"] == fluent
                 and e["value"] == proposition.predicate.value
+                and not e.get("condition")
                 for e in entries
             ), (leaf, form)
         kinds[proposition.predicate.kind] += 1
@@ -218,8 +220,106 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
 
 
 def record_entries(record: dict, label: str, key: str) -> list[dict]:
+    """The unconditional effects, or the precondition literals, of an event type's record."""
     entry = next(e for e in record["event_types"] if e["label"] == label)
-    return entry["effects"] if key == "effects" else entry["precondition"]["literals"]
+    if key == "effects":
+        return [e for e in entry["effects"] if not e.get("condition")]
+    return entry["precondition"]["literals"]
+
+
+def test_no_causal_statement_is_true_by_a_conditional_effect(cases, runs) -> None:
+    """Stage b1: an effect with a condition guarantees nothing after every event, so the
+    statement about it is not enumerated, is judged false by ``Truth``, and is judged false by
+    the oracle's independent re-reading of ``definition.json``. The default world has
+    conditional effects at the default share."""
+    case = cases("default")
+    corpus = runs("default")
+    facts, truth = corpus.planner.facts, corpus.planner.truth
+    oracle = case.oracle()
+    record = json.loads((case.folder / "definition.json").read_text(encoding="utf-8"))
+    conditional = [
+        (entry["label"], effect)
+        for entry in record["event_types"]
+        for effect in entry["effects"]
+        if effect.get("condition")
+    ]
+    assert conditional, "the default world has conditional effects"
+    listed = {
+        (p.subject.event_type, p.subject.role, p.predicate.label, p.predicate.value)
+        for p in facts.causal_statements(kind=EFFECT)
+    }
+    checked = 0
+    for label, effect in conditional:
+        if label not in facts.named or effect["fluent"] not in facts.base_fluents:
+            continue
+        key = (label, effect["role"], effect["fluent"], effect["value"])
+        assert key not in listed, key
+        statement = Proposition(
+            CLASS,
+            EventTerm(label, effect["role"]),
+            Predicate(EFFECT, effect["fluent"], value=effect["value"]),
+            True,
+            NEC_ALL,
+        )
+        evaluation = truth.evaluate(statement)
+        # the statement is well formed, and false: the entry is conditional
+        if not evaluation.valid:
+            assert "no binding is able" in evaluation.reason
+            continue
+        assert evaluation.true is False
+        assert evaluation.grounding["with_entry"] < evaluation.grounding["event_types"]
+        assert oracle.causal(statement.to_json()) is False
+        checked += 1
+    assert checked > 0
+    # no sentence of the corpus and no true test item states one
+    for _, sentence in causal_sentences(corpus):
+        form = sentence.logical_form
+        assert oracle.causal(form) is True
+    for test_set in corpus.test_sets:
+        if test_set.level in CAUSAL_LEVELS:
+            for true, _ in test_set.pairs:
+                assert oracle.causal(true.input["logical_form"]) is True
+
+
+def test_capped_causal_sets_keep_every_statement(runs) -> None:
+    """Stage b1 (Jon's ruling 1 on stage a8): a causal set with more pairs than
+    ``test_sets.size`` draws its pairs round-robin over its true statements, so every statement
+    appears before any appears twice; both items carry the structured statement record."""
+    corpus = runs("default")
+    facts, truth = corpus.planner.facts, corpus.planner.truth
+    size = corpus.config.test_sets.size
+    capped = 0
+    for test_set in corpus.test_sets:
+        if test_set.level not in CAUSAL_LEVELS:
+            continue
+        kind = EFFECT if test_set.level == "causal_effect" else PRECONDITION
+        for true, false in test_set.pairs:
+            record = {"kind": kind, **true.meta["causal"]}
+            assert true.meta["statement_record"] == record
+            assert false.meta["statement_record"] == record
+            assert record["event_type"] == true.proposition.subject.event_type
+        every: dict = {}
+        for true in facts.causal_statements(kind=kind):
+            for false in false_items(facts, true, test_set.change):
+                group = LAWLIKE if truth.observed(false) else ""
+                if group == test_set.kind:
+                    every.setdefault(true, []).append(false)
+        if sum(len(v) for v in every.values()) <= size:
+            continue
+        capped += 1
+        counts = Counter(true.proposition for true, _ in test_set.pairs)
+        assert len(test_set.pairs) == size
+        if len(every) <= size:
+            assert set(counts) == set(every), test_set.name
+        else:
+            assert len(counts) == size
+        assert max(counts.values()) - min(counts.values()) <= 1, test_set.name
+        # a statement with more pairs than the rounds give is not exhausted before the others
+        rounds = max(counts.values())
+        for statement, pairs in every.items():
+            if statement in counts and counts[statement] < rounds:
+                assert counts[statement] == len(pairs) or counts[statement] == rounds - 1
+    assert capped > 0
 
 
 # ---------------------------------------------------------------------------------------------
@@ -340,13 +440,22 @@ def test_the_causal_sets_are_capped_at_the_size(runs) -> None:
     for test_set in corpus.test_sets:
         if test_set.level in CAUSAL_LEVELS:
             assert len(test_set.pairs) <= 3
-    # the default world has more pairs of an effect statement and a valid other fluent than the
-    # test runs' size of 30, so the set is full and holds more than one pair per true statement
+    # the default world has more effect statements than the test runs' size of 30, so the
+    # predicate set is full and, under the stratified draw of stage b1, every kept pair tests
+    # another statement; a size above the number of statements lets a statement recur
     full = runs("default")
     predicate = next(s for s in full.test_sets if s.name == "causal_effect_predicate")
     assert len(predicate.pairs) == full.config.test_sets.size == 30
-    assert len({t.meta["statement"] for t, _ in predicate.pairs}) < len(predicate.pairs)
-    assert len(facts.causal_statements(kind=EFFECT)) > 30
+    assert len({t.meta["statement"] for t, _ in predicate.pairs}) == len(predicate.pairs)
+    statements = len(facts.causal_statements(kind=EFFECT))
+    assert statements > 30
+    wide = runs("default", test_sets={"size": statements + 20})
+    predicate = next(s for s in wide.test_sets if s.name == "causal_effect_predicate")
+    counts = Counter(t.meta["statement"] for t, _ in predicate.pairs)
+    assert len(predicate.pairs) == statements + 20 or len(counts) == len(
+        {p for p in facts.causal_statements(kind=EFFECT)}
+    )
+    assert max(counts.values()) > 1 and max(counts.values()) - min(counts.values()) <= 1
 
 
 def test_an_observed_false_item_held_of_every_event_in_the_scenes(runs) -> None:
@@ -486,8 +595,10 @@ def test_the_descriptions_setting_changes_the_propositional_rendering_only(runs)
 
 
 def test_seen_counts_descriptions_by_default_and_not_with_the_setting(runs) -> None:
-    counted = runs("default")
-    uncounted = runs("default", test_sets={"size": 30, "seen": {"descriptions": False}})
+    # 600 documents: in the default world of stage b1 (with its conditional effects) the
+    # 200-document run has no item seen through a description alone
+    counted = runs("default", 600)
+    uncounted = runs("default", 600, test_sets={"size": 30, "seen": {"descriptions": False}})
     # the documents are the same; only the seen marks can differ, and only downward
     assert [d.to_json() for d in counted.documents] == [d.to_json() for d in uncounted.documents]
     stated_all = stated_propositions(counted.documents)

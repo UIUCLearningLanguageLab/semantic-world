@@ -1,7 +1,7 @@
 {
  "version": 1,
- "name": "hand_07_two_events_independent",
- "description": "Three events in one step that do not interfere: EVENTTYPE2.1 (INSTANCE.1.1.1, INSTANCE.1.1.2) writes BOOLFL.2 of the patient and reads BOOLFL.1 of the agent; EVENTTYPE1.3 (INSTANCE.1.1.2) writes BOOLFL.1 of the same patient entity, a different fluent, and reads nothing; EVENTTYPE1.1 (INSTANCE.1.2.1) touches a third entity.",
+ "name": "hand_15_fluent_condition_holds",
+ "description": "A fluent condition that holds (stage b1): EVENTTYPE1.5 clears agent.BOOLFL.2 when the derived agent.BOOLFL.3 (BOOLFL.1 AND BOOLFL.2) holds. INSTANCE.1.1.1 has both base fluents, so BOOLFL.2 is cleared and BOOLFL.3 goes false with it. In the same step EVENTTYPE1.1 on INSTANCE.1.2.1 touches another entity and does not interfere.",
  "rule_set_id": "5b8332acfbbce478e6a2c3efce549ed8fcb1ded3107055a6272098f2c0bf2cbb",
  "definition": {
   "version": 1,
@@ -228,17 +228,13 @@
   {"label": "INSTANCE.1.1.2", "leaf": "CATEGORY.1.1", "PROPERTY.1": 0, "SCALARDIM.1": 0.5},
   {"label": "INSTANCE.1.2.1", "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25}
  ],
- "initial": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
+ "initial": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
  "steps": [
   {
    "events": [
     {
-     "event_type": "EVENTTYPE2.1",
-     "binding": {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"}
-    },
-    {
-     "event_type": "EVENTTYPE1.3",
-     "binding": {"agent": "INSTANCE.1.1.2"}
+     "event_type": "EVENTTYPE1.5",
+     "binding": {"agent": "INSTANCE.1.1.1"}
     },
     {
      "event_type": "EVENTTYPE1.1",
@@ -270,7 +266,7 @@
     ]
    },
    "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": ["BOOLFL.2"], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
   }
  ],
  "error": null

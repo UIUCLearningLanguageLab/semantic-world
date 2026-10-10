@@ -105,12 +105,22 @@ class EffectsConfig:
     count: dict[int, float]
     feature_rate: float
     roles: dict[str, float]
+    conditional_share: float = 0.2
+    """The share of effects that get a condition (stage b1)."""
+    condition_literals: dict[int, float] = None  # type: ignore[assignment]
+    """Weights over the number of literals of a condition."""
+
+    def __post_init__(self) -> None:
+        if self.condition_literals is None:
+            object.__setattr__(self, "condition_literals", {1: 0.7, 2: 0.3})
 
     def resolved(self) -> dict[str, Any]:
         return {
             "count": dict(self.count),
             "feature_rate": self.feature_rate,
             "roles": dict(self.roles),
+            "conditional_share": self.conditional_share,
+            "condition_literals": dict(self.condition_literals),
         }
 
 
@@ -393,8 +403,12 @@ def _read_effects(node: _Node) -> EffectsConfig:
     count = _count_weights(node, "count", {1: 0.7, 2: 0.3})
     rate = node.probability("feature_rate", 0.5)
     roles = _read_roles(node, "roles", {"agent": 0.4, "patient": 0.6})
+    conditional_share = node.probability("conditional_share", 0.2)
+    condition_literals = _count_weights(node, "condition_literals", {1: 0.7, 2: 0.3})
+    if 0 in condition_literals and condition_literals[0] > 0:
+        raise node.error("condition_literals", "a condition has at least one literal")
     node.finish()
-    return EffectsConfig(count, rate, roles)
+    return EffectsConfig(count, rate, roles, conditional_share, condition_literals)
 
 
 def _read_unary(node: _Node, taxonomy: TaxonomyRunConfig) -> UnaryConfig:

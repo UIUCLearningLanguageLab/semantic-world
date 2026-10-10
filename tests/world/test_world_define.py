@@ -289,6 +289,7 @@ def test_event_type_features_share_preconditions_and_effects(default: WorldResul
             effect = event_types.feature_effects.get(feature)
             if effect is not None:
                 inherited_effects += 1
+                # stage b1: an inherited effect brings its condition with it
                 kept_effects += effect in et.effects
             literal = event_types.feature_preconditions.get(feature)
             if literal is not None:
@@ -1006,6 +1007,7 @@ def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> N
         "world:initial",
         "world:preconditions",
         "world:effects",
+        "world:conditions",
         "world:stats",
         "world:episodes",
     ]

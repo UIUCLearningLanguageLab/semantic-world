@@ -36,6 +36,7 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 - **The world gives no reward.** `step` never returns reward. Reward is computed on the agent's side.
 - **Privileged access is labeled.** Only scripted agents and tests may read the full world state, through calls clearly marked as privileged.
 - **Tests before done.** Every stage lists acceptance tests. Write the tests, run the tests, and report the results honestly, including anything skipped.
+- **Record the run times, and never cap by default.** Every stage records the default world's and corpus's run times in the guides (`docs/guides/README.md`, `WORLD.md`, `CORPUS.md`), timed with nothing else running, and the stage's proposal file flags any growth of more than half, with its cause. There is no hard time limit on the default run. A step is never made cheaper by changing what it produces by default: a step that becomes too slow gets a setting that a study can turn on (for example a cap on an enumeration), with the full version as the default. (Jon's ruling 3 on stage a8.)
 
 ## Commands
 

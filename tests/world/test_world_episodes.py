@@ -472,8 +472,10 @@ def test_quiescence_ends_an_episode() -> None:
     """A world where nothing is ever legal ends at TIME.1 with no steps."""
     fixture = read_fixture(Path("tests/fixtures/world/hand_01_no_event.json"))
     record = dict(fixture["definition"])
-    record["symbols"] = [s for s in record["symbols"] if s["label"] != "EVENTTYPE1.3"]
-    record["event_types"] = [e for e in record["event_types"] if e["label"] != "EVENTTYPE1.3"]
+    # without the event types that are always legal (EVENTTYPE1.4 and EVENTTYPE1.5 since b1)
+    always = {"EVENTTYPE1.3", "EVENTTYPE1.4", "EVENTTYPE1.5"}
+    record["symbols"] = [s for s in record["symbols"] if s["label"] not in always]
+    record["event_types"] = [e for e in record["event_types"] if e["label"] not in always]
     entities = [{**row, "PROPERTY.1": 1} for row in fixture["entities"]]
     rehashed = fixture_record("quiet", "", record, entities, {}, [], None)["definition"]
     definition = runtime_definition(rehashed, entities)

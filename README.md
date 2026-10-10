@@ -14,7 +14,7 @@ The disembodied simulation is a chain of three Python programs, which need no Ru
 2. **The corpus generator** states propositions about the world's rules and events, and realizes the propositions as documents in an artificial language, with test sets. Sentences can use conceptual labels or spoken words (`docs/guides/CORPUS.md`).
 3. **The word-form pipeline** makes a spoken word for every word of the lexicon, with audio from many voices and sound embeddings (`docs/guides/WORDFORMS.md`).
 
-The commands for the full chain are in `docs/guides/README.md`, under "The full chain". The chain ran at default scale on October 2, 2026: 10,000 documents with 92,464 sentences, spoken words for 173 content lexemes with five sound embeddings, and 14,736 test items. Each guide states what its program does not do yet.
+The commands for the full chain are in `docs/guides/README.md`, under "The full chain". The chain ran at default scale on October 9, 2026: 10,000 documents with 99,233 sentences, spoken words for 199 content lexemes and 17 function words with five sound embeddings, and 30,420 test items. Each guide states what its program does not do yet.
 
 ## Purpose
 

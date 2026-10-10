@@ -1,15 +1,16 @@
 """``world_stats.yaml`` (``docs/specs/WORLD_AND_LANGUAGE.md``, "World statistics").
 
 This stage reports the structural statistics: counts of fluents, event types, precondition
-literals, and effects by kind and role; the effects and literals dropped or redrawn by the
-fix-ups; the enabling graph (an edge from A to B when an effect of A produces a value that a
-precondition literal of B requires), its edge count and longest chain; and the absorbing
-fluents. The episode statistics come from 1,000 episodes of the default policy on the
-``world:stats`` stream: for each event type, the share of steps at which it had a legal binding
-among the participants and the share at which it occurred; the mean number of changes per event;
-the share of quiescent episodes; the number of times each event type's preconditions were
-redrawn because it was never legal (``precondition_redraws``); and, for each event type still
-never legal, why: ``never_able`` (no entity, or no ordered pair, meets its requirement) or
+literals, and effects by kind and role, with the conditional effects and their literals (stage
+b1); the effects, literals, and conditions dropped or redrawn by the fix-ups; the enabling graph
+(an edge from A to B when an effect of A produces a value that a precondition literal of B
+requires), its edge count and longest chain; and the absorbing fluents. The episode statistics
+come from 1,000 episodes of the default policy on the ``world:stats`` stream: for each event
+type, the share of steps at which it had a legal binding among the participants and the share at
+which it occurred; the mean number of changes per event; the share of quiescent episodes; the
+number of times each event type's preconditions were redrawn because it was never legal
+(``precondition_redraws``); and, for each event type still never legal, why: ``never_able`` (no
+entity, or no ordered pair, meets its requirement) or
 ``preconditions`` (its preconditions were never met in the episodes, after the redraws).
 The ``relations`` block reports what the taxonomy's ``summary.yaml`` reported about the
 two-place event types before stage a5b: the counts of event-type features, categories, event
@@ -199,6 +200,8 @@ def world_stats(
     effects_by_role = {"agent": 0, "patient": 0}
     literals_by_kind = {"one_place": 0, "two_place": 0}
     effects_by_kind = {"one_place": 0, "two_place": 0}
+    conditional = {"one_place": 0, "two_place": 0}
+    condition_literals = {"total": 0, "feature": 0, "fluent": 0, "agent": 0, "patient": 0}
     for et in leaves:
         kind = "one_place" if et.arity == 1 else "two_place"
         for lit in et.precondition:
@@ -207,6 +210,12 @@ def world_stats(
         for effect in et.effects:
             effects_by_role[effect.role] += 1
             effects_by_kind[kind] += 1
+            if effect.condition:
+                conditional[kind] += 1
+            for lit in effect.condition:
+                condition_literals["total"] += 1
+                condition_literals[lit.kind] += 1
+                condition_literals[lit.role] += 1
     edges = enabling_edges(event_types)
     return {
         "fluents": {"base": len(fluents.base), "derived": len(fluents.derived)},
@@ -224,6 +233,21 @@ def world_stats(
             "by_kind": effects_by_kind,
             "by_role": effects_by_role,
             "from_features": sum(1 for v in event_types.feature_effects.values() if v is not None),
+            "conditional": {"total": sum(conditional.values()), "by_kind": conditional},
+            "condition_literals": {
+                "total": condition_literals["total"],
+                "by_symbol": {
+                    "feature": condition_literals["feature"],
+                    "fluent": condition_literals["fluent"],
+                },
+                "by_role": {
+                    "agent": condition_literals["agent"],
+                    "patient": condition_literals["patient"],
+                },
+                "from_features": sum(
+                    len(v.condition) for v in event_types.feature_effects.values() if v is not None
+                ),
+            },
         },
         "fix_ups": dict(event_types.stats),
         "enabling_graph": {
