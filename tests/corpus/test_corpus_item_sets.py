@@ -40,10 +40,13 @@ from semantic_world.corpus.propositions import (
 from semantic_world.corpus.realize import leaves, preorder
 from semantic_world.corpus.testsets import (
     BLOCKED,
+    CAUSAL_LEVELS,
     CHANGES,
+    EVENT_SWAP,
     IMPOSSIBLE,
     INPUT_FIELDS,
     LAWLIKE,
+    POLARITY,
     POSSIBLE,
     PREDICATE,
     QUANTIFIER,
@@ -91,7 +94,28 @@ ALL_SETS = (
     "able_now_predicate_impossible",
     "able_now_subject_blocked",
     "able_now_subject_impossible",
+    "causal_effect_predicate",
+    "causal_effect_predicate_lawlike",
+    "causal_effect_polarity",
+    "causal_effect_polarity_lawlike",
+    "causal_effect_event",
+    "causal_effect_event_lawlike",
+    "causal_effect_role",
+    "causal_effect_role_lawlike",
+    "causal_precondition_predicate",
+    "causal_precondition_predicate_lawlike",
+    "causal_precondition_polarity",
+    "causal_precondition_polarity_lawlike",
+    "causal_precondition_event",
+    "causal_precondition_event_lawlike",
+    "causal_precondition_role",
+    "causal_precondition_role_lawlike",
 )
+CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
+EMPTY_SETS = ("causal_effect_polarity_lawlike", "causal_precondition_polarity_lawlike")
+"""The sets that no world can fill: the opposite value of an effect or a literal is never
+observed after (or before) an event of the type, because the true entry guarantees the
+value."""
 GRAMMARS = {
     "default": {},
     "marked": {
@@ -165,13 +189,18 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 assert (meta["level"], meta["change"]) == (level, change)
                 assert list(item.to_json()) == ["input", "meta"]
                 assert list(item.input) == list(INPUT_FIELDS)
-                assert item.proposition.level == level
+                # a causal item is a class-level proposition; its set is named by its kind
+                assert item.proposition.level == (CLASS if level in CAUSAL_LEVELS else level)
     # the default world fills every set but some of the law-like ones (since the retune of
-    # stage a7a, the possible and blocked role swaps of events fill too)
+    # stage a7a, the possible and blocked role swaps of events fill too), and the causal sets,
+    # which hold one pair per true statement of the world
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
-    unfilled = {name for name in ALL_SETS if LAWLIKE in name}
+    unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS}
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
-    assert all(sizes[name] > 0 for name in ALL_SETS), sizes
+    # a polarity swap of a causal statement is never observed: the true entry guarantees the
+    # opposite value, so its law-like sets are empty by the world's own laws
+    assert all(sizes[name] > 0 for name in ALL_SETS if name not in EMPTY_SETS), sizes
+    assert all(sizes[name] == 0 for name in EMPTY_SETS), sizes
     # a true item is used once in the sets of one level and change
     for level, change in {(s.level, s.change) for s in corpus.test_sets}:
         used = [
@@ -212,7 +241,16 @@ def test_a_corpus_without_narratives_has_class_level_sets_only(runs) -> None:
     corpus = runs("tiny", 20, documents={"mix": mix})
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
     assert list(sizes) == list(ALL_SETS)
-    assert all((count > 0) == name.startswith("class") for name, count in sizes.items()), sizes
+    # the class-level and the causal sets need no narrative; the tiny world has few causal
+    # statements, so some of its causal sets are empty
+    assert all(
+        (count > 0) == name.startswith("class")
+        for name, count in sizes.items()
+        if name not in CAUSAL_SETS
+    ), sizes
+    assert any(sizes[name] > 0 for name in CAUSAL_SETS) and all(
+        sizes[name] == 0 for name in EMPTY_SETS
+    )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -257,6 +295,23 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             assert corpus.planner.facts.expressible(item.proposition)
         changed = differences(true.proposition, false.proposition)
         a, b = true.proposition, false.proposition
+        if test_set.level in CAUSAL_LEVELS:
+            # the causal changes: another fluent, the opposite value, another event type at
+            # the same level, or the other role (test_corpus_causal.py checks them further)
+            if test_set.change == PREDICATE:
+                assert changed == {"predicate"}
+                assert dataclasses.replace(b.predicate, label=a.predicate.label) == a.predicate
+            elif test_set.change == POLARITY:
+                assert changed == {"predicate"}
+                assert dataclasses.replace(b.predicate, value=a.predicate.value) == a.predicate
+            elif test_set.change == EVENT_SWAP:
+                assert changed == {"subject"} and b.subject.role == a.subject.role
+                assert b.subject.event_type != a.subject.event_type
+            else:
+                assert test_set.change == ROLE and changed == {"subject"}
+                assert b.subject.event_type == a.subject.event_type
+                assert b.subject.role != a.subject.role
+            continue
         if test_set.change == PREDICATE:
             assert changed == {"predicate"}
             assert dataclasses.replace(b.predicate, label=a.predicate.label) == a.predicate
@@ -279,7 +334,7 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             assert b.predicate.label == a.predicate.label
     assert sum(made.values()) > 150, made
     if name == "default":
-        assert all(made[s] > 0 for s in ALL_SETS)
+        assert all(made[s] > 0 for s in ALL_SETS if s not in EMPTY_SETS)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -359,7 +414,7 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
     assert sum(checked.values()) > 150
     # every set of the default world is checked
     if name == "default":
-        assert all(checked[s] > 0 for s in ALL_SETS), checked
+        assert all(checked[s] > 0 for s in ALL_SETS if s not in EMPTY_SETS), checked
 
 
 def test_the_format_check_finds_planted_differences(runs) -> None:
@@ -443,7 +498,7 @@ def test_instance_and_event_items_continue_a_document(runs, name) -> None:
     lexicon = corpus.planner.lexicon
     checked = 0
     for test_set, true, false in pairs_of(corpus):
-        if test_set.level == CLASS:
+        if test_set.level == CLASS or test_set.level in CAUSAL_LEVELS:
             assert true.input["document"] is None and false.input["document"] is None
             assert all(label is None for label in true.input["coreference"])
             continue
@@ -490,7 +545,7 @@ def test_an_item_without_a_noun_for_its_referent_is_left_out(cases) -> None:
     )
     planner = Planner(config, case.result)
     sets = build_test_sets(planner, planner.generate())
-    assert all(not s.pairs for s in sets if s.level != CLASS)
+    assert all(not s.pairs for s in sets if s.level != CLASS and s.level not in CAUSAL_LEVELS)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -706,7 +761,7 @@ def test_law_like_items_are_nec_items(runs) -> None:
     # the extensional words, "all" and "no" make no nec item apart from membership and rules
     corpus = runs("default", **RICH)
     for test_set, _, false in pairs_of(corpus):
-        if test_set.kind == LAWLIKE:
+        if test_set.kind == LAWLIKE and test_set.level == CLASS:
             assert false.proposition.quantifier in (NEC_ALL, NEC_NO)
             assert false.proposition.predicate.kind in FEATURE_KINDS
     extensional = runs("default", quantifiers={"universal_words": "extensional"})
@@ -781,7 +836,7 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
             assert stats["true_items_seen_share"] == round(count / len(test_set.pairs), 6)
     # both kinds occur at every level. An event item is unseen when it names its verb at
     # another level of the verb tree than its document does
-    for level in (CLASS, INSTANCE):
+    for level in (CLASS, INSTANCE, *CAUSAL_LEVELS):
         assert seen[(level, True)] > 0 and seen[(level, False)] > 0, seen
     assert seen[(EVENT, True)] > 0
     # a state or able_now item is about the scene's final time point, which no document states

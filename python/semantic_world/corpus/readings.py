@@ -14,7 +14,11 @@ one of three kinds of logical form, one for each level:
   so a sentence about an instance with "can" has both the ``capacity`` and the ``able_now``
   readings; with ``distinct``, "can" allows ``capacity`` only and the word ``can_now`` allows
   ``able_now`` only. A tense marker beside the auxiliary leaves ``able_now`` alone, because a
-  capacity has no tense.
+  capacity has no tense;
+- ``causal``: a class-level sentence with ``become`` or with ``before`` ("things that things
+  catch become caught"), which states what events do or need. It takes the place of
+  ``generic``, and the quantifier readings of its words follow it as for any class-level
+  sentence.
 
 A noun phrase shows whether it names a category or an instance, so a class-level sentence has the
 one level reading ``generic``, followed by its quantifier readings: the quantifiers that its
@@ -48,7 +52,7 @@ that every one of its verb phrases allows:
 from __future__ import annotations
 
 from semantic_world.corpus.config import Config
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, Lexicon
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, Lexicon
 from semantic_world.corpus.propositions import ALL, COUNTERPART, MOST, NEC_ALL, NEC_NO, NO, SOME
 from semantic_world.corpus.realize import Tree, token_parts
 from semantic_world.corpus.world import (
@@ -63,7 +67,8 @@ CAPACITY = "capacity"
 EVENT = "event"
 STATE = "state"
 ABLE_NOW = "able_now"
-READINGS = (GENERIC, CAPACITY, EVENT, STATE, ABLE_NOW)
+CAUSAL = "causal"
+READINGS = (GENERIC, CAPACITY, EVENT, STATE, ABLE_NOW, CAUSAL)
 LEVEL_READINGS = READINGS
 """The readings that name a level, in the order they are listed."""
 QUANTIFIER_READINGS = (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO)
@@ -159,7 +164,8 @@ class _Reader:
         if subject is None:
             raise ValueError("a sentence has a subject")
         if not self.names_an_instance(subject):
-            return (GENERIC, *self.quantifier_readings(tree, subject))
+            level = CAUSAL if self.causal(tree) else GENERIC
+            return (level, *self.quantifier_readings(tree, subject))
         allowed = self.walk(tree)
         return tuple(reading for reading in READINGS if reading in allowed)
 
@@ -174,13 +180,26 @@ class _Reader:
                 return ()
         determiner = self.child(subject, "Det")
         if determiner is None:
-            if verb_phrase is None or not self.negated(verb_phrase):
+            # the "not" of a causal statement gives the fluent's value, and negates nothing
+            if verb_phrase is None or not self.negated(verb_phrase) or self.causal(tree):
                 return self.bare_quantifiers
             readings = self.negated_bare_quantifiers
             if self.names_a_category(verb_phrase) and NEC_ALL in self.bare_quantifiers:
                 readings = tuple(q for q in QUANTIFIER_READINGS if q == NEC_NO or q in readings)
             return readings
         return self.word_quantifiers.get(self.gloss(determiner), ())
+
+    def causal(self, tree: Tree) -> bool:
+        """Whether a class-level sentence is a causal statement: its verb phrase has ``become``
+        or ``before``."""
+        verb_phrase = self.child(tree, "VP")
+        if verb_phrase is None:
+            return False
+        auxiliary = self.child(verb_phrase, "AUX")
+        adverb = self.child(verb_phrase, "Adv")
+        return (auxiliary is not None and self.gloss(auxiliary) == "become") or (
+            adverb is not None and self.gloss(adverb) == BEFORE_WORD
+        )
 
     def negated(self, verb_phrase: Tree) -> bool:
         """Whether a verb phrase is negated: by ``not``, or by ``no`` on its predicate noun."""

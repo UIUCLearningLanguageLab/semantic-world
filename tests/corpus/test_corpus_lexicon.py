@@ -253,7 +253,7 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "patient_projection": 20,
         "scalar": 4,
         GENERIC: 1,
-        FUNCTION: 16,
+        FUNCTION: 17,
     }
     assert counts["named_concepts"] == {
         "category": 28,
@@ -266,7 +266,7 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         "patient_projection": 10,
         "scalar": 2,  # one of the two dimensions, with both of its poles
         GENERIC: 1,
-        FUNCTION: 16,
+        FUNCTION: 17,
     }
 
 
@@ -338,16 +338,17 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
 
 def test_lexeme_labels(default_world) -> None:
     lexicon = lexicon_of(default_world)
-    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 216)]
-    assert len(lexicon.content_lexemes) == 199 and len(lexicon.function_lexemes) == 16
+    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 217)]
+    assert len(lexicon.content_lexemes) == 199 and len(lexicon.function_lexemes) == 17
     # content lexemes come first, then the function words
     assert all(x.content for x in lexicon.lexemes[:199])
     assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
     assert lexicon.lexeme("LEXEME.199").concept == THING
     assert lexicon.lexeme("LEXEME.200").gloss == "a"
     assert lexicon.lexeme("LEXEME.215").gloss == "become"
+    assert lexicon.lexeme("LEXEME.216").gloss == "before"
     with pytest.raises(KeyError, match="unknown lexeme"):
-        lexicon.lexeme("LEXEME.216")
+        lexicon.lexeme("LEXEME.217")
     with pytest.raises(KeyError, match="unknown concept"):
         lexicon.concept("CATEGORY.99")
 
@@ -384,7 +385,7 @@ def function_glosses(world, can_words: str = "shared", **morphology: Any) -> lis
 def test_function_words(tiny_world) -> None:
     base = [
         "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-        "and", "that", "it", "become",
+        "and", "that", "it", "become", "before",
     ]  # fmt: skip
     assert list(FUNCTION_WORDS) == base and AGREEMENT_WORDS == ("are", "have")
     assert function_glosses(tiny_world) == base

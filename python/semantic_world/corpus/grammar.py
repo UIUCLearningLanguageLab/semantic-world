@@ -14,6 +14,13 @@ predication. It holds everything that the planner decides, and nothing that the 
 - a :class:`RelativeClause` is a subject relative, with one or more predications about the head
   joined by "and", or an object relative, with the clause's own subject (``agent``) and one verb.
 
+A **causal statement** ("things that things catch become caught") is a class-level plan whose
+subject is the generic noun with a relative clause that names an event: its one predication is a
+verb whose ``event`` is the event variable ``EVENTVAR.1``, in the present tense, with the bare
+generic noun as its other participant. Its predication is an ``effect`` (``become`` with the
+state adjective) or a ``precondition`` (the copula with the state adjective, and the function
+word ``before``), whose polarity is the fluent's value, and its quantifier is ``nec_all``.
+
 The grammar turns a plan into words and a tree (``realize``), and a tree back into the plan
 (``interpret``). Word order, morphology, adjective order, the choice between synonyms, and the
 optional ``can`` of a positive capacity are the grammar's own, and are not in the plan. The
@@ -43,12 +50,15 @@ from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.histories import split_time_key
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
+    AGENT,
     ALL,
     ASPECTS,
     CAN,
+    CAUSAL_KINDS,
     CHANGE,
     CLASS,
     EVENT,
+    EVENT_VARIABLE,
     HAS,
     INSTANCE,
     IS,
@@ -57,6 +67,8 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
+    PATIENT,
+    PRESENT,
     PROJECTION,
     QUANTIFIERS,
     SCALAR,
@@ -67,13 +79,15 @@ from semantic_world.corpus.propositions import (
     VERB,
     CategoryTerm,
     Clause,
+    EventTerm,
     Literal,
     Predicate,
     Proposition,
     event_of,
+    is_event_variable,
     scene_of,
 )
-from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX
+from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, THING
 
 CLASS_NP = "class"
 INSTANCE_NP = "instance"
@@ -139,16 +153,18 @@ class NounPhrase:
 class Predication:
     kind: str
     """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
-    ``event_type2``, or ``state``."""
+    ``event_type2``, ``state``, ``effect``, or ``precondition``."""
     label: str
     polarity: bool = True
+    """For an effect or a precondition, the fluent's value."""
     object: NounPhrase | None = None
     """Verbs only: the patient. None in an object relative, where the head noun is the
     patient."""
     event: str | None = None
     """Event level only: the label of the event that the verb phrase reports
     (``SCENE.8.EVENTINSTANCE.5``). In a test item it is the label of the scene (``SCENE.8``):
-    some event of the scene."""
+    some event of the scene. In the relative clause of a causal statement it is the event
+    variable (``EVENTVAR.1``): the events of the event type."""
     tense: str | None = None
     """Event, state, change, and able_now levels: ``past`` or ``present``."""
     aspect: str | None = None
@@ -163,6 +179,12 @@ class Predication:
     @property
     def timed(self) -> bool:
         return self.time is not None
+
+    @property
+    def bound(self) -> bool:
+        """Whether the verb phrase names the events of an event type, bound to an event
+        variable: the relative clause of a causal statement."""
+        return is_event_variable(self.event)
 
     @property
     def timed_level(self) -> str | None:
@@ -208,12 +230,25 @@ class SentencePlan:
     def bare_plural(self) -> bool:
         return self.subject.kind == CLASS_NP and self.subject.determiner is None
 
+    @property
+    def causal(self) -> bool:
+        """Whether the plan is a causal statement: an effect or a precondition."""
+        return self.predication.kind in CAUSAL_KINDS
+
     def proposition(self) -> Proposition:
         """The proposition of the main clause, as the truth tests judge it: the subject, the
         predicate, the quantifier, and the polarity, without the mentions and the relative
         clauses."""
         predication = self.predication
         target = predication.object
+        if self.causal:
+            return Proposition(
+                CLASS,
+                event_term_of(self.subject),
+                Predicate(predication.kind, predication.label, value=predication.polarity),
+                True,
+                NEC_ALL,
+            )
         if self.subject.kind == CLASS_NP:
             patient = None if target is None else term_of(target)
             return Proposition(
@@ -292,9 +327,52 @@ def term_of(phrase: NounPhrase) -> CategoryTerm:
     return CategoryTerm(phrase.referent, phrase.restriction, clauses)
 
 
-def phrase_of(term: CategoryTerm, determiner: str | None = None) -> NounPhrase:
+def event_term_of(phrase: NounPhrase) -> EventTerm:
+    """The event term of the subject of a causal statement: the event type that its relative
+    clause names, and the head's role, the patient in an object relative and the agent
+    otherwise."""
+    clause = phrase.clause
+    if phrase.kind != CLASS_NP or phrase.referent != THING or clause is None:
+        raise GrammarError(
+            "the subject of a causal statement is the generic noun with a relative clause that "
+            "names the event"
+        )
+    if len(clause.predications) != 1 or not clause.predications[0].bound:
+        raise GrammarError(
+            "the relative clause of a causal statement has one verb, bound to the event variable"
+        )
+    role = PATIENT if clause.object_relative else AGENT
+    return EventTerm(clause.predications[0].label, role)
+
+
+def bare_things() -> NounPhrase:
+    """The bare generic noun, "things": the other participant in the relative clause of a
+    causal statement."""
+    return NounPhrase(CLASS_NP, THING, THING)
+
+
+def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhrase:
+    """The subject noun phrase of a causal statement: the generic noun with "all" or bare, and
+    a relative clause naming the events of the term's event type, in which the head is the
+    agent (a subject relative: "things that catch things", "things that sleep") or the patient
+    (an object relative: "things that things catch")."""
+    kind = CAN if term.event_type.startswith("EVENTTYPE1.") else VERB
+    if term.role == PATIENT:
+        bound = Predication(VERB, term.event_type, True, None, EVENT_VARIABLE, PRESENT)
+        clause = RelativeClause((bound,), bare_things())
+    else:
+        target = bare_things() if kind == VERB else None
+        bound = Predication(kind, term.event_type, True, target, EVENT_VARIABLE, PRESENT)
+        clause = RelativeClause((bound,))
+    return NounPhrase(CLASS_NP, THING, THING, determiner, (), clause)
+
+
+def phrase_of(term: CategoryTerm | EventTerm, determiner: str | None = None) -> NounPhrase:
     """The class-level noun phrase of a category term. Its clauses make one relative clause: an
-    object relative for a clause with an agent category, and a subject relative otherwise."""
+    object relative for a clause with an agent category, and a subject relative otherwise. An
+    event term gives the subject of a causal statement."""
+    if isinstance(term, EventTerm):
+        return event_phrase_of(term, determiner)
     clause: RelativeClause | None = None
     if any(c.agent is not None for c in term.clauses):
         if len(term.clauses) != 1:
@@ -334,6 +412,9 @@ def check_plan(plan: SentencePlan) -> None:
     subject, predication = plan.subject, plan.predication
     if subject.kind == CLASS_NP and predication.event is not None:
         raise GrammarError("an event is about an instance, not about a category")
+    if plan.causal:
+        _check_causal(plan)
+        return
     if subject.kind == CLASS_NP:
         quantifier = plan.quantifier
         if predication.kind == SCALAR:
@@ -357,6 +438,53 @@ def check_plan(plan: SentencePlan) -> None:
         raise GrammarError(
             "a pronoun names no category, so a scalar pole has no comparison class: mention the "
             "subject with a noun"
+        )
+
+
+def _check_causal(plan: SentencePlan) -> None:
+    """A causal statement: the generic noun with one event-bound relative clause, ``nec_all``,
+    said with "all" or bare, and an effect or a precondition with no object, no event, and no
+    time point."""
+    subject, predication = plan.subject, plan.predication
+    if plan.quantifier != NEC_ALL:
+        raise GrammarError("a causal statement is nec_all: the definition guarantees it")
+    if subject.determiner not in (WORD_OF[NEC_ALL], None):
+        raise GrammarError("a causal statement says all, or uses the bare plural")
+    if subject.restriction:
+        raise GrammarError("the subject of a causal statement takes no modifier")
+    if (
+        predication.object is not None
+        or predication.time is not None
+        or predication.tense is not None
+        or predication.aspect is not None
+        or predication.become
+    ):
+        raise GrammarError(
+            "an effect or a precondition has no object, no event, no time point, and no tense: "
+            "a causal statement is timeless"
+        )
+    term = event_term_of(subject)  # the shape of the subject
+    clause = subject.clause
+    assert clause is not None
+    bound = clause.predications[0]
+    kind = CAN if term.event_type.startswith("EVENTTYPE1.") else VERB
+    if bound.kind != kind or bound.event != EVENT_VARIABLE:
+        raise GrammarError(
+            "the relative clause of a causal statement names the events of a one-place or a "
+            f"two-place event type, bound to {EVENT_VARIABLE}"
+        )
+    if bound.tense != PRESENT or bound.aspect is not None or not bound.polarity:
+        raise GrammarError(
+            "the relative clause of a causal statement is in the present tense, has no aspect, "
+            "and is never negated"
+        )
+    other = clause.agent if clause.object_relative else bound.object
+    if kind == CAN:
+        if other is not None or clause.object_relative:
+            raise GrammarError("a one-place event type has an agent only")
+    elif other != bare_things():
+        raise GrammarError(
+            "the other participant of the event of a causal statement is the bare generic noun"
         )
 
 
@@ -423,8 +551,15 @@ def _check_predication(
             f"a relative clause does not hold a predicate of kind {kind!r}: an IS literal, a "
             "scalar pole, and a HAS literal belong in the restriction"
         )
-    if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND):
+    if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND, *CAUSAL_KINDS):
         raise GrammarError(f"unknown predicate kind {kind!r}")
+    if kind in CAUSAL_KINDS:
+        raise GrammarError("an effect or a precondition is the predicate of a causal statement")
+    if predication.bound:
+        raise GrammarError(
+            "a verb bound to an event variable names the event of a causal statement, in the "
+            "relative clause of its subject"
+        )
     if in_clause and predication.time is not None:
         raise GrammarError("a relative clause is never about a time point")
     if (kind == STATE_KIND) != (predication.time is not None and kind not in (CAN, VERB)):

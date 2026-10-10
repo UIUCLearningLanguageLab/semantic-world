@@ -12,6 +12,8 @@ They hold:
 - ``states``: the initial-state, result, and blocked sentences of the narratives, the share of
   event sentences followed by a result sentence, and the share of blocked sentences that are
   negative;
+- ``causal``: the causal statements of the feature documents, by kind (effect and
+  precondition);
 - ``quantifiers``: the quantifier mix of the class-level sentences, by the quantifier of each
   fact (the strongest true one the language can state, which ``quantifiers.weights``
   reweights), and how many are said with a bare plural;
@@ -25,7 +27,7 @@ They hold:
 - ``cooccurrence``: the co-occurrence check;
 - ``test_sets``: for each test set, the number of pairs, the share of its true items whose
   logical form appears in a document, and, for a state set, the share of its items marked
-  ``changed``.
+  ``changed`` and the counts of pairs by which item changed.
 
 **The co-occurrence check.** Over the unordered pairs of leaves, we correlate within-document
 co-occurrence with thematic relatedness and with taxonomic similarity, separately for each
@@ -66,6 +68,7 @@ from semantic_world.corpus.config import DOCUMENT_TYPES
 from semantic_world.corpus.grammar import INSTANCE_NP
 from semantic_world.corpus.planner import (
     BLOCKED,
+    CAUSAL,
     EVENT_SECTION,
     INITIAL_STATE,
     POLE,
@@ -77,9 +80,11 @@ from semantic_world.corpus.planner import (
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     CLASS,
+    EFFECT,
     EVENT,
     INSTANCE,
     LEVELS,
+    PRECONDITION,
     PROGRESSIVE,
     QUANTIFIERS,
     STATE,
@@ -307,6 +312,17 @@ def _states(documents: Sequence[Document]) -> dict[str, Any]:
     }
 
 
+def _causal(documents: Sequence[Document]) -> dict[str, Any]:
+    """The causal statements of the feature documents, by kind."""
+    sentences = [s for d in documents for s in d.sentences if s.section == CAUSAL]
+    kinds = Counter(s.proposition.predicate.kind for s in sentences)
+    return {
+        "causal_sentences": len(sentences),
+        "effect_sentences": kinds[EFFECT],
+        "precondition_sentences": kinds[PRECONDITION],
+    }
+
+
 def _quantifiers(documents: Sequence[Document]) -> dict[str, Any]:
     sentences = [s for d in documents for s in d.sentences if s.proposition.level == CLASS]
     stated = Counter(str(s.strength) for s in sentences)
@@ -382,6 +398,7 @@ def corpus_stats(
         "documents": _documents(documents),
         "sentences": _sentences(documents),
         "states": _states(documents),
+        "causal": _causal(documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,
         "ambiguity": ambiguity,

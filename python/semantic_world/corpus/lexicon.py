@@ -64,11 +64,15 @@ LEXEME_PREFIX = "LEXEME."
 
 FUNCTION_WORDS = (
     "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-    "and", "that", "it", "become",
+    "and", "that", "it", "become", "before",
 )  # fmt: skip
 """The glosses of the function words every language has, in the order of the specification:
 the fifteen of the corpus generator, then ``become`` (``docs/specs/WORLD_AND_LANGUAGE.md``,
-"States and changes")."""
+"States and changes") and ``before`` ("Causal statements"), each appended so that the words
+before it keep their order."""
+BEFORE_WORD = "before"
+"""The gloss of the function word of a precondition statement ("things that catch things are
+awake before")."""
 ABLE_NOW_WORD = "can_now"
 """The gloss of the function word that expresses ``ABLE_NOW`` when ``lexicon.can_words`` is
 ``distinct``; with ``shared``, "can" expresses ``ABLE`` and ``ABLE_NOW`` alike."""

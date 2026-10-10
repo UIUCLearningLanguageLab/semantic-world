@@ -13,9 +13,12 @@ There are four document types (``documents.mix``):
   rest. A fact about the topic can be followed by the matching fact about a sibling category, at
   ``documents.sibling_contrast_rate``, when the sibling differs;
 - **encyclopedic, about a feature.** The topic is a PROPERTY or PART feature, a one-place event
-  type, or a two-place event type or category. A sentence states a rule, at
+  type, a two-place event type or category, or a base fluent. A sentence states a rule, at
   ``propositions.rule_statement_rate``, or says which categories have the feature and which lack
-  it;
+  it. About an event type, a sentence is first a causal statement, at
+  ``propositions.causal_statement_rate``: what its events do and need. About a fluent, every
+  sentence is a causal statement, drawn at the same rate: the event types that set it, clear
+  it, and need it, because nothing else can be said of a fluent at the class level;
 - **entity narrative.** The topic is one instance. The document narrates the events of
   ``entity.scenes`` scenes that involve the instance, in time order, scene by scene;
 - **situational narrative.** One scene. The document narrates its events in time order.
@@ -136,7 +139,8 @@ CHARACTERISTIC = "characteristic"
 RARER = "rarer"
 RELATION = "relation"
 RULE = "rule"
-TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE)
+CAUSAL = "causal"
+TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE, CAUSAL)
 """The sections of an encyclopedic document, in the order of the template."""
 TOPIC = "topic"
 SUBCATEGORY = "subcategory"
@@ -384,7 +388,11 @@ class Planner:
             for category in group:
                 self._siblings[category] = [c for c in group if c != category]
         self._feature_topics = (
-            facts.features[IS] + facts.features[HAS] + facts.features[CAN] + facts.verbs
+            facts.features[IS]
+            + facts.features[HAS]
+            + facts.features[CAN]
+            + facts.verbs
+            + facts.base_fluents
         )
         self._available: dict[str, dict[str, tuple[tuple, ...]]] = {}
         self._tense = config.propositions.event_tense
@@ -434,6 +442,7 @@ class Planner:
         mentions = draft.mentions
         referents = {} if mentions is None else mentions.referents
         mode = self.config.propositional_referents
+        descriptions = self.config.propositional_descriptions
         sentences = []
         for number, item in enumerate(draft.items, start=1):
             plan = item.plan or plan_for(self.facts, item.proposition, bare=item.bare)
@@ -451,7 +460,7 @@ class Planner:
                     proposition=proposition,
                     sentence=sentence,
                     logical_form=form,
-                    propositional=propositional(form, mode),
+                    propositional=propositional(form, mode, descriptions),
                     readings=readings(sentence.tree, self.lexicon, self.config),
                     coreference=tuple(referents.get(r) for r, _ in sentence.referents),
                     distinguished=tuple(
@@ -484,6 +493,8 @@ class Planner:
 
     def _section(self, fact: Proposition) -> str:
         kind = fact.predicate.kind
+        if fact.causal:
+            return CAUSAL
         if fact.rule is not None:
             return RULE
         if kind == MEMBER:
@@ -823,15 +834,23 @@ class Planner:
         topic = self._feature_topics[int(rng.integers(len(self._feature_topics)))]
         length = self._length(kind, rng)
         is_verb = topic in facts.verbs
+        is_fluent = topic in facts.base_fluents
         rules: list[Proposition] = []
+        causal: list[Proposition] = []
         topic_kind = VERB
-        if not is_verb:
+        if is_fluent:
+            causal = list(facts.causal_statements(fluent=topic))
+        elif not is_verb:
             topic_kind = next(k for k in (IS, HAS, CAN) if topic in facts.features[k])
             rules = list(
                 dict.fromkeys(facts.rule_statements(topic) + facts.rule_statements_reading(topic))
             )
+        if is_verb or topic_kind == CAN:
+            causal = list(facts.causal_statements(event_type=topic))
         categories = facts.categories
-        if is_verb:
+        if is_fluent:
+            candidates = []
+        elif is_verb:
             candidates = [
                 (CategoryTerm(agent), Predicate(VERB, topic, CategoryTerm(patient)))
                 for agent in categories
@@ -840,14 +859,20 @@ class Planner:
         else:
             candidates = [(CategoryTerm(c), Predicate(topic_kind, topic)) for c in categories]
         rule_rate = self.config.propositions.rule_statement_rate
+        causal_rate = self.config.propositions.causal_statement_rate
         items: list[_Item] = []
         stated: set = set()
         for _ in range(4 * length + 20):
             if len(items) >= length:
                 break
             left = [r for r in rules if self._key(r) not in stated]
-            if left and facts_rng.random() < rule_rate:
-                fact: Proposition | None = left[int(facts_rng.integers(len(left)))]
+            causal_left = [c for c in causal if self._key(c) not in stated]
+            if causal_left and facts_rng.random() < causal_rate:
+                fact: Proposition | None = causal_left[int(facts_rng.integers(len(causal_left)))]
+            elif is_fluent:
+                fact = None
+            elif left and facts_rng.random() < rule_rate:
+                fact = left[int(facts_rng.integers(len(left)))]
             else:
                 negative = self._negative(facts_rng)
                 fact = self._first_fact(facts_rng, candidates, negative, stated)

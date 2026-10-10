@@ -26,6 +26,12 @@ states too: ``state`` (the fluent's value at the time point), ``change`` (its va
 point and at the next), ``able_now`` (legality at the time point), ``changed`` (the value at
 the scene's final time point against ``TIME.1``), and ``made_by`` (whether one event's own
 recorded changes, applied alone to the state at the time point, change the fluent).
+
+Causal statements (stage a7b) are judged by re-reading the ``event_types`` block of
+``definition.json``: ``causal`` says whether every event type below the statement's event type
+has the effect, or the precondition literal, that the statement names; ``observed`` says whether
+the statement held after (or before) every event of its type in the given scenes, with at
+least one such event, on the replayed states.
 """
 
 from __future__ import annotations
@@ -324,6 +330,13 @@ class Oracle:
 
     allows = able
 
+    def able_somewhere(self, label: str) -> bool:
+        """Whether the requirement of an event type (or the base relation of a category) holds
+        for some entity, or some ordered pair of entities."""
+        if self.event_types[label]["arity"] == 1:
+            return bool((self.column[label] == 1).any())
+        return bool(self.matrix(label).any())
+
     # Events ----------------------------------------------------------------------------------
 
     def names(self, event_type: str) -> list[str]:
@@ -421,16 +434,14 @@ class Oracle:
     def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
         """Whether a state form (``HOLDS``) is true of the scene."""
         time = int(form["time"].split(".")[1])
-        value = self.fluent_at(
-            scene, time, form["subject"]["instance"], form["predicate"]["fluent"]
-        )
+        value = self.fluent_at(scene, time, form["subject"]["instance"], form["predicate"]["label"])
         return value == form["polarity"]
 
     def change(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
         """Whether a change form (``BECOME``) is true of the scene: the fluent had the other
         value at the time point and the stated value at the next."""
         time = int(form["time"].split(".")[1])
-        entity, fluent = form["subject"]["instance"], form["predicate"]["fluent"]
+        entity, fluent = form["subject"]["instance"], form["predicate"]["label"]
         before = self.fluent_at(scene, time, entity, fluent)
         after = self.fluent_at(scene, time + 1, entity, fluent)
         return before != form["polarity"] and after == form["polarity"]
@@ -481,9 +492,61 @@ class Oracle:
         """Whether some event of the scenes has the form's event type, agent, and patient."""
         return any(self.matching(form, scene) for scene in scenes)
 
+    # Causal statements -----------------------------------------------------------------------
+
+    def entries(self, event_type: str, kind: str) -> list[dict[str, Any]]:
+        """The effects (``effect``) or the precondition literals (``precondition``) of an event
+        type, as ``definition.json`` records them."""
+        record = self.event_types[event_type]
+        return record["effects"] if kind == "effect" else record["precondition"]["literals"]
+
+    def causal(self, form: dict[str, Any]) -> bool | None:
+        """Whether a causal statement is true: every event type below its event type (itself,
+        for an event type) has the entry. None for a statement about a derived fluent, or about
+        a role the event type lacks."""
+        subject, predicate = form["subject"], form["predicate"]
+        event_type, role = subject["event"], subject["role"]
+        fluent, value = predicate["label"], predicate["value"]
+        if form["quantifier"] != NEC_ALL or not form["polarity"]:
+            return None
+        if fluent not in self.base_fluents or role not in self.event_types[event_type]["roles"]:
+            return None
+        for label in self.leaves_below(event_type):
+            if not any(
+                e["role"] == role and e["fluent"] == fluent and e["value"] == value
+                for e in self.entries(label, predicate["kind"])
+            ):
+                return False
+        return True
+
+    def observed(self, form: dict[str, Any], scenes: list[dict[str, Any]]) -> bool:
+        """Whether a causal statement held of every event of its type in the scenes, and at
+        least one occurred: the participant in its role had the fluent's value at the time
+        point after the event's step (an effect) or at the event's time point (a
+        precondition)."""
+        subject, predicate = form["subject"], form["predicate"]
+        below = set(self.leaves_below(subject["event"]))
+        offset = 1 if predicate["kind"] == "effect" else 0
+        seen = False
+        for scene in scenes:
+            for step in scene["steps"]:
+                for event in step["events"]:
+                    if event["type"] not in below:
+                        continue
+                    entity = event.get(subject["role"])
+                    if entity is None:
+                        continue
+                    seen = True
+                    value = self.fluent_at(scene, step["step"] + offset, entity, predicate["label"])
+                    if value != predicate["value"]:
+                        return False
+        return seen
+
     # Truth -----------------------------------------------------------------------------------
 
     def truth(self, form: dict[str, Any], scene: dict[str, Any] | None = None) -> bool | None:
+        if form["level"] == "class" and "head" in form["subject"]:
+            return self.causal(form)
         if form["level"] == "class":
             return self._class(form)
         if form["level"] in ("state", "change", "able_now"):

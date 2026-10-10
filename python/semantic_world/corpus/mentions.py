@@ -76,6 +76,7 @@ from semantic_world.corpus.propositions import (
     SIMPLE,
     VERB,
     CategoryTerm,
+    EventTerm,
     Literal,
     Predicate,
     Proposition,
@@ -99,8 +100,9 @@ def mention(
     return NounPhrase(INSTANCE_NP, instance, noun or leaf_of(facts, instance), determiner)
 
 
-def class_phrase(term: CategoryTerm, determiner: str | None = None) -> NounPhrase:
-    """The noun phrase of a category term, with its relative clauses."""
+def class_phrase(term: CategoryTerm | EventTerm, determiner: str | None = None) -> NounPhrase:
+    """The noun phrase of a category term, with its relative clauses, or of the event term of a
+    causal statement."""
     return phrase_of(term, determiner)
 
 
@@ -120,10 +122,16 @@ def plan_for(
         return mentions.get(instance) or mention(facts, instance, noun)
 
     if proposition.level == CLASS:
-        assert isinstance(proposition.subject, CategoryTerm)
+        assert isinstance(proposition.subject, CategoryTerm | EventTerm)
         quantifier = proposition.quantifier
         determiner = None if bare or quantifier is None else WORD_OF[quantifier]
         subject = class_phrase(proposition.subject, determiner)
+        if proposition.causal:
+            # the value of an effect or a precondition is the polarity of its predication
+            assert predicate.value is not None
+            return SentencePlan(
+                subject, Predication(predicate.kind, predicate.label, predicate.value), quantifier
+            )
         target = None
         if isinstance(predicate.patient, CategoryTerm):
             target = class_phrase(predicate.patient)

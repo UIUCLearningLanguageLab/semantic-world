@@ -26,6 +26,13 @@ sentence is grounded. A restriction is one literal ("red penguins"), and a relat
 restrictive ("penguins that can swim", "owls that eat mice", "mice that owls eat"). Both are drawn
 among those that some members of the category satisfy, and not all, so the restriction does work.
 
+A causal statement (``docs/specs/WORLD_AND_LANGUAGE.md``, "Causal statements") states one entry
+of the definition: an effect or a precondition literal of an event type with a word, about a base
+fluent with a word, as ``nec_all`` ("things that things catch become caught"). A category of
+event types with a word states the entries that every event type below it has. The statements
+are enumerated from the definition (:meth:`Facts.causal_statements`) and grounded by the truth
+tests, in the order of the event types, then the roles, the fluents, and the values.
+
 An event is reported by an event-level proposition. Its event type is named at a level of the
 event-type tree, as a noun names a category at a level of the category tree: the event type
 itself, or a category above it ("chase" or "hunt"), drawn by ``mention.event_level_weights``.
@@ -44,6 +51,7 @@ from semantic_world.corpus.lexicon import Lexicon, world_concepts
 from semantic_world.corpus.propositions import (
     ALL,
     CAN,
+    CAUSAL_KINDS,
     CLASS,
     EVENT,
     HAS,
@@ -56,12 +64,14 @@ from semantic_world.corpus.propositions import (
     NO,
     POSITIVE_ORDER,
     PROJECTION,
+    ROLES,
     SCALAR,
     SIMPLE,
     STATE_KIND,
     VERB,
     CategoryTerm,
     Clause,
+    EventTerm,
     Literal,
     Predicate,
     Proposition,
@@ -129,6 +139,8 @@ class Facts:
         self.poles = of_type("scalar")
         self.fluents = of_type("state")
         """The fluents that have a state adjective, base then derived."""
+        self.base_fluents = tuple(f for f in self.fluents if f in world.base_fluents)
+        """The base fluents that have a state adjective: what a causal statement is about."""
         self.verbs = of_type("event", "event_category")
         """The two-place event types and categories of them that have a word, in tree order."""
         self.level = {label: info.level for label, info in world.category.items()}
@@ -137,6 +149,7 @@ class Facts:
         self._clauses: dict[tuple[CategoryTerm, bool], tuple[Clause, ...]] = {}
         self._rules: tuple[Proposition, ...] | None = None
         self.rule_report: dict[str, Any] = {}
+        self._causal: tuple[Proposition, ...] | None = None
 
     def expressible(self, proposition: Proposition) -> bool:
         """Whether every concept the proposition needs has a word."""
@@ -437,6 +450,63 @@ class Facts:
             "skipped": skipped,
         }
         return tuple(statements)
+
+    # Causal statements -----------------------------------------------------------------------
+
+    @property
+    def event_type_labels(self) -> tuple[str, ...]:
+        """The event types with a word that a causal statement can be about: the one-place
+        event types, then the two-place event types and categories in tree order."""
+        return self.features[CAN] + self.verbs
+
+    def causal_statements(
+        self, event_type: str | None = None, fluent: str | None = None, kind: str | None = None
+    ) -> tuple[Proposition, ...]:
+        """Every true causal statement that the language can state, or those about an event
+        type (or category), about a fluent, or of one kind (``effect`` or ``precondition``):
+        for each event type with a word, each role, each base fluent with a word, and each
+        value, the effect statement and the precondition statement that the definition makes
+        true."""
+        if self._causal is None:
+            self._causal = self._build_causal_statements()
+        return tuple(
+            p
+            for p in self._causal
+            if (event_type is None or p.subject.event_type == event_type)
+            and (fluent is None or p.predicate.label == fluent)
+            and (kind is None or p.predicate.kind == kind)
+        )
+
+    def _build_causal_statements(self) -> tuple[Proposition, ...]:
+        truth, world = self.truth, self.world
+        statements: list[Proposition] = []
+        for label in self.event_type_labels:
+            for role in ROLES[: world.event_types[label].arity]:
+                for fluent in self.base_fluents:
+                    for value in (True, False):
+                        for kind in CAUSAL_KINDS:
+                            if not truth.has_entry(label, kind, role, fluent, value):
+                                continue
+                            candidate = Proposition(
+                                CLASS,
+                                EventTerm(label, role),
+                                Predicate(kind, fluent, value=value),
+                                True,
+                                NEC_ALL,
+                            )
+                            grounded = truth.grounded(candidate)
+                            if grounded is not None:
+                                statements.append(grounded)
+        return tuple(statements)
+
+    def draw_causal_statement(
+        self, rng: np.random.Generator, pool: tuple[Proposition, ...] | None = None
+    ) -> Proposition | None:
+        """One causal statement, from every one of the world or from ``pool``."""
+        pool = self.causal_statements() if pool is None else pool
+        if not pool:
+            return None
+        return pool[int(rng.integers(len(pool)))]
 
     # Events ----------------------------------------------------------------------------------
 

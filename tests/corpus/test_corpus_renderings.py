@@ -146,7 +146,7 @@ SENTENCES = {
         SentencePlan(
             the(DOG, "CATEGORY.1.3.2", Literal("PROPERTY.12")), Predication(HAS, "PART.4")
         ),
-        "CATEGORY.1.3.2(REF.1) AND PROPERTY.12(REF.1) AND PART.4(REF.1)",
+        "{CATEGORY.1.3.2(REF.1) AND PROPERTY.12(REF.1)} PART.4(REF.1)",
     ),
     # the dog that chased the cat ran
     "chased": (
@@ -167,7 +167,7 @@ SENTENCES = {
             ),
             happened(CAN, "EVENTTYPE1.7", "SCENE.3.EVENTINSTANCE.4"),
         ),
-        "CATEGORY.1.3.2(REF.1) AND CATEGORY.1.4.1(REF.2) AND EVENT(SCENE.3.EVENTINSTANCE.2, PAST, SIMPLE, EVENTTYPE2.1.2(REF.1, REF.2)) AND "
+        "{CATEGORY.1.3.2(REF.1) AND CATEGORY.1.4.1(REF.2) AND EVENT(SCENE.3.EVENTINSTANCE.2, PAST, SIMPLE, EVENTTYPE2.1.2(REF.1, REF.2))} "
         "EVENT(SCENE.3.EVENTINSTANCE.4, PAST, SIMPLE, EVENTTYPE1.7(REF.1))",
     ),
     # the cat that the dog was chasing ran: an object relative, and a progressive event
@@ -187,13 +187,13 @@ SENTENCES = {
             ),
             happened(CAN, "EVENTTYPE1.7", "SCENE.3.EVENTINSTANCE.5"),
         ),
-        "CATEGORY.1.4.1(REF.2) AND CATEGORY.1.3(REF.1) AND EVENT(SCENE.3.EVENTINSTANCE.2, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.2)) AND "
+        "{CATEGORY.1.4.1(REF.2) AND CATEGORY.1.3(REF.1) AND EVENT(SCENE.3.EVENTINSTANCE.2, PAST, PROGRESSIVE, EVENTTYPE2.1.2(REF.1, REF.2))} "
         "EVENT(SCENE.3.EVENTINSTANCE.5, PAST, SIMPLE, EVENTTYPE1.7(REF.2))",
     ),
     # the penguin can swim, and it can not swim
     "able": (
         SentencePlan(the(DOG, "CATEGORY.1.3"), Predication(CAN, "EVENTTYPE1.3")),
-        "CATEGORY.1.3(REF.1) AND ABLE(EVENTTYPE1.3(REF.1))",
+        "{CATEGORY.1.3(REF.1)} ABLE(EVENTTYPE1.3(REF.1))",
     ),
     "not able": (
         SentencePlan(the(DOG, None), Predication(CAN, "EVENTTYPE1.3", False)),
@@ -204,7 +204,7 @@ SENTENCES = {
         SentencePlan(
             the(OWL, "CATEGORY.1.2"), Predication(VERB, "EVENTTYPE2.2.1", True, the(CAT, None))
         ),
-        "CATEGORY.1.2(REF.3) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2))",
+        "{CATEGORY.1.2(REF.3)} ABLE(EVENTTYPE2.2.1(REF.3, REF.2))",
     ),
     # the big mouse without fins is small for an animal: a pole names its comparison class
     "poles": (
@@ -212,7 +212,7 @@ SENTENCES = {
             the(CAT, "CATEGORY.1", Literal("SCALARDIM.1.HIGH"), Literal("PART.2", False)),
             Predication(SCALAR, "SCALARDIM.2.LOW", False),
         ),
-        "CATEGORY.1(REF.2) AND NOT PART.2(REF.2) AND SCALARDIM.1.HIGH(REF.2, CATEGORY.1) AND NOT SCALARDIM.2.LOW(REF.2, CATEGORY.1)",
+        "{CATEGORY.1(REF.2) AND NOT PART.2(REF.2) AND SCALARDIM.1.HIGH(REF.2, CATEGORY.1)} NOT SCALARDIM.2.LOW(REF.2, CATEGORY.1)",
     ),
     # the bird that is not red is a penguin, and it is edible
     "member": (
@@ -220,7 +220,7 @@ SENTENCES = {
             the(DOG, "CATEGORY.1.3", Literal("PROPERTY.4", False)),
             Predication(MEMBER, "CATEGORY.1.3.2"),
         ),
-        "CATEGORY.1.3(REF.1) AND NOT PROPERTY.4(REF.1) AND CATEGORY.1.3.2(REF.1)",
+        "{CATEGORY.1.3(REF.1) AND NOT PROPERTY.4(REF.1)} CATEGORY.1.3.2(REF.1)",
     ),
     "edible": (
         SentencePlan(the(DOG, None), Predication(PROJECTION, "CANBE.EVENTTYPE2.1.1")),
@@ -249,7 +249,7 @@ SENTENCES = {
             ),
             Predication(SCALAR, "SCALARDIM.1.HIGH"),
         ),
-        "CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2) AND ABLE(EVENTTYPE1.3(REF.2)) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2)) AND "
+        "{CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2) AND ABLE(EVENTTYPE1.3(REF.2)) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2))} "
         "SCALARDIM.1.HIGH(REF.3, CATEGORY.1.2)",
     ),
     # most red penguins can swim, and no penguins have fur: the quantifier of the plan is
@@ -393,8 +393,8 @@ def test_the_propositional_rendering(name) -> None:
 def test_referents_can_be_named_by_their_instances() -> None:
     plan, _ = SENTENCES["chased"]
     assert render(plan, mode="instance") == (
-        "CATEGORY.1.3.2(INSTANCE.1.3.2.1) AND CATEGORY.1.4.1(INSTANCE.1.4.1.1) AND "
-        "EVENT(SCENE.3.EVENTINSTANCE.2, PAST, SIMPLE, EVENTTYPE2.1.2(INSTANCE.1.3.2.1, INSTANCE.1.4.1.1)) AND "
+        "{CATEGORY.1.3.2(INSTANCE.1.3.2.1) AND CATEGORY.1.4.1(INSTANCE.1.4.1.1) AND "
+        "EVENT(SCENE.3.EVENTINSTANCE.2, PAST, SIMPLE, EVENTTYPE2.1.2(INSTANCE.1.3.2.1, INSTANCE.1.4.1.1))} "
         "EVENT(SCENE.3.EVENTINSTANCE.4, PAST, SIMPLE, EVENTTYPE1.7(INSTANCE.1.3.2.1))"
     )
     # a class-level form has variables, and no referents
@@ -462,6 +462,7 @@ def test_the_formula_of_a_logical_form() -> None:
         "referent": "REF.2",
         "noun": "CATEGORY.1.4.1",
         "restriction": [],
+        "descriptive": True,
         "clauses": [
             {
                 "kind": "event_type2",
@@ -471,6 +472,7 @@ def test_the_formula_of_a_logical_form() -> None:
                     "referent": "REF.1",
                     "noun": "CATEGORY.1.3",
                     "restriction": [],
+                    "descriptive": True,
                 },
                 "event": "SCENE.3.EVENTINSTANCE.2",
                 "tense": "past",
@@ -494,6 +496,7 @@ def test_the_formula_of_a_logical_form() -> None:
         "referent": "REF.1",
         "noun": None,
         "restriction": [],
+        "descriptive": False,
     }
     assert formula(form) == (Not(Able(Atom("EVENTTYPE1.3", ("REF.1",)))),)
 
@@ -511,7 +514,7 @@ def test_a_noun_phrase_said_twice_is_written_once() -> None:
         Predication(VERB, "EVENTTYPE2.1.2", True, the(CAT, "CATEGORY.1.5")),
     )
     assert render(plan) == (
-        "CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2)) AND ABLE(EVENTTYPE2.1.2(REF.3, REF.2))"
+        "{CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2))} ABLE(EVENTTYPE2.1.2(REF.3, REF.2))"
     )
 
 

@@ -34,6 +34,7 @@ from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.mentions import clause_propositions
 from semantic_world.corpus.planner import (
     BLOCKED,
+    CAUSAL,
     CHARACTERISTIC,
     CONTRAST,
     DEFINING,
@@ -546,6 +547,8 @@ def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> N
                 assert proposition.rule is not None and proposition.subject.category == "THING"
             elif sentence.section == CONTRAST:
                 assert index > 0 and document.sentences[index - 1].section != CONTRAST
+            elif sentence.section == CAUSAL:
+                assert proposition.causal and proposition.quantifier == NEC_ALL
             else:
                 assert sentence.section in (DEFINING, CHARACTERISTIC, RARER)
                 assert kind not in (MEMBER, VERB) and proposition.rule is None
@@ -659,15 +662,28 @@ def test_feature_documents(corpora) -> None:
     topics: Counter = Counter()
     rules = sentences = 0
     with_rules = set()
+    causal = 0
     for document in documents:
         if document.type != "encyclopedic_feature":
             continue
         topic = document.topic
-        kind = VERB if topic in facts.verbs else planner.world.feature_kind[topic]
+        if topic in facts.verbs:
+            kind = VERB
+        elif topic in facts.base_fluents:
+            kind = "fluent"
+        else:
+            kind = planner.world.feature_kind[topic]
         topics[kind] += 1
         for sentence in document.sentences:
             proposition = sentence.proposition
             assert proposition.level == CLASS
+            if proposition.causal:
+                # what the topic's events do and need, or the event types that set, clear,
+                # and need the topic (test_corpus_causal.py)
+                assert topic in (proposition.subject.event_type, proposition.predicate.label)
+                causal += 1
+                continue
+            assert kind != "fluent"  # a fluent document holds causal statements only
             if proposition.rule is not None:
                 # a sufficient condition for the topic, or something the topic makes possible
                 restriction = [x.feature for x in proposition.subject.restriction]
@@ -679,8 +695,8 @@ def test_feature_documents(corpora) -> None:
                 assert proposition.predicate.label == topic
                 assert proposition.subject.category in facts.categories
             sentences += 1
-    assert set(topics) == {IS, HAS, CAN, VERB}
-    assert rules > 20 and 0.05 < rules / sentences < 0.4
+    assert set(topics) == {IS, HAS, CAN, VERB, "fluent"}
+    assert rules > 20 and 0.05 < rules / sentences < 0.4 and causal > 20
     # with the rate at 0, no document states a rule, and at 1 the rules come first
     _, none = corpora("default", 150, propositions={"rule_statement_rate": 0.0})
     assert not [s for _, s in sentences_of(none) if s.proposition.rule is not None]
@@ -887,7 +903,7 @@ def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> 
         found = []
         for _, sentence in sentences_of(documents, *ENCYCLOPEDIC):
             proposition = sentence.proposition
-            if proposition.rule is not None:
+            if proposition.rule is not None or proposition.causal:
                 continue
             for term in (proposition.subject, proposition.predicate.patient):
                 if term is not None and term.restriction:
@@ -915,7 +931,7 @@ def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> 
     for _, sentence in sentences_of(documents):
         for phrase in sentence.plan.noun_phrases():
             if phrase.kind == CLASS_NP and sentence.proposition.rule is None:
-                assert not phrase.restriction
+                assert not phrase.restriction  # a causal subject has none either
 
 
 def test_class_level_relative_clauses(cases, corpora) -> None:
@@ -927,6 +943,8 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
     deep = on_patient = 0
     for _, sentence in sentences_of(documents, *ENCYCLOPEDIC):
         proposition = sentence.proposition
+        if proposition.causal:
+            continue  # the clause of a causal subject names the event, and is not drawn
         subject, patient = proposition.subject, proposition.predicate.patient
         for term in (subject, patient):
             if term is None or not term.clauses:
@@ -955,7 +973,7 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
     stated = Counter(
         s.proposition.quantifier
         for _, s in sentences_of(documents, *ENCYCLOPEDIC)
-        if s.proposition.subject.clauses
+        if not s.proposition.causal and s.proposition.subject.clauses
     )
     assert set(stated) <= {MOST, SOME}
     either = merged(settings, {"quantifiers": {"universal_words": "either"}})
@@ -963,7 +981,7 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
     quantifiers = Counter(
         s.proposition.quantifier
         for _, s in sentences_of(documents, *ENCYCLOPEDIC)
-        if s.proposition.subject.clauses
+        if not s.proposition.causal and s.proposition.subject.clauses
     )
     assert quantifiers[ALL] > 0 and quantifiers[NO] > 0
     # with the rate at 0, or the depth limit at 0, no class-level noun phrase has a drawn clause
@@ -971,6 +989,8 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
         _, documents = corpora("default", 100, mention={"relative_clauses": off})
         for _, sentence in sentences_of(documents, *ENCYCLOPEDIC):
             proposition = sentence.proposition
+            if proposition.causal:
+                continue  # the clause of a causal subject names the event, and is not drawn
             assert not proposition.subject.clauses
             assert (
                 proposition.predicate.patient is None or not proposition.predicate.patient.clauses
@@ -1024,7 +1044,7 @@ def test_content_words_count_nouns_adjectives_and_verbs(corpora) -> None:
 def test_readings_in_documents(corpora) -> None:
     kinds = {CLASS: "generic", INSTANCE: "capacity", EVENT: "event"}
     kinds.update({STATE: "state", CHANGE: "state", ABLE_NOW: "able_now"})
-    levels = {"generic", "capacity", "event", "state", "able_now"}
+    levels = {"generic", "capacity", "event", "state", "able_now", "causal"}
     # the default language is not ambiguous between the levels, apart from "can", which
     # expresses ABLE and ABLE_NOW alike (lexicon.can_words: shared): every other sentence has
     # the one reading of its level, and a class-level sentence has its quantifier readings
@@ -1039,7 +1059,10 @@ def test_readings_in_documents(corpora) -> None:
             assert sentence.readings == ("capacity", "able_now")
             with_can += 1
             continue
-        assert sentence.readings[0] == kinds[level]
+        if proposition.causal:
+            assert sentence.readings[0] == "causal"
+        else:
+            assert sentence.readings[0] == kinds[level]
         rest = sentence.readings[1:]
         assert not (set(rest) & levels)
         if level != CLASS:
@@ -1053,7 +1076,14 @@ def test_readings_in_documents(corpora) -> None:
     counts = reading_counts(documents)
     assert counts["ambiguous"] == with_can > 0
     assert counts["ambiguous_share"] == with_can / counts["sentences"]
-    assert set(counts["readings"]) == {"generic", "capacity", "event", "state", "capacity+able_now"}
+    assert set(counts["readings"]) == {
+        "generic",
+        "capacity",
+        "event",
+        "state",
+        "capacity+able_now",
+        "causal",
+    }
     assert sum(counts["readings"].values()) == counts["sentences"]
     assert {k: v for k, v in counts["quantifier_readings"].items() if k != "none"} == quantified
     assert {NEC_ALL, f"{NEC_ALL}+{MOST}", MOST, SOME, NEC_NO} <= set(quantified)
@@ -1065,7 +1095,7 @@ def test_readings_in_documents(corpora) -> None:
     for _, sentence in sentences_of(documents):
         level = sentence.proposition.level
         # the true reading is always among the readings
-        assert kinds[level] in sentence.readings
+        assert ("causal" if sentence.proposition.causal else kinds[level]) in sentence.readings
         if level == ABLE_NOW:
             assert sentence.readings == ("capacity", "able_now")
             ambiguous[level] += 1
@@ -1098,7 +1128,14 @@ def test_readings_in_documents(corpora) -> None:
     marked = merged(bare, {"grammar": {"morphology": {"tense": {"enabled": True}}}})
     _, documents = corpora("default", 200, **marked)
     counts = reading_counts(documents)
-    assert set(counts["readings"]) <= {"generic", "capacity", "event", "state", "capacity+able_now"}
+    assert set(counts["readings"]) <= {
+        "generic",
+        "capacity",
+        "event",
+        "state",
+        "capacity+able_now",
+        "causal",
+    }
     assert counts["ambiguous"] == counts["readings"].get("capacity+able_now", 0)
 
 
@@ -1234,7 +1271,9 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
         planner = Planner(case.config(**sections), case.world)
         documents = planner.generate(300)
         strengths = Counter(
-            s.strength for _, s in sentences_of(documents, *ENCYCLOPEDIC) if s.section != RULE
+            s.strength
+            for _, s in sentences_of(documents, *ENCYCLOPEDIC)
+            if s.section not in (RULE, CAUSAL)  # rules and causal statements take no weight
         )
         return planner, documents, strengths
 
@@ -1250,6 +1289,8 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
             assert sentence.strength is None
         elif proposition.predicate.kind == SCALAR:
             assert sentence.strength == "pole"
+        elif proposition.causal:
+            assert sentence.strength == NEC_ALL
         else:
             # a fact is stated with its strongest true quantifier that the language can state,
             # with a word or with a bare plural
@@ -1287,9 +1328,10 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
     # the mix among the negative facts: "no" against "most ... not" and "some ... not"
-    # (1.3 in the default world of stage a6, with 300 documents; 1.5 and more in the a5b world)
+    # (1.3 in the default world of stage a6, with 300 documents; 1.5 and more in the a5b world;
+    # 1.23 since stage a7b, whose feature documents draw other facts)
     _, _, heavier = made(nec_none=4)
-    assert share(heavier, NEC_NO) > 1.25 * share(strengths, NEC_NO)
+    assert share(heavier, NEC_NO) > 1.2 * share(strengths, NEC_NO)
     with pytest.raises(ConfigError, match="quantifiers.weights.no"):
         case.config(quantifiers={"weights": {"no": 4}})
 

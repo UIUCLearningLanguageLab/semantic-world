@@ -86,11 +86,21 @@ CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
 SIDES = ("before", "after")
 ADPOSITIONS = ("preposition", "postposition")
 NEGATION_POSITIONS = ("after_auxiliary", "before_auxiliary")
+BEFORE_POSITIONS = ("after_predicate", "before_predicate")
+"""``grammar.word_order.before``: where the function word ``before`` of a precondition
+statement stands, at the end of the verb phrase or at its start."""
+DESCRIPTION_MODES = ("marked", "omitted")
+"""``renderings.propositional.descriptions``: whether the propositional rendering writes the
+descriptions of a sentence about instances, in braces before the assertion, or leaves them
+out."""
 REALIZATIONS = ("affix", "word")
 VERB_MARKS = ("plural", "singular")
 EVENT_TENSES = ("past", "present")
 REFERENT_LABELS = ("local", "instance")
-TEST_CHANGES = ("predicate", "subject", "quantifier", "role")
+TEST_CHANGES = ("predicate", "subject", "quantifier", "polarity", "event", "role")
+"""The changes a false test item can be made by. ``predicate``, ``subject``, ``quantifier``, and
+``role`` are those of ``CORPUS_GENERATOR.md``; ``polarity`` and ``event`` are the changes of the
+causal sets (``WORLD_AND_LANGUAGE.md``, "Test sets"), beside ``predicate`` and ``role``."""
 WORLD_KINDS = ("config", "run")
 
 
@@ -214,6 +224,9 @@ class PropositionsConfig:
     """The rate of negative propositions at the class level, at the instance level, among the
     initial-state sentences (``state``), and among the blocked sentences (``able_now``)."""
     rule_statement_rate: float
+    causal_statement_rate: float
+    """The probability that a sentence of a feature document about an event type or a fluent is
+    a causal statement."""
     rule_max_literals: int | None
     """The most literals in the term of a rule statement; a longer term is skipped and counted.
     None: no cap."""
@@ -228,6 +241,7 @@ class PropositionsConfig:
         return {
             "negation_rate": dict(self.negation_rate),
             "rule_statement_rate": self.rule_statement_rate,
+            "causal_statement_rate": self.causal_statement_rate,
             "rule_statements": {"max_literals": self.rule_max_literals},
             "restriction_rate": self.restriction_rate,
             "events": {"tense": self.event_tense},
@@ -356,6 +370,9 @@ class WordOrderConfig:
     adposition: str
     auxiliary: str
     negation: str
+    before: str
+    """Where the function word ``before`` of a precondition statement stands:
+    ``after_predicate`` or ``before_predicate``."""
 
     def resolved(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -448,9 +465,16 @@ class TestSetsConfig:
 
     size: int
     changes: tuple[str, ...]
+    seen_descriptions: bool
+    """Whether a description counts as stated, for the ``seen`` mark of a test item
+    (``test_sets.seen.descriptions``)."""
 
     def resolved(self) -> dict[str, Any]:
-        return {"size": self.size, "changes": list(self.changes)}
+        return {
+            "size": self.size,
+            "changes": list(self.changes),
+            "seen": {"descriptions": self.seen_descriptions},
+        }
 
 
 @dataclass(frozen=True)
@@ -470,6 +494,9 @@ class Config:
     grammar: GrammarConfig
     scalar_z: float
     propositional_referents: str
+    propositional_descriptions: str
+    """``marked``: the propositional rendering writes the descriptions in braces before the
+    assertion. ``omitted``: it holds the assertion only."""
     test_sets: TestSetsConfig
     source: str
     """Where the configuration came from: the file path, or a label for an in-memory mapping."""
@@ -492,7 +519,12 @@ class Config:
             "mention": self.mention.resolved(),
             "grammar": self.grammar.resolved(),
             "scalar_adjectives": {"z": self.scalar_z},
-            "renderings": {"propositional": {"referents": self.propositional_referents}},
+            "renderings": {
+                "propositional": {
+                    "referents": self.propositional_referents,
+                    "descriptions": self.propositional_descriptions,
+                }
+            },
             "test_sets": self.test_sets.resolved(),
         }
 
@@ -643,6 +675,7 @@ def _read_propositions(node: _Node) -> PropositionsConfig:
     config = PropositionsConfig(
         negation_rate=_probabilities(node.mapping("negation_rate"), NEGATION_DEFAULTS),
         rule_statement_rate=node.probability("rule_statement_rate", 0.3),
+        causal_statement_rate=node.probability("causal_statement_rate", 0.5),
         rule_max_literals=max_literals,
         restriction_rate=node.probability("restriction_rate", 0.1),
         event_tense=event_tense,
@@ -868,6 +901,7 @@ def _read_grammar(node: _Node, event_tense: str) -> GrammarConfig:
         adposition=words.choice("adposition", "preposition", ADPOSITIONS),
         auxiliary=words.choice("auxiliary", "before", SIDES),
         negation=words.choice("negation", "after_auxiliary", NEGATION_POSITIONS),
+        before=words.choice("before", "after_predicate", BEFORE_POSITIONS),
     )
     words.finish()
     can_node = node.mapping("can_rate")
@@ -898,7 +932,14 @@ def _read_test_sets(node: _Node) -> TestSetsConfig:
             )
     if len(set(changes)) != len(changes):
         raise node.error("changes", "the changes must be distinct")
-    config = TestSetsConfig(size=node.int("size", 500, min=0), changes=tuple(changes))
+    seen = node.mapping("seen")
+    seen_descriptions = seen.bool("descriptions", True)
+    seen.finish()
+    config = TestSetsConfig(
+        size=node.int("size", 500, min=0),
+        changes=tuple(changes),
+        seen_descriptions=seen_descriptions,
+    )
     node.finish()
     return config
 
@@ -946,6 +987,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     renderings = root.mapping("renderings")
     propositional = renderings.mapping("propositional")
     referents = propositional.choice("referents", "local", REFERENT_LABELS)
+    descriptions = propositional.choice("descriptions", "marked", DESCRIPTION_MODES)
     propositional.finish()
     renderings.finish()
     test_sets = _read_test_sets(root.mapping("test_sets"))
@@ -964,6 +1006,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         grammar=grammar,
         scalar_z=float(z),
         propositional_referents=referents,
+        propositional_descriptions=descriptions,
         test_sets=test_sets,
         source=source,
     )

@@ -39,6 +39,7 @@ documents:
 propositions:
   negation_rate: {class: 0.1, instance: 0.1, state: 0.1, able_now: 0.8}   # state: initial-state sentences; able_now: blocked sentences ("could not" rather than "could")
   rule_statement_rate: 0.3       # share of feature-topic sentences that state rules
+  causal_statement_rate: 0.5     # share of sentences of a feature document about an event type or a fluent that are causal statements
   rule_statements: {max_literals: null}   # a number skips the rule terms with more literals; null: no cap
   restriction_rate: 0.1          # the probability that a class-level subject takes a restriction ("red penguins")
   events: {tense: past}          # the tense of every event (past or present)
@@ -80,7 +81,7 @@ mention:
 grammar:
   adjective_order: {fixed: true}
   can_rate: {class: 0.5, instance: 1.0}   # share of positive capacities that say "can"; below 1 at the instance level, "the penguin swim" is ambiguous
-  word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary}
+  word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary, before: after_predicate}   # before: where the function word "before" of a precondition statement stands
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
     tense: {enabled: false, realization: affix, position: after}    # whether and how the past is marked
@@ -89,8 +90,9 @@ grammar:
 scalar_adjectives: {z: 1.0}
 
 renderings:
-  propositional: {referents: local}   # local (REF.1, REF.2, ... within each document) or instance (entity labels)
+  propositional: {referents: local, descriptions: marked}   # referents: local (REF.1, REF.2, ... within each document) or instance (entity labels); descriptions: marked (in braces before the assertion) or omitted
 
 test_sets:
   size: 500                      # true items per set; each gets one matched false item
-  changes: [predicate, subject, quantifier, role]
+  changes: [predicate, subject, quantifier, polarity, event, role]   # polarity and event apply to the causal sets
+  seen: {descriptions: true}     # whether a description counts as stated, for the seen mark

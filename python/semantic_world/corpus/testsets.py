@@ -7,7 +7,10 @@ A false proposition is made from a true one by one minimal change:
 - **quantifier:** another quantifier that makes it false ("all" for a "most" fact), among the
   quantifiers the language can state;
 - **role** (two-place event types only): agent and patient exchanged, when the reversed
-  requirement does not hold.
+  requirement does not hold;
+- **polarity** (causal statements only): the opposite value of the effect or the literal;
+- **event** (causal statements only): another event type, or category at the same level, that
+  lacks the effect or the literal.
 
 Every false item is checked false by the same truth tests that ground the true propositions. A
 false item is never vacuous: its subject set has at least one instance.
@@ -34,7 +37,19 @@ kinds of item have test sets of their own:
 - ``able_now_<change>_blocked`` and ``able_now_<change>_impossible``. An ``able_now`` item
   continues a situational narrative and says that a participant could do something at the
   scene's final time point. A false item's binding is able and not legal then (``blocked``), or
-  not able (``impossible``).
+  not able (``impossible``);
+- ``causal_effect_<change>`` and ``causal_precondition_<change>``, with their ``_lawlike``
+  twins. A causal item states an effect or a precondition of an event type, and every false
+  item is false under ``NEC``: the definition lacks the entry. A false item that held after (an
+  effect) or before (a precondition) every event of its type in the corpus's scenes, of which
+  there was at least one, is marked ``observed`` and goes into the ``_lawlike`` twin, as CG.59
+  puts a false ``nec`` item whose extensional twin is true. The changes are a predicate swap
+  (another fluent), a polarity swap (the opposite value), an event swap (another event type, or
+  category at the same level), and a role swap (the other role, for two-place event types).
+
+A state pair records which of its items changed (``changed_item``: ``true_item``,
+``false_item``, ``both``, or null for a pair of the ``_unchanged`` set), beside each item's
+``changed`` mark.
 
 **Context.** An instance-level or event-level item names a narrative document, and is a
 continuation of it: its noun phrases are definite mentions of referents that the document has
@@ -68,7 +83,9 @@ item says, and the two items of a pair mention an instance in the same way.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import re
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -87,14 +104,16 @@ from semantic_world.corpus.histories import (
     time_key,
 )
 from semantic_world.corpus.lexicon import THING
-from semantic_world.corpus.logical import logical_form
+from semantic_world.corpus.logical import is_descriptive, logical_form
 from semantic_world.corpus.mentions import Mentions, clause_propositions, plan_for
 from semantic_world.corpus.planner import CONTENT_KINDS, RELATION, SITUATIONAL, Document, Planner
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
+    AGENT,
     CAN,
     CHANGE,
     CLASS,
+    EFFECT,
     EVENT,
     FEATURE_KINDS,
     HAS,
@@ -104,6 +123,8 @@ from semantic_world.corpus.propositions import (
     MOST,
     NEC_KINDS,
     NEC_QUANTIFIERS,
+    PATIENT,
+    PRECONDITION,
     PROGRESSIVE,
     PROJECTION,
     QUANTIFIERS,
@@ -115,6 +136,7 @@ from semantic_world.corpus.propositions import (
     TIMED_LEVELS,
     VERB,
     CategoryTerm,
+    EventTerm,
     Predicate,
     Proposition,
     Truth,
@@ -129,7 +151,10 @@ PREDICATE = "predicate"
 SUBJECT = "subject"
 QUANTIFIER = "quantifier"
 ROLE = "role"
-CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, ROLE)
+POLARITY = "polarity"
+EVENT_SWAP = "event"
+"""The event swap of the causal sets (``test_sets.changes`` writes it ``event``)."""
+CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE)
 
 LAWLIKE = "lawlike"
 POSSIBLE = "possible"
@@ -138,8 +163,21 @@ IMPOSSIBLE = "impossible"
 CHANGED = "changed"
 UNCHANGED = "unchanged"
 _ORDINARY = ""
-ITEM_LEVELS = (CLASS, INSTANCE, EVENT, STATE, ABLE_NOW)
+CAUSAL_EFFECT = "causal_effect"
+CAUSAL_PRECONDITION = "causal_precondition"
+CAUSAL_LEVELS = (CAUSAL_EFFECT, CAUSAL_PRECONDITION)
+"""The two causal "levels" of the test sets: their items are class-level propositions, and the
+sets are named by the kind of statement."""
+_CAUSAL_KIND = {CAUSAL_EFFECT: EFFECT, CAUSAL_PRECONDITION: PRECONDITION}
+ITEM_LEVELS = (CLASS, INSTANCE, EVENT, STATE, ABLE_NOW, CAUSAL_EFFECT, CAUSAL_PRECONDITION)
 """The levels that have test sets, in file order (a change is stated in documents only)."""
+TRUE_ITEM = "true_item"
+FALSE_ITEM = "false_item"
+BOTH_ITEMS = "both"
+NEITHER_ITEM = "neither"
+CHANGED_ITEMS = (TRUE_ITEM, FALSE_ITEM, BOTH_ITEMS, NEITHER_ITEM)
+"""Which item of a state pair changed, as ``changed_item`` records it (``neither`` is written
+null in the metadata)."""
 
 _DRAWS_PER_PAIR = 60
 _DRAWS = 300
@@ -153,9 +191,12 @@ LEVEL_CHANGES = {
     EVENT: (PREDICATE, SUBJECT, ROLE),
     STATE: (PREDICATE, SUBJECT),
     ABLE_NOW: (PREDICATE, SUBJECT),
+    CAUSAL_EFFECT: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
+    CAUSAL_PRECONDITION: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
 }
 """The changes that can apply at each level: only a class-level proposition has a quantifier,
-and the state and ``able_now`` sets take a predicate swap and a subject swap."""
+the state and ``able_now`` sets take a predicate swap and a subject swap, and the causal sets
+the predicate, polarity, event, and role swaps."""
 
 INPUT_FIELDS = (
     "document",
@@ -203,6 +244,9 @@ def candidates(
             for label in labels
             if label != predicate.label
         ]
+
+    if isinstance(subject, EventTerm):
+        return _causal_candidates(facts, proposition, change)
 
     if change == PREDICATE:
         if proposition.level in (EVENT, ABLE_NOW):
@@ -262,6 +306,39 @@ def candidates(
     return [dataclasses.replace(proposition, subject=predicate.patient, predicate=swapped)]
 
 
+def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
+    """The candidates of a causal statement: another base fluent with a word (``predicate``),
+    the opposite value (``polarity``), another event type or category at the same level with a
+    word (``event``), or the other role of a two-place event type (``role``)."""
+    subject, predicate = proposition.subject, proposition.predicate
+    assert isinstance(subject, EventTerm)
+    world = facts.world
+    if change == PREDICATE:
+        return [
+            dataclasses.replace(proposition, predicate=dataclasses.replace(predicate, label=f))
+            for f in facts.base_fluents
+            if f != predicate.label
+        ]
+    if change == POLARITY:
+        flipped = dataclasses.replace(predicate, value=not predicate.value)
+        return [dataclasses.replace(proposition, predicate=flipped)]
+    if change == EVENT_SWAP:
+        info = world.event_types[subject.event_type]
+        return [
+            dataclasses.replace(proposition, subject=dataclasses.replace(subject, event_type=e))
+            for e in facts.event_type_labels
+            if e != subject.event_type
+            and world.event_types[e].arity == info.arity
+            and world.event_types[e].level == info.level
+        ]
+    if change == ROLE:
+        if world.event_types[subject.event_type].arity < 2:
+            return []
+        other = PATIENT if subject.role == AGENT else AGENT
+        return [dataclasses.replace(proposition, subject=dataclasses.replace(subject, role=other))]
+    return []
+
+
 def falsify(
     facts: Facts,
     proposition: Proposition,
@@ -295,6 +372,11 @@ def falsify(
 
 def changes_for(proposition: Proposition) -> tuple[str, ...]:
     """The kinds of change that can apply to a proposition at all."""
+    if isinstance(proposition.subject, EventTerm):
+        changes = [PREDICATE, POLARITY, EVENT_SWAP]
+        if not proposition.subject.event_type.startswith("EVENTTYPE1."):
+            changes.append(ROLE)
+        return tuple(changes)
     changes = [PREDICATE, SUBJECT]
     if proposition.level == CLASS:
         changes.append(QUANTIFIER)
@@ -348,16 +430,21 @@ def happened(truth: Truth, scenes: Sequence[History], proposition: Proposition) 
 # ---------------------------------------------------------------------------------------------
 
 
-def stated_propositions(documents: Sequence[Document]) -> set[Proposition]:
+def stated_propositions(
+    documents: Sequence[Document], descriptions: bool = True
+) -> set[Proposition]:
     """Every proposition that the documents state, for the ``seen`` mark of a test item:
 
     - the proposition of every main clause;
     - in a sentence about instances, the proposition of every relative clause, and what every
       noun phrase says of its referent: its noun (membership), and its modifiers.
 
-    An event-level proposition is kept without its event label, as a test item writes it, and
-    without its aspect, which is the report's choice. The restriction of a class-level subject
-    asserts nothing, and adds nothing here."""
+    With ``descriptions`` false (``test_sets.seen.descriptions``), a description counts for
+    nothing: a definite mention's noun, modifiers, and relative clause identify the referent
+    and assert nothing (CG.63), so only the indefinite mentions' nouns and modifiers, their
+    relative clauses, and the main clauses count. An event-level proposition is kept without
+    its event label, as a test item writes it, and without its aspect, which is the report's
+    choice. The restriction of a class-level subject asserts nothing, and adds nothing here."""
     stated: set[Proposition] = set()
 
     def add(proposition: Proposition) -> None:
@@ -365,15 +452,19 @@ def stated_propositions(documents: Sequence[Document]) -> set[Proposition]:
             proposition = dataclasses.replace(proposition, event=None, aspect=SIMPLE)
         stated.add(proposition)
 
+    def counts(phrase: NounPhrase) -> bool:
+        return descriptions or not is_descriptive(phrase)
+
     for document in documents:
         for sentence in document.sentences:
             add(sentence.proposition)
             if sentence.proposition.level == CLASS:
                 continue
-            for proposition in clause_propositions(sentence.plan):
-                add(proposition)
+            for phrase, proposition in phrase_clause_propositions(sentence.plan):
+                if counts(phrase):
+                    add(proposition)
             for phrase in sentence.plan.noun_phrases():
-                if phrase.noun is None:
+                if phrase.noun is None or not counts(phrase):
                     continue
                 instance = phrase.referent
                 add(Proposition(INSTANCE, instance, Predicate(MEMBER, phrase.noun)))
@@ -386,6 +477,30 @@ def stated_propositions(documents: Sequence[Document]) -> set[Proposition]:
                         predicate = Predicate(kind, literal.feature)
                         add(Proposition(INSTANCE, instance, predicate, literal.positive))
     return stated
+
+
+def phrase_clause_propositions(plan: SentencePlan) -> list[tuple[NounPhrase, Proposition]]:
+    """The proposition of every relative clause of a plan, each with the noun phrase whose
+    clause it is: :func:`clause_propositions` with the heads, in the same order."""
+    propositions = clause_propositions(plan)
+    heads: list[NounPhrase] = []
+
+    def visit(phrase: NounPhrase | None) -> None:
+        if phrase is None or phrase.clause is None:
+            return
+        clause = phrase.clause
+        if clause.agent is not None:
+            heads.append(phrase)
+            visit(clause.agent)
+            return
+        for predication in clause.predications:
+            if predication.kind != SCALAR:
+                heads.append(phrase)
+            visit(predication.object)
+
+    visit(plan.subject)
+    visit(plan.predication.object)
+    return list(zip(heads, propositions, strict=True))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -469,7 +584,7 @@ def input_problems(item: dict[str, Any]) -> list[str]:
         problems.append(f"the fields are {list(item)}, not {list(INPUT_FIELDS)}")
         return problems
     form = item["logical_form"]
-    for key in ("id", "grounding", "rule"):
+    for key in ("id", "grounding", "rule", "causal"):
         if key in form:
             problems.append(f"the logical form holds {key!r}, which is metadata")
     if _EVENT_LABEL.search(item["propositional"]) or _EVENT_LABEL.search(str(form)):
@@ -548,6 +663,8 @@ class ItemSet:
             record["items_changed_share"] = (
                 round(changed / len(self.items), 6) if self.items else None
             )
+            by_item = Counter(true.meta["changed_item"] or NEITHER_ITEM for true, _ in self.pairs)
+            record["pairs_by_changed_item"] = {kind: by_item[kind] for kind in CHANGED_ITEMS}
         return record
 
 
@@ -573,6 +690,8 @@ def _kinds(level: str, change: str) -> tuple[str, ...]:
         return (CHANGED, UNCHANGED)
     if level == ABLE_NOW:
         return (BLOCKED, IMPOSSIBLE)
+    if level in CAUSAL_LEVELS:
+        return (_ORDINARY, LAWLIKE)
     return (_ORDINARY,)
 
 
@@ -592,7 +711,7 @@ class TestSetBuilder:
         self.truth = planner.truth
         self.streams = planner.streams
         self.size = planner.config.test_sets.size
-        self.stated = stated_propositions(documents)
+        self.stated = stated_propositions(documents, self.config.test_sets.seen_descriptions)
         self.narratives = [d for d in documents if d.scenes and d.referents]
         self._events: dict[str, SceneEvent] = {
             event.label: event
@@ -638,6 +757,8 @@ class TestSetBuilder:
             EVENT: self._draw_event,
             STATE: self._draw_state,
             ABLE_NOW: self._draw_able_now,
+            CAUSAL_EFFECT: functools.partial(self._draw_causal, EFFECT),
+            CAUSAL_PRECONDITION: functools.partial(self._draw_causal, PRECONDITION),
         }
         idle = 0
         for _ in range(_DRAWS_PER_PAIR * self.size + _DRAWS if self.size else 0):
@@ -652,7 +773,11 @@ class TestSetBuilder:
             key = (None if document is None else document.label, true)
             if key in used:
                 continue
-            if open_kinds == {LAWLIKE} and not _can_be_law_like(self.truth, true, change):
+            if (
+                open_kinds == {LAWLIKE}
+                and level == CLASS
+                and not _can_be_law_like(self.truth, true, change)
+            ):
                 continue
 
             def accept(
@@ -690,6 +815,8 @@ class TestSetBuilder:
         pair, its true item too), or None for a false item that no set takes."""
         if level == CLASS:
             return LAWLIKE if law_like(self.truth, false) else _ORDINARY
+        if level in CAUSAL_LEVELS:
+            return LAWLIKE if self.truth.observed(false) else _ORDINARY
         if level == INSTANCE:
             return _ORDINARY
         assert document is not None and false.grounding is not None
@@ -826,6 +953,20 @@ class TestSetBuilder:
         )
         return None if proposition is None else (document, proposition, False)
 
+    def _draw_causal(
+        self, kind: str, rng: np.random.Generator, change: str, aspects: np.random.Generator
+    ) -> tuple[None, Proposition, bool] | None:
+        """A true causal statement of the set's kind (an effect or a precondition), drawn
+        uniformly among the world's, with a bare plural at the generic rate as a feature
+        document draws it. A role swap needs a two-place event type."""
+        pool = self.facts.causal_statements(kind=kind)
+        if change == ROLE:
+            pool = tuple(p for p in pool if not p.subject.event_type.startswith("EVENTTYPE1."))
+        fact = self.facts.draw_causal_statement(rng, pool)
+        if fact is None:
+            return None
+        return None, fact, self.planner._bare(rng, fact)
+
     # Items -----------------------------------------------------------------------------------
 
     def _pair(
@@ -843,12 +984,22 @@ class TestSetBuilder:
         true item with a bare plural; the false item follows it when its quantifier allows, and
         takes the bare plural when the language has no word for its quantifier."""
         items = []
+        changed_item = None
+        if level == STATE:
+            assert true.grounding is not None and false.grounding is not None
+            marks = (true.grounding["changed"], false.grounding["changed"])
+            changed_item = {
+                (True, True): BOTH_ITEMS,
+                (True, False): TRUE_ITEM,
+                (False, True): FALSE_ITEM,
+                (False, False): None,
+            }[marks]
         for proposition, truth in ((true, True), (false, False)):
-            if level == CLASS and proposition.quantifier is not None:
+            if proposition.level == CLASS and proposition.quantifier is not None:
                 sayable = proposition.quantifier in self.truth.sayable
                 is_bare = not sayable or (bare and self.truth.bare_plural_expresses(proposition))
             else:
-                is_bare = level == CLASS
+                is_bare = proposition.level == CLASS
             record = self._input(name, number, document, proposition, is_bare)
             if record is None:
                 return None
@@ -874,10 +1025,14 @@ class TestSetBuilder:
                 meta["law_like"] = not truth and law_like(self.truth, proposition)
                 rule = proposition.rule
                 meta["rule"] = None if rule is None else {"feature": rule[0], "term": rule[1]}
+            elif level in CAUSAL_LEVELS:
+                meta["observed"] = not truth and self.truth.observed(proposition)
+                meta["causal"] = proposition.causal_record()
             elif level in (EVENT, ABLE_NOW):
                 meta["possible"] = proposition.grounding["able"]
             elif level == STATE:
                 meta["changed"] = proposition.grounding["changed"]
+                meta["changed_item"] = changed_item
             meta["grounding"] = proposition.grounding
             items.append(Item(record, meta, proposition))
         problems = format_differences(items[0].input, items[1].input)
@@ -962,7 +1117,7 @@ class TestSetBuilder:
         grammar_rng = self.streams.substream("grammar", f"tests:{name}.{number}")
         sentence = planner.realizer.realize(plan, grammar_rng)
         form = logical_form(plan, proposition, referents)
-        for key in ("id", "grounding", "rule"):
+        for key in ("id", "grounding", "rule", "causal"):
             form.pop(key, None)
         return {
             "document": None if document is None else document.label,
@@ -971,7 +1126,9 @@ class TestSetBuilder:
             "text": None,
             "formal": sentence.formal,
             "conceptual": sentence.conceptual,
-            "propositional": propositional(form, self.config.propositional_referents),
+            "propositional": propositional(
+                form, self.config.propositional_referents, self.config.propositional_descriptions
+            ),
             "tree": as_json(sentence.tree),
             "logical_form": form,
             "referents": [
