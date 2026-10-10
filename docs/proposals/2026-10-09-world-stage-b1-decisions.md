@@ -181,9 +181,9 @@ Each criterion of the stage prompt, and how it was checked.
 - **Replay reproduces every recorded change and nothing else**: `test_replay_reproduces_every_recorded_change_under_conditions` (200 episodes of the conditional tiny world, with effects that fired and effects that did not), and the a4 replay test on the tiny world.
 - **No causal statement true by a conditional effect**, by the oracle's independent re-reading: `test_no_causal_statement_is_true_by_a_conditional_effect`, and the a7b tests with `record_entries` leaving out conditional effects.
 - **Every capped causal set holds every statement; every causal item carries its statement record**: `test_capped_causal_sets_keep_every_statement`, `test_the_causal_sets_are_capped_at_the_size`; in the default corpus the two full event-swap sets hold all 57 and 54 statements.
-- **Every corpus test passes**, with the changed expectations listed above (the full suite, below).
+- **Every corpus test passes**, with the changed expectations listed above: `pytest tests/corpus` ran once alone (two expectations then changed, listed above) and once more inside the full suite.
 - **The full chain on the tiny configuration**: `define`, `generate`, `wordforms forms` (in the word-form command test, from the guides' commands), and `render` (203 sentences and 1,068 test items rendered).
-- **The full check list** of `CLAUDE.md`: see the report (`cargo fmt`, `cargo clippy`, `cargo test`, `maturin develop --release`, `ruff check`, `pytest`).
+- **The full check list** of `CLAUDE.md`: `cargo fmt --all --check`, `cargo clippy` with warnings as errors, `cargo test --workspace --all-features`, `maturin develop --release`, `ruff check python tests`, and `pytest` (1,944 tests passed, none failed or skipped; the suite's quiet mode prints no total, so the count is the dots of its output) all pass on the final code.
 
 ## Notes for stage b2
 
