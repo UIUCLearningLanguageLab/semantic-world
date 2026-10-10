@@ -123,6 +123,7 @@ def test_homophones_count_as_correct(tmp_path, common_english):
     assert set(common_english.pronunciations[("DH", "EH", "R")]) >= {"their", "there"}
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_espeak
 @needs_piper

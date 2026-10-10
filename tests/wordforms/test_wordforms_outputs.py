@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import polars as pl
+import pytest
 import yaml
 from wordforms_support import DATA, needs_cmudict, needs_wordfreq
 
@@ -83,6 +84,7 @@ def test_same_seed_gives_identical_files(tmp_path):
     ).read_bytes()
 
 
+@pytest.mark.slow
 def test_all_runs_the_built_layers(tmp_path):
     out = tmp_path / "run"
     assert main(["all", str(DATA / "tiny.yaml"), "--out", str(out)]) == 0

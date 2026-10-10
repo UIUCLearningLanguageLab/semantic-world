@@ -343,6 +343,7 @@ def test_progress_is_reported(synthesis, tmp_path):
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio

@@ -184,6 +184,10 @@ def relation_stats(statics: StaticWorld) -> dict[str, Any] | None:
     return block
 
 
+def _share(count: int, total: int) -> float:
+    return round(count / total, 6) if total else 0.0
+
+
 def world_stats(
     fluents: Fluents,
     event_types: EventTypes,
@@ -233,7 +237,18 @@ def world_stats(
             "by_kind": effects_by_kind,
             "by_role": effects_by_role,
             "from_features": sum(1 for v in event_types.feature_effects.values() if v is not None),
-            "conditional": {"total": sum(conditional.values()), "by_kind": conditional},
+            "conditional": {
+                "total": sum(conditional.values()),
+                "by_kind": conditional,
+                # Jon's ruling 2 on stage b1: the share of the effects a condition was drawn for
+                # (an inherited effect once) that got one, beside the share of all effects of
+                # all event types, which inheritance makes larger
+                "share_of_drawn": _share(
+                    event_types.condition_draws.get("conditional", 0),
+                    event_types.condition_draws.get("drawn", 0),
+                ),
+                "share_of_all": _share(sum(conditional.values()), sum(effects_by_kind.values())),
+            },
             "condition_literals": {
                 "total": condition_literals["total"],
                 "by_symbol": {

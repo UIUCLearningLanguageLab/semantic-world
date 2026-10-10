@@ -116,7 +116,7 @@ def test_hand_fixtures_are_what_the_hand_world_script_writes() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     fixtures = module.hand_fixtures()
-    assert len(fixtures) == 17
+    assert len(fixtures) == len(list(FIXTURES_DIR.glob("hand_*.json")))
     for fixture in fixtures:
         path = FIXTURES_DIR / f"{fixture['name']}.json"
         assert (

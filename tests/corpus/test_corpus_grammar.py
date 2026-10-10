@@ -1031,6 +1031,7 @@ def test_readings_of_the_fixed_set(tiny) -> None:
     assert readings(sentence.tree, lexicon, config) == ("capacity",)
 
 
+@pytest.mark.slow
 def test_adjective_order(cases) -> None:
     case = cases("default")
     adjectives = ("PROPERTY.3", "PROPERTY.17", "SCALARDIM.1.HIGH", "PROPERTY.30", "SCALARDIM.2.LOW")

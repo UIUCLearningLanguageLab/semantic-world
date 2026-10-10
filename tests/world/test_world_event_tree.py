@@ -416,6 +416,7 @@ def test_event_tree_is_seeded_by_the_world_not_the_taxonomy() -> None:
         assert getattr(taxonomy_streams, name).random() == getattr(untouched, name).random()
 
 
+@pytest.mark.slow
 def test_taxonomy_outputs_are_unchanged_when_only_binary_settings_change(tmp_path: Path) -> None:
     variants = [
         None,

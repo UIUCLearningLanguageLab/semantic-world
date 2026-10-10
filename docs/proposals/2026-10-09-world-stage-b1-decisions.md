@@ -195,3 +195,12 @@ What the builder of the world's comparisons and numeric fluents must know about 
 - **The corpus** reads effects in `propositions.unconditional_effects` (used by `Truth.has_entry` and `_evaluate_causal`) and the oracle's `entries`; `Facts.causal_statements` enumerates over `has_entry`. The `RAISES` and `LOWERS` statements of phase (b) are stage b3's, but their truth will read the numeric effects there; a conditional numeric effect is, by the same rule, no entry until the conditional causal statements come.
 - **The causal sets** are enumerated and capped by the stratified draw (choice 14); every pair carries `statement` and `statement_record`.
 - **The reference runs** of this stage are in `/Users/jon/Documents/Projects/semantic-world-reference/b1/` (the tiny and default worlds and corpora from `main` at 20111ba, before the stage).
+
+## Jon's rulings on the open questions
+
+Ruled on October 10, 2026, and recorded here; WM.E174 to WM.E190 are decided. The follow-ups were built in the process-cleanup session (`docs/proposals/2026-10-10-process-cleanup.md`).
+
+1. **The kind of a condition literal** (question 1): the split is a setting, `event_types.effects.condition_kinds`, a weight map over `feature` and `fluent` with the default `{feature: 0.5, fluent: 0.5}`. The split is a choice of the generator, not a frequency of the world: a uniform draw over symbols gives almost no fluent conditions, because static features far outnumber fluents. Built as follow-up 1 of the cleanup session; with the default the draws are exactly those of this stage, so the definitions are unchanged.
+2. **The share counts drawn effects** (question 2): `conditional_share` keeps counting drawn effects, as `feature_rate` does; inheritance is the world's own structure. `world_stats.yaml` reports both the drawn share and the share of all effects of all event types (31% in the default world). Built as follow-up 2 of the cleanup session.
+3. **A never-able holder counts as satisfied** (question 3): accepted.
+4. **Conditions stay on the effect's record** (question 4): the Rust runtime reads a condition as it reads a precondition, literal by literal; neither becomes a matrix rule.

@@ -264,6 +264,7 @@ def test_brute_force_on_the_default_world_for_a_few_event_types(default: StaticW
         )
 
 
+@pytest.mark.slow
 def test_no_instance_is_related_to_itself(tiny: StaticWorld, default: StaticWorld) -> None:
     for statics in (tiny, default):
         n = len(statics.instances)
@@ -273,6 +274,7 @@ def test_no_instance_is_related_to_itself(tiny: StaticWorld, default: StaticWorl
         assert not statics.relations.holds(statics.event_tree.event_types[0], idx, idx).any()
 
 
+@pytest.mark.slow
 def test_relations_imply_their_ancestors_base_relations(
     tiny: StaticWorld, default: StaticWorld
 ) -> None:
@@ -445,6 +447,7 @@ def test_key_lock_structure() -> None:
     assert found
 
 
+@pytest.mark.slow
 def test_comparisons_agree_with_direct_arithmetic(tiny: StaticWorld, default: StaticWorld) -> None:
     checked = 0
     for statics in (tiny, default):

@@ -232,6 +232,7 @@ def test_patients_with_relative_clauses_are_judged_as_the_output_files_say(cases
     assert agree(case, {}, forms) > 500
 
 
+@pytest.mark.slow
 def test_a_relative_clause_is_restrictive_and_means_at_least_one(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -286,6 +287,7 @@ def restricted_subject(facts, minimum: int = 3):
     raise AssertionError("no restricted subject with a feature that every member has")
 
 
+@pytest.mark.slow
 def test_a_subject_with_a_relative_clause_takes_the_extensional_quantifiers(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -401,7 +403,9 @@ def test_relative_clauses_that_cannot_be_judged(tiny) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["tiny", "default", "deep", "still"])
+@pytest.mark.parametrize(
+    "name", ["tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still"]
+)
 def test_the_fixed_test_matches_the_defining_vectors(cases, name) -> None:
     # For a category without a restriction, the fixed test is the taxonomy generator's own:
     # categories_defining.csv holds the value of every fixed feature, and NaN elsewhere.
@@ -694,6 +698,7 @@ def test_membership(tiny) -> None:
     assert truth.evaluate(restricted).true == (len(truth.members(restricted.subject)) > 0)
 
 
+@pytest.mark.slow
 def test_class_level_scalar_poles(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -747,6 +752,7 @@ def test_class_level_scalar_poles(cases) -> None:
     assert count(1.0) > 0
 
 
+@pytest.mark.slow
 def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> None:
     case = cases("default")
     truth = case.facts(scalar_adjectives={"z": 0.5}).truth
@@ -779,6 +785,7 @@ def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> N
     assert differ > 0  # "the big mouse" can be "the small animal"
 
 
+@pytest.mark.slow
 def test_a_pole_in_a_restriction_is_relative_to_the_category(cases) -> None:
     case = cases("default")
     truth = case.facts().truth
@@ -837,6 +844,7 @@ def test_patient_capacities_at_the_class_level(tiny) -> None:
             assert "extensional" in judge_projection(category, quantifier).reason
 
 
+@pytest.mark.slow
 def test_relation_facts_use_the_able_tables_for_any_pair_of_categories(cases) -> None:
     case = cases("default")
     facts = case.facts()

@@ -42,7 +42,7 @@ from semantic_world.corpus.testsets import (
     falsify,
 )
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 
 
 def true_items(case, per_kind: int = 12) -> list:
@@ -146,6 +146,7 @@ def test_changes_that_can_apply(cases) -> None:
     assert candidates(facts, instance, QUANTIFIER) == [] and candidates(facts, feature, ROLE) == []
 
 
+@pytest.mark.slow
 def test_false_events_did_not_happen_in_their_scene(cases) -> None:
     # A false event is an event that did not happen in its scene. It names no event.
     case = cases("default")
@@ -187,6 +188,7 @@ def test_false_events_did_not_happen_in_their_scene(cases) -> None:
     assert all(made[change] > 20 for change in (PREDICATE, SUBJECT, ROLE)), made
 
 
+@pytest.mark.slow
 def test_quantifier_swaps(cases) -> None:
     case = cases("default")
     facts, truth = case.facts(), case.facts().truth
@@ -220,6 +222,7 @@ def test_quantifier_swaps(cases) -> None:
     assert not any(kind == SCALAR for kind, _, _ in seen)
 
 
+@pytest.mark.slow
 def test_a_false_item_about_a_scalar_pole_keeps_its_comparison_class(cases) -> None:
     case = cases("default")
     facts = case.facts(scalar_adjectives={"z": 0.5})
@@ -241,6 +244,7 @@ def test_a_false_item_about_a_scalar_pole_keeps_its_comparison_class(cases) -> N
     assert made > 10
 
 
+@pytest.mark.slow
 def test_rule_statements_have_false_versions(cases) -> None:
     case = cases("default")
     facts, oracle = case.facts(), case.oracle()
@@ -278,6 +282,7 @@ def test_false_items_are_never_vacuous(cases) -> None:
     assert made > 10
 
 
+@pytest.mark.slow
 def test_false_items_are_reproducible(cases) -> None:
     case = cases("default")
     facts = case.facts()

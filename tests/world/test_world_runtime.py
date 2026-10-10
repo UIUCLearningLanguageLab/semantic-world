@@ -312,6 +312,7 @@ def test_malformed_events_are_illegal(runtime: RuntimeDefinition) -> None:
         able(runtime, "EVENTTYPE2.1.1", [(0, 0)])
 
 
+@pytest.mark.slow
 def test_interfering_events_raise_the_documented_error(
     runtime: RuntimeDefinition, brute: BruteForce
 ) -> None:

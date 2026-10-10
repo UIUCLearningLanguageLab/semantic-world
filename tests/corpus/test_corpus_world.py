@@ -45,6 +45,7 @@ def same_world(a, b) -> bool:
     )
 
 
+@pytest.mark.slow
 def test_a_configuration_file_is_defined_in_memory(tiny_world) -> None:
     direct = define(load_world_config(TINY_WORLD))
     world = load_world(corpus_config())
@@ -57,6 +58,7 @@ def test_a_configuration_file_is_defined_in_memory(tiny_world) -> None:
     assert world.binary and world.patient_capacities and world.unary
 
 
+@pytest.mark.slow
 def test_the_world_seed_chooses_the_world() -> None:
     def world(seed: int):
         return load_world(config_from_mapping({"world": {"config": TINY_WORLD, "seed": seed}}))
@@ -67,6 +69,7 @@ def test_the_world_seed_chooses_the_world() -> None:
     assert same_world(load_world(corpus_config(seed=99)), world(1))
 
 
+@pytest.mark.slow
 def test_a_run_folder_is_regenerated_and_checked(tmp_path: Path) -> None:
     folder = run_folder(tmp_path, seed=4)
     config = config_from_mapping({"world": {"run": str(folder)}})
@@ -79,6 +82,7 @@ def test_a_run_folder_is_regenerated_and_checked(tmp_path: Path) -> None:
     assert "count: 1000" in (folder / "world_stats.yaml").read_text(encoding="utf-8")
 
 
+@pytest.mark.slow
 def test_a_changed_run_folder_is_an_error(tmp_path: Path) -> None:
     folder = run_folder(tmp_path)
     path = folder / "entities.csv"
@@ -114,6 +118,7 @@ def test_a_changed_manifest_is_an_error(tmp_path: Path, tiny_world) -> None:
     check_run_folder(tiny_world.result, folder)
 
 
+@pytest.mark.slow
 def test_world_identity(tmp_path: Path) -> None:
     config = corpus_config()
     world = load_world(config)

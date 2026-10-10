@@ -533,6 +533,7 @@ def test_closed_class_forms_change_no_content_word():
     assert on.streams.seed("closed_class") != on.streams.seed("generate")
 
 
+@pytest.mark.slow
 def test_content_words_are_the_stage_4_words():
     """With the inflections kept among the pattern words, the content words of the tiny and
     default configurations are the stage 4 words."""
@@ -785,6 +786,7 @@ def test_an_affix_that_too_many_stems_cannot_take_is_rejected(common_english):
     assert sum(rejected.values()) == 0
 
 
+@pytest.mark.slow
 def test_an_inflected_form_that_is_a_common_word_is_skipped(common_english):
     found = False
     for seed in (1, 2, 3, 4):
@@ -933,6 +935,7 @@ def test_the_glide_repair_in_a_run(common_english):
     assert info.value.field == "closed_class.affixes.glide"
 
 
+@pytest.mark.slow
 def test_an_affix_is_never_another_affix_with_the_schwa():
     from semantic_world.wordforms.closed_class import same_after_schwa
 

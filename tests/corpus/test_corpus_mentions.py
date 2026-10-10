@@ -43,7 +43,7 @@ from semantic_world.corpus.propositions import (
     Proposition,
 )
 
-WORLDS = ("tiny", "default", "deep")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep")
 
 
 def rate_settings(**clauses) -> dict:
@@ -128,6 +128,7 @@ def test_class_level_plans(cases) -> None:
     assert plan_for(facts, pole).quantifier is None and plan_for(facts, pole).bare_plural
 
 
+@pytest.mark.slow
 def test_instances_are_mentioned_by_their_leaf_unless_told_otherwise(cases) -> None:
     facts = cases("default").facts()
     instance, other = "INSTANCE.1.2.1.3", "INSTANCE.2.1.1.1"
@@ -154,6 +155,7 @@ def test_instances_are_mentioned_by_their_leaf_unless_told_otherwise(cases) -> N
         assert plan.subject.noun == comparison and plan.proposition() == pole
 
 
+@pytest.mark.slow
 def test_a_membership_sentence_never_names_the_subject_by_the_predicate(cases) -> None:
     facts = cases("default").facts()
     instance = "INSTANCE.1.2.1.3"
@@ -228,6 +230,7 @@ def test_a_relative_clause_expresses_a_true_proposition_about_its_head(cases, na
     assert clauses > 100
 
 
+@pytest.mark.slow
 def test_event_clauses_report_events_of_the_same_scene(cases) -> None:
     case = cases("default")
     # 120 scenes: two-place events, which an object relative needs, are few in the default
@@ -266,28 +269,35 @@ def test_event_clauses_report_events_of_the_same_scene(cases) -> None:
     assert subject_relatives > 50 and object_relatives > 20
 
 
+@pytest.mark.slow
 def test_the_rate_and_the_share_of_object_relatives(cases) -> None:
     case = cases("default")
 
-    def shares(**clauses) -> tuple[float, float]:
+    def shares(**clauses) -> tuple[float, float, int]:
         plans, _ = attach_all(case, rate_settings(max_depth=1, **clauses), EVENT)
         phrases = [p for plan in plans for p in (plan.subject, plan.predication.object) if p]
         with_clause = [p for p in phrases if p.clause is not None]
         objects = [p for p in with_clause if p.clause.agent is not None]
-        return len(with_clause) / len(phrases), len(objects) / max(1, len(with_clause))
+        object_share = len(objects) / max(1, len(with_clause))
+        return len(with_clause) / len(phrases), object_share, len(phrases)
 
-    assert shares(rate=0.0) == (0.0, 0.0)
-    low, _ = shares(rate=0.1)
-    high, _ = shares(rate=0.6)
-    assert 0.03 < low < 0.15 and 0.4 < high <= 0.6
+    assert shares(rate=0.0)[:2] == (0.0, 0.0)
+    # a noun phrase takes a clause at the rate, when a true one exists: the share is at most
+    # the rate, up to three standard errors of a binomial share, and grows with it
+    low, _, phrases = shares(rate=0.1)
+    high, _, _ = shares(rate=0.6)
+    error = (0.6 * 0.4 / phrases) ** 0.5
+    assert 0 < low <= 0.1 + 3 * error and low < high <= 0.6 + 3 * error
+    assert high > 0.6 - 0.1 - 3 * error  # nearly every phrase has a true clause to take
     # when the drawn kind has no true proposition, the other kind is used, so the share of
     # object relatives follows the setting only as far as the events allow
-    _, none = shares(rate=0.6, object_share=0.0)
-    _, most = shares(rate=0.6, object_share=1.0)
-    _, default = shares(rate=0.6)
+    _, none, _ = shares(rate=0.6, object_share=0.0)
+    _, most, _ = shares(rate=0.6, object_share=1.0)
+    _, default, _ = shares(rate=0.6)
     assert none < default < most
 
 
+@pytest.mark.slow
 def test_what_takes_no_drawn_relative_clause(cases) -> None:
     case = cases("default")
     settings = rate_settings(rate=1.0, max_depth=3)
@@ -313,6 +323,7 @@ def test_what_takes_no_drawn_relative_clause(cases) -> None:
         assert none.attach(rng, plan_for(facts, fact)) == plan_for(facts, fact)
 
 
+@pytest.mark.slow
 def test_negated_literals_keep_the_clause_a_subject_relative(cases) -> None:
     case = cases("default")
     settings = rate_settings(rate=1.0, max_depth=1, object_share=1.0)
@@ -333,6 +344,7 @@ def test_negated_literals_keep_the_clause_a_subject_relative(cases) -> None:
     assert plan.subject.clause is not None
 
 
+@pytest.mark.slow
 def test_clauses_are_drawn_from_the_mentions_stream_alone(cases) -> None:
     case = cases("default")
     base, _ = attach_all(case, rate_settings(rate=0.6, max_depth=2), EVENT, seed=3)
@@ -360,6 +372,7 @@ def test_clauses_are_drawn_from_the_mentions_stream_alone(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_plan_of_a_proposition_with_a_restrictive_clause(cases) -> None:
     case = cases("default")
     settings = rate_settings(rate=0.6, max_depth=2)
@@ -394,6 +407,7 @@ def rules_of(case, **mention_settings) -> MentionRules:
     return MentionRules(config, case.facts(**settings), Streams(config.seed))
 
 
+@pytest.mark.slow
 def test_the_preference_order_is_fixed_for_the_language(cases) -> None:
     case = cases("default")
     rules = rules_of(case)
@@ -405,6 +419,7 @@ def test_the_preference_order_is_fixed_for_the_language(cases) -> None:
     assert other.preference != rules.preference
 
 
+@pytest.mark.slow
 def test_the_incremental_algorithm(cases) -> None:
     case = cases("default")
     rules = rules_of(case)
@@ -453,6 +468,7 @@ def test_the_incremental_algorithm(cases) -> None:
     assert literals[0].feature not in [x.feature for x in avoided]
 
 
+@pytest.mark.slow
 def test_a_document_s_mentions(cases) -> None:
     case = cases("default")
     labels = case.world.instances
@@ -490,6 +506,7 @@ def test_a_document_s_mentions(cases) -> None:
     assert mentions.noun_phrase(rng, second).determiner == "a"
 
 
+@pytest.mark.slow
 def test_when_a_mention_can_be_a_pronoun(cases) -> None:
     case = cases("default")
     first, second = "INSTANCE.1.1.1.1", "INSTANCE.2.1.1.1"
@@ -520,6 +537,7 @@ def test_when_a_mention_can_be_a_pronoun(cases) -> None:
     assert mentions.distinguished(mentions.noun_phrase(rng, first)) is not None
 
 
+@pytest.mark.slow
 def test_a_referent_that_cannot_be_told_apart(cases) -> None:
     """With no adjective and no with-phrase allowed, two instances of one leaf cannot be told
     apart. The mention falls back to the noun of the leaf, is kept, and is marked."""
@@ -549,6 +567,7 @@ def test_a_referent_that_cannot_be_told_apart(cases) -> None:
     assert fixed.noun == "CATEGORY.1" and mentions.distinguished(fixed) is False
 
 
+@pytest.mark.slow
 def test_modifiers_at_the_modifier_rate(cases) -> None:
     case = cases("default")
     instance = "INSTANCE.1.1.1.1"

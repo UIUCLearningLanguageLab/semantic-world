@@ -49,7 +49,7 @@ from semantic_world.corpus.propositions import (
     Proposition,
 )
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 EXTENSIONAL = {"quantifiers": {"universal_words": "extensional"}}
 KIND_OF = {"PROPERTY": IS, "PART": HAS, "EVENTTYPE1": CAN}
 
@@ -194,6 +194,7 @@ def test_every_drawn_proposition_passes(cases, name) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("settings", [{}, EXTENSIONAL], ids=["nec", "extensional"])
 def test_the_strongest_statable_true_quantifier_is_stated(cases, settings) -> None:
     case = cases("default")
@@ -251,8 +252,15 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
         MEMBER,
         VERB,
     ]
-    # 6 two-place event types (4 leaves and 2 categories, all with a word) by 6 patient categories
-    assert len(predicates) == 8 + 8 + 4 + 1 + 2 + 5 + 6 * 6
+    # one predicate per feature of each kind with a word, per scalar pole, per category the
+    # subject can be a member of (below), and per verb and patient category
+    by_kind = Counter(p.kind for p in predicates)
+    assert by_kind[IS] == len(facts.features[IS]) and by_kind[HAS] == len(facts.features[HAS])
+    assert by_kind[CAN] == len(facts.features[CAN])
+    assert by_kind[PROJECTION] == len(facts.projections) > 0
+    assert by_kind[SCALAR] == 2 * len(facts.world.scalars)
+    assert by_kind[VERB] == len(facts.verbs) * len(facts.categories)
+    assert sum(by_kind.values()) == len(predicates)
     # membership in a category at the same level or above, never in itself or in a subcategory
     assert [p.label for p in predicates if p.kind == MEMBER] == [
         "CATEGORY.1",
@@ -272,6 +280,7 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
     assert [p.patient for p in limited if p.kind == VERB] == [CategoryTerm("CATEGORY.2")] * 6
 
 
+@pytest.mark.slow
 def test_membership_facts(cases) -> None:
     facts = cases("default").facts()
     members = [f for f in facts.class_facts("CATEGORY.1.2.1") if f.predicate.kind == MEMBER]
@@ -291,12 +300,17 @@ def test_membership_facts(cases) -> None:
     assert facts.truth.bare_plural_expresses(apart[0])
 
 
+@pytest.mark.slow
 def test_event_type_categories_are_stated_in_capacity_sentences(cases) -> None:
     case = cases("default")
     facts = case.facts()
     event_types = case.world.event_types
     general = [v for v in facts.verbs if event_types[v].category]
-    assert len(general) == 5 and len(facts.verbs) == 25
+    # every two-place event type and category with a word is a verb
+    unnamed = set(case.lexicon().event_types_without_word)
+    assert set(facts.verbs) == set(case.world.binary) - unnamed
+    assert set(general) == {v for v in case.world.binary if event_types[v].category} - unnamed
+    assert general
     for category in ("CATEGORY.1", "CATEGORY.2.1"):
         stated = {
             f.predicate.label for f in facts.class_facts(category) if f.predicate.kind == VERB
@@ -321,9 +335,18 @@ def test_instance_predicates(cases) -> None:
     facts = case.facts()
     predicates = facts.instance_predicates("INSTANCE.1.1.1")
     by_kind = Counter(p.kind for p in predicates)
-    assert by_kind == {IS: 8, HAS: 8, CAN: 4, PROJECTION: 1, SCALAR: 4, MEMBER: 6, VERB: 6 * 11}
     # a scalar pole against every category the instance is below
     assert {p.comparison for p in predicates if p.kind == SCALAR} == {"CATEGORY.1", "CATEGORY.1.1"}
+    assert by_kind == {
+        IS: len(facts.features[IS]),
+        HAS: len(facts.features[HAS]),
+        CAN: len(facts.features[CAN]),
+        PROJECTION: len(facts.projections),
+        SCALAR: 2 * len(case.world.scalars) * 2,
+        MEMBER: len(facts.categories),
+        VERB: len(facts.verbs) * (case.world.count - 1),
+    }
+    assert by_kind[PROJECTION] > 0
     assert all(p.patient != "INSTANCE.1.1.1" for p in predicates if p.kind == VERB)
     near = facts.instance_predicates(
         "INSTANCE.1.1.1", patients=("INSTANCE.1.1.1", "INSTANCE.1.1.2", "INSTANCE.2.1.1")
@@ -336,6 +359,7 @@ def test_instance_predicates(cases) -> None:
     assert not {f.predicate for f in positive} & {f.predicate for f in negative}
 
 
+@pytest.mark.slow
 def test_only_named_concepts_take_part(cases) -> None:
     case = cases("default")
     proportions = dict.fromkeys(
@@ -344,7 +368,8 @@ def test_only_named_concepts_take_part(cases) -> None:
     facts = case.facts(lexicon={"named_proportion": proportions})
     everything = case.facts()
     assert len(facts.named) < len(everything.named)
-    assert len(facts.categories) == 28 and len(facts.features[IS]) == 20
+    assert len(facts.categories) == round(0.5 * len(everything.categories))
+    assert len(facts.features[IS]) == round(0.5 * len(everything.features[IS]))
     for category in facts.categories[:6]:
         for negative in (False, True):
             for fact in facts.class_facts(category, negative):
@@ -451,33 +476,31 @@ def test_rule_statements_are_the_terms_of_the_minimal_dnf(cases, name) -> None:
     assert report["skipped"][SKIP_UNCONFIRMED] == 0 and report["skipped"][SKIP_MAX_LITERALS] == 0
 
 
-def test_rule_statement_counts_of_the_default_world(cases) -> None:
-    facts = cases("default").facts()
-    facts.rule_statements()
+@pytest.mark.slow
+def test_the_rule_report_of_the_default_world(cases) -> None:
+    """The rules are the taxonomy's determined features and the one-place requirements; every
+    term is stated or skipped for a threshold or for want of an instance; nothing is skipped for
+    a cap, a missing word, or an unconfirmed term. The counts themselves are figures of the run
+    (``tests/figures/snapshot.yaml``, ``default.corpus.rule_statements``)."""
+    case = cases("default")
+    facts = case.facts()
+    statements = facts.rule_statements()
     report = facts.rule_report
-    # 20 rules of the taxonomy and 20 one-place requirements
-    assert report == {
-        "rules": 40,
-        "terms": 102,
-        "stated": 88,
-        "skipped": {
-            SKIP_THRESHOLD: 6,
-            SKIP_MAX_LITERALS: 0,
-            SKIP_NO_WORD: 0,
-            SKIP_NO_INSTANCE: 8,
-            SKIP_UNCONFIRMED: 0,
-        },
-    }
+    determined = len(case.world.features[IS]) + len(case.world.features[HAS]) - len(case.world.free)
+    assert report["rules"] == determined + len(case.world.unary)
+    assert report["stated"] == len(statements) > 0
+    assert report["stated"] + sum(report["skipped"].values()) == report["terms"]
+    assert set(report["skipped"]) == set(SKIP_REASONS)
+    assert report["skipped"][SKIP_THRESHOLD] > 0 and report["skipped"][SKIP_NO_INSTANCE] > 0
+    for reason in (SKIP_MAX_LITERALS, SKIP_NO_WORD, SKIP_UNCONFIRMED):
+        assert report["skipped"][reason] == 0
 
 
+@pytest.mark.slow
 def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
     case = cases("default")
     uncapped = case.facts()
     lengths = Counter(len(s.subject.restriction) for s in uncapped.rule_statements())
-    # rule statements are exempt from the limits on adjectives and with-phrases: some of the
-    # default world's statements have four adjectives, and the limit is three (before stage
-    # a5b, one statement had four with-phrases, and the limit is two)
-    assert lengths == {1: 23, 2: 28, 3: 11, 4: 26}
     mention = case.config().mention
     assert (mention.max_adjectives, mention.max_with_phrases) == (3, 2)
     adjectives = [
@@ -488,7 +511,10 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
         sum(x.feature.startswith("PART.") for x in s.subject.restriction)
         for s in uncapped.rule_statements()
     ]
-    assert max(adjectives) == 4 and max(with_phrases) == 2
+    # rule statements are exempt from the limits on adjectives and with-phrases, and the
+    # exemption has work to do: some statement of the default world passes a limit
+    assert max(adjectives) > mention.max_adjectives or max(with_phrases) > mention.max_with_phrases
+    assert max(lengths) > mention.max_adjectives
     for cap in (1, 2, 3):
         capped = case.facts(propositions={"rule_statements": {"max_literals": cap}})
         statements = capped.rule_statements()
@@ -500,9 +526,10 @@ def test_long_terms_are_stated_unless_a_cap_is_set(cases) -> None:
         skipped = capped.rule_report["skipped"]
         # a term that is skipped for another reason is not counted against the cap
         assert skipped[SKIP_MAX_LITERALS] >= over
-        assert capped.rule_report["stated"] + sum(skipped.values()) == 102
+        assert capped.rule_report["stated"] + sum(skipped.values()) == uncapped.rule_report["terms"]
 
 
+@pytest.mark.slow
 def test_negated_property_literals_share_one_relative_clause(cases) -> None:
     # "things with wings that are not red and not big can fly": a relative clause joins several
     # verb phrases with "and", so a term with any number of negated PROPERTY literals is stated.
@@ -511,8 +538,8 @@ def test_negated_property_literals_share_one_relative_clause(cases) -> None:
         sum(not x.positive and x.feature.startswith("PROPERTY.") for x in s.subject.restriction)
         for s in facts.rule_statements()
     ]
-    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) == 23
-    assert max(negated) == 4
+    assert Counter(negated)[0] > 0 and sum(count > 1 for count in negated) > 0
+    assert max(negated) >= 2
     assert "relative_clauses" not in facts.rule_report["skipped"]
     # only a term that reads a scalar threshold, or that no instance satisfies, stays unstated
     skipped = facts.rule_report["skipped"]
@@ -522,6 +549,7 @@ def test_negated_property_literals_share_one_relative_clause(cases) -> None:
     }
 
 
+@pytest.mark.slow
 def test_a_drawn_rule_statement_is_always_nec_all(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -535,7 +563,7 @@ def test_a_drawn_rule_statement_is_always_nec_all(cases) -> None:
         assert oracle.truth(statement.to_json()) is True
         assert statement.rule is not None and statement.polarity
         assert statement.subject.category == THING
-    assert len({p.rule for p in drawn}) == 88  # every rule statement is drawn
+    assert len({p.rule for p in drawn}) == len(facts.rule_statements())  # every one is drawn
     # a pool limits the draw: the sufficient conditions of one feature
     feature = facts.rule_statements()[0].predicate.label
     pool = facts.rule_statements(feature)
@@ -543,6 +571,7 @@ def test_a_drawn_rule_statement_is_always_nec_all(cases) -> None:
     assert facts.draw_rule_statement(rng, ()) is None
 
 
+@pytest.mark.slow
 def test_rule_statements_by_feature(cases) -> None:
     facts = cases("default").facts()
     statements = facts.rule_statements()
@@ -601,6 +630,7 @@ def draws(facts, count: int, seed: int = 1, level: str = CLASS):
     return drawn
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("level", [CLASS, INSTANCE])
 def test_the_negation_rate(cases, level) -> None:
     case = cases("default")
@@ -618,6 +648,7 @@ def test_the_negation_rate(cases, level) -> None:
     }
 
 
+@pytest.mark.slow
 def test_draws_are_reproducible(cases) -> None:
     facts = cases("default").facts()
     assert draws(facts, 200, seed=4) == draws(facts, 200, seed=4)
@@ -672,6 +703,7 @@ def test_a_restriction_is_drawn_among_those_that_do_work(cases, name) -> None:
     assert {"PROPERTY", "PART"} <= set(kinds)
 
 
+@pytest.mark.slow
 def test_a_relative_clause_is_drawn_among_those_that_do_work(cases) -> None:
     case = cases("default")
     settings = {"mention": {"relative_clauses": {"rate": 0.5, "max_depth": 2, "object_share": 0.3}}}
@@ -715,6 +747,7 @@ def test_a_relative_clause_is_drawn_among_those_that_do_work(cases) -> None:
     assert nested > 20
 
 
+@pytest.mark.slow
 def test_the_settings_of_a_drawn_relative_clause(cases) -> None:
     case = cases("default")
 
