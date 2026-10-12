@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 import yaml
 
+from semantic_world.figures import SNAPSHOT_FILE, load_snapshot
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.config import Config, config_from_mapping, load_config
 from semantic_world.world.definition import RuntimeDefinition, runtime_definition
@@ -49,9 +50,12 @@ from semantic_world.world.stats import world_stats
 DATA = Path("data/world")
 RANDOM_STATES = 1000
 RANDOM_SETS = 1000
-TINY_A8 = "bd02c67e7286e1193748013574607bdb4b6207d04e7d9a454977bf98bb988e68"
-"""The rule set of the tiny world before the stage (the a8 reference run)."""
-DEFAULT_A8 = "123a4a6eb9f37cddfc6273e241e27efec2381ec10e720a67eed44e47a3cd8359"
+
+
+def a8_identity(name: str) -> str:
+    """The rule set of a world before the stage (the a8 reference run), kept as the baseline
+    of ``conditional_share: 0`` in the snapshot of figures."""
+    return load_snapshot(SNAPSHOT_FILE)["baselines"]["conditional_effects_off"][name]["rule_set_id"]
 
 
 def tiny_config(share: float, **effects: Any) -> Config:
@@ -146,7 +150,7 @@ def test_every_effect_of_the_conditional_tiny_world_has_a_condition(
 
 def test_the_record_and_the_identity_change_only_with_a_condition() -> None:
     plain = define(tiny_config(0.0))
-    assert plain.rule_set_id == TINY_A8
+    assert plain.rule_set_id == a8_identity("tiny")
     for et in plain.event_types.event_types:
         for effect in et.effects:
             assert not effect.condition
@@ -166,13 +170,12 @@ def test_the_record_and_the_identity_change_only_with_a_condition() -> None:
     ) != rule_set_id(record["symbols"], record["literals"], record["rules"], record["event_types"])
 
 
-def test_the_default_world_with_the_share_at_zero_is_the_a8_world() -> None:
+def test_the_default_file_lists_the_condition_settings() -> None:
+    """The default world with the share at 0 is the a8 world:
+    ``tests/world/test_world_off_settings.py`` checks it against the snapshot's baseline."""
     data = yaml.safe_load((DATA / "default.yaml").read_text(encoding="utf-8"))
     assert data["event_types"]["effects"]["conditional_share"] == 0.2
     assert data["event_types"]["effects"]["condition_literals"] == {1: 0.7, 2: 0.3}
-    data["event_types"]["effects"]["conditional_share"] = 0
-    result = define(config_from_mapping(data, source=str(DATA / "default.yaml")))
-    assert result.rule_set_id == DEFAULT_A8
 
 
 def test_the_two_settings_are_read_and_validated() -> None:
@@ -380,6 +383,7 @@ def test_applying_together_equals_one_at_a_time_with_conditional_effects(
     assert sets == RANDOM_SETS and with_conditions > RANDOM_SETS // 2
 
 
+@pytest.mark.slow
 def test_events_whose_conditions_read_what_another_writes_interfere(
     runtime: RuntimeDefinition, brute: BruteForce
 ) -> None:
@@ -493,6 +497,7 @@ def _check_satisfiable(result: WorldResult) -> int:
     return count
 
 
+@pytest.mark.slow
 def test_every_condition_is_satisfiable_and_no_effect_is_contradictory_or_empty(
     conditional: WorldResult, default: WorldResult
 ) -> None:
@@ -504,6 +509,7 @@ def test_every_condition_is_satisfiable_and_no_effect_is_contradictory_or_empty(
         assert _check_satisfiable(define(config_from_mapping(data, seed=seed))) > 0
 
 
+@pytest.mark.slow
 def test_an_inherited_effect_brings_its_condition_to_every_event_type(default: WorldResult) -> None:
     event_types = default.event_types
     conditional_features = [
@@ -528,6 +534,7 @@ def test_an_inherited_effect_brings_its_condition_to_every_event_type(default: W
     assert set(stats["fix_ups"]) >= {"conditions_redrawn", "conditions_dropped"}
 
 
+@pytest.mark.slow
 def test_the_conditions_have_a_stream_of_their_own() -> None:
     """Changing the condition settings changes no other draw: the effects without their
     conditions, the preconditions, and the static side are those of the a8 world."""
@@ -580,6 +587,7 @@ def test_replay_reproduces_every_recorded_change_under_conditions(
     assert fired > 0 and not_fired > 0
 
 
+@pytest.mark.slow
 def test_an_event_file_gives_conditional_effects(tmp_path: Path) -> None:
     base = define(tiny_config(0.0))
     world = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
@@ -672,3 +680,65 @@ def test_fixtures_hold_the_condition_record() -> None:
     assert fixture["version"] == 1
     tiny = read_fixture(Path("tests/fixtures/world/tiny_seed1.json"))
     assert any("condition" in e for et in tiny["definition"]["event_types"] for e in et["effects"])
+
+
+# ---------------------------------------------------------------------------------------------
+# The follow-ups of the stage (Jon's rulings 1 and 2, built in the process-cleanup session)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_condition_kinds_weigh_the_kinds() -> None:
+    """``event_types.effects.condition_kinds`` weighs a static feature against a fluent in the
+    draw of a condition literal: all the weight on one kind gives literals of that kind alone,
+    and the even split in any spelling is the default draw, which gives the tiny world."""
+    features = define(tiny_config(1.0, condition_kinds={"feature": 1, "fluent": 0}))
+    kinds = {
+        lit.kind for et in features.event_types.leaves for e in et.effects for lit in e.condition
+    }
+    assert kinds == {"feature"}
+    fluents = define(tiny_config(1.0, condition_kinds={"feature": 0, "fluent": 1}))
+    kinds = {
+        lit.kind for et in fluents.event_types.leaves for e in et.effects for lit in e.condition
+    }
+    assert kinds == {"fluent"}
+    assert features.rule_set_id != fluents.rule_set_id
+    even = define(tiny_config(0.2, condition_kinds={"feature": 2, "fluent": 2}))
+    assert even.rule_set_id == define(tiny_config(0.2)).rule_set_id
+    assert even.config.resolved()["event_types"]["effects"]["condition_kinds"] == {
+        "feature": 2.0,
+        "fluent": 2.0,
+    }
+    defaults = config_from_mapping({}).event_types.effects
+    assert defaults.condition_kinds == {"feature": 0.5, "fluent": 0.5}
+    with pytest.raises(ConfigError, match="condition_kinds"):
+        tiny_config(0.5, condition_kinds={"feature": 0, "fluent": 0})
+    with pytest.raises(ConfigError, match="condition_kinds"):
+        tiny_config(0.5, condition_kinds={"scalar": 1})
+
+
+def test_the_statistics_report_both_shares(conditional: WorldResult) -> None:
+    """``world_stats.yaml`` reports the share of the drawn effects that got a condition (the
+    effects of event-type features once each, and the own effects of the event types) and the
+    share of all effects of all event types that have one."""
+    for world in (conditional, define(tiny_config(0.2)), define(tiny_config(0.0))):
+        stats = world.stats["effects"]["conditional"]
+        event_types = world.event_types
+        drawn = event_types.condition_draws
+        feature_effects = [e for e in event_types.feature_effects.values() if e is not None]
+        own = [
+            e
+            for et in event_types.leaves
+            for e in et.effects
+            if not any(e.unconditional == f.unconditional for f in feature_effects)
+        ]
+        assert drawn["drawn"] == len(feature_effects) + len(own)
+        got = sum(1 for e in feature_effects if e.condition) + sum(1 for e in own if e.condition)
+        assert drawn["conditional"] == got
+        effects = [e for et in event_types.leaves for e in et.effects]
+        assert stats["share_of_drawn"] == round(got / drawn["drawn"], 6)
+        assert stats["share_of_all"] == round(
+            sum(1 for e in effects if e.condition) / len(effects), 6
+        )
+        assert stats["total"] == sum(1 for e in effects if e.condition)
+    assert conditional.stats["effects"]["conditional"]["share_of_all"] == 1.0
+    assert define(tiny_config(0.0)).stats["effects"]["conditional"]["share_of_drawn"] == 0.0

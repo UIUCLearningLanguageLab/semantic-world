@@ -41,7 +41,7 @@ from semantic_world.corpus.propositions import (
 from semantic_world.world.history import History, replay
 from semantic_world.world.runtime import legal
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 BALANCED = {"policy": "uniform_event_type"}
 
 
@@ -128,25 +128,35 @@ def test_no_event_repeats_within_a_step(cases, name) -> None:
     assert repeats_across_steps > 0  # the same event can happen again at a later step
 
 
+@pytest.mark.slow
 def test_the_thematic_weight_draws_thematically_related_participants(cases) -> None:
     case = cases("default")
 
-    def mean_relatedness(**weights) -> tuple[float, float]:
+    def relatedness(**weights) -> np.ndarray:
         generator = case.scenes(**scene_settings(participant_weights=weights))
-        return tuple(np.nanmean([generator.relatedness(s) for s in make(generator, 600)], axis=0))
+        return np.array([generator.relatedness(s) for s in make(generator, 600)])
 
-    without = mean_relatedness(thematic=0, taxonomic=0.5, constant=0.1)
-    default = mean_relatedness(thematic=1.0, taxonomic=0.5, constant=0.1)
-    strong = mean_relatedness(thematic=5.0, taxonomic=0.5, constant=0.1)
-    only = mean_relatedness(thematic=1.0, taxonomic=0, constant=0)
-    assert without[0] < default[0] < strong[0] <= only[0]
-    assert default[0] - without[0] > 0.15
+    def mean(values: np.ndarray) -> tuple[float, float]:
+        return tuple(np.nanmean(values, axis=0))
+
+    def error(a: np.ndarray, b: np.ndarray, column: int) -> float:
+        """The standard error of the difference of two means over the scenes."""
+        return float(np.sqrt(np.nanvar(a[:, column]) / len(a) + np.nanvar(b[:, column]) / len(b)))
+
+    without = relatedness(thematic=0, taxonomic=0.5, constant=0.1)
+    default = relatedness(thematic=1.0, taxonomic=0.5, constant=0.1)
+    strong = relatedness(thematic=5.0, taxonomic=0.5, constant=0.1)
+    only = relatedness(thematic=1.0, taxonomic=0, constant=0)
+    assert mean(without)[0] < mean(default)[0] < mean(strong)[0] <= mean(only)[0]
+    # the weight raises the mean thematic relatedness by more than three standard errors
+    assert mean(default)[0] - mean(without)[0] > 3 * error(default, without, 0)
     # the taxonomic weight does the same for taxonomic similarity
-    plain = mean_relatedness(thematic=0, taxonomic=0, constant=1)
-    similar = mean_relatedness(thematic=0, taxonomic=3.0, constant=0.1)
-    assert similar[1] > plain[1] + 0.02
+    plain = relatedness(thematic=0, taxonomic=0, constant=1)
+    similar = relatedness(thematic=0, taxonomic=3.0, constant=0.1)
+    assert mean(similar)[1] - mean(plain)[1] > 3 * error(similar, plain, 1)
     # with every weight but the constant at 0, participants are a uniform draw
-    assert abs(plain[0] - case.world.thematic.mean()) < 0.05 * case.world.thematic.mean()
+    expected = case.world.thematic.mean()
+    assert abs(mean(plain)[0] - expected) < 0.05 * expected
 
 
 def test_participants_are_the_old_scene_generators_on_a_static_world(world_files) -> None:
@@ -191,6 +201,7 @@ def test_participants(cases, name) -> None:
     assert min(sizes.values()) > 300 / 5 * 0.5
 
 
+@pytest.mark.slow
 def test_participant_weights_are_the_weighted_sum(cases) -> None:
     case = cases("default")
     weights = {"thematic": 2.0, "taxonomic": 0.7, "constant": 0.05}
@@ -377,6 +388,7 @@ def test_the_transitive_share_under_the_balanced_policy(world_files) -> None:
     assert abs(uniform - expected) < 0.03 and 0.2 < expected < 0.8
 
 
+@pytest.mark.slow
 def test_the_balanced_policy_draws_the_event_type_first(world_files) -> None:
     # With every instance of the tiny world in the scene, the able pool is the same in every
     # scene, and the event types differ widely in how many pairs they hold for.
@@ -447,6 +459,7 @@ def test_event_type_weights(world_files) -> None:
         assert "not an event type" in info.value.message
 
 
+@pytest.mark.slow
 def test_events_per_step(cases) -> None:
     case = cases("default")
     assert all(
@@ -493,6 +506,7 @@ def test_a_world_without_two_place_event_types_has_one_place_events_only(world_f
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_same_seed_gives_the_same_scenes(cases) -> None:
     case = cases("default")
     generator = case.scenes()
@@ -511,6 +525,7 @@ def test_the_same_seed_gives_the_same_scenes(cases) -> None:
         generator.scene(streams, 1, "INSTANCE.9.9.9")
 
 
+@pytest.mark.slow
 def test_only_the_scene_settings_change_a_scene(cases) -> None:
     case = cases("default")
     base = make(case.scenes(), 40)
@@ -647,6 +662,7 @@ def test_event_logical_forms(cases) -> None:
     }
 
 
+@pytest.mark.slow
 def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -735,6 +751,7 @@ def test_an_event_is_true_only_if_it_happened_in_its_scene(cases) -> None:
     assert moved > 0
 
 
+@pytest.mark.slow
 def test_a_report_names_one_event(cases) -> None:
     case = cases("default")
     facts = case.facts(scene={"events_per_step": 5.0})
@@ -825,6 +842,7 @@ def test_the_tense_of_events_is_the_corpus_s(cases) -> None:
     assert not facts.truth.evaluate(past).valid
 
 
+@pytest.mark.slow
 def test_a_report_chooses_its_aspect(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -852,6 +870,7 @@ def test_a_report_chooses_its_aspect(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -887,6 +906,7 @@ def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None
     assert checked > 60
 
 
+@pytest.mark.slow
 def test_the_event_level_is_drawn_by_weight(cases) -> None:
     case = cases("default")
     scenes = make(case.scenes(), 200)

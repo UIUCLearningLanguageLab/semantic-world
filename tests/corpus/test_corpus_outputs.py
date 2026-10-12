@@ -111,7 +111,7 @@ def files_of(folder: Path) -> dict[str, bytes]:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["tiny", "default"])
+@pytest.mark.parametrize("name", ["tiny", pytest.param("default", marks=pytest.mark.slow)])
 def test_the_output_folder(cases, runs, tmp_path, name) -> None:
     corpus = runs(name, **RICH)
     folder = corpus.write(tmp_path / "run")
@@ -172,7 +172,7 @@ def _int_keys(mapping: dict) -> dict:
     return {int(k) if k.lstrip("-").isdigit() else k: v for k, v in mapping.items()}
 
 
-@pytest.mark.parametrize("name", ["tiny", "default"])
+@pytest.mark.parametrize("name", ["tiny", pytest.param("default", marks=pytest.mark.slow)])
 def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, name) -> None:
     corpus = runs(name, **RICH)
     folder = corpus.write(tmp_path / "run")
@@ -247,7 +247,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
             }
 
 
-@pytest.mark.parametrize("name", ["tiny", "default"])
+@pytest.mark.parametrize("name", ["tiny", pytest.param("default", marks=pytest.mark.slow)])
 def test_each_corpus_text_file_matches_its_rendering(runs, tmp_path, name) -> None:
     corpus = runs(name, **RICH)
     folder = corpus.write(tmp_path / "run")
@@ -273,6 +273,7 @@ def test_each_corpus_text_file_matches_its_rendering(runs, tmp_path, name) -> No
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_same_configuration_and_seed_give_byte_identical_folders(cases, tmp_path) -> None:
     case = cases("default")
     settings = {"documents": {"count": 60}, "test_sets": {"size": 10}, **RICH}
@@ -297,6 +298,7 @@ def test_the_same_configuration_and_seed_give_byte_identical_folders(cases, tmp_
     assert files_of(run("a")) == a and not stale.exists()
 
 
+@pytest.mark.slow
 def test_grammar_settings_change_no_logical_form_and_no_sentence_order(folders) -> None:
     base, other = folders(**RICH), folders(**RICH, **MARKED)
     a, b = lines(base / "documents.jsonl"), lines(other / "documents.jsonl")
@@ -325,6 +327,7 @@ def test_grammar_settings_change_no_logical_form_and_no_sentence_order(folders) 
             assert mine["input"]["propositional"] == yours["input"]["propositional"]
 
 
+@pytest.mark.slow
 def test_test_set_settings_change_no_document(folders) -> None:
     base = files_of(folders(**RICH))
     other = files_of(folders(**RICH, test_sets={"size": 3, "changes": ["role", "subject"]}))
@@ -365,7 +368,7 @@ def test_test_set_settings_change_no_document(folders) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["tiny", "default", "deep"])
+@pytest.mark.parametrize("name", ["tiny", pytest.param("default", marks=pytest.mark.slow), "deep"])
 def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> None:
     corpus = runs(name, **RICH)
     folder = corpus.write(tmp_path / "run")
@@ -541,6 +544,7 @@ def _clause_depth(tree) -> int:
     return inner + (tree[0] == "RC")
 
 
+@pytest.mark.slow
 def test_ambiguous_sentences_are_counted(runs) -> None:
     plain = runs("default").stats["ambiguity"]
     # in the default language the only ambiguity is "can", which expresses ABLE and ABLE_NOW
@@ -575,6 +579,7 @@ def test_ambiguous_sentences_are_counted(runs) -> None:
     assert block["ambiguous_share"] == round(counted / block["sentences"], 6)
 
 
+@pytest.mark.slow
 def test_the_cooccurrence_check_by_brute_force(cases, runs) -> None:
     corpus = runs("default", **RICH)
     planner, documents = corpus.planner, corpus.documents
@@ -696,6 +701,7 @@ def test_partial_correlations() -> None:
     assert partial_correlation(x[:2], y[:2], z[:2]) == none
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("kinds", ["proportional", "equal"])
 def test_cooccurrence_on_the_default_configuration(kinds) -> None:
     # The acceptance check of stage 6, on the default configuration with fewer documents:
@@ -724,9 +730,10 @@ def test_cooccurrence_on_the_default_configuration(kinds) -> None:
         check = block["check"][measure]
         assert check["thematic_situational_above_encyclopedic"] == thematic
         if kinds == "equal":
-            # the margin is small with 2,500 documents (0.145 against 0.130 by words in the
-            # default world of stage a7a; 0.26 against 0.14 with 10,000 documents)
-            assert situational["thematic"]["pearson"] > encyclopedic["thematic"]["pearson"] + 0.01
+            # the property is the sign of the difference: with 2,500 documents the difference
+            # (0.015 by words in the default world of stage a7a) is within the sampling error of
+            # a correlation over 741 pairs, so no margin is asserted
+            assert situational["thematic"]["pearson"] > encyclopedic["thematic"]["pearson"]
             assert thematic == {"pearson": True, "spearman": True}
         taxonomic = {
             kind: situational["taxonomic"][kind] < encyclopedic["taxonomic"][kind]
@@ -764,16 +771,19 @@ def test_statistics_without_test_sets_and_without_documents(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_generate_command(tmp_path, capsys) -> None:
     out = tmp_path / "tiny"
     assert main(["generate", "data/corpus/tiny.yaml", "--out", str(out)]) == 0
     message = capsys.readouterr().out
-    assert message.startswith(f"wrote {out}: 20 documents, ")
-    assert "41 test sets" in message
     config = load_config(out / "config.yaml")
-    assert (config.name, config.seed, config.documents.count) == ("tiny", 1, 20)
-    assert len(lines(out / "documents.jsonl")) == 20
-    assert all(len(lines(path)) <= 40 for path in (out / "tests").glob("*.jsonl"))
+    assert message.startswith(f"wrote {out}: {config.documents.count} documents, ")
+    assert f"{len(set_names(config.test_sets.changes))} test sets" in message
+    assert (config.name, config.seed) == ("tiny", 1)
+    assert len(lines(out / "documents.jsonl")) == config.documents.count
+    assert all(
+        len(lines(path)) <= 2 * config.test_sets.size for path in (out / "tests").glob("*.jsonl")
+    )
     # the seed can be given on the command line, and it changes the corpus
     other = tmp_path / "other"
     assert main(["generate", "data/corpus/tiny.yaml", "--seed", "5", "--out", str(other)]) == 0

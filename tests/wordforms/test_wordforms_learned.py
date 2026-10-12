@@ -268,6 +268,7 @@ def test_embed_command_reports_the_training(tmp_path, capsys):
     assert summary["embeddings"]["contrastive"]["encoder"] == "learned"
 
 
+@pytest.mark.slow
 @needs_espeak
 @needs_piper
 def test_learned_encoders_on_the_tiny_configuration(tmp_path, capsys):

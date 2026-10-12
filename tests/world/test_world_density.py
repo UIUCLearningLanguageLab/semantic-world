@@ -267,6 +267,7 @@ def _print(label: str, s: dict[str, float]) -> None:
     )
 
 
+@pytest.mark.slow
 def test_every_event_type_is_inside_the_default_range_or_warned_across_ten_seeds() -> None:
     """Under the default, inside means a leaf-pair density strictly between 0 and 1."""
     survey = _survey({})
@@ -398,6 +399,7 @@ def test_checks_on_change_the_event_types_but_keep_them_distinct() -> None:
             assert np.array_equal(a.values, b.values)
 
 
+@pytest.mark.slow
 def test_same_seed_gives_the_same_tuned_result(tmp_path: Path) -> None:
     a = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "a")
     b = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "b")

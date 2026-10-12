@@ -353,6 +353,7 @@ def marker_distances(assignment) -> list[int]:
     return [edit_distance(a, b) for i, a in enumerate(plain) for b in plain[i + 1 :]]
 
 
+@pytest.mark.slow
 def test_branch_markers_differ_by_at_least_the_minimum_distance(tmp_path):
     """``assignment.branch_markers.min_distance`` (default 2): markers that differ in one
     phoneme alone, such as ``R IY0`` and ``R IH0``, would be nearly impossible to tell apart."""
@@ -636,6 +637,7 @@ def mapped_run(tmp_path, mappings=MAPPINGS, **sections) -> Run:
     return run
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_parselmouth
 def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
@@ -708,6 +710,7 @@ def test_acoustic_mapping_produces_the_configured_shifts_as_measured(tmp_path):
     assert again.synthesis.tokens == synthesis.tokens
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_parselmouth
 def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(tmp_path):
@@ -823,6 +826,7 @@ def test_mapped_tokens_are_the_words_tokens_and_the_originals_are_a_control_set(
     assert summary["mapped_tokens"] == summary["control_tokens"] == 36
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_parselmouth
 @needs_torch
@@ -858,6 +862,7 @@ def test_an_unknown_feature_is_an_error_before_any_audio(tmp_path):
         run_assignment(run_forms(config))
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_parselmouth
 @needs_espeak

@@ -83,7 +83,7 @@ from semantic_world.corpus.testsets import (
     stated_propositions,
 )
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 MANY = {"propositions": {"causal_statement_rate": 0.8}}
 """Many causal statements, so that the tests see every kind."""
 
@@ -227,6 +227,7 @@ def record_entries(record: dict, label: str, key: str) -> list[dict]:
     return entry["precondition"]["literals"]
 
 
+@pytest.mark.slow
 def test_no_causal_statement_is_true_by_a_conditional_effect(cases, runs) -> None:
     """Stage b1: an effect with a condition guarantees nothing after every event, so the
     statement about it is not enumerated, is judged false by ``Truth``, and is judged false by
@@ -281,6 +282,7 @@ def test_no_causal_statement_is_true_by_a_conditional_effect(cases, runs) -> Non
                 assert oracle.causal(true.input["logical_form"]) is True
 
 
+@pytest.mark.slow
 def test_capped_causal_sets_keep_every_statement(runs) -> None:
     """Stage b1 (Jon's ruling 1 on stage a8): a causal set with more pairs than
     ``test_sets.size`` draws its pairs round-robin over its true statements, so every statement
@@ -434,6 +436,7 @@ def test_the_causal_sets_pair_every_statement_with_every_valid_false_item(runs, 
             assert [(t.meta, f.meta) for t, f in a.pairs] == [(t.meta, f.meta) for t, f in b.pairs]
 
 
+@pytest.mark.slow
 def test_the_causal_sets_are_capped_at_the_size(runs) -> None:
     corpus = runs("default", test_sets={"size": 3})
     facts = corpus.planner.facts
@@ -444,11 +447,12 @@ def test_the_causal_sets_are_capped_at_the_size(runs) -> None:
     # predicate set is full and, under the stratified draw of stage b1, every kept pair tests
     # another statement; a size above the number of statements lets a statement recur
     full = runs("default")
+    size = full.config.test_sets.size
     predicate = next(s for s in full.test_sets if s.name == "causal_effect_predicate")
-    assert len(predicate.pairs) == full.config.test_sets.size == 30
+    assert len(predicate.pairs) == size
     assert len({t.meta["statement"] for t, _ in predicate.pairs}) == len(predicate.pairs)
     statements = len(facts.causal_statements(kind=EFFECT))
-    assert statements > 30
+    assert statements > size
     wide = runs("default", test_sets={"size": statements + 20})
     predicate = next(s for s in wide.test_sets if s.name == "causal_effect_predicate")
     counts = Counter(t.meta["statement"] for t, _ in predicate.pairs)
@@ -458,6 +462,7 @@ def test_the_causal_sets_are_capped_at_the_size(runs) -> None:
     assert max(counts.values()) > 1 and max(counts.values()) - min(counts.values()) <= 1
 
 
+@pytest.mark.slow
 def test_an_observed_false_item_held_of_every_event_in_the_scenes(runs) -> None:
     corpus = runs("default")
     truth = corpus.planner.truth
@@ -563,6 +568,7 @@ def mentions_of(form: dict) -> list[dict]:
     return found
 
 
+@pytest.mark.slow
 def test_the_descriptions_setting_changes_the_propositional_rendering_only(runs) -> None:
     marked = runs("default", 150)
     omitted = runs("default", 150, renderings={"propositional": {"descriptions": "omitted"}})
@@ -594,6 +600,7 @@ def test_the_descriptions_setting_changes_the_propositional_rendering_only(runs)
         runs("tiny", 5, renderings={"propositional": {"descriptions": "braces"}})
 
 
+@pytest.mark.slow
 def test_seen_counts_descriptions_by_default_and_not_with_the_setting(runs) -> None:
     # 600 documents: in the default world of stage b1 (with its conditional effects) the
     # 200-document run has no item seen through a description alone
@@ -689,6 +696,7 @@ def test_the_record_of_which_state_item_changed_agrees_with_the_history(cases, r
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_feature_documents_about_event_types_and_fluents(runs) -> None:
     corpus = runs("default", 300, **MANY)
     facts = corpus.planner.facts
@@ -720,6 +728,7 @@ def test_feature_documents_about_event_types_and_fluents(runs) -> None:
     assert topics["fluent"] >= 2 and topics["event_type"] > 10 and topics["feature"] > 10, topics
 
 
+@pytest.mark.slow
 def test_the_causal_statement_rate_is_a_setting(runs) -> None:
     def counts(rate: float) -> Counter:
         corpus = runs("default", 200, propositions={"causal_statement_rate": rate})
@@ -749,6 +758,7 @@ def test_the_causal_statement_rate_is_a_setting(runs) -> None:
         runs("tiny", 5, propositions={"causal_statement_rate": 2})
 
 
+@pytest.mark.slow
 def test_the_statistics_count_causal_sentences(runs) -> None:
     corpus = runs("default", 200, **MANY)
     block = corpus.stats["causal"]
@@ -768,6 +778,7 @@ def test_the_statistics_count_causal_sentences(runs) -> None:
     assert corpus.stats["ambiguity"]["readings"]["causal"] == len(sentences)
 
 
+@pytest.mark.slow
 def test_readings_and_renderings_of_causal_sentences(runs) -> None:
     corpus = runs("default", 200, **MANY)
     lexicon = corpus.planner.lexicon
@@ -1061,5 +1072,15 @@ def test_the_tiny_corpus_holds_every_new_thing(runs) -> None:
     assert any(s.proposition.causal for d in corpus.documents for s in d.sentences)
     assert any("{" in s.propositional for d in corpus.documents for s in d.sentences)
     names = [s.name for s in corpus.test_sets]
-    assert len(names) == 41 and sum(n.startswith("causal") for n in names) == 14
+    # the causal sets: both kinds by the four changes, each with a law-like twin but the
+    # polarity swap, which is never observed
+    expected = [
+        name
+        for level in CAUSAL_LEVELS
+        for change in (PREDICATE, POLARITY, EVENT_SWAP, ROLE)
+        for name in (
+            [f"{level}_{change}"] + ([] if change == POLARITY else [f"{level}_{change}_{LAWLIKE}"])
+        )
+    ]
+    assert [n for n in names if n.startswith("causal")] == expected
     assert TEMPLATE[-1] == CAUSAL

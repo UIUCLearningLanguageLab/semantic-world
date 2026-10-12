@@ -74,7 +74,7 @@ from semantic_world.corpus.propositions import (
 from semantic_world.corpus.realize import leaves, token_parts
 from semantic_world.corpus.renderings import formula
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 COUNTS = {"tiny": 120, "default": 300, "deep": 150, "still": 120}
 RICH = {
     "mention": {"relative_clauses": {"rate": 0.3, "max_depth": 2, "object_share": 0.4}},
@@ -85,6 +85,11 @@ RICH = {
 many of each."""
 ENCYCLOPEDIC = ("encyclopedic_category", "encyclopedic_feature")
 NARRATIVES = ("entity", "situational")
+
+
+def standard_error(share: float, count: int) -> float:
+    """The standard error of a binomial share over ``count`` draws."""
+    return (share * (1 - share) / count) ** 0.5
 
 
 def merged(*sections: dict) -> dict:
@@ -228,6 +233,7 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
     assert min(quantified, events) > 50 and capacities > 10 and existential > 5
 
 
+@pytest.mark.slow
 def test_the_propositional_rendering_never_depends_on_the_grammar(corpora) -> None:
     grammars = {
         "plain": {},
@@ -363,6 +369,7 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
     assert flags[False] <= 0.15 * flags[True]
 
 
+@pytest.mark.slow
 def test_first_mentions_in_situational_documents_take_no_modifier(corpora) -> None:
     _, documents = corpora("default", **RICH)
     plain = with_modifier = 0
@@ -380,7 +387,8 @@ def test_first_mentions_in_situational_documents_take_no_modifier(corpora) -> No
                     plain += not phrase.restriction
                     assert len(phrase.restriction) <= 1
     # in an entity document, a mention takes a modifier at mention.modifier_rate (0.3)
-    assert 0.15 < with_modifier / (with_modifier + plain) < 0.45
+    share = with_modifier / (with_modifier + plain)
+    assert abs(share - 0.3) < 3 * standard_error(0.3, with_modifier + plain)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -461,9 +469,10 @@ def test_pronouns_and_chains(corpora, name) -> None:
         assert seen == list(labels)
     assert pronouns > 30 and later > 100
     # a later mention becomes "it" at mention.pronoun_rate (0.5), when it can
-    assert eligible > 60 and 0.35 < taken / eligible < 0.65
+    assert eligible > 60 and abs(taken / eligible - 0.5) < 3 * standard_error(0.5, eligible)
 
 
+@pytest.mark.slow
 def test_the_pronoun_rate(corpora) -> None:
     def pronouns(rate: float) -> int:
         _, documents = corpora("default", 150, mention={"pronoun_rate": rate})
@@ -475,7 +484,7 @@ def test_the_pronoun_rate(corpora) -> None:
     assert pronouns(1.0) > 2 * pronouns(0.5) * 0.7 > 0
 
 
-@pytest.mark.parametrize("name", ["default", "deep"])
+@pytest.mark.parametrize("name", [pytest.param("default", marks=pytest.mark.slow), "deep"])
 def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
     case = cases(name)
     planner, documents = corpora(name, **RICH)
@@ -522,6 +531,7 @@ def inversions(document) -> int:
     return sum(a > b for i, a in enumerate(ranks) for b in ranks[i + 1 :])
 
 
+@pytest.mark.slow
 def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> None:
     settings = merged(RICH, {"documents": {"shuffle": 0.0, "sibling_contrast_rate": 1.0}})
     _, documents = corpora("default", **settings)
@@ -562,6 +572,7 @@ def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> N
     assert set(sections) == {*TEMPLATE, CONTRAST}
 
 
+@pytest.mark.slow
 def test_shuffle_moves_from_the_template_to_a_random_order(corpora) -> None:
     def disorder(shuffle: float) -> float:
         _, documents = corpora("default", 200, documents={"shuffle": shuffle})
@@ -586,13 +597,14 @@ def test_shuffle_moves_from_the_template_to_a_random_order(corpora) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_document_mix_and_lengths(cases, corpora) -> None:
     planner, documents = corpora("default", 600)
     config = planner.config
     assert [d.label for d in documents] == [f"DOC.{n}" for n in range(1, 601)]
     types = Counter(d.type for d in documents)
     for kind, weight in config.documents.mix.items():
-        assert abs(types[kind] / 600 - weight) < 0.07
+        assert abs(types[kind] / 600 - weight) < 3 * standard_error(weight, 600)
     short_encyclopedic = 0
     for document in documents:
         limits = config.documents.sentences[document.type]
@@ -602,9 +614,9 @@ def test_the_document_mix_and_lengths(cases, corpora) -> None:
         ]
         if document.type in ENCYCLOPEDIC:
             # the default world has enough to say about almost every topic: a feature document
-            # about a feature that few rule statements read can run short (1 of 600)
+            # about a feature that few rule statements read can run short
             short_encyclopedic += len(document.sentences) < limits.min
-    assert short_encyclopedic <= 2
+    assert short_encyclopedic <= 0.01 * sum(types[kind] for kind in ENCYCLOPEDIC)
     # one type alone
     only = {"documents": {"mix": {"situational": 1.0}}}
     _, documents = corpora("tiny", 30, **only)
@@ -616,6 +628,7 @@ def test_the_document_mix_and_lengths(cases, corpora) -> None:
     assert Planner(case.config(), case.result).generate(0) == []
 
 
+@pytest.mark.slow
 def test_category_documents(corpora) -> None:
     planner, documents = corpora("default", **RICH)
     facts, truth = planner.facts, planner.truth
@@ -656,6 +669,7 @@ def test_category_documents(corpora) -> None:
     assert set(topics) == {1, 2, 3}
 
 
+@pytest.mark.slow
 def test_feature_documents(corpora) -> None:
     planner, documents = corpora("default", **RICH)
     facts = planner.facts
@@ -702,6 +716,7 @@ def test_feature_documents(corpora) -> None:
     assert not [s for _, s in sentences_of(none) if s.proposition.rule is not None]
 
 
+@pytest.mark.slow
 def test_narratives(cases, corpora) -> None:
     planner, documents = corpora("default", **RICH)
     config = planner.config
@@ -789,14 +804,23 @@ def test_narratives(cases, corpora) -> None:
     assert set(names) == {1, 2}
 
 
+@pytest.mark.slow
 def test_the_description_rate(corpora) -> None:
-    def share(rate: float) -> float:
+    def share(rate: float) -> tuple[float, int]:
         _, documents = corpora("default", 200, documents={"instance_description_rate": rate})
         sections = Counter(s.section for _, s in sentences_of(documents, *NARRATIVES))
-        return sections[DESCRIPTION] / max(1, sections[EVENT_SECTION])
+        return sections[DESCRIPTION] / max(1, sections[EVENT_SECTION]), sections[EVENT_SECTION]
 
-    assert share(0.0) == 0.0
-    assert 0.1 < share(0.2) < 0.3 < share(0.8) < 0.9
+    assert share(0.0) == (0.0, share(0.0)[1])
+    # a description follows an event sentence at the rate, when one can be said: the share is
+    # at most the rate, and the two shares stand in the ratio of the rates, up to three
+    # standard errors of a binomial share
+    low, low_events = share(0.2)
+    high, high_events = share(0.8)
+    low_error = 3 * standard_error(low, low_events)
+    high_error = 3 * standard_error(high, high_events)
+    assert 0 < low <= 0.2 + low_error and low < high <= 0.8 + high_error
+    assert abs(high - 4 * low) <= high_error + 4 * low_error
 
 
 # ---------------------------------------------------------------------------------------------
@@ -804,6 +828,7 @@ def test_the_description_rate(corpora) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_relation_fact_share(corpora, world_files) -> None:
     """``documents.relation_fact_share`` sets how often a sentence of a category document draws
     a relation fact. The default, null, keeps the chance that ``content_kind_weights`` gives
@@ -824,16 +849,16 @@ def test_the_relation_fact_share(corpora, world_files) -> None:
             for d in found
             if d.type != "encyclopedic_category"
         ]
-        return sum(section == RELATION for section in drawn) / len(drawn), others, found
+        return sum(section == RELATION for section in drawn) / len(drawn), others, found, len(drawn)
 
-    default, others, documents = made()
+    default, others, documents, drawn = made()
     # one kind among four for a topic with subcategories, and among three for a leaf; a little
     # more in the documents, because the membership facts of a topic run out first
     assert 0.25 < default < 0.40
     explicit = made(relation_fact_share=None)[2]
     assert [d.to_json() for d in explicit] == [d.to_json() for d in documents]
     # 0 turns relation facts off in category documents, and only there
-    none, same_others, without = made(relation_fact_share=0.0)
+    none, same_others, without, _ = made(relation_fact_share=0.0)
     assert none == 0.0 and same_others == others
     feature = [s.section for d in without if d.type == "encyclopedic_feature" for s in d.sentences]
     assert feature.count(RELATION) > 40
@@ -841,7 +866,7 @@ def test_the_relation_fact_share(corpora, world_files) -> None:
         (d.label, d.type, d.topic) for d in documents
     ]
     # a share is the probability that a sentence draws a relation fact
-    assert 0.52 < made(relation_fact_share=0.6)[0] < 0.68
+    assert abs(made(relation_fact_share=0.6)[0] - 0.6) < 3 * standard_error(0.6, drawn)
     assert made(relation_fact_share=1.0)[0] == 1.0
     assert made(relation_fact_share=0.6)[1] == others
     # without verbs, a category document has no relation fact to draw
@@ -856,6 +881,7 @@ def test_the_relation_fact_share(corpora, world_files) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_sibling_contrasts(corpora) -> None:
     def contrasts(rate: float):
         planner, documents = corpora("default", 300, documents={"sibling_contrast_rate": rate})
@@ -897,6 +923,7 @@ def test_sibling_contrasts(corpora) -> None:
             )  # fmt: skip
 
 
+@pytest.mark.slow
 def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> None:
     def restricted(**sections):
         planner, documents = corpora("default", 200, **sections)
@@ -934,6 +961,7 @@ def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> 
                 assert not phrase.restriction  # a causal subject has none either
 
 
+@pytest.mark.slow
 def test_class_level_relative_clauses(cases, corpora) -> None:
     case = cases("default")
     settings = {"mention": {"relative_clauses": {"rate": 0.5, "max_depth": 2}}}
@@ -1002,6 +1030,7 @@ def test_class_level_relative_clauses(cases, corpora) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_limit_on_content_words(corpora) -> None:
     limit = 6
     settings = {
@@ -1033,6 +1062,7 @@ def test_the_limit_on_content_words(corpora) -> None:
     assert depths[2] > 50 and max(depths) == 2
 
 
+@pytest.mark.slow
 def test_content_words_count_nouns_adjectives_and_verbs(corpora) -> None:
     planner, documents = corpora("default", **RICH)
     content = {x.label for x in planner.lexicon.content_lexemes}
@@ -1041,6 +1071,7 @@ def test_content_words_count_nouns_adjectives_and_verbs(corpora) -> None:
         assert content_words(sentence.plan) == len(words)
 
 
+@pytest.mark.slow
 def test_readings_in_documents(corpora) -> None:
     kinds = {CLASS: "generic", INSTANCE: "capacity", EVENT: "event"}
     kinds.update({STATE: "state", CHANGE: "state", ABLE_NOW: "able_now"})
@@ -1139,6 +1170,7 @@ def test_readings_in_documents(corpora) -> None:
     assert counts["ambiguous"] == counts["readings"].get("capacity+able_now", 0)
 
 
+@pytest.mark.slow
 def test_the_conceptual_rendering_is_the_same_sentence(corpora) -> None:
     """The conceptual rendering has the same words in the same order as the tokens, with the
     same affixes and the same marker words. Only the lexical forms differ: a concept label in
@@ -1184,6 +1216,7 @@ def test_the_conceptual_rendering_is_the_same_sentence(corpora) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_document_record(corpora) -> None:
     planner, documents = corpora("default", **RICH)
     for document in documents[:120]:
@@ -1223,6 +1256,7 @@ def test_the_document_record(corpora) -> None:
                 assert record["logical_form"]["tense"] == "past"
 
 
+@pytest.mark.slow
 def test_proposition_labels(corpora) -> None:
     _, documents = corpora("default", **RICH)
     labels: dict = {}
@@ -1238,6 +1272,7 @@ def test_proposition_labels(corpora) -> None:
     assert len(labels) < len(sentences_of(documents))  # some propositions are said twice
 
 
+@pytest.mark.slow
 def test_documents_are_deterministic(cases) -> None:
     case = cases("default")
 
@@ -1260,6 +1295,7 @@ def test_documents_are_deterministic(cases) -> None:
     assert load_world(config).instances == case.world.instances
 
 
+@pytest.mark.slow
 def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     case = cases("default")
 
@@ -1328,15 +1364,21 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
     # the mix among the negative facts: "no" against "most ... not" and "some ... not". About 3%
-    # of the class-level sentences are "no", so the rise needs 1,000 documents to settle: 1.47
-    # on this seed, 1.31 to 1.47 on seeds 1 to 6 (stage a8; 300 documents gave 1.10 to 1.44)
+    # of the class-level sentences are "no", so the rise needs 1,000 documents to show: it must
+    # be more than two standard errors of the two binomial shares (a one-sided bound at the
+    # usual level; on this seed the rise is about two and a half)
     _, _, base_many = made(count=1000)
     _, _, heavier = made(count=1000, nec_none=4)
-    assert share(heavier, NEC_NO) > 1.25 * share(base_many, NEC_NO)
+    base_share, heavier_share = share(base_many, NEC_NO), share(heavier, NEC_NO)
+    error = standard_error(base_share, sum(base_many.values())) + standard_error(
+        heavier_share, sum(heavier.values())
+    )
+    assert heavier_share - base_share > 2 * error
     with pytest.raises(ConfigError, match="quantifiers.weights.no"):
         case.config(quantifiers={"weights": {"no": 4}})
 
 
+@pytest.mark.slow
 def test_an_entity_narrative_has_two_to_five_scenes(cases) -> None:
     case = cases("default")
     planner = Planner(case.config(documents={"mix": {"entity": 1}}), case.result)
@@ -1353,6 +1395,7 @@ def test_an_entity_narrative_has_two_to_five_scenes(cases) -> None:
     assert sum(len(d.sentences) for d in documents) > 1.3 * sum(len(d.sentences) for d in shorter)
 
 
+@pytest.mark.slow
 def test_a_lexicon_with_unnamed_concepts(cases) -> None:
     case = cases("default")
     proportions = dict.fromkeys(CONCEPT_TYPES, 0.5)

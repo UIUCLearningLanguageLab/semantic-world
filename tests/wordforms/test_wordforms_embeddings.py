@@ -657,6 +657,7 @@ def hubert_run(tmp_path, **settings):
     return run, engine
 
 
+@pytest.mark.slow
 @needs_hubert
 def test_pretrained_embedding_stores_the_configured_layer(tmp_path):
     run, engine = hubert_run(tmp_path)
@@ -915,6 +916,7 @@ def tiny_run(tmp_path_factory):
     return path, folder / "run"
 
 
+@pytest.mark.slow
 @needs_espeak
 @needs_piper
 def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
@@ -961,6 +963,7 @@ def test_all_on_the_tiny_configuration_is_above_chance(tiny_run, capsys):
     assert plain_rows(pl.read_csv(run / "eval" / "embeddings.csv")).equals(table)
 
 
+@pytest.mark.slow
 @needs_espeak
 @needs_piper
 def test_embed_with_the_real_engines(tiny_run):
@@ -1017,6 +1020,7 @@ def example_meanings(module, folder):
     return folder / "taxonomy" / "categories_generative.csv"
 
 
+@pytest.mark.slow
 @needs_espeak
 @needs_piper
 @needs_torch

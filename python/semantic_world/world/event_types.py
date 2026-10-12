@@ -191,6 +191,9 @@ class EventTypes:
     feature_effects: dict[str, Effect | None] = field(default_factory=dict)
     stats: dict[str, int] = field(default_factory=dict)
     """Counts of the fix-ups: dropped and redrawn effects and literals."""
+    condition_draws: dict[str, int] = field(default_factory=dict)
+    """The effects a condition was drawn for (``drawn``) and how many got one
+    (``conditional``)."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_constraints", {c.label: c for c in self.constraints})
@@ -349,6 +352,10 @@ class _Dynamics:
             "conditions_redrawn": 0,
             "conditions_dropped": 0,
         }
+        self.condition_draws: dict[str, int] = {"drawn": 0, "conditional": 0}
+        """The effects a condition was drawn for, and how many of them got one (Jon's ruling 2
+        on stage b1: the share counts drawn effects; ``world_stats.yaml`` reports it beside the
+        share of all effects)."""
         # Values present in the initial state: (fluent, value) pairs.
         self.initial_values: set[tuple[str, bool]] = set()
         for i, fluent in enumerate(fluents.base):
@@ -827,17 +834,29 @@ class _Dynamics:
     ) -> tuple[ConditionLiteral, ...] | None:
         """A condition for the effect, satisfiable for every holder, or None after ``MAX_TRIES``
         rejected draws. The number of literals comes from ``condition_literals``; each literal's
-        role is drawn uniformly among ``roles``, its kind with an even chance of a static feature
-        and a fluent (the pools differ in size, and both kinds of condition are wanted), its
-        symbol uniformly within the kind, and its value uniformly."""
+        role is drawn uniformly among ``roles``, its kind by the weights ``condition_kinds`` over
+        a static feature and a fluent (the pools differ in size, and both kinds of condition are
+        wanted; Jon's ruling 1 on stage b1), its symbol uniformly within the kind, and its value
+        uniformly."""
         rng = self.rng_conditions
-        pools = [self.feature_labels, self.all_labels]
+        pools = {"feature": self.feature_labels, "fluent": self.all_labels}
+        kinds = self.effects_config.condition_kinds
+        # The even split is drawn with rng.integers(2), as stage b1 drew it: a weighted draw
+        # (rng.choice with probabilities) reads the stream differently, so using it for the
+        # even split too would change every condition of the existing worlds. The weighted draw
+        # serves the other splits.
+        even = kinds.get("feature", 0) == kinds.get("fluent", 0)
         for _ in range(MAX_TRIES):
             count = _draw(rng, self.effects_config.condition_literals)
             literals = []
             for _ in range(count):
                 role = roles[0] if len(roles) == 1 else roles[int(rng.integers(len(roles)))]
-                pool = pools[int(rng.integers(2))] if self.feature_labels else self.all_labels
+                if not self.feature_labels:
+                    pool = self.all_labels
+                elif even:
+                    pool = pools[("feature", "fluent")[int(rng.integers(2))]]
+                else:
+                    pool = pools[_draw(rng, kinds)]
                 symbol = pool[int(rng.integers(len(pool)))]
                 value = bool(rng.integers(2))
                 literals.append(ConditionLiteral(role, symbol, value))
@@ -855,6 +874,18 @@ class _Dynamics:
         nothing is drawn, and every other draw is unchanged in any case, because the conditions
         have a stream of their own."""
         cfg = self.effects_config
+        # The effects a condition is drawn for: the effects of event-type features, and the own
+        # effects of every event type without an explicit entry (an inherited effect counts
+        # once, for the feature; the statistics report the share of all effects beside it).
+        self.condition_draws["drawn"] = sum(
+            1 for effect in self.feature_effects.values() if effect is not None
+        ) + sum(
+            1
+            for draft in self.drafts.values()
+            if draft.explicit is None or draft.explicit.effects is None
+            for effect in draft.effects
+            if (effect.role, effect.fluent) in draft.own_effect_keys
+        )
         if cfg.conditional_share <= 0 or not self.base_labels or not self.all_labels:
             return
         rng = self.rng_conditions
@@ -878,6 +909,7 @@ class _Dynamics:
                 continue
             conditioned = Effect(effect.role, effect.fluent, effect.value, condition)
             self.feature_effects[feature] = conditioned
+            self.condition_draws["conditional"] += 1
             for draft in holders:
                 draft.effects = tuple(conditioned if e == effect else e for e in draft.effects)
         for draft in self.drafts.values():
@@ -894,6 +926,7 @@ class _Dynamics:
                     self.stats["conditions_dropped"] += 1
                     continue
                 effects[i] = Effect(effect.role, effect.fluent, effect.value, condition)
+                self.condition_draws["conditional"] += 1
             draft.effects = tuple(effects)
 
     # The whole procedure ----------------------------------------------------------------------
@@ -943,6 +976,7 @@ class _Dynamics:
             dict(self.feature_literals),
             dict(self.feature_effects),
             dict(self.stats),
+            dict(self.condition_draws),
         )
 
 

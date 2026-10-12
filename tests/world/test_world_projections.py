@@ -159,6 +159,7 @@ def test_projections_are_not_all_trivial(tiny: WorldResult, default: StaticWorld
     )
 
 
+@pytest.mark.slow
 def test_extensional_projections_imply_intensional_ones(
     tiny: WorldResult, default: StaticWorld
 ) -> None:

@@ -27,7 +27,7 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 
 ## Working rules
 
-- **Work through the build stages in order.** Finish one stage, with its tests passing, before starting the next. Commit at the end of each stage.
+- **On the staged track, work through the build stages in order.** Finish one stage, with its tests passing, before starting the next. Commit at the end of each stage. A piece of work on the change track is one session, committed at its end.
 - **What is approved.** The contract additions in `MILESTONE_1.md` are approved, and are also recorded in `CONTRACTS.md`. Items marked **Proposed** in `CONTRACTS.md` are the working design for milestone 1.
 - **The contracts are binding.** Never change an interface, file format, or data-file schema in a way that disagrees with `docs/CONTRACTS.md`. If the implementation shows that a contract is wrong or incomplete, stop and write a proposal in `docs/proposals/` (the question, the options, and a recommendation), then ask Jon.
 - **Ask about design, decide engineering.** Questions that change the contracts, the world's content, or what agents are given go to Jon. Small engineering choices inside a crate do not.
@@ -35,8 +35,35 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 - **Determinism is a requirement.** Follow the determinism section of `MILESTONE_1.md`: named random streams from one master seed, no hash-map iteration order in simulation logic, and state-hash tests.
 - **The world gives no reward.** `step` never returns reward. Reward is computed on the agent's side.
 - **Privileged access is labeled.** Only scripted agents and tests may read the full world state, through calls clearly marked as privileged.
-- **Tests before done.** Every stage lists acceptance tests. Write the tests, run the tests, and report the results honestly, including anything skipped.
-- **Record the run times, and never cap by default.** Every stage records the default world's and corpus's run times in the guides (`docs/guides/README.md`, `WORLD.md`, `CORPUS.md`), timed with nothing else running, and the stage's proposal file flags any growth of more than half, with its cause. There is no hard time limit on the default run. A step is never made cheaper by changing what it produces by default: a step that becomes too slow gets a setting that a study can turn on (for example a cap on an enumeration), with the full version as the default. (Jon's ruling 3 on stage a8.)
+- **Tests before done.** Every stage lists acceptance tests, and every change has a test of what it changed. Write the tests, run the tests, and report the results honestly, including anything skipped.
+- **Record the run times, and never cap by default.** On the staged track, every stage records the default world's and corpus's run times in the guides (`docs/guides/README.md`, `WORLD.md`, `CORPUS.md`), timed with nothing else running, and the stage's proposal file flags any growth of more than half, with its cause. There is no hard time limit on the default run. A step is never made cheaper by changing what it produces by default: a step that becomes too slow gets a setting that a study can turn on (for example a cap on an enumeration), with the full version as the default. (Jon's ruling 3 on stage a8.)
+
+## Two tracks of work
+
+- The staged track is for redesigns: a specification, build stages, a proposal file for each stage, WM.E rows for engineering choices, reference runs, and the full check list. Jon says when a piece of work takes the staged track.
+- The change track is for everything else: a fix, a new setting, a small feature, a follow-up of a stage. It runs in one session.
+  - Write a proposal file only when a design question comes up, and then stop and ask Jon.
+  - Add a row to `docs/DECISIONS.md` only for a decision Jon makes. Engineering choices go in the commit message.
+  - Run the fast tier of the tests while working, and the full check list once before committing.
+  - Regenerate a dataset only when the change alters that output. Then rewrite the snapshot of figures (`python -m semantic_world.figures snapshot`) and the guides' figures (`python -m semantic_world.figures guides`), and say in the commit message which figures moved and why.
+  - Update a guide only where the change touches what the guide describes.
+- When it is unclear which track a piece of work takes, ask Jon.
+
+## Tests
+
+- Two tiers. `pytest` runs the fast tier, on tiny worlds, in a few minutes. `pytest --slow` runs the tests that need default-scale runs. The full check list runs both (`pytest --all`).
+- Properties, not counts. A test checks what must be true: truth by the oracle, an invariant of the output, determinism of the same seed. A test never pins a count of a default or tiny run.
+- One snapshot of figures. The figures of the default and tiny runs live in `tests/figures/snapshot.yaml`, compared by one test. `python -m semantic_world.figures snapshot` rewrites the snapshot on purpose and prints what moved.
+- Bounds come from the configuration. A test that checks a rate states its bound from the configured rate and a sampling margin for the sample size, never a number fitted to the last run. A failing bound is a finding to report, not a number to lower.
+- Each test has its own folder. Every test writes to its own temporary folder, so that two suites can run at once. Tests never read `runs/`.
+
+## Random streams for new features
+
+- A new feature draws from a named random stream of its own, created after the existing streams, so that with the feature off every earlier output stays byte-identical. Each new feature gets a test that checks this, against an identity kept in the snapshot file.
+
+## Figures in the guides
+
+- The guides' figures are written by `python -m semantic_world.figures guides` from `stats.yaml` and `world_stats.yaml`, between marker comments. Never type a figure of a run into a guide by hand. A figure from another run, or a run time, stays hand-written with the date of its run.
 
 ## Commands
 
@@ -48,7 +75,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 maturin develop --release        # build the Python module into the active virtual environment
 ruff check python tests
-pytest
+pytest --all                     # both tiers of the tests; plain pytest runs the fast tier, pytest --slow the slow tier
+pytest --slow -n auto            # the slow tier on every core (pytest-xdist): about 6 minutes in place of 23; -n auto works with --all too
 ```
 
 Other commands:
@@ -77,6 +105,8 @@ python -m semantic_world.world define data/world/default.yaml [--seed N] [--out 
 python -m semantic_world.world view runs/world/tiny_seed1 --preset classic [--include PROPERTY,PART] [--out FILE]   # a table for a model: base, static, or classic
 python -m semantic_world.world simulate runs/world/tiny_seed1 --episodes 100 [--seed N] [--legal] [--out FILE] [--config data/corpus/default.yaml]   # run episodes of a world run and write episodes.jsonl; --config reads a corpus file's scene block
 python tests/taxonomy/make_golden_hashes.py                      # rewrite the taxonomy's golden hashes after a deliberate change of the generator
+python -m semantic_world.figures snapshot                        # rewrite tests/figures/snapshot.yaml (the figures of the default and tiny runs in runs/, and the baselines of the off settings) and print what moved
+python -m semantic_world.figures guides [--check]                # write the guides' figures from the runs in runs/ between their marker comments (--check: report what would move, write nothing)
 python -m semantic_world.world check-fixtures [tests/fixtures/world]   # run the Python runtime and the brute-force evaluator on every conformance fixture
 python -m semantic_world.world make-fixtures data/world/tiny.yaml [--out tests/fixtures/world] [--count N] [--steps N]   # regenerate the tiny world's fixtures (expected values from the brute-force evaluator)
 python tests/world/hand_world.py                                 # rewrite the hand-written fixtures from the hand world and its hand-typed cases
@@ -99,14 +129,14 @@ The word-form pipeline needs the `speech` extra (`uv pip install -e ".[dev,speec
 
 The taxonomy generator needs only NumPy, polars, and PyYAML: `PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/tiny.yaml` runs without the Rust core built.
 
-This is the full check list. A stage is done when the full check list passes locally.
+This is the full check list. A stage, or a change, is done when the full check list passes locally.
 
 ## Git
 
 - The repository's local git config already sets Jon's commit identity. Do not change it.
-- Commit at the end of each build stage, with a message naming the stage.
+- Commit at the end of each build stage, or of each session of the change track, with a message naming the stage or the change.
 - Do not push, rewrite history, or force-push unless Jon asks. Jon pushes to GitHub and opens pull requests.
-- Work on a branch for each stage (for example, `m1-stage-3-core`), not directly on `main`.
+- Work on a branch for each stage or change (for example, `m1-stage-3-core`), not directly on `main`.
 - Large files never go into git: run outputs go in `runs/` (ignored), and large assets stay outside the repository.
 
 ## Writing style for documents

@@ -514,6 +514,7 @@ def embedded(tmp_path, run: Run, folder: str) -> Run:
     return run
 
 
+@pytest.mark.slow
 @needs_audio
 @needs_torch
 @pytest.mark.parametrize("mode", ["arbitrary", "branch_markers"])
@@ -567,6 +568,7 @@ def test_the_inflect_list_changes_no_content_embedding(tmp_path, mode):
     assert reports[1]["tokens"] == len(training)
 
 
+@pytest.mark.slow
 @needs_audio
 def test_two_passes_with_an_embedding_as_the_sound_distance(tmp_path):
     """With an embedding's distance, the first pass embeds the words, the lexemes are assigned,

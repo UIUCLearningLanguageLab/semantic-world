@@ -19,7 +19,7 @@ from semantic_world.corpus.mentions import RelativeClauses, plan_for
 from semantic_world.corpus.propositions import HAS, IS, VERB, CategoryTerm, Literal, Predicate
 from semantic_world.corpus.realize import leaves, token_parts, tree_depth
 
-WORLDS = ("tiny", "default", "deep")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep")
 ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
 FLIPPED = {
     "determiner": "after",
@@ -291,6 +291,7 @@ def test_generated_sentences(cases, plans, name, grammar) -> None:
     assert agreement.across > 20  # subjects with a relative clause between the noun and the verb
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("limit", [0, 1, 2, 3])
 def test_relative_clause_depth_never_exceeds_the_limit(cases, limit) -> None:
     case = cases("default")
@@ -310,6 +311,7 @@ def test_relative_clause_depth_never_exceeds_the_limit(cases, limit) -> None:
     assert deepest == limit  # and the limit is reached
 
 
+@pytest.mark.slow
 def test_the_generated_sentences_cover_the_grammar(cases, plans) -> None:
     case = cases("default")
     realizer = case.realizer(grammar=GRAMMARS["english"], lexicon=LEXICON)

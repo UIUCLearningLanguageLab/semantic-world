@@ -205,6 +205,7 @@ def test_proportions_at_the_leaf_level_use_distinct_instances(default: StaticWor
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_every_sampled_pairs_holds_value_is_correct(
     tiny: WorldResult, default: StaticWorld
 ) -> None:
@@ -298,6 +299,7 @@ def test_thematic_relatedness(default: StaticWorld) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_estimated_proportions_are_close_to_exact(default: StaticWorld) -> None:
     # The same world as the default fixture (the default file's event-type tree and its retuned
     # settings: no own constraint, the constraint families, the constraints' rules, and the
@@ -447,6 +449,7 @@ def test_instance_count_never_changes_rules_thresholds_event_tree_or_constraints
     assert not a.relation_stats.pairs.equals(b.relation_stats.pairs)
 
 
+@pytest.mark.slow
 def test_binary_settings_never_change_the_taxonomy_or_the_one_place_side(tmp_path: Path) -> None:
     a = define(
         world_config(
@@ -478,6 +481,7 @@ def test_binary_settings_never_change_the_taxonomy_or_the_one_place_side(tmp_pat
     assert a.statics.relations.records() != b.statics.relations.records()
 
 
+@pytest.mark.slow
 def test_default_world_statics_build_in_under_five_minutes() -> None:
     start = time.perf_counter()
     statics = statics_of(load_config(DATA / "default.yaml"))

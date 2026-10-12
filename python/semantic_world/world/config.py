@@ -100,6 +100,11 @@ class PreconditionsConfig:
         }
 
 
+CONDITION_KINDS = ("feature", "fluent")
+"""The kinds of a condition literal: a static feature, or a Boolean fluent."""
+DEFAULT_CONDITION_KINDS = {"feature": 0.5, "fluent": 0.5}
+
+
 @dataclass(frozen=True)
 class EffectsConfig:
     count: dict[int, float]
@@ -109,10 +114,15 @@ class EffectsConfig:
     """The share of effects that get a condition (stage b1)."""
     condition_literals: dict[int, float] = None  # type: ignore[assignment]
     """Weights over the number of literals of a condition."""
+    condition_kinds: dict[str, float] = None  # type: ignore[assignment]
+    """Weights over the kind of a condition literal, ``feature`` or ``fluent`` (Jon's ruling 1
+    on stage b1): a choice of the generator, not a frequency of the world."""
 
     def __post_init__(self) -> None:
         if self.condition_literals is None:
             object.__setattr__(self, "condition_literals", {1: 0.7, 2: 0.3})
+        if self.condition_kinds is None:
+            object.__setattr__(self, "condition_kinds", dict(DEFAULT_CONDITION_KINDS))
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -121,6 +131,7 @@ class EffectsConfig:
             "roles": dict(self.roles),
             "conditional_share": self.conditional_share,
             "condition_literals": dict(self.condition_literals),
+            "condition_kinds": dict(self.condition_kinds),
         }
 
 
@@ -407,8 +418,11 @@ def _read_effects(node: _Node) -> EffectsConfig:
     condition_literals = _count_weights(node, "condition_literals", {1: 0.7, 2: 0.3})
     if 0 in condition_literals and condition_literals[0] > 0:
         raise node.error("condition_literals", "a condition has at least one literal")
+    condition_kinds = node.weights(
+        "condition_kinds", dict(DEFAULT_CONDITION_KINDS), allowed=CONDITION_KINDS
+    )
     node.finish()
-    return EffectsConfig(count, rate, roles, conditional_share, condition_literals)
+    return EffectsConfig(count, rate, roles, conditional_share, condition_literals, condition_kinds)
 
 
 def _read_unary(node: _Node, taxonomy: TaxonomyRunConfig) -> UnaryConfig:

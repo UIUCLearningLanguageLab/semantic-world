@@ -28,7 +28,7 @@ from semantic_world.corpus import CorpusError, render, wordform_request
 from semantic_world.corpus.__main__ import main
 from semantic_world.corpus.generate import generate
 from semantic_world.corpus.io import corpus_text
-from semantic_world.corpus.lexicon import LEXICON_COLUMNS
+from semantic_world.corpus.lexicon import FUNCTION_WORDS, LEXICON_COLUMNS
 from semantic_world.corpus.render import wordform_identity
 from semantic_world.corpus.request import MEANINGS_FILE, REQUEST_FILE, affix_items, takes
 
@@ -67,11 +67,13 @@ def files_of(folder: Path) -> dict[str, bytes]:
 
 
 def wordform_config(request: Path, name: str = "tiny", seed: int = 1, **assignment):
-    """A word-form configuration for a corpus's request."""
+    """A word-form configuration for a corpus's request, with its synthesis cache beside the
+    request (never the shared ``runs/wordforms/cache``, so that two suites can run at once)."""
     data = {
         "name": "corpus_forms",
         "request": str(request),
         "wordforms": {"count": WORD_COUNTS[name]},
+        "synthesis": {"cache_dir": str(request.parent / "cache")},
         "assignment": {"null_samples": 20, **assignment},
     }
     return parse_config(data, "corpus_forms", seed=seed)
@@ -108,7 +110,7 @@ def chains(cases, tmp_path_factory):
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", ["tiny", "default"])
+@pytest.mark.parametrize("name", ["tiny", pytest.param("default", marks=pytest.mark.slow)])
 def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
     corpus, before, folder, _, _ = chains(name, **INFLECTED)
     request = yaml.safe_load(before[REQUEST_FILE])
@@ -172,7 +174,8 @@ def test_the_request_of_a_language_without_inflection(chains) -> None:
     corpus, before, _, _, _ = chains("tiny")
     request = yaml.safe_load(before[REQUEST_FILE])
     assert request["takes"] == {} and request["affixes"] == [] and request["inflect"] == []
-    assert len(request["function_words"]) == 17 and "become" in request["function_words"]
+    assert len(request["function_words"]) == len(FUNCTION_WORDS)
+    assert "become" in request["function_words"]
     assert "before" in request["function_words"]
     assert len(request["lexemes"]) == len(corpus.planner.lexicon.content_lexemes)
 
@@ -208,6 +211,7 @@ def test_takes_and_affixes_come_from_the_grammar_settings(cases, morphology, aff
     assert takes(config) == wanted
 
 
+@pytest.mark.slow
 def test_homonyms_and_synonyms_in_the_request(chains) -> None:
     corpus, before, _, _, _ = chains("default", 30, **AMBIGUOUS)
     request = yaml.safe_load(before[REQUEST_FILE])
@@ -228,7 +232,12 @@ def test_homonyms_and_synonyms_in_the_request(chains) -> None:
     [
         ("tiny", "arbitrary", {}),
         ("tiny", "branch_markers", NUMBER),
-        ("default", "target_correlation", {**INFLECTED, **AMBIGUOUS}),
+        pytest.param(
+            "default",
+            "target_correlation",
+            {**INFLECTED, **AMBIGUOUS},
+            marks=pytest.mark.slow,
+        ),
     ],
 )
 def test_generate_make_word_forms_and_render(chains, name, mode, sections) -> None:
@@ -300,8 +309,13 @@ def test_generate_make_word_forms_and_render(chains, name, mode, sections) -> No
 
 @pytest.mark.parametrize(
     ("name", "mode", "sections"),
-    [("tiny", "branch_markers", NUMBER), ("default", "target_correlation", {**INFLECTED, **AMBIGUOUS})],
-)  # fmt: skip
+    [
+        ("tiny", "branch_markers", NUMBER),
+        pytest.param(
+            "default", "target_correlation", {**INFLECTED, **AMBIGUOUS}, marks=pytest.mark.slow
+        ),
+    ],
+)
 def test_rendering_leaves_the_rest_of_the_folder_byte_identical(chains, name, mode, sections):
     _, before, folder, forms, report = chains(name, mode=mode, **sections)
     after = files_of(folder)
@@ -395,6 +409,7 @@ def test_marked_forms_are_inflected(chains) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("mode", ["arbitrary", "branch_markers"])
 def test_documents_and_test_sets_change_no_lexemes_word(cases, tmp_path, mode) -> None:
     """The request's inflect list and the order of its function words follow the documents and
@@ -444,6 +459,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     data = yaml.safe_load(Path("data/wordforms/corpus_tiny.yaml").read_text(encoding="utf-8"))
     assert data["request"] == "runs/corpus/tiny_seed1/wordform_request.yaml"
     data["request"] = str(out / REQUEST_FILE)
+    data.setdefault("synthesis", {})["cache_dir"] = str(tmp_path / "cache")
     config = tmp_path / "corpus_tiny.yaml"
     config.write_text(yaml.safe_dump(data), encoding="utf-8")
     forms = tmp_path / "forms"
@@ -453,7 +469,9 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     printed = capsys.readouterr().out
     assert "rendered" in printed and "the word forms of corpus_tiny (seed 1)" in printed
     text = (out / "corpus.txt").read_text(encoding="utf-8")
-    assert "/LEXEME." not in text and len(text.split()) == 1078  # 1105 before stage b1
+    # one spelled word per token of the corpus
+    stats = yaml.safe_load((out / "stats.yaml").read_text(encoding="utf-8"))
+    assert "/LEXEME." not in text and len(text.split()) == stats["tokens"]["count"]
     spellings = set(pl.read_csv(forms / "words.csv")["spelling"].to_list())
     assert set(text.split()) <= spellings
     # the word forms of tiny.yaml are too few for the tiny corpus, as the specification says
@@ -463,6 +481,7 @@ def test_the_generate_wordforms_and_render_commands(tmp_path, capsys) -> None:
     assert "need distinct forms" in capsys.readouterr().err
 
 
+@pytest.mark.slow
 def test_the_word_form_configuration_for_the_default_corpus() -> None:
     """``data/wordforms/corpus_default.yaml`` has the default word-form settings, and its 500
     words are enough for the default corpus's lexemes."""
@@ -480,9 +499,9 @@ def test_the_word_form_configuration_for_the_default_corpus() -> None:
     assert (corpus.name, corpus.seed) == ("default", 1)  # the run folder that the request is in
     lexicon = build_lexicon(corpus, load_world(corpus), Streams(corpus.seed))
     content = lexicon.content_lexemes
-    assert len(content) == 199 <= config.wordforms.count
-    assert sum(x.same_form_as is None for x in content) == 199
-    assert len(lexicon.function_lexemes) == 17
+    assert 0 < len(content) <= config.wordforms.count
+    assert sum(x.same_form_as is None for x in content) == len(content)  # no homonyms
+    assert len(lexicon.function_lexemes) == len(FUNCTION_WORDS)
 
 
 def test_render_errors_leave_the_folder_unchanged(cases, chains, tmp_path, capsys) -> None:

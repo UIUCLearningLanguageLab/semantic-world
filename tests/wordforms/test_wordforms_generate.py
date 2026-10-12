@@ -94,6 +94,7 @@ def test_min_english_distance_3(english):
         assert english.neighbors(w.phones).distance >= 3
 
 
+@pytest.mark.slow
 def test_syllable_counts_match_the_distribution(english):
     lexicon = lexicon_for({"wordforms": {"count": 2000}}, english)
     counts = lexicon.summary()["syllable_counts"]
@@ -101,6 +102,7 @@ def test_syllable_counts_match_the_distribution(english):
         assert abs(counts[k] / 2000 - p) < 0.04, counts
 
 
+@pytest.mark.slow
 def test_stress_pattern_matches_the_probability(english):
     lexicon = lexicon_for({"wordforms": {"count": 1000, "syllables": {2: 0.5, 3: 0.5}}}, english)
     initial = sum(w.stress[0] == "1" for w in lexicon.words)
@@ -210,6 +212,7 @@ def test_default_words_use_only_trigrams_of_common_words(default_lexicon, common
     assert uncommon_trigram_words(default_lexicon, common_english) == 0
 
 
+@pytest.mark.slow
 def test_whole_dictionary_patterns_give_uncommon_trigrams(common_english):
     lexicon = lexicon_for({"wordforms": {"english_min_zipf": None}})
     assert lexicon.english_summary["english_min_zipf"] is None
@@ -249,6 +252,7 @@ def test_real_words_come_from_the_whole_dictionary_without_a_threshold(common_en
     assert any(w.english_word not in common_english.pattern_words for w in lexicon.words)
 
 
+@pytest.mark.slow
 def test_no_pseudoword_is_spelled_like_a_common_word(common_english):
     from semantic_world.wordforms.spelling import Speller
 

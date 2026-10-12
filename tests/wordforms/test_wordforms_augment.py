@@ -595,6 +595,7 @@ def augmented_tiny(tmp_path_factory):
     return run
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -624,6 +625,7 @@ def test_praat_manipulation_moves_the_median_pitch_of_real_clips(augmented_tiny)
     assert np.mean(errors <= 0.05) > 0.8, f"{np.mean(errors <= 0.05):.2f} within 5%"
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -652,6 +654,7 @@ def test_shifts_of_real_clips_are_measured_frame_by_frame(augmented_tiny):
     assert summary["duration_s"]["over_5_percent"] == 0
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -667,6 +670,7 @@ def test_augmented_snr_on_real_clips(augmented_tiny):
     assert np.median(np.abs(estimated)) < 0.2 and max(abs(e) for e in estimated) < 1.0
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio

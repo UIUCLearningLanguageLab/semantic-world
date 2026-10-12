@@ -65,7 +65,7 @@ from semantic_world.corpus.testsets import (
     stated_propositions,
 )
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 ALL_SETS = (
     "class_predicate",
     "class_predicate_lawlike",
@@ -169,6 +169,7 @@ def documents_json(corpus) -> dict[str, dict]:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_layout_of_the_test_sets(runs) -> None:
     corpus = runs("default")
     assert [s.name for s in corpus.test_sets] == list(ALL_SETS)
@@ -412,6 +413,7 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
         assert all(checked[s] > 0 for s in ALL_SETS), checked
 
 
+@pytest.mark.slow
 def test_the_format_check_finds_planted_differences(runs) -> None:
     corpus = runs("default")
     _, true, false = pairs_of(corpus, "event_role_possible")[0]
@@ -604,6 +606,7 @@ def test_event_items(cases, runs, name) -> None:
         assert category_names > 0  # some false items name their verb with a verb category
 
 
+@pytest.mark.slow
 def test_a_false_event_did_not_happen_in_any_scene_of_its_document(cases) -> None:
     case = cases("default")
     facts = case.facts(scene={"events_per_step": 4.0})
@@ -651,6 +654,7 @@ def test_a_false_event_did_not_happen_in_any_scene_of_its_document(cases) -> Non
         assert happened(truth, [first], claim)
 
 
+@pytest.mark.slow
 def test_candidates_for_events(cases) -> None:
     case = cases("default")
     facts = case.facts()
@@ -751,6 +755,7 @@ def test_law_like_items_have_sets_of_their_own(cases, runs, name) -> None:
         assert law_like_pairs > 10
 
 
+@pytest.mark.slow
 def test_law_like_items_are_nec_items(runs) -> None:
     # relation facts and patient capacities are never nec, so they are never law-like, and with
     # the extensional words, "all" and "no" make no nec item apart from membership and rules
@@ -841,6 +846,7 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
         assert seen[(EVENT, False)] > 0, seen
 
 
+@pytest.mark.slow
 def test_what_the_documents_state(runs) -> None:
     corpus = runs("default", **RICH)
     stated = stated_propositions(corpus.documents)
@@ -906,6 +912,7 @@ def test_what_the_documents_state(runs) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_test_sets_are_reproducible(cases) -> None:
     case = cases("default")
 
@@ -920,6 +927,7 @@ def test_the_test_sets_are_reproducible(cases) -> None:
     assert made(seed=2) != base
 
 
+@pytest.mark.slow
 def test_grammar_settings_change_no_test_item(runs) -> None:
     base = runs("default", **RICH)
     other = runs("default", **GRAMMARS["marked"], **RICH)

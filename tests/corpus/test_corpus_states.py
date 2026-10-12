@@ -54,13 +54,18 @@ from semantic_world.corpus.renderings import proposition_of, propositional
 from semantic_world.corpus.testsets import BLOCKED as BLOCKED_KIND
 from semantic_world.corpus.testsets import CHANGED, IMPOSSIBLE, POSSIBLE, UNCHANGED
 
-WORLDS = ("tiny", "default", "deep", "still")
+WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 MANY = {
     "documents": {"initial_state_rate": 0.6, "result_rate": 0.9, "blocked_rate": 0.5},
     "propositions": {"negation_rate": {"able_now": 0.6}},
 }
 """Many state, result, and blocked sentences, so that the tests see every kind."""
 TIMED = (STATE, CHANGE, ABLE_NOW)
+
+
+def standard_error(share: float, count: int) -> float:
+    """The standard error of a binomial share over ``count`` draws."""
+    return (share * (1 - share) / count) ** 0.5
 
 
 def scenes_json(corpus) -> dict[str, dict]:
@@ -357,6 +362,7 @@ def test_the_timed_sets_continue_situational_narratives_only(runs) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_follow_up_sentences_come_after_event_sentences_in_order(runs) -> None:
     corpus = runs("default", 200, **MANY)
     order = {section: k for k, section in enumerate(NARRATIVE_SECTIONS)}
@@ -377,6 +383,7 @@ def test_follow_up_sentences_come_after_event_sentences_in_order(runs) -> None:
             group.append(sentence.section)
 
 
+@pytest.mark.slow
 def test_modifiers_stay_static(runs) -> None:
     corpus = runs("default", 200, **MANY)
     for document in corpus.documents:
@@ -388,6 +395,7 @@ def test_modifiers_stay_static(runs) -> None:
                         assert predication.kind != STATE_KIND and predication.time is None
 
 
+@pytest.mark.slow
 def test_the_rates_are_settings(runs) -> None:
     def sections(**documents) -> Counter:
         corpus = runs("default", 200, documents=documents)
@@ -395,17 +403,26 @@ def test_the_rates_are_settings(runs) -> None:
 
     none = sections(initial_state_rate=0, result_rate=0, blocked_rate=0)
     assert none[INITIAL_STATE] == none[RESULT] == none[BLOCKED] == 0 and none[EVENT_SECTION] > 100
-    low = sections(initial_state_rate=0.2, result_rate=0.3, blocked_rate=0.1)
-    high = sections(initial_state_rate=0.8, result_rate=0.9, blocked_rate=0.6)
+    low_rate, high_rate = 0.3, 0.9
+    low = sections(initial_state_rate=0.2, result_rate=low_rate, blocked_rate=0.1)
+    high = sections(initial_state_rate=0.8, result_rate=high_rate, blocked_rate=0.6)
     for section in (INITIAL_STATE, RESULT, BLOCKED):
         assert 0 < low[section] < high[section]
-    # the share of event sentences with a result sentence tracks the rate: not every event
-    # changes a fluent that has a word (fewer since stage b1, when an effect's condition can fail:
-    # 0.14 at the low rate in the default world)
-    assert 0.1 < low[RESULT] / low[EVENT_SECTION] < 0.35
-    assert 0.4 < high[RESULT] / high[EVENT_SECTION] < 0.95
+    # the share of event sentences with a result sentence is the rate times the share of
+    # events that changed a fluent with a word (an effect whose condition fails changes
+    # nothing), so it is at most the rate, and the two shares stand in the ratio of the rates,
+    # each up to three standard errors of a binomial share
+    low_share = low[RESULT] / low[EVENT_SECTION]
+    high_share = high[RESULT] / high[EVENT_SECTION]
+    low_error = 3 * standard_error(low_share, low[EVENT_SECTION])
+    high_error = 3 * standard_error(high_share, high[EVENT_SECTION])
+    assert 0 < low_share <= low_rate + low_error
+    assert low_share < high_share <= high_rate + high_error
+    expected_high = high_rate / low_rate * low_share
+    assert abs(high_share - expected_high) <= high_error + high_rate / low_rate * low_error
 
 
+@pytest.mark.slow
 def test_the_negation_rates_are_settings(runs) -> None:
     def polarities(section: str, **negation) -> Counter:
         corpus = runs(
@@ -424,13 +441,15 @@ def test_the_negation_rates_are_settings(runs) -> None:
     states = polarities(INITIAL_STATE, state=0.0)
     assert states[False] == 0 and states[True] > 50
     states = polarities(INITIAL_STATE, state=0.5)
-    assert 0.3 < states[False] / sum(states.values()) < 0.7
+    share = states[False] / sum(states.values())
+    assert abs(share - 0.5) < 3 * standard_error(0.5, sum(states.values()))
     blocked = polarities(BLOCKED, able_now=1.0)
     assert blocked[True] == 0 and blocked[False] > 20
     blocked = polarities(BLOCKED, able_now=0.0)
     assert blocked[False] == 0 and blocked[True] > 10
 
 
+@pytest.mark.slow
 def test_the_statistics_count_the_new_sentences(runs) -> None:
     corpus = runs("default", 200, **MANY)
     stats = corpus.stats
@@ -465,6 +484,7 @@ def test_the_statistics_count_the_new_sentences(runs) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_readings_of_the_new_sentences(runs) -> None:
     corpus = runs("default", 200, **MANY)
     seen: Counter = Counter()
@@ -492,6 +512,7 @@ def test_readings_of_the_new_sentences(runs) -> None:
     assert counts["readings"]["state"] == seen[STATE] + seen[CHANGE]
 
 
+@pytest.mark.slow
 def test_can_words_distinct(cases, runs) -> None:
     corpus = runs("default", 200, **MANY, lexicon={"can_words": "distinct"})
     lexicon = corpus.planner.lexicon
@@ -521,6 +542,7 @@ def test_can_words_distinct(cases, runs) -> None:
         cases("tiny").config(lexicon={"can_words": "both"})
 
 
+@pytest.mark.slow
 def test_the_renderings_parse_back_and_the_trees_read_back(runs) -> None:
     corpus = runs("default", 200, **MANY)
     operators: Counter = Counter()

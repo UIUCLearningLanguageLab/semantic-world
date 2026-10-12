@@ -680,6 +680,7 @@ def test_run_folder_with_synthesis(tmp_path):
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -736,6 +737,7 @@ def piper_only(tmp_path):
     )
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio
@@ -780,6 +782,7 @@ def test_missing_piper_voice_names_the_download_command(tmp_path, capsys):
     assert "python -m piper.download_voices en_US-libritts_r-medium" in err
 
 
+@pytest.mark.slow
 @needs_cmudict
 @needs_wordfreq
 @needs_audio

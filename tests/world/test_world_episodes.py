@@ -234,6 +234,7 @@ def test_chain_example_events_follow_the_preconditions(chain: WorldResult) -> No
     assert _catch_before_eat(chain, silence=True) > 20
 
 
+@pytest.mark.slow
 def test_chain_example_completes_on_every_seed() -> None:
     """The acceptance test of stage a5b: with the chain's explicit requirement (the agent is
     bigger than the patient on the first scalar, shared by both event types), whatever is
@@ -264,6 +265,7 @@ def _occurrence_and_legal(result: WorldResult, name: str, count: int) -> tuple[d
     return occurred, legal_total
 
 
+@pytest.mark.slow
 def test_policies_differ_in_the_expected_direction(default: WorldResult) -> None:
     """Under uniform_event, an event type legal for many bindings occurs more often, so the
     occurrences follow the legal counts more closely than under uniform_event_type."""

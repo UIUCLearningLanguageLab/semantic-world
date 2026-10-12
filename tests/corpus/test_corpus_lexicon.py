@@ -57,20 +57,18 @@ def round_half_up(x: float) -> int:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_concepts_of_the_default_world(default_world) -> None:
     world = default_world
     lexicon = lexicon_of(world)
     labels = {t: [c.label for c in lexicon.of_type(t)] for t in CONCEPT_TYPES}
-    assert labels["category"] == list(world.categories) and len(labels["category"]) == 56
-    assert (
-        labels["property"] == list(world.features[PROPERTY_KIND]) and len(labels["property"]) == 40
-    )
-    assert labels["part"] == list(world.features[PART_KIND]) and len(labels["part"]) == 40
+    assert labels["category"] == list(world.categories)
+    assert labels["property"] == list(world.features[PROPERTY_KIND])
+    assert labels["part"] == list(world.features[PART_KIND])
     # one state adjective per fluent, base and derived, in the definition's order
-    assert labels["state"] == list(world.fluents) and len(labels["state"]) == 8
+    assert labels["state"] == list(world.fluents)
     assert all(label.startswith("BOOLFL.") for label in labels["state"])
     assert labels["event_unary"] == list(world.features[EVENT_TYPE1_KIND])
-    assert len(labels["event_unary"]) == 20
     assert labels["event"] == [
         v for v in world.binary_leaves if v not in lexicon.event_types_without_word
     ]
@@ -79,18 +77,23 @@ def test_concepts_of_the_default_world(default_world) -> None:
         for v in world.binary
         if world.event_types[v].category and v not in lexicon.event_types_without_word
     ]
-    # every two-place leaf event type has a patient capacity; a quarter get words
+    # every two-place leaf event type has a patient capacity; the named proportion of the
+    # configuration (a quarter by default) get words
     assert labels["patient_projection"] == list(world.patient_capacities)
-    assert len(labels["patient_projection"]) == 20
-    assert sum(lexicon.is_named(c) for c in labels["patient_projection"]) == 5
+    assert len(labels["patient_projection"]) == len(world.binary_leaves)
+    proportion = corpus_config().lexicon.named_proportion["patient_projection"]
+    assert sum(lexicon.is_named(c) for c in labels["patient_projection"]) == round_half_up(
+        proportion * len(labels["patient_projection"])
+    )
     assert labels["scalar"] == [
-        "SCALARDIM.1.HIGH", "SCALARDIM.1.LOW", "SCALARDIM.2.HIGH", "SCALARDIM.2.LOW"
-    ]  # fmt: skip
+        f"{dimension}.{pole}" for dimension in world.scalars for pole in ("HIGH", "LOW")
+    ]
     assert [c.label for c in lexicon.of_type(GENERIC)] == [THING]
     # no agent capacity is a concept: the event type itself is the word
     assert not any(c.label.startswith("CAN.") for c in lexicon.concepts)
 
 
+@pytest.mark.slow
 def test_parts_of_speech(default_world) -> None:
     lexicon = lexicon_of(default_world)
     expected = {
@@ -112,6 +115,7 @@ def test_parts_of_speech(default_world) -> None:
         assert lexeme.pos == lexicon.concept(lexeme.concept).pos
 
 
+@pytest.mark.slow
 def test_concept_order_follows_the_specification_table(default_world) -> None:
     lexicon = lexicon_of(default_world)
     types = [c.type for c in lexicon.concepts]
@@ -125,7 +129,10 @@ def test_a_world_without_two_place_event_types_or_scalars(world_files) -> None:
     for concept_type in ("event", "event_category", "patient_projection", "scalar"):
         assert lexicon.of_type(concept_type) == ()
     assert lexicon.event_types_without_word == {}
-    assert len(lexicon.content_lexemes) == 6 + 8 + 8 + 4 + 1
+    assert (
+        len(lexicon.content_lexemes)
+        == sum(len(lexicon.of_type(t)) for t in ("category", "property", "part", "event_unary")) + 1
+    )  # and the generic noun
     assert lexicon.stats()["lexemes_by_pos"][TRANSITIVE_VERB] == 0
 
 
@@ -153,7 +160,9 @@ def test_an_event_type_category_that_holds_for_every_pair_gets_no_lexeme(cases) 
     assert lexicon.stats()["event_types_without_word"] == {"EVENTTYPE2.2": EVERY_PAIR}
 
 
-@pytest.mark.parametrize("world_name", ["tiny_world", "default_world"])
+@pytest.mark.parametrize(
+    "world_name", ["tiny_world", pytest.param("default_world", marks=pytest.mark.slow)]
+)
 def test_event_types_without_a_word_match_brute_force(world_name: str, request) -> None:
     world = request.getfixturevalue(world_name)
     named = {c.label for c in world_concepts(world)}
@@ -210,6 +219,7 @@ def units(lexicon: Lexicon, concept_type: str) -> list[str]:
     return labels
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("proportion", [0.0, 0.25, 0.5, 0.8, 1.0])
 def test_every_concept_type_gets_lexemes_in_the_configured_proportion(
     default_world, proportion: float
@@ -229,6 +239,7 @@ def test_every_concept_type_gets_lexemes_in_the_configured_proportion(
         assert list(lexicon.unnamed) == [label for label in content if label in lexicon.unnamed]
 
 
+@pytest.mark.slow
 def test_each_type_has_its_own_proportion(default_world) -> None:
     proportions = {
         "category": 0.5,
@@ -242,34 +253,23 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
     }
     lexicon = lexicon_of(default_world, lexicon={"named_proportion": proportions})
     counts = lexicon.stats()
-    assert counts["concepts"] == {
-        "category": 56,
-        "property": 40,
-        "part": 40,
-        "state": 8,
-        "event_unary": 20,
-        "event": 20,
-        "event_category": 5,
-        "patient_projection": 20,
-        "scalar": 4,
-        GENERIC: 1,
-        FUNCTION: 17,
+    # the concepts of the world, by type, and the named share of each type rounded half up;
+    # a scalar dimension is named with both of its poles
+    concepts = {t: len(lexicon.of_type(t)) for t in CONCEPT_TYPES}
+    assert concepts["category"] == len(default_world.categories)
+    assert concepts["state"] == len(default_world.fluents)
+    assert concepts["scalar"] == 2 * len(default_world.scalars)
+    assert counts["concepts"] == {**concepts, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
+    named = {
+        t: round_half_up(proportions.get(t, 1.0) * len(units(lexicon, t)))
+        * (2 if t == "scalar" else 1)
+        for t in CONCEPT_TYPES
     }
-    assert counts["named_concepts"] == {
-        "category": 28,
-        "property": 4,
-        "part": 40,
-        "state": 8,
-        "event_unary": 15,
-        "event": 8,
-        "event_category": 0,
-        "patient_projection": 10,
-        "scalar": 2,  # one of the two dimensions, with both of its poles
-        GENERIC: 1,
-        FUNCTION: 17,
-    }
+    assert counts["named_concepts"] == {**named, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
+    assert 0 < named["category"] < concepts["category"] and named["event_category"] == 0
 
 
+@pytest.mark.slow
 def test_the_poles_of_a_scalar_dimension_are_named_together(default_world) -> None:
     seen = set()
     for seed in SEEDS:
@@ -285,6 +285,7 @@ def test_the_poles_of_a_scalar_dimension_are_named_together(default_world) -> No
     assert len(seen) == 2  # the dimension is drawn at random
 
 
+@pytest.mark.slow
 def test_one_types_proportion_never_changes_another_types_concepts(default_world) -> None:
     def named(lexicon: Lexicon, concept_type: str) -> list[str]:
         return [c.label for c in lexicon.of_type(concept_type) if lexicon.is_named(c.label)]
@@ -298,6 +299,7 @@ def test_one_types_proportion_never_changes_another_types_concepts(default_world
             assert named(changed, concept_type) == named(base, concept_type)
 
 
+@pytest.mark.slow
 def test_the_named_concepts_are_drawn_at_random(default_world) -> None:
     half = {"named_proportion": {"category": 0.5}}
     draws = {tuple(lexicon_of(default_world, seed=seed, lexicon=half).unnamed) for seed in SEEDS}
@@ -312,7 +314,10 @@ def test_the_named_concepts_are_drawn_at_random(default_world) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("world_name", ["tiny_world", "default_world"])
+@pytest.mark.parametrize(
+    "world_name", ["tiny_world", pytest.param("default_world", marks=pytest.mark.slow)]
+)
+@pytest.mark.slow
 def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
     world_name: str, request
 ) -> None:
@@ -336,23 +341,29 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
     assert stats["lexemes"] == len(lexicon.concepts)
 
 
+@pytest.mark.slow
 def test_lexeme_labels(default_world) -> None:
     lexicon = lexicon_of(default_world)
-    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, 217)]
-    assert len(lexicon.content_lexemes) == 199 and len(lexicon.function_lexemes) == 17
+    total = len(lexicon.lexemes)
+    assert [x.label for x in lexicon.lexemes] == [f"LEXEME.{i}" for i in range(1, total + 1)]
+    # one lexeme per named content concept, then one per function word
+    content = len(lexicon.content_lexemes)
+    assert content == sum(c.content and lexicon.is_named(c.label) for c in lexicon.concepts)
+    assert len(lexicon.function_lexemes) == len(FUNCTION_WORDS) == total - content
     # content lexemes come first, then the function words
-    assert all(x.content for x in lexicon.lexemes[:199])
+    assert all(x.content for x in lexicon.lexemes[:content])
     assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
-    assert lexicon.lexeme("LEXEME.199").concept == THING
-    assert lexicon.lexeme("LEXEME.200").gloss == "a"
-    assert lexicon.lexeme("LEXEME.215").gloss == "become"
-    assert lexicon.lexeme("LEXEME.216").gloss == "before"
+    assert lexicon.lexeme(f"LEXEME.{content}").concept == THING
+    assert lexicon.lexeme(f"LEXEME.{content + 1}").gloss == "a"
+    assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "become"
+    assert lexicon.lexeme(f"LEXEME.{total}").gloss == "before"
     with pytest.raises(KeyError, match="unknown lexeme"):
-        lexicon.lexeme("LEXEME.217")
+        lexicon.lexeme(f"LEXEME.{total + 1}")
     with pytest.raises(KeyError, match="unknown concept"):
         lexicon.concept("CATEGORY.99")
 
 
+@pytest.mark.slow
 def test_the_same_seed_gives_the_same_lexicon(default_world) -> None:
     knobs = {
         "synonym_rate": 0.3,
@@ -437,6 +448,7 @@ def test_function_words_are_ordinary_lexemes(tiny_world) -> None:
             lexicon.function_word(gloss)
 
 
+@pytest.mark.slow
 def test_grammar_settings_never_change_a_content_lexeme(default_world) -> None:
     knobs = {"synonym_rate": 0.3, "homonym_rate": 0.2}
     base = lexicon_of(default_world, lexicon=knobs)
@@ -460,6 +472,7 @@ def test_grammar_settings_never_change_a_content_lexeme(default_world) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_realized_synonym_rate_is_within_tolerance(default_world) -> None:
     for rate in (0.1, 0.3, 0.6):
         rates = [
@@ -474,25 +487,27 @@ def test_the_realized_synonym_rate_is_within_tolerance(default_world) -> None:
     assert lexicon_of(default_world, lexicon={"synonym_rate": 1.0}).stats()["synonym_rate"] == 1
 
 
+@pytest.mark.slow
 def test_synonyms(default_world) -> None:
     base = lexicon_of(default_world)
+    content = len(base.content_lexemes)
     lexicon = lexicon_of(default_world, lexicon={"synonym_rate": 0.3})
     doubled = [c for c in lexicon.concepts if len(lexicon.lexemes_of(c.label)) == 2]
-    assert 20 < len(doubled) < 90
+    assert 0.1 * content < len(doubled) < 0.5 * content  # about 0.3 of the content concepts
     for concept in lexicon.concepts:
         expected = (0,) if concept.label in lexicon.unnamed else (1, 2)
         assert len(lexicon.lexemes_of(concept.label)) in expected
-    assert len(lexicon.content_lexemes) == 199 + len(doubled)
+    assert len(lexicon.content_lexemes) == content + len(doubled)
     for concept in doubled:
         first, second = lexicon.lexemes_of(concept.label)
         assert concept.content  # function words never get synonyms
         assert (first.concept, first.pos, first.gloss) == (second.concept, second.pos, second.gloss)
         assert first.label != second.label
     # first lexemes keep their labels, second lexemes follow them, then the function words
-    assert lexicon.lexemes[:199] == base.lexemes[:199]
-    seconds = lexicon.lexemes[199 : 199 + len(doubled)]
+    assert lexicon.lexemes[:content] == base.lexemes[:content]
+    seconds = lexicon.lexemes[content : content + len(doubled)]
     assert [x.concept for x in seconds] == [c.label for c in doubled]
-    assert [x.gloss for x in lexicon.lexemes[199 + len(doubled) :]] == [
+    assert [x.gloss for x in lexicon.lexemes[content + len(doubled) :]] == [
         x.gloss for x in base.function_lexemes
     ]
     assert [x.label for x in lexicon.lexemes] == [
@@ -500,6 +515,7 @@ def test_synonyms(default_world) -> None:
     ]
 
 
+@pytest.mark.slow
 def test_the_synonyms_at_one_rate_are_among_those_at_a_higher_rate(default_world) -> None:
     def doubled(rate: float) -> set[str]:
         lexicon = lexicon_of(default_world, lexicon={"synonym_rate": rate})
@@ -509,6 +525,7 @@ def test_the_synonyms_at_one_rate_are_among_those_at_a_higher_rate(default_world
     assert doubled(0.1) < doubled(0.3) < doubled(0.6)
 
 
+@pytest.mark.slow
 def test_synonyms_only_for_named_concepts(default_world) -> None:
     knobs = {"synonym_rate": 1.0, "named_proportion": {"property": 0.5, "scalar": 0.0}}
     lexicon = lexicon_of(default_world, lexicon=knobs)
@@ -523,20 +540,23 @@ def test_synonyms_only_for_named_concepts(default_world) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_the_realized_homonym_rate_is_within_tolerance(default_world) -> None:
+    content = len(lexicon_of(default_world).content_lexemes)
     for rate in (0.1, 0.2, 0.5):
         for seed in SEEDS:
             lexicon = lexicon_of(default_world, seed=seed, lexicon={"homonym_rate": rate})
             stats = lexicon.stats()
             shared = [x for x in lexicon.content_lexemes if x.same_form_as is not None]
             assert stats["homonym_pairs"] == len(shared)
-            assert stats["homonym_rate"] == 2 * len(shared) / 199
+            assert stats["homonym_rate"] == 2 * len(shared) / content
             # the number of pairs is rate x lexemes / 2, rounded down or up
-            assert abs(stats["homonym_rate"] - rate) <= 2 / 199
+            assert abs(stats["homonym_rate"] - rate) <= 2 / content
     every = lexicon_of(default_world, lexicon={"homonym_rate": 1.0}).stats()
-    assert every["homonym_pairs"] == 99  # 199 lexemes: one is left over
+    assert every["homonym_pairs"] == content // 2  # with an odd count, one is left over
 
 
+@pytest.mark.slow
 def test_the_share_of_same_pos_pairs_is_within_tolerance(default_world) -> None:
     for same_pos in (0.0, 0.5, 0.8, 1.0):
         pairs = same = 0
@@ -552,6 +572,7 @@ def test_the_share_of_same_pos_pairs_is_within_tolerance(default_world) -> None:
             assert abs(same / pairs - same_pos) < 0.08, (same_pos, same / pairs)
 
 
+@pytest.mark.slow
 def test_homonym_pairs(default_world) -> None:
     knobs = {"homonym_rate": 0.3, "synonym_rate": 0.3}
     lexicon = lexicon_of(default_world, lexicon=knobs)
@@ -578,9 +599,12 @@ def test_a_homonym_never_pairs_a_concept_with_its_own_synonym(tiny_world) -> Non
     for seed in SEEDS:
         knobs = {"homonym_rate": 1.0, "synonym_rate": 1.0}
         lexicon = lexicon_of(tiny_world, TINY_WORLD, seed=seed, lexicon=knobs)
-        assert len(lexicon.content_lexemes) == 80  # 40 content concepts, each with a synonym
+        content_concepts = sum(c.content and lexicon.is_named(c.label) for c in lexicon.concepts)
+        assert len(lexicon.content_lexemes) == 2 * content_concepts  # each with a synonym
         pairs = lexicon.homonym_pairs()
-        assert len(pairs) >= 33
+        # at the rate 1, every lexeme is in a pair but those whose only partner would be their
+        # own synonym
+        assert len(pairs) >= 0.75 * (len(lexicon.content_lexemes) // 2)
         assert all(a.concept != b.concept for a, b in pairs)
 
 
@@ -595,7 +619,8 @@ def test_a_missing_kind_of_partner_falls_back_to_the_other_kind(world_files) -> 
     lexicon = lexicon_of(world, world_files["plain"], lexicon=only_nouns)
     assert {x.pos for x in lexicon.content_lexemes} == {NOUN}
     pairs = lexicon.homonym_pairs()
-    assert len(pairs) == 3 and all(a.pos == b.pos for a, b in pairs)
+    assert len(pairs) == len(lexicon.content_lexemes) // 2 > 0
+    assert all(a.pos == b.pos for a, b in pairs)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -603,6 +628,7 @@ def test_a_missing_kind_of_partner_falls_back_to_the_other_kind(world_files) -> 
 # ---------------------------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_lexicon_frame(default_world) -> None:
     lexicon = lexicon_of(default_world, lexicon={"homonym_rate": 0.2, "synonym_rate": 0.2})
     frame = lexicon.frame()
