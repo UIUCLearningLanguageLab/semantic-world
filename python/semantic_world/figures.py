@@ -52,10 +52,12 @@ OFF_SETTINGS: dict[str, dict[str, Any]] = {
     "conditional_effects_off": {"event_types": {"effects": {"conditional_share": 0}}},
     "fluents_off": {"fluents": {"count": 0}},
     "two_place_off": {"event_types": {"binary": None}},
+    "numeric_fluents_off": {"numeric_fluents": {"count": 0}},
 }
 """The features of the world with an off setting, and the setting: conditional effects (stage
-b1, promised byte-identical to the a8 world), fluents (the static side is promised unchanged),
-and two-place event types (the taxonomy and the one-place side are promised unchanged)."""
+b1, promised byte-identical to the world without them), fluents (the static side is promised
+unchanged), two-place event types (the taxonomy and the one-place side are promised unchanged),
+and numeric fluents (stage b2, promised byte-identical to the b1 world)."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -137,6 +139,7 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
     relations = stats.get("relations") or {}
     effects = stats["effects"]
     conditional = effects["conditional"]
+    numeric = stats.get("numeric_fluents") or {}
     figures: dict[str, Any] = {
         "name": config["name"],
         "seed": config["seed"],
@@ -174,6 +177,25 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
                 f"`{effect['expression']}`, on `{label}`" for label, effect in conditional_effects
             ],
         },
+        "numeric": {
+            "count": numeric.get("count", 0),
+            "drifting": numeric.get("drifting", 0),
+            "fluents": {
+                label: {**row, "drift": round(row["drift"], 6)}
+                for label, row in numeric.get("fluents", {}).items()
+            },
+            # the drifts as a list, so that a guide can name one by index (a label with a
+            # period cannot be a step of a dotted key); rounded to six decimals, as a figure
+            "drifts": [round(row["drift"], 6) for row in numeric.get("fluents", {}).values()],
+            "effects": json.loads(json.dumps(numeric.get("effects", {}))),
+            "precondition_literals": json.loads(
+                json.dumps(numeric.get("precondition_literals", {}))
+            ),
+            "condition_literals": json.loads(json.dumps(numeric.get("condition_literals", {}))),
+            "rules_reading_a_threshold": numeric.get("rules_reading_a_threshold", 0),
+            "changes_per_event": episodes.get("numeric_changes_per_event"),
+            "drift_changes_per_step": episodes.get("drift_changes_per_step"),
+        },
         "fix_ups": dict(stats["fix_ups"]),
         "enabling_graph": dict(stats["enabling_graph"]),
         "absorbing_fluents": list(stats["absorbing_fluents"]),
@@ -201,7 +223,8 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
     )
     figures["wrote_line"] = (
         f"{entities} entities, {figures['fluents_total']} fluents "
-        f"({figures['fluents']['derived']} derived), {figures['event_types']['one_place']} "
+        f"({figures['fluents']['derived']} derived), {figures['numeric']['count']} numeric "
+        f"fluents, {figures['event_types']['one_place']} "
         f"one-place and {figures['event_types']['two_place']} two-place event types, "
         f"{figures['constraints']} constraints; rule set {figures['rule_set_short']}"
     )
@@ -511,7 +534,9 @@ def format_figure(value: Any, spec: str | None) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, list):
-        return ", ".join(str(v) for v in value)
+        return ", ".join(str(v) for v in value) or "none"
+    if isinstance(value, Mapping):
+        return ", ".join(f"`{k}` ({v})" for k, v in value.items()) or "none"
     if value is None:
         return "none"
     if spec:

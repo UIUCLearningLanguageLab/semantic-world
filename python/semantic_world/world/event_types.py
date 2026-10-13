@@ -14,6 +14,15 @@ that effects produce; then preconditions; then the fix-ups (no contradictions, n
 every literal achievable); then, from ``world:conditions``, the conditions of a share of the
 effects ("Conditional effects", stage b1), each satisfiable with its event type's requirement and
 precondition. An event file replaces the sampled dynamics of the event types it names.
+
+Since stage b2 ("Numeric fluents") a share of the effects is numeric and a share of the
+precondition literals is a numeric threshold literal, when the world has numeric fluents: each
+Boolean effect or literal is drawn as before, and then, from ``world:numeric_effects`` or
+``world:numeric_preconditions``, replaced by a numeric one at the share, so that with the share
+at 0 the Boolean side is drawn exactly as before the stage. A condition literal may be a numeric
+threshold too (the kind ``numeric`` of ``condition_kinds``, its symbol and threshold from
+``world:numeric_conditions``). A numeric literal is achievable when its fluent's initial
+distribution, drift, or some effect can bring a value to its side of the threshold.
 """
 
 from __future__ import annotations
@@ -40,6 +49,7 @@ from semantic_world.world.dynamics import (
 )
 from semantic_world.world.event_file import EventFile, ExplicitEventType
 from semantic_world.world.fluents import Fluents
+from semantic_world.world.numeric import NumericFluents, empty_numeric
 from semantic_world.world.statics import StaticWorld
 from semantic_world.world.streams import WorldStreams
 
@@ -319,15 +329,21 @@ class _Dynamics:
         event_file: EventFile | None,
         derived_initial: Mapping[str, np.ndarray],
         statics: StaticWorld | None = None,
+        numeric: NumericFluents | None = None,
     ) -> None:
         self.static = event_types
         self.statics = statics
         self.fluents = fluents
+        self.numeric = numeric if numeric is not None else empty_numeric(0)
+        self.numeric_labels = self.numeric.labels
         self.effects_config: EffectsConfig = config.event_types.effects
         self.preconditions_config: PreconditionsConfig = config.event_types.preconditions
         self.rng_effects = streams.effects
         self.rng_preconditions = streams.preconditions
         self.rng_conditions = streams.conditions
+        self.rng_numeric_effects = streams.numeric_effects
+        self.rng_numeric_preconditions = streams.numeric_preconditions
+        self.rng_numeric_conditions = streams.numeric_conditions
         self.event_file = event_file
         self.base_labels = fluents.base_labels
         self.all_labels = fluents.labels
@@ -351,6 +367,7 @@ class _Dynamics:
             "literals_redrawn": 0,
             "conditions_redrawn": 0,
             "conditions_dropped": 0,
+            "numeric_literals_redrawn": 0,
         }
         self.condition_draws: dict[str, int] = {"drawn": 0, "conditional": 0}
         """The effects a condition was drawn for, and how many of them got one (Jon's ruling 2
@@ -380,17 +397,91 @@ class _Dynamics:
             return roles[0]
         return _draw(rng, weights)
 
+    def _numeric_effect(self, role: str) -> Effect:
+        """A numeric effect of a role, from ``world:numeric_effects``: the fluent uniformly, the
+        operator uniformly, the constant uniformly from ``numeric_amounts``."""
+        rng = self.rng_numeric_effects
+        cfg = self.effects_config
+        fluent = self.numeric_labels[int(rng.integers(len(self.numeric_labels)))]
+        sign = 1.0 if rng.integers(2) == 0 else -1.0
+        amount = float(rng.uniform(cfg.numeric_amounts[0], cfg.numeric_amounts[1]))
+        return Effect(role, fluent, sign * amount)
+
+    def _maybe_numeric(self, effect: Effect) -> Effect:
+        """The Boolean effect, or a numeric one of the same role at ``numeric_share``; nothing
+        is drawn when the share is 0 or the world has no numeric fluents."""
+        share = self.effects_config.numeric_share
+        if not self.numeric_labels or share <= 0:
+            return effect
+        if self.rng_numeric_effects.random() < share:
+            return self._numeric_effect(effect.role)
+        return effect
+
     def _draw_effect(
         self, roles: tuple[str, ...], forbidden: set[tuple[str, str]] = frozenset()
     ) -> Effect | None:  # type: ignore[assignment]
         rng = self.rng_effects
         for _ in range(MAX_TRIES):
             role = self._role(rng, roles, self.effects_config.roles)
-            fluent = self.base_labels[int(rng.integers(len(self.base_labels)))]
-            value = bool(rng.integers(2))
-            if (role, fluent) not in forbidden:
-                return Effect(role, fluent, value)
+            if self.base_labels:
+                fluent = self.base_labels[int(rng.integers(len(self.base_labels)))]
+                value = bool(rng.integers(2))
+                effect = self._maybe_numeric(Effect(role, fluent, value))
+            else:
+                effect = self._numeric_effect(role)
+            if (effect.role, effect.fluent) not in forbidden:
+                return effect
         return None
+
+    def produced_numeric(self) -> set[tuple[str, int]]:
+        """``(fluent, +1 or -1)`` for every numeric effect of every event type."""
+        return {
+            (e.fluent, 1 if e.amount > 0 else -1)
+            for draft in self.drafts.values()
+            for e in draft.effects
+            if e.numeric
+        }
+
+    def numeric_achievable(self, fluent: str, above: bool, threshold: float) -> bool:
+        return self.numeric.achievable(fluent, above, threshold, self.produced_numeric())
+
+    def _numeric_literal(
+        self,
+        role: str,
+        rng: np.random.Generator,
+        forbidden: set[tuple[str, str]],
+        produced: set[tuple[str, int]],
+    ) -> Literal | None:
+        """A numeric threshold literal of a role, from ``rng``: the fluent uniformly, the side
+        uniformly, the threshold from ``numeric_thresholds``; drawn again while it is not
+        achievable or its fluent is forbidden for the role, up to ``MAX_TRIES``."""
+        cfg = self.preconditions_config
+        for _ in range(MAX_TRIES):
+            fluent = self.numeric_labels[int(rng.integers(len(self.numeric_labels)))]
+            above = bool(rng.integers(2) == 0)
+            fraction = cfg.numeric_thresholds[int(rng.integers(len(cfg.numeric_thresholds)))]
+            threshold = self.numeric[fluent].point(fraction)
+            if (role, fluent) in forbidden or not self.numeric.achievable(
+                fluent, above, threshold, produced
+            ):
+                self.stats["numeric_literals_redrawn"] += 1
+                continue
+            return Literal(role, fluent, above, threshold)
+        return None
+
+    def _maybe_numeric_literal(
+        self, literal: Literal, forbidden: set[tuple[str, str]], rng: np.random.Generator
+    ) -> Literal:
+        """The Boolean literal, or a numeric one of the same role at ``numeric_share`` (the
+        Boolean one again when no achievable numeric literal was found)."""
+        share = self.preconditions_config.numeric_share
+        if not self.numeric_labels or share <= 0:
+            return literal
+        if rng.random() < share:
+            candidate = self._numeric_literal(literal.role, rng, forbidden, self.produced_numeric())
+            if candidate is not None:
+                return candidate
+        return literal
 
     def _draw_literal(
         self,
@@ -398,25 +489,39 @@ class _Dynamics:
         achievable: set[tuple[str, bool]],
         produced: list[tuple[str, bool]],
         forbidden: set[tuple[str, str]] = frozenset(),  # type: ignore[assignment]
+        numeric_rng: np.random.Generator | None = None,
     ) -> Literal | None:
         rng = self.rng_preconditions
-        if not achievable:
+        numeric_rng = self.rng_numeric_preconditions if numeric_rng is None else numeric_rng
+        if not achievable and not self.numeric_labels:
             return None
         for _ in range(MAX_TRIES):
             role = self._role(rng, roles, self.preconditions_config.roles)
+            if not self.all_labels:
+                return self._numeric_literal(
+                    role, numeric_rng, set(forbidden), self.produced_numeric()
+                )
             if produced and rng.random() < self.preconditions_config.enabled_share:
                 fluent, value = produced[int(rng.integers(len(produced)))]
             else:
                 fluent = self.all_labels[int(rng.integers(len(self.all_labels)))]
                 value = bool(rng.integers(2))
             if (fluent, value) in achievable and (role, fluent) not in forbidden:
-                return Literal(role, fluent, value)
+                return self._maybe_numeric_literal(
+                    Literal(role, fluent, value), set(forbidden), numeric_rng
+                )
         return None
+
+    def literal_achievable(self, literal: Literal, achievable: set[tuple[str, bool]]) -> bool:
+        if literal.numeric:
+            assert literal.threshold is not None
+            return self.numeric_achievable(literal.fluent, literal.value, literal.threshold)
+        return (literal.fluent, literal.value) in achievable
 
     # Effects ----------------------------------------------------------------------------------
 
     def draw_effects(self) -> None:
-        if not self.base_labels:
+        if not self.base_labels and not self.numeric_labels:
             return
         cfg = self.effects_config
         for et in self.static.unary:
@@ -473,14 +578,20 @@ class _Dynamics:
     # Preconditions ----------------------------------------------------------------------------
 
     def produced(self) -> list[tuple[str, bool]]:
-        values = {(e.fluent, e.value) for draft in self.drafts.values() for e in draft.effects}
+        """``(fluent, value)`` for every Boolean effect of every event type."""
+        values = {
+            (e.fluent, e.value)
+            for draft in self.drafts.values()
+            for e in draft.effects
+            if not e.numeric
+        }
         return sorted(values)
 
     def achievable(self) -> set[tuple[str, bool]]:
         return set(self.produced()) | self.initial_values
 
     def draw_preconditions(self) -> None:
-        if not self.all_labels:
+        if not self.all_labels and not self.numeric_labels:
             return
         cfg = self.preconditions_config
         achievable = self.achievable()
@@ -550,13 +661,15 @@ class _Dynamics:
         """An effect that sets a fluent to the value the precondition already requires changes
         nothing: an own effect is redrawn, an inherited one dropped. Returns whether anything
         changed."""
-        required = {(lit.role, lit.fluent): lit.value for lit in draft.precondition}
+        required = {
+            (lit.role, lit.fluent): lit.value for lit in draft.precondition if not lit.numeric
+        }
         changed = False
         kept: dict[tuple[str, str], Effect] = {(e.role, e.fluent): e for e in draft.effects}
         for effect in list(draft.effects):
             key = (effect.role, effect.fluent)
-            if required.get(key) != effect.value:
-                continue
+            if effect.numeric or required.get(key) != effect.value:
+                continue  # a numeric effect is never empty: it can always add or subtract
             changed = True
             del kept[key]
             if key not in draft.own_effect_keys:
@@ -568,6 +681,7 @@ class _Dynamics:
                 candidate = self._draw_effect(draft.roles, set(kept))
                 if (
                     candidate is None
+                    or candidate.numeric
                     or required.get((candidate.role, candidate.fluent)) != candidate.value
                 ):
                     break
@@ -590,7 +704,7 @@ class _Dynamics:
             (lit.role, lit.fluent): lit for lit in draft.precondition
         }
         for literal in list(draft.precondition):
-            if (literal.fluent, literal.value) in achievable:
+            if self.literal_achievable(literal, achievable):
                 continue
             changed = True
             key = (literal.role, literal.fluent)
@@ -633,22 +747,38 @@ class _Dynamics:
                 )
             for lit in entry.precondition or ():
                 self._check_role(source, f"{entry.field}.precondition", et, lit.role, lit.key)
-                if lit.fluent not in self.fluents:
+                if lit.numeric:
+                    if lit.fluent not in self.numeric:
+                        raise ConfigError(
+                            source,
+                            f"{entry.field}.precondition",
+                            f"reads unknown numeric fluent {lit.fluent}",
+                        )
+                    self._check_threshold(
+                        source, f"{entry.field}.precondition", lit.fluent, lit.threshold
+                    )
+                elif lit.fluent not in self.fluents:
                     raise ConfigError(
                         source, f"{entry.field}.precondition", f"reads unknown fluent {lit.fluent}"
                     )
-            seen_effects: dict[tuple[str, str], bool] = {}
+            seen_effects: dict[tuple[str, str], bool | float] = {}
             for i, effect in enumerate(entry.effects or ()):
                 where = f"{entry.field}.effects[{i}]"
                 self._check_role(source, where, et, effect.role, effect.key)
-                if effect.fluent not in self.fluents:
-                    raise ConfigError(source, where, f"writes unknown fluent {effect.fluent}")
-                if self.fluents[effect.fluent].derived:
-                    raise ConfigError(
-                        source,
-                        where,
-                        f"{effect.fluent} is a derived fluent; effects write base fluents only",
-                    )
+                if effect.numeric:
+                    if effect.fluent not in self.numeric:
+                        raise ConfigError(
+                            source, where, f"adds to unknown numeric fluent {effect.fluent}"
+                        )
+                else:
+                    if effect.fluent not in self.fluents:
+                        raise ConfigError(source, where, f"writes unknown fluent {effect.fluent}")
+                    if self.fluents[effect.fluent].derived:
+                        raise ConfigError(
+                            source,
+                            where,
+                            f"{effect.fluent} is a derived fluent; effects write base fluents only",
+                        )
                 key = (effect.role, effect.fluent)
                 if key in seen_effects and seen_effects[key] != effect.value:
                     raise ConfigError(
@@ -659,14 +789,21 @@ class _Dynamics:
             seen_literals: dict[tuple[str, str], bool] = {}
             for lit in entry.precondition or ():
                 key = (lit.role, lit.fluent)
-                if key in seen_literals and seen_literals[key] != lit.value:
+                if key in seen_literals and (lit.numeric or seen_literals[key] != lit.value):
                     raise ConfigError(
-                        source, f"{entry.field}.precondition", f"holds {lit.key} and its negation"
+                        source,
+                        f"{entry.field}.precondition",
+                        f"holds {lit.key} twice"
+                        if lit.numeric
+                        else f"holds {lit.key} and its negation",
                     )
                 seen_literals[key] = lit.value
             if entry.precondition is not None and entry.effects is not None:
                 for effect in entry.effects:
-                    if seen_literals.get((effect.role, effect.fluent)) == effect.value:
+                    if (
+                        not effect.numeric
+                        and seen_literals.get((effect.role, effect.fluent)) == effect.value
+                    ):
                         raise ConfigError(
                             source,
                             entry.field,
@@ -674,7 +811,7 @@ class _Dynamics:
                             f"already requires, so it changes nothing",
                         )
                     for lit in effect.condition:
-                        if lit.kind == "fluent" and (lit.role, lit.symbol) in seen_literals:
+                        if lit.kind != "feature" and (lit.role, lit.symbol) in seen_literals:
                             raise ConfigError(
                                 source,
                                 entry.field,
@@ -692,7 +829,11 @@ class _Dynamics:
         keys: set[tuple[str, str]] = set()
         for lit in effect.condition:
             self._check_role(source, where, et, lit.role, lit.key)
-            if lit.kind == "fluent":
+            if lit.kind == "numeric":
+                if lit.symbol not in self.numeric:
+                    raise ConfigError(source, where, f"reads unknown numeric fluent {lit.symbol}")
+                self._check_threshold(source, where, lit.symbol, lit.threshold)
+            elif lit.kind == "fluent":
                 if lit.symbol not in self.fluents:
                     raise ConfigError(source, where, f"reads unknown fluent {lit.symbol}")
             elif lit.symbol not in self.feature_labels:
@@ -709,6 +850,18 @@ class _Dynamics:
                     f"the fluent has the effect's value after the event either way",
                 )
 
+    def _check_threshold(
+        self, source: str, where: str, fluent: str, threshold: float | None
+    ) -> None:
+        low, high = self.numeric[fluent].range
+        if threshold is None or not low < threshold < high:
+            raise ConfigError(
+                source,
+                where,
+                f"the threshold {threshold!r} on {fluent} is not strictly inside its range "
+                f"[{low}, {high}]",
+            )
+
     def _check_role(self, source: str, where: str, et: EventType, role: str, key: str) -> None:
         if role not in et.roles:
             raise ConfigError(
@@ -723,25 +876,25 @@ class _Dynamics:
         achievable = self.achievable()
         for label, entry in self.event_file.event_types.items():
             for lit in entry.precondition or ():
-                if (lit.fluent, lit.value) not in achievable:
+                if not self.literal_achievable(lit, achievable):
                     raise ConfigError(
                         self.event_file.source,
                         f"{entry.field}.precondition",
                         f"{lit.text} is not achievable: no entity starts with that value and no "
-                        f"effect produces it",
+                        f"effect or drift produces it",
                     )
             draft = self.drafts[label]
             for i, effect in enumerate(entry.effects or ()):
                 where = f"{entry.field}.effects[{i}]"
                 for lit in effect.condition:
-                    if lit.kind == "fluent" and (lit.symbol, lit.value) not in achievable:
+                    if not self._condition_literal_achievable(lit, achievable):
                         raise ConfigError(
                             self.event_file.source,
                             where,
                             f"the condition literal {lit.text} is not achievable: no entity "
-                            f"starts with that value and no effect produces it",
+                            f"starts with that value and no effect or drift produces it",
                         )
-                    if lit.kind == "fluent" and (lit.role, lit.symbol) in {
+                    if lit.kind != "feature" and (lit.role, lit.symbol) in {
                         (p.role, p.fluent) for p in draft.precondition
                     }:
                         raise ConfigError(
@@ -758,6 +911,16 @@ class _Dynamics:
                         f"no able binding of {label} satisfies the condition "
                         f"{' AND '.join(lit.text for lit in effect.condition)}",
                     )
+
+    def _condition_literal_achievable(
+        self, lit: ConditionLiteral, achievable: set[tuple[str, bool]]
+    ) -> bool:
+        if lit.kind == "feature":
+            return True
+        if lit.numeric:
+            assert lit.threshold is not None
+            return self.numeric_achievable(lit.symbol, lit.value, lit.threshold)
+        return (lit.symbol, lit.value) in achievable
 
     # Conditions ------------------------------------------------------------------------------
 
@@ -814,11 +977,14 @@ class _Dynamics:
         if len(keys) < len(condition):
             return False
         for lit in condition:
-            if lit.kind != "fluent":
+            if lit.kind == "feature":
                 continue
-            if (lit.symbol, lit.value) not in achievable:
+            if not self._condition_literal_achievable(lit, achievable):
                 return False
-            if (lit.role, lit.symbol) == (effect.role, effect.fluent):
+            # A Boolean condition on the fluent the effect sets would be a condition in name
+            # only; a numeric condition on the effect's own numeric fluent ("when low, add") is
+            # a real condition, and allowed.
+            if not lit.numeric and (lit.role, lit.symbol) == (effect.role, effect.fluent):
                 return False
             for draft in holders:
                 if any((p.role, p.fluent) == (lit.role, lit.symbol) for p in draft.precondition):
@@ -839,24 +1005,47 @@ class _Dynamics:
         wanted; Jon's ruling 1 on stage b1), its symbol uniformly within the kind, and its value
         uniformly."""
         rng = self.rng_conditions
-        pools = {"feature": self.feature_labels, "fluent": self.all_labels}
-        kinds = self.effects_config.condition_kinds
-        # The even split is drawn with rng.integers(2), as stage b1 drew it: a weighted draw
-        # (rng.choice with probabilities) reads the stream differently, so using it for the
-        # even split too would change every condition of the existing worlds. The weighted draw
-        # serves the other splits.
-        even = kinds.get("feature", 0) == kinds.get("fluent", 0)
+        pools = {
+            "feature": self.feature_labels,
+            "fluent": self.all_labels,
+            "numeric": self.numeric_labels,
+        }
+        weights = {
+            kind: weight
+            for kind, weight in self.effects_config.condition_kinds.items()
+            if weight > 0 and pools.get(kind)
+        }
+        # The even split between features and fluents is drawn with rng.integers(2), as stage b1
+        # drew it: a weighted draw (rng.choice with probabilities) reads the stream differently,
+        # so using it for the even split too would change every condition of the existing
+        # worlds. The weighted draw serves the other splits, and the numeric kind (stage b2).
+        even = set(weights) == {"feature", "fluent"} and weights["feature"] == weights["fluent"]
+        numeric_rng = self.rng_numeric_conditions
+        fractions = self.preconditions_config.numeric_thresholds
         for _ in range(MAX_TRIES):
             count = _draw(rng, self.effects_config.condition_literals)
             literals = []
             for _ in range(count):
                 role = roles[0] if len(roles) == 1 else roles[int(rng.integers(len(roles)))]
-                if not self.feature_labels:
-                    pool = self.all_labels
+                if not weights:
+                    kind = "fluent"
                 elif even:
-                    pool = pools[("feature", "fluent")[int(rng.integers(2))]]
+                    kind = ("feature", "fluent")[int(rng.integers(2))]
+                elif len(weights) == 1:
+                    kind = next(iter(weights))
                 else:
-                    pool = pools[_draw(rng, kinds)]
+                    kind = _draw(rng, weights)
+                if kind == "numeric":
+                    symbol = self.numeric_labels[
+                        int(numeric_rng.integers(len(self.numeric_labels)))
+                    ]
+                    above = bool(numeric_rng.integers(2) == 0)
+                    fraction = fractions[int(numeric_rng.integers(len(fractions)))]
+                    literals.append(
+                        ConditionLiteral(role, symbol, above, self.numeric[symbol].point(fraction))
+                    )
+                    continue
+                pool = pools[kind]
                 symbol = pool[int(rng.integers(len(pool)))]
                 value = bool(rng.integers(2))
                 literals.append(ConditionLiteral(role, symbol, value))
@@ -886,7 +1075,7 @@ class _Dynamics:
             for effect in draft.effects
             if (effect.role, effect.fluent) in draft.own_effect_keys
         )
-        if cfg.conditional_share <= 0 or not self.base_labels or not self.all_labels:
+        if cfg.conditional_share <= 0 or not (self.base_labels or self.numeric_labels):
             return
         rng = self.rng_conditions
         achievable = self.achievable()
@@ -987,20 +1176,34 @@ def generate_event_types(
     streams: WorldStreams,
     event_file: EventFile | None,
     derived_initial: Mapping[str, np.ndarray],
+    numeric: NumericFluents | None = None,
 ) -> EventTypes:
     """Event types with their requirements, preconditions, and effects."""
     static = build_event_types(statics)
-    return _Dynamics(static, fluents, config, streams, event_file, derived_initial, statics).run()
+    return _Dynamics(
+        static, fluents, config, streams, event_file, derived_initial, statics, numeric
+    ).run()
 
 
 def condition_keys(effects: Sequence[Effect]) -> set[tuple[str, str]]:
-    """The ``(role, fluent)`` pairs that the conditions of the effects read: a precondition
-    literal on one of them would fix what the condition asks, so none is drawn there."""
+    """The ``(role, fluent)`` pairs that the conditions of the effects read (Boolean or
+    numeric): a precondition literal on one of them would fix what the condition asks, so none
+    is drawn there."""
     return {
         (lit.role, lit.symbol)
         for effect in effects
         for lit in effect.condition
-        if lit.kind == "fluent"
+        if lit.kind != "feature"
+    }
+
+
+def produced_numeric(event_types: EventTypes) -> set[tuple[str, int]]:
+    """``(fluent, +1 or -1)`` for every numeric effect of the event types."""
+    return {
+        (e.fluent, 1 if e.amount > 0 else -1)
+        for et in event_types.event_types
+        for e in et.effects
+        if e.numeric
     }
 
 
@@ -1011,16 +1214,20 @@ def redraw_preconditions(
     config: Config,
     parts: Mapping[str, np.random.Generator],
     derived_initial: Mapping[str, np.ndarray],
+    numeric: NumericFluents | None = None,
+    numeric_parts: Mapping[str, np.random.Generator] | None = None,
 ) -> EventTypes:
     """The event types with the own precondition literals of the named event types drawn
-    again, each from its own generator (the part ``world:preconditions:<label>``), as
-    ``define`` redraws an event type that was never legal in the statistics episodes. The
-    inherited literals stay, except one that is no longer achievable (the generator's fix-ups
-    dropped it from the event type when the effect that produced its value went); a literal that
-    would make one of the event type's own effects empty, that duplicates an inherited one, or
-    that fixes a fluent one of the event type's conditions reads, is drawn again. No other event
-    type changes."""
+    again, each from its own generator (the part ``world:preconditions:<label>``, and
+    ``world:numeric_preconditions:<label>`` for the numeric replacements), as ``define``
+    redraws an event type that was never legal in the statistics episodes. The inherited
+    literals stay, except one that is no longer achievable (the generator's fix-ups dropped it
+    from the event type when the effect that produced its value went); a literal that would make
+    one of the event type's own effects empty, that duplicates an inherited one, or that fixes a
+    fluent one of the event type's conditions reads, is drawn again. No other event type
+    changes."""
     cfg = config.event_types.preconditions
+    numeric = numeric if numeric is not None else empty_numeric(fluents.initial_values.shape[0])
     achievable: set[tuple[str, bool]] = set()
     for i, fluent in enumerate(fluents.base):
         for value in np.unique(fluents.initial_values[:, i]):
@@ -1028,29 +1235,42 @@ def redraw_preconditions(
     for label, column in derived_initial.items():
         for value in np.unique(column):
             achievable.add((label, bool(value)))
-    produced = sorted({(e.fluent, e.value) for et in event_types.event_types for e in et.effects})
+    produced = sorted(
+        {(e.fluent, e.value) for et in event_types.event_types for e in et.effects if not e.numeric}
+    )
     achievable |= set(produced)
+    signs = produced_numeric(event_types)
+
+    def ok(literal: Literal) -> bool:
+        if literal.numeric:
+            assert literal.threshold is not None
+            return numeric.achievable(literal.fluent, literal.value, literal.threshold, signs)
+        return (literal.fluent, literal.value) in achievable
+
     feature_literals = event_types.feature_preconditions
     redrawn: dict[str, EventType] = {}
     for label in labels:
         et = event_types.event_type(label)
         rng = parts[label]
+        numeric_rng = (numeric_parts or {}).get(label)
         inherited: dict[tuple[str, str], Literal] = {}
         for feature in event_types.features:
             literal = feature_literals.get(feature)
-            if (
-                literal is not None
-                and feature in et.features
-                and (literal.fluent, literal.value) in achievable
-            ):
+            if literal is not None and feature in et.features and ok(literal):
                 inherited.setdefault((literal.role, literal.fluent), literal)
-        empty = {(e.role, e.fluent, e.value) for e in et.effects}
+        empty = {(e.role, e.fluent, e.value) for e in et.effects if not e.numeric}
         read = condition_keys(et.effects)
         kept = dict(inherited)
         n = _draw(rng, cfg.literals)
         for _ in range(n):
             for _ in range(MAX_TRIES):
                 role = et.roles[0] if len(et.roles) == 1 else _draw(rng, cfg.roles)
+                if not fluents.labels:
+                    literal = _redraw_numeric(numeric, cfg, role, numeric_rng, kept, read, signs)
+                    if literal is not None:
+                        kept[(role, literal.fluent)] = literal
+                        break
+                    continue
                 if produced and rng.random() < cfg.enabled_share:
                     fluent, value = produced[int(rng.integers(len(produced)))]
                 else:
@@ -1062,7 +1282,19 @@ def redraw_preconditions(
                     and (role, fluent) not in read
                     and (role, fluent, value) not in empty
                 ):
-                    kept[(role, fluent)] = Literal(role, fluent, value)
+                    literal = Literal(role, fluent, value)
+                    if (
+                        numeric_rng is not None
+                        and len(numeric)
+                        and cfg.numeric_share > 0
+                        and numeric_rng.random() < cfg.numeric_share
+                    ):
+                        replacement = _redraw_numeric(
+                            numeric, cfg, role, numeric_rng, kept, read, signs
+                        )
+                        if replacement is not None:
+                            literal = replacement
+                    kept[(role, literal.fluent)] = literal
                     break
         redrawn[label] = dataclasses.replace(et, precondition=tuple(kept.values()))
     return dataclasses.replace(
@@ -1071,11 +1303,39 @@ def redraw_preconditions(
     )
 
 
+def _redraw_numeric(
+    numeric: NumericFluents,
+    cfg: PreconditionsConfig,
+    role: str,
+    rng: np.random.Generator | None,
+    kept: Mapping[tuple[str, str], Literal],
+    read: set[tuple[str, str]],
+    signs: set[tuple[str, int]],
+) -> Literal | None:
+    """A numeric literal for a redraw, achievable and on a fluent the event type's other
+    literals and conditions leave free, or None."""
+    if rng is None or not len(numeric):
+        return None
+    for _ in range(MAX_TRIES):
+        fluent = numeric.labels[int(rng.integers(len(numeric.labels)))]
+        above = bool(rng.integers(2) == 0)
+        fraction = cfg.numeric_thresholds[int(rng.integers(len(cfg.numeric_thresholds)))]
+        threshold = numeric[fluent].point(fraction)
+        if (
+            (role, fluent) not in kept
+            and (role, fluent) not in read
+            and numeric.achievable(fluent, above, threshold, signs)
+        ):
+            return Literal(role, fluent, above, threshold)
+    return None
+
+
 def check_dynamics(
     event_types: EventTypes,
     fluents: Fluents,
     initial_present: set[tuple[str, bool]],
     features: Sequence[str] | None = None,
+    numeric: NumericFluents | None = None,
 ) -> None:
     """The invariants of "Preconditions", "Effects", and "Conditional effects": no effect on a
     derived fluent, no contradiction (whatever the conditions), no empty effect, every literal
@@ -1085,15 +1345,34 @@ def check_dynamics(
     fluent literal achievable. Raises :class:`ValueError` naming the event type
     otherwise. Tests and the generator both call it. Whether some able binding satisfies the
     static literals needs the static side; the generator checks it when it draws."""
-    produced = {(e.fluent, e.value) for et in event_types.event_types for e in et.effects}
+    produced = {
+        (e.fluent, e.value) for et in event_types.event_types for e in et.effects if not e.numeric
+    }
     achievable = produced | initial_present
+    signs = produced_numeric(event_types)
+    numeric = numeric if numeric is not None else empty_numeric(0)
+
+    def numeric_ok(fluent: str, above: bool, threshold: float | None) -> bool:
+        return (
+            fluent in numeric
+            and threshold is not None
+            and numeric.achievable(fluent, above, threshold, signs)
+        )
+
     for et in event_types.event_types:
-        effect_keys: dict[tuple[str, str], bool] = {}
+        effect_keys: dict[tuple[str, str], bool | float] = {}
         precondition_keys = {(lit.role, lit.fluent) for lit in et.precondition}
         for effect in et.effects:
             if effect.role not in et.roles:
                 raise ValueError(f"{et.label}: the effect {effect.text} uses a role it has not")
-            if fluents[effect.fluent].derived:
+            if effect.numeric:
+                if effect.fluent not in numeric:
+                    raise ValueError(
+                        f"{et.label}: the effect {effect.text} writes an unknown numeric fluent"
+                    )
+                if effect.amount == 0:
+                    raise ValueError(f"{et.label}: the effect {effect.text} adds nothing")
+            elif fluents[effect.fluent].derived:
                 raise ValueError(f"{et.label}: the effect {effect.text} writes a derived fluent")
             key = (effect.role, effect.fluent)
             if key in effect_keys:
@@ -1105,7 +1384,18 @@ def check_dynamics(
                     raise ValueError(
                         f"{et.label}: the condition of {effect.text} uses a role it has not"
                     )
-                if lit.kind == "fluent":
+                if lit.numeric:
+                    if not numeric_ok(lit.symbol, lit.value, lit.threshold):
+                        raise ValueError(
+                            f"{et.label}: the condition literal {lit.text} is unknown or not "
+                            f"achievable"
+                        )
+                    if (lit.role, lit.symbol) in precondition_keys:
+                        raise ValueError(
+                            f"{et.label}: the condition of {effect.text} reads {lit.key}, which "
+                            f"the precondition fixes"
+                        )
+                elif lit.kind == "fluent":
                     if lit.symbol not in fluents:
                         raise ValueError(
                             f"{et.label}: the condition of {effect.text} reads an unknown fluent"
@@ -1140,11 +1430,17 @@ def check_dynamics(
             key = (lit.role, lit.fluent)
             if key in literal_keys:
                 raise ValueError(f"{et.label}: the precondition reads {lit.key} twice")
+            if lit.numeric:
+                if not numeric_ok(lit.fluent, lit.value, lit.threshold):
+                    raise ValueError(
+                        f"{et.label}: the literal {lit.text} is unknown or not achievable"
+                    )
+                continue
             literal_keys[key] = lit.value
             if (lit.fluent, lit.value) not in achievable:
                 raise ValueError(f"{et.label}: the literal {lit.text} is not achievable")
         for key, value in effect_keys.items():
-            if literal_keys.get(key) == value:
+            if not key[1].startswith("NUMFL.") and literal_keys.get(key) == value:
                 raise ValueError(f"{et.label}: the effect on {key[0]}.{key[1]} changes nothing")
 
 
@@ -1164,5 +1460,6 @@ __all__ = [
     "constraint_from_rule",
     "generate_event_types",
     "prefixed",
+    "produced_numeric",
     "redraw_preconditions",
 ]

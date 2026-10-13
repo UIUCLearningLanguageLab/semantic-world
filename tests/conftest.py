@@ -2,9 +2,12 @@
 
 ``pytest`` runs the fast tier: every test without the ``slow`` marker. ``pytest --slow`` runs the
 slow tier alone: the tests marked ``slow``, which need a default-scale run (the default world of
-``data/world/default.yaml``, with its 1,000 statistics episodes, or a corpus on it) or take more
-than a few seconds. ``pytest --all`` runs both tiers, as the full check list does. A test of one
-tier is deselected in the other, and the summary counts the deselected tests.
+``data/world/default.yaml``, with its 1,000 statistics episodes, or a corpus on it), or
+synthesize speech (the word-form audio and embedding tests, which need the speech extra). A test
+over the tiny world is in the fast tier whatever its run time (Jon's ruling 5 on the process
+cleanup); the fast tier runs on every core with ``pytest -n auto``. ``pytest --all`` runs both
+tiers, as the full check list does. A test of one tier is deselected in the other, and the
+summary counts the deselected tests.
 """
 
 from pathlib import Path
@@ -32,8 +35,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
-        "slow: needs a default-scale run, or takes more than a few seconds; deselected by plain "
-        "pytest, run by pytest --slow or pytest --all",
+        "slow: needs a default-scale run, or synthesizes speech; deselected by plain pytest, run "
+        "by pytest --slow or pytest --all",
     )
 
 

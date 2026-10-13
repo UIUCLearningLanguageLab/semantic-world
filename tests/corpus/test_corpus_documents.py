@@ -1364,9 +1364,12 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
     # the mix among the negative facts: "no" against "most ... not" and "some ... not". About 3%
-    # of the class-level sentences are "no", so the rise needs 1,000 documents to show: it must
-    # be more than two standard errors of the two binomial shares (a one-sided bound at the
-    # usual level; on this seed the rise is about two and a half)
+    # of the class-level sentences are "no", so the rise needs 1,000 documents to show. The
+    # margin is two standard errors of the two binomial shares, not the three the other rate
+    # tests use (Jon's ruling 4 on the process cleanup): three were preferred if the rise cleared
+    # them comfortably, but on this seed the rise measures about two and a half, so the test
+    # keeps two (a one-sided bound at the usual level); more documents would make it slower, and
+    # a heavier weight would make it a test of another setting
     _, _, base_many = made(count=1000)
     _, _, heavier = made(count=1000, nec_none=4)
     base_share, heavier_share = share(base_many, NEC_NO), share(heavier, NEC_NO)

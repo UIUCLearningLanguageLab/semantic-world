@@ -270,9 +270,9 @@ def test_every_rule_of_preconditions_and_effects_holds(default: WorldResult) -> 
         for i, f in enumerate(fluents.base)
         for v in np.unique(fluents.initial_values[:, i])
     }
-    for label, column in derived_initial_values(fluents, default.taxonomy).items():
+    for label, column in derived_initial_values(fluents, default.taxonomy, default.numeric).items():
         initial_present |= {(label, bool(v)) for v in np.unique(column)}
-    check_dynamics(default.event_types, fluents, initial_present)
+    check_dynamics(default.event_types, fluents, initial_present, numeric=default.numeric)
     leaves = default.event_types.leaves
     assert sum(len(e.effects) for e in leaves) > 0
     assert sum(len(e.precondition) for e in leaves) > 0
@@ -315,12 +315,14 @@ def test_event_type_features_share_preconditions_and_effects(default: WorldResul
 
 
 def test_fluents_off_gives_no_dynamics_and_the_same_static_side(tiny: WorldResult) -> None:
-    """Without fluents, no event type has a precondition or an effect, and the static side is
-    the same as with them: the requirements, the capacities, and the relation statistics come
-    from their own streams."""
-    config = config_from_mapping(world_mapping("tiny", fluents={"count": 0}))
+    """Without fluents (Boolean and, since stage b2, numeric), no event type has a precondition
+    or an effect, and the static side is the same as with them: the requirements, the
+    capacities, and the relation statistics come from their own streams."""
+    config = config_from_mapping(
+        world_mapping("tiny", fluents={"count": 0}, numeric_fluents={"count": 0})
+    )
     world = define(config)
-    assert len(world.fluents) == 0
+    assert len(world.fluents) == 0 and len(world.numeric) == 0
     for et in world.event_types.event_types:
         assert et.precondition == () and et.effects == ()
     assert static_records(world.statics) == static_records(tiny.statics)
@@ -331,22 +333,33 @@ def test_fluents_off_gives_no_dynamics_and_the_same_static_side(tiny: WorldResul
 def test_never_legal_event_types_have_their_preconditions_redrawn(tiny: WorldResult) -> None:
     """An event type never legal in the statistics episodes has its own precondition literals
     drawn again from its own part of ``world:preconditions``, as many times as the statistics
-    count, and no other event type's preconditions change. The tiny world at seed 1 redraws
-    some event types (which ones is a figure of the run, in ``tests/figures/snapshot.yaml``),
-    after which every event type is legal somewhere."""
+    count, and no other event type's preconditions change. The test takes the first seed of the
+    tiny world from 1 on that redraws some event type (which seeds do is a figure of the run,
+    and the default tiny world of stage b2 at seed 1 redraws none), after which every event
+    type is legal somewhere."""
     from semantic_world.world.event_types import redraw_preconditions
 
+    for seed in range(1, 9):
+        tiny = define(load_config(DATA / "tiny.yaml", seed=seed))
+        if tiny.stats["episodes"]["precondition_redraws"]:
+            break
     episodes = tiny.stats["episodes"]
     redraws = episodes["precondition_redraws"]
-    assert redraws, "the tiny world at seed 1 redraws no preconditions: nothing to test"
+    assert redraws, "no tiny world at seeds 1 to 8 redraws preconditions: nothing to test"
     assert all(1 <= count <= 5 for count in redraws.values())
     assert episodes["never_legal"] == {} and episodes["warnings"] == []
     assert all(episodes["legal_share"][label] > 0 for label in redraws)
     # The first draw, before the statistics episodes.
     streams = WorldStreams(tiny.config.seed)
-    derived_initial = derived_initial_values(tiny.fluents, tiny.taxonomy)
+    derived_initial = derived_initial_values(tiny.fluents, tiny.taxonomy, tiny.numeric)
     first = generate_event_types(
-        tiny.statics, tiny.fluents, tiny.config, streams, tiny.event_file, derived_initial
+        tiny.statics,
+        tiny.fluents,
+        tiny.config,
+        streams,
+        tiny.event_file,
+        derived_initial,
+        tiny.numeric,
     )
     assert first.features == tiny.event_types.features
     assert first.feature_preconditions == tiny.event_types.feature_preconditions
@@ -360,10 +373,18 @@ def test_never_legal_event_types_have_their_preconditions_redrawn(tiny: WorldRes
     # counted, whatever the other event types did.
     for label, count in redraws.items():
         parts = {label: streams.part("preconditions", label)}
+        numeric_parts = {label: streams.part("numeric_preconditions", label)}
         again = first
         for _ in range(count):
             again = redraw_preconditions(
-                again, [label], tiny.fluents, tiny.config, parts, derived_initial
+                again,
+                [label],
+                tiny.fluents,
+                tiny.config,
+                parts,
+                derived_initial,
+                tiny.numeric,
+                numeric_parts,
             )
         assert (
             again.event_type(label).precondition == tiny.event_types.event_type(label).precondition
@@ -643,17 +664,30 @@ def test_definition_json_has_the_spec_keys_and_a_recomputable_identity(
         data["symbols"], data["literals"], data["rules"], data["event_types"]
     )
     kinds = {s["kind"] for s in data["symbols"]}
-    assert kinds == {"property", "part", "scalar", "fluent", "event_type", "event_type_category"}
+    assert kinds == {
+        "property",
+        "part",
+        "scalar",
+        "fluent",
+        "numeric_fluent",
+        "event_type",
+        "event_type_category",
+    }
     assert all(lit["index"] == i for i, lit in enumerate(data["literals"]))
     for et in data["event_types"]:
         assert et["roles"] == ["agent"][: et["arity"]] + (["patient"] if et["arity"] == 2 else [])
     assert {layer["scope"] for layer in data["layers"]} == {"entity", "binding"}
-    rates = {s["label"]: s["initial_rate"] for s in data["symbols"] if s["fluent"]}
+    rates = {s["label"]: s["initial_rate"] for s in data["symbols"] if s["kind"] == "fluent"}
     assert rates == {f.label: None if f.derived else f.initial_rate for f in tiny.fluents.fluents}
     assert rates["BOOLFL.4"] is None and all(
         isinstance(rates[f.label], float) for f in tiny.fluents.base
     )
-    assert not any("initial_rate" in s for s in data["symbols"] if not s["fluent"])
+    assert not any("initial_rate" in s for s in data["symbols"] if s["kind"] != "fluent")
+    # a numeric fluent's symbol carries its range, initial distribution, and drift (stage b2)
+    numeric = [s for s in data["symbols"] if s["kind"] == "numeric_fluent"]
+    assert [s["label"] for s in numeric] == list(tiny.numeric.labels)
+    assert all(s["fluent"] and not s["derived"] for s in numeric)
+    assert all({"range", "initial", "drift"} <= set(s) for s in numeric)
 
 
 def test_binding_layers_rebuild_and_agree(tiny: WorldResult, tiny_folder: Path) -> None:
@@ -692,7 +726,6 @@ def test_requirement_rules_and_the_constraints_in_the_identity(tiny: WorldResult
     )
 
 
-@pytest.mark.slow
 def test_identity_changes_with_a_fluent_setting_but_requirements_do_not() -> None:
     a = define(config_from_mapping(world_mapping("tiny", fluents={"count": 4})))
     b = define(config_from_mapping(world_mapping("tiny", fluents={"count": 5})))
@@ -731,6 +764,8 @@ def test_entities_csv_holds_base_facts_and_initial_fluents(
         "BOOLFL.1",
         "BOOLFL.2",
         "BOOLFL.3",
+        "NUMFL.1",
+        "NUMFL.2",
     ]
     assert entities["label"][0] == "INSTANCE.1.1.1" and entities["leaf"][0] == "CATEGORY.1.1"
     assert not any(c.startswith(("PROPERTY.7", "PROPERTY.8")) for c in entities.columns)
@@ -932,7 +967,6 @@ def test_taxonomy_folder_is_byte_identical_to_a_standalone_run(
     )
 
 
-@pytest.mark.slow
 def test_same_configuration_and_seed_give_byte_identical_runs(tmp_path: Path) -> None:
     a = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "a")
     b = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "b")
@@ -943,7 +977,6 @@ def test_same_configuration_and_seed_give_byte_identical_runs(tmp_path: Path) ->
             assert (a / name).read_bytes() == (b / name).read_bytes(), name
 
 
-@pytest.mark.slow
 def test_dynamics_settings_never_change_the_static_side(tiny: WorldResult) -> None:
     """Fluent, precondition, and effect settings draw from their own streams: changing them
     changes neither the requirements, nor the capacities, nor the relation statistics."""
@@ -1020,6 +1053,11 @@ def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> N
         "world:preconditions",
         "world:effects",
         "world:conditions",
+        "world:numeric",
+        "world:numeric_initial",
+        "world:numeric_effects",
+        "world:numeric_preconditions",
+        "world:numeric_conditions",
         "world:stats",
         "world:episodes",
     ]

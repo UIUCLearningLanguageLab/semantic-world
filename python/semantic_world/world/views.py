@@ -7,8 +7,8 @@ scalars), ``static`` (the base vector and the derived static features), and ``cl
 columns of the old ``instances.csv``: ISA, PROPERTY, PART, the one-place capacities in the place
 of CAN, and the scalars). ``--include`` takes label prefixes: a prefix that matches columns of the
 preset narrows the view to them, and a prefix that matches none of the preset's columns adds every
-available column with that prefix. A sidecar YAML file records the preset, the prefixes, the
-columns, and the rule-set identity.
+available column with that prefix (the initial Boolean and numeric fluents among them). A
+sidecar YAML file records the preset, the prefixes, the columns, and the rule-set identity.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ _ORDER = (
     "CANBE.",
     "SCALARDIM.",
     "BOOLFL.",
+    "NUMFL.",
 )
 
 
@@ -69,6 +70,7 @@ def available_columns(run: Path) -> tuple[pl.DataFrame, dict[str, list[str]]]:
         "base": [c for c in entities.columns if c.startswith(("PROPERTY.", "PART."))],
         "scalars": [c for c in entities.columns if c.startswith("SCALARDIM.")],
         "fluents": [c for c in entities.columns if c.startswith("BOOLFL.")],
+        "numeric": [c for c in entities.columns if c.startswith("NUMFL.")],
         "derived_static": [c for c in static.columns if c != "label"],
         "capacities": [c for c in capacities.columns if c not in ("label", "approximate")],
         "isa": [c for c in isa.columns if c != "label"],

@@ -15,6 +15,15 @@ without a condition always is), unwritten base fluents keep their values (inerti
 fluents are never carried over, only recomputed. Non-interference counts every effect as a write
 of its fluent, whether or not its condition holds, and counts what a condition reads beside what
 a precondition reads (stage b1).
+
+Since stage b2 a state also holds every entity's numeric fluents (float64), a precondition or a
+condition may read a numeric threshold, a derived fluent may read one through its rule, and an
+effect may add a constant to a numeric fluent or subtract one. Within a step each numeric value
+becomes ``clamp(clamp(v + e) + d)``: the one effect that wrote it (non-interference allows at
+most one), then the drift, each clamped to the range, in float64. ``apply_step`` also returns
+the values after the effects and before the drift, which histories record. The comparisons of
+"Phase (b): the world" (``greater``, ``above``, ``below``, ``increase``, ``decrease``) are judged
+on demand by direct arithmetic on the values, for entities or category means.
 """
 
 from __future__ import annotations
@@ -28,10 +37,15 @@ from semantic_world.world.definition import EventTypeRecord, RuntimeDefinition
 from semantic_world.world.dynamics import Effect
 from semantic_world.world.errors import IllegalEventError, InterferenceError, WorldError
 from semantic_world.world.matrices import AgreementReport, check_agreement
+from semantic_world.world.numeric import clamp
 
 Binding = tuple[int, ...]
 ABLE_CHUNK_ROWS = 32768
 """Ordered pairs are evaluated in chunks of this many rows when the requirement table is built."""
+ENTITY = "ENTITY"
+"""The world symbol for all entities: the comparison class of a top-level category."""
+RANGE = "RANGE"
+"""The standard of an absolute comparison of a numeric fluent: the ends of its range."""
 
 
 # ---------------------------------------------------------------------------------------------
@@ -41,10 +55,13 @@ ABLE_CHUNK_ROWS = 32768
 
 @dataclass(frozen=True)
 class State:
-    """The base fluents of every entity at one time point: shape ``(entities, base fluents)``,
-    values 0 and 1. The array is read-only; ``apply`` returns a new state."""
+    """The base fluents of every entity at one time point: ``values``, shape ``(entities, base
+    fluents)`` with 0 and 1, and ``numeric``, shape ``(entities, numeric fluents)`` in float64
+    (stage b2; a world without numeric fluents has an empty second axis). The arrays are
+    read-only; ``apply`` returns a new state."""
 
     values: np.ndarray
+    numeric: np.ndarray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         values = np.array(self.values, dtype=np.uint8, copy=True)
@@ -54,21 +71,48 @@ class State:
             raise WorldError("a state holds 0 and 1 only")
         values.setflags(write=False)
         object.__setattr__(self, "values", values)
+        numeric = (
+            np.zeros((values.shape[0], 0), dtype=np.float64)
+            if self.numeric is None
+            else np.array(self.numeric, dtype=np.float64, copy=True)
+        )
+        if numeric.ndim != 2 or numeric.shape[0] != values.shape[0]:
+            raise WorldError(
+                f"the numeric part of a state is a 2-D array (entities, numeric fluents) with "
+                f"the entities of the Boolean part, got {numeric.shape} beside {values.shape}"
+            )
+        if numeric.size and not np.isfinite(numeric).all():
+            raise WorldError("a state holds finite numeric values only")
+        numeric.setflags(write=False)
+        object.__setattr__(self, "numeric", numeric)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, State):
             return NotImplemented
-        return self.values.shape == other.values.shape and bool(
-            np.array_equal(self.values, other.values)
+        return (
+            self.values.shape == other.values.shape
+            and bool(np.array_equal(self.values, other.values))
+            and self.numeric.shape == other.numeric.shape
+            and bool(np.array_equal(self.numeric, other.numeric))
         )
 
     def __hash__(self) -> int:
-        return hash((self.values.shape, self.values.tobytes()))
+        return hash(
+            (self.values.shape, self.values.tobytes(), self.numeric.shape, self.numeric.tobytes())
+        )
 
     @classmethod
-    def from_true(cls, definition: RuntimeDefinition, true: Mapping[str, Iterable[str]]) -> State:
-        """A state from the base fluents that are true, as ``{entity label: [fluent labels]}``.
-        Every entity of the definition must be listed; a fluent not listed is false."""
+    def from_true(
+        cls,
+        definition: RuntimeDefinition,
+        true: Mapping[str, Iterable[str]],
+        numeric: Mapping[str, Mapping[str, float]] | None = None,
+    ) -> State:
+        """A state from the base fluents that are true, as ``{entity label: [fluent labels]}``,
+        and the numeric values as ``{entity label: {fluent label: value}}`` (the entities
+        table's initial values when None, and every entity and fluent must be given otherwise).
+        Every entity of the definition must be listed in ``true``; a fluent not listed is
+        false."""
         values = np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8)
         missing = [label for label in definition.entity_labels if label not in true]
         if missing:
@@ -81,7 +125,23 @@ class State:
                         f"{fluent} is not a base fluent; a state holds base fluents only"
                     )
                 values[row, definition.base_fluent_index(fluent)] = 1
-        return cls(values)
+        if numeric is None:
+            return cls(values, _initial_numeric(definition))
+        matrix = np.zeros((definition.entity_count, len(definition.numeric_fluents)))
+        if not numeric:
+            return cls(values, matrix)  # every numeric fluent at 0, for a caller that fills them
+        for i, label in enumerate(definition.entity_labels):
+            entry = numeric.get(label)
+            if entry is None:
+                raise WorldError(f"the state lists no numeric values for {label}")
+            for fluent in definition.numeric_fluents:
+                if fluent not in entry:
+                    raise WorldError(f"the state lists no value of {fluent} for {label}")
+                matrix[i, definition.numeric_index(fluent)] = float(entry[fluent])
+            for fluent in entry:
+                if not definition.is_numeric_fluent(fluent):
+                    raise WorldError(f"{fluent} is not a numeric fluent of the definition")
+        return cls(values, matrix)
 
     def true_fluents(self, definition: RuntimeDefinition) -> dict[str, list[str]]:
         """The base fluents that are true, as ``{entity label: [fluent labels]}``, every entity
@@ -92,12 +152,27 @@ class State:
             for i, label in enumerate(definition.entity_labels)
         }
 
+    def numeric_values(self, definition: RuntimeDefinition) -> dict[str, dict[str, float]]:
+        """Every entity's numeric fluents, as ``{entity label: {fluent label: value}}``."""
+        _check_state(definition, self)
+        return {
+            label: {f: float(self.numeric[i, j]) for j, f in enumerate(definition.numeric_fluents)}
+            for i, label in enumerate(definition.entity_labels)
+        }
+
+
+def _initial_numeric(definition: RuntimeDefinition) -> np.ndarray:
+    if definition.initial_numeric is None:
+        raise WorldError("the definition's entities table carries no initial numeric values")
+    return definition.initial_numeric
+
 
 def initial_state(definition: RuntimeDefinition) -> State:
-    """The state at ``TIME.1`` of every episode: the initial base fluents of the entities table."""
+    """The state at ``TIME.1`` of every episode: the initial base fluents and numeric values of
+    the entities table."""
     if definition.initial_values is None:
         raise WorldError("the definition's entities table carries no initial fluents")
-    return State(definition.initial_values)
+    return State(definition.initial_values, _initial_numeric(definition))
 
 
 @dataclass(frozen=True)
@@ -236,6 +311,12 @@ def _check_state(definition: RuntimeDefinition, state: State) -> None:
         raise WorldError(
             f"the state has shape {state.values.shape}; the definition needs {expected}"
         )
+    numeric = (definition.entity_count, len(definition.numeric_fluents))
+    if state.numeric.shape != numeric:
+        raise WorldError(
+            f"the state's numeric part has shape {state.numeric.shape}; the definition needs "
+            f"{numeric}"
+        )
 
 
 def _entity_rows(definition: RuntimeDefinition, entities: Sequence[int] | None) -> np.ndarray:
@@ -258,10 +339,15 @@ def derive(
     literals = np.array(facts.literals[rows], dtype=np.uint8, copy=True)
     for i, spec in enumerate(definition.literals):
         reads = spec.reads
-        if reads["role"] is None and reads["kind"] == "fluent":
+        if reads["role"] is not None:
+            continue
+        if reads["kind"] == "fluent":
             fluent = reads["fluent"]
             if definition.is_base_fluent(fluent):
                 literals[:, i] = state.values[rows, definition.base_fluent_index(fluent)]
+        elif reads["kind"] == "numeric_threshold":
+            column = state.numeric[rows, definition.numeric_index(reads["fluent"])]
+            literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
     outputs = definition.entity_matrices.evaluate(literals)
     fluent = (
         np.stack([outputs[label] for label in definition.derived_fluents], axis=1)
@@ -410,12 +496,17 @@ def check_definition_agreement(
     facts = static_facts(definition)
     literals = np.array(facts.literals, dtype=np.uint8, copy=True)
     if definition.initial_values is not None:
-        state = State(definition.initial_values)
+        state = State(definition.initial_values, definition.initial_numeric)
         for i, spec in enumerate(definition.literals):
             reads = spec.reads
-            if reads["role"] is None and reads["kind"] == "fluent":
+            if reads["role"] is not None:
+                continue
+            if reads["kind"] == "fluent":
                 if definition.is_base_fluent(reads["fluent"]):
                     literals[:, i] = state.values[:, definition.base_fluent_index(reads["fluent"])]
+            elif reads["kind"] == "numeric_threshold" and definition.initial_numeric is not None:
+                column = state.numeric[:, definition.numeric_index(reads["fluent"])]
+                literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
     entity_report = check_agreement(definition.entity_matrices, definition.entity_rules, literals)
     n = definition.entity_count
     agents = np.repeat(np.arange(n), n)
@@ -440,11 +531,17 @@ def _precondition_holds(
     needed = np.unique(array)
     facts = (
         derive(definition, state, needed)
-        if any(not definition.is_base_fluent(lit.fluent) for lit in et.precondition)
+        if any(
+            not lit.numeric and not definition.is_base_fluent(lit.fluent) for lit in et.precondition
+        )
         else None
     )
     for lit in et.precondition:
         rows = array[:, et.roles.index(lit.role)]
+        if lit.numeric:
+            column = state.numeric[rows, definition.numeric_index(lit.fluent)]
+            holds &= (column > lit.threshold) if lit.value else (column <= lit.threshold)
+            continue
         if definition.is_base_fluent(lit.fluent):
             values = state.values[rows, definition.base_fluent_index(lit.fluent)]
         else:
@@ -540,6 +637,14 @@ def _check_legal(
         for lit in et.precondition:
             row = et.roles.index(lit.role)
             entity = event.binding[row]
+            if lit.numeric:
+                number = float(state.numeric[entity, definition.numeric_index(lit.fluent)])
+                if not lit.holds_for(number):
+                    raise IllegalEventError(
+                        f"{text} is illegal: the precondition literal {lit.text} does not hold "
+                        f"({lit.fluent} of {definition.entity_labels[entity]} is {number!r})"
+                    )
+                continue
             if definition.is_base_fluent(lit.fluent):
                 value = state.values[entity, definition.base_fluent_index(lit.fluent)]
             else:
@@ -552,9 +657,10 @@ def _check_legal(
         raise AssertionError("the precondition fails but every literal holds")
 
 
-def _writes(event: Event, et: EventTypeRecord) -> dict[tuple[int, str], bool]:
-    """The base fluents the event may write, ``{(entity, fluent): value}``: every effect
-    counts, whether or not its condition holds in the state."""
+def _writes(event: Event, et: EventTypeRecord) -> dict[tuple[int, str], bool | float]:
+    """The base fluents the event may write, ``{(entity, fluent): value}`` (a numeric effect's
+    signed constant for a numeric fluent): every effect counts, whether or not its condition
+    holds in the state."""
     return {
         (event.binding[et.roles.index(effect.role)], effect.fluent): effect.value
         for effect in et.effects
@@ -571,7 +677,7 @@ def _reads_by_reader(
     found: dict[tuple[int, str], str] = {}
     for effect in et.effects:
         for lit in effect.condition:
-            if lit.kind != "fluent":
+            if lit.kind == "feature":
                 continue
             entity = event.binding[et.roles.index(lit.role)]
             for base in definition.cone(lit.symbol):
@@ -607,6 +713,12 @@ def _condition_holds(
     for lit in effect.condition:
         row = et.roles.index(lit.role)
         entity = event.binding[row]
+        if lit.numeric:
+            if not lit.holds_for(
+                float(state.numeric[entity, definition.numeric_index(lit.symbol)])
+            ):
+                return False
+            continue
         if lit.kind == "feature":
             value = statics.values[lit.symbol][entity]
         elif definition.is_base_fluent(lit.symbol):
@@ -621,9 +733,9 @@ def _condition_holds(
 
 def _fired(
     definition: RuntimeDefinition, state: State, event: Event, et: EventTypeRecord
-) -> dict[tuple[int, str], bool]:
+) -> dict[tuple[int, str], bool | float]:
     """The base fluents the event writes in ``state``: its effects whose conditions hold there,
-    judged before any effect of the step."""
+    judged before any effect of the step (a numeric effect's value is its signed constant)."""
     facts = None
     if any(
         lit.kind == "fluent" and not definition.is_base_fluent(lit.symbol)
@@ -658,12 +770,35 @@ def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
     )
 
 
-def apply(definition: RuntimeDefinition, state: State, events: Iterable[Event]) -> State:
+@dataclass(frozen=True)
+class StepResult:
+    """What one step computes: the state after it, and the numeric values after the effects
+    and before the drift (shape ``(entities, numeric fluents)``), which histories record as the
+    effects' changes."""
+
+    state: State
+    after_effects: np.ndarray
+
+
+def apply(
+    definition: RuntimeDefinition, state: State, events: Iterable[Event], drift: bool = True
+) -> State:
     """The state after one step. Every event must be legal in ``state``, and the events must
     not interfere; otherwise :class:`IllegalEventError` or :class:`InterferenceError` names the
     event and the reason. The effects whose conditions hold in ``state`` are applied (every
     condition is judged in the starting state, before any effect of the step); unwritten base
-    fluents keep their values."""
+    fluents keep their values; each numeric value becomes ``clamp(clamp(v + e) + d)``. With
+    ``drift`` false the effects alone are applied, each clamped, and the drift is left out: the
+    device by which a step's events can be applied one at a time (the drift is added once per
+    step, not once per event)."""
+    return apply_step(definition, state, events, drift).state
+
+
+def apply_step(
+    definition: RuntimeDefinition, state: State, events: Iterable[Event], drift: bool = True
+) -> StepResult:
+    """``apply``, with the numeric values after the effects and before the drift beside the
+    state after the step."""
     _check_state(definition, state)
     events = tuple(events)
     types = [_check_event(definition, event) for event in events]
@@ -694,10 +829,21 @@ def apply(definition: RuntimeDefinition, state: State, events: Iterable[Event]) 
                         f"{_fact(definition, shared[0])}, which {r[shared[0]]} of {reader} reads"
                     )
     values = np.array(state.values, dtype=np.uint8, copy=True)
+    numeric = np.array(state.numeric, dtype=np.float64, copy=True)
+    low, high = definition.range_bounds
     for event, et in zip(events, types, strict=True):
         for (entity, fluent), value in _fired(definition, state, event, et).items():
-            values[entity, definition.base_fluent_index(fluent)] = int(value)
-    return State(values)
+            if definition.is_numeric_fluent(fluent):
+                j = definition.numeric_index(fluent)
+                numeric[entity, j] = clamp(
+                    float(numeric[entity, j]) + float(value), low[j], high[j]
+                )
+            else:
+                values[entity, definition.base_fluent_index(fluent)] = int(value)
+    after_effects = np.array(numeric, copy=True)
+    if numeric.shape[1] and drift:
+        numeric = np.minimum(np.maximum(numeric + definition.drift_vector[None, :], low), high)
+    return StepResult(State(values, numeric), after_effects)
 
 
 def fired_effects(definition: RuntimeDefinition, state: State, event: Event) -> tuple[Effect, ...]:
@@ -718,21 +864,200 @@ def fired_effects(definition: RuntimeDefinition, state: State, event: Event) -> 
     )
 
 
+# ---------------------------------------------------------------------------------------------
+# Comparisons (phase (b): the world)
+# ---------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Mean:
+    """A category's mean on a dimension, as an argument of a comparison: ``MEAN(CATEGORY.1.4)``,
+    or ``MEAN(ENTITY)`` for all entities."""
+
+    category: str
+
+
+Argument = int | Mean
+"""An argument of a comparison: an entity (by index) or a category mean."""
+
+
+def members(definition: RuntimeDefinition, category: str) -> np.ndarray:
+    """The indices of the entities below a category: those whose leaf is the category or below
+    it, read off the leaf labels (``CATEGORY.1.3.2`` is below ``CATEGORY.1.3``); every entity
+    for ``ENTITY``."""
+    if category == ENTITY:
+        return np.arange(definition.entity_count, dtype=np.intp)
+    prefix = category + "."
+    found = [
+        i for i, leaf in enumerate(definition.leaves) if leaf == category or leaf.startswith(prefix)
+    ]
+    if not found:
+        raise WorldError(f"{category} is not a category of the definition's entities")
+    return np.array(found, dtype=np.intp)
+
+
+def categories(definition: RuntimeDefinition) -> tuple[str, ...]:
+    """Every category the leaves name, from the top down, with every ancestor: the comparison
+    classes beside ``ENTITY``."""
+    found: dict[str, None] = {}
+    for leaf in definition.leaves:
+        parts = leaf.split(".")
+        for k in range(2, len(parts) + 1):
+            found.setdefault(".".join(parts[:k]), None)
+    return tuple(
+        sorted(found, key=lambda c: tuple(int(p) if p.isdigit() else p for p in c.split(".")))
+    )
+
+
+def comparison_classes(
+    definition: RuntimeDefinition,
+) -> dict[tuple[str, str], tuple[int, float, float]]:
+    """For every category and ``ENTITY``, and every scalar: the number of instances, the mean,
+    and the population standard deviation of the scalar over the instances below the category
+    (``derived/comparison_classes.csv`` holds the same figures). Computed once and cached."""
+    cached = definition.cache.get("comparison_classes")
+    if cached is not None:
+        return cached
+    table: dict[tuple[str, str], tuple[int, float, float]] = {}
+    for category in (ENTITY, *categories(definition)):
+        rows = members(definition, category)
+        for j, scalar in enumerate(definition.scalars):
+            column = definition.scalar_values[rows, j]
+            table[(category, scalar)] = (int(rows.size), float(column.mean()), float(column.std()))
+    definition.cache["comparison_classes"] = table
+    return table
+
+
+def _dimension_column(
+    definition: RuntimeDefinition, dimension: str, state: State | None
+) -> np.ndarray:
+    if dimension in definition.scalars:
+        return definition.scalar_values[:, definition.scalars.index(dimension)]
+    if definition.is_numeric_fluent(dimension):
+        if state is None:
+            raise WorldError(f"a comparison of {dimension} needs a state: it is a numeric fluent")
+        _check_state(definition, state)
+        return state.numeric[:, definition.numeric_index(dimension)]
+    raise WorldError(f"{dimension} is not a scalar dimension or a numeric fluent")
+
+
+def value_of(
+    definition: RuntimeDefinition, dimension: str, x: Argument, state: State | None = None
+) -> float:
+    """An argument's value on a dimension: the entity's value, or the mean over a category's
+    members, on the static scalars, or on a numeric fluent in ``state``."""
+    column = _dimension_column(definition, dimension, state)
+    if isinstance(x, Mean):
+        return float(column[members(definition, x.category)].mean())
+    if not 0 <= int(x) < definition.entity_count:
+        raise WorldError(f"an entity index is outside 0..{definition.entity_count - 1}")
+    return float(column[int(x)])
+
+
+def greater(
+    definition: RuntimeDefinition,
+    dimension: str,
+    x: Argument,
+    y: Argument,
+    state: State | None = None,
+) -> bool:
+    """``GREATER(dimension, x, y)``: ``x`` exceeds ``y`` on the dimension, strictly, so two
+    equal values give false both ways."""
+    return value_of(definition, dimension, x, state) > value_of(definition, dimension, y, state)
+
+
+def above(
+    definition: RuntimeDefinition,
+    dimension: str,
+    x: Argument,
+    standard: str,
+    z: float,
+    state: State | None = None,
+) -> bool:
+    """``ABOVE(dimension, x, K, z)``: on a scalar, the value is at least ``z`` standard
+    deviations above the mean of the comparison class ``K`` (a category, or ``ENTITY``); a class
+    with no spread has nothing above it. On a numeric fluent, with ``RANGE`` as the standard,
+    the value is at least the fraction ``z`` of the way through the fluent's range."""
+    value = value_of(definition, dimension, x, state)
+    if definition.is_numeric_fluent(dimension):
+        if standard != RANGE:
+            raise WorldError(f"a comparison of {dimension} takes RANGE as its standard")
+        low, high = definition.numeric_ranges[dimension]
+        return value >= low + z * (high - low)
+    if standard == RANGE:
+        raise WorldError(f"a comparison of the scalar {dimension} takes a comparison class")
+    _, mean, sd = comparison_classes(definition)[(standard, dimension)]
+    return sd > 0 and value >= mean + z * sd
+
+
+def below(
+    definition: RuntimeDefinition,
+    dimension: str,
+    x: Argument,
+    standard: str,
+    z: float,
+    state: State | None = None,
+) -> bool:
+    """``BELOW(dimension, x, K, z)``: at least ``z`` standard deviations below the mean of the
+    comparison class, or, on a numeric fluent with ``RANGE``, at most the fraction ``z`` of the
+    way through the range."""
+    value = value_of(definition, dimension, x, state)
+    if definition.is_numeric_fluent(dimension):
+        if standard != RANGE:
+            raise WorldError(f"a comparison of {dimension} takes RANGE as its standard")
+        low, high = definition.numeric_ranges[dimension]
+        return value <= low + z * (high - low)
+    if standard == RANGE:
+        raise WorldError(f"a comparison of the scalar {dimension} takes a comparison class")
+    _, mean, sd = comparison_classes(definition)[(standard, dimension)]
+    return sd > 0 and value <= mean - z * sd
+
+
+def increase(
+    definition: RuntimeDefinition, fluent: str, x: int, before: State, after: State
+) -> bool:
+    """``INCREASE``: the entity's value of the numeric fluent is greater after the step than
+    before it."""
+    return value_of(definition, fluent, x, after) > value_of(definition, fluent, x, before)
+
+
+def decrease(
+    definition: RuntimeDefinition, fluent: str, x: int, before: State, after: State
+) -> bool:
+    """``DECREASE``: the value is less after the step than before it."""
+    return value_of(definition, fluent, x, after) < value_of(definition, fluent, x, before)
+
+
 __all__ = [
+    "ENTITY",
+    "RANGE",
+    "Argument",
     "Binding",
     "DerivedFacts",
     "Event",
+    "Mean",
     "State",
     "StaticFacts",
+    "StepResult",
     "able",
     "able_table",
+    "above",
     "apply",
+    "apply_step",
+    "below",
+    "categories",
     "check_definition_agreement",
+    "comparison_classes",
+    "decrease",
     "derive",
     "fired_effects",
+    "greater",
+    "increase",
     "initial_state",
     "interferes",
     "legal",
     "legal_bindings",
+    "members",
     "static_facts",
+    "value_of",
 ]

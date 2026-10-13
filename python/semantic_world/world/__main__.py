@@ -101,7 +101,8 @@ def _define(args: argparse.Namespace) -> int:
     event_types = result.event_types
     print(
         f"wrote {folder}: {len(result.taxonomy.instances)} entities, {len(result.fluents)} fluents "
-        f"({len(result.fluents.derived)} derived), {len(event_types.unary)} one-place and "
+        f"({len(result.fluents.derived)} derived), {len(result.numeric)} numeric fluents, "
+        f"{len(event_types.unary)} one-place and "
         f"{len(event_types.binary)} two-place event types, "
         f"{len(event_types.constraints)} constraints; rule set {result.rule_set_id[:12]}"
     )

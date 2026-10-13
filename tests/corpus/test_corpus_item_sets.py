@@ -836,8 +836,14 @@ def test_seen_says_whether_a_training_document_states_the_item(runs, name) -> No
             assert stats["true_items_seen_share"] == round(count / len(test_set.pairs), 6)
     # both kinds occur at every level. An event item is unseen when it names its verb at
     # another level of the verb tree than its document does
-    for level in (CLASS, INSTANCE, *CAUSAL_LEVELS):
+    for level in (CLASS, INSTANCE):
         assert seen[(level, True)] > 0 and seen[(level, False)] > 0, seen
+    for level in CAUSAL_LEVELS:
+        assert seen[(level, True)] > 0, seen
+        # the tiny world of stage b2 has so few causal statements that a run states every
+        # one; the default world leaves some unseen
+        if name == "default":
+            assert seen[(level, False)] > 0, seen
     assert seen[(EVENT, True)] > 0
     # a state or able_now item is about the scene's final time point, which no document states
     for level in (STATE, ABLE_NOW):

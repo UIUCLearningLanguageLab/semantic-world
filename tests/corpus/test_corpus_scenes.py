@@ -317,9 +317,15 @@ def test_the_timeline_with_fluents(cases, name) -> None:
     assert np.mean(per_step) <= 1.5 + 0.1  # never more than the Poisson draw asks for
     assert 0 in per_step
     assert len(quiescent) < len(scenes)
-    # events change state: some event records a change to a base fluent
+    # events change state: some event records a change to a base fluent; a numeric change
+    # (stage b2) names a numeric fluent and carries its cause
     changes = [c for scene in scenes for e in scene.events for c in e.changes]
-    assert changes and all(c.fluent.startswith("BOOLFL.") for c in changes)
+    assert any(not c.numeric for c in changes)
+    for change in changes:
+        if change.numeric:
+            assert change.fluent.startswith("NUMFL.") and change.cause is not None
+        else:
+            assert change.fluent.startswith("BOOLFL.")
 
 
 def test_the_able_bindings(cases) -> None:
@@ -388,7 +394,6 @@ def test_the_transitive_share_under_the_balanced_policy(world_files) -> None:
     assert abs(uniform - expected) < 0.03 and 0.2 < expected < 0.8
 
 
-@pytest.mark.slow
 def test_the_balanced_policy_draws_the_event_type_first(world_files) -> None:
     # With every instance of the tiny world in the scene, the able pool is the same in every
     # scene, and the event types differ widely in how many pairs they hold for.
@@ -554,12 +559,13 @@ def test_scene_json_is_a_history(cases) -> None:
     for scene in make(case.scenes(), 50):
         form = scene.to_json()
         assert list(form) == [
-            "label", "seed", "participants", "policy", "rule_set_id", "initial", "steps",
-            "final", "quiescent",
+            "label", "seed", "participants", "policy", "rule_set_id", "initial",
+            "initial_numeric", "steps", "final", "quiescent",
         ]  # fmt: skip
         assert form["policy"] == "uniform_event"
         assert form["rule_set_id"] == case.world.rule_set_id
         assert list(form["initial"]) == list(form["participants"])
+        assert list(form["initial_numeric"]) == list(form["participants"])
         for k, step in enumerate(form["steps"], start=1):
             assert step["step"] == k and "legal" not in step
             for event in step["events"]:

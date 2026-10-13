@@ -20,6 +20,7 @@ from typing import Any
 import yaml
 
 from semantic_world.taxonomy.config import (
+    _MISSING,
     SEED_MAX,
     ConfigError,
     InheritanceConfig,
@@ -84,12 +85,21 @@ class FluentsConfig:
         }
 
 
+DEFAULT_NUMERIC_THRESHOLDS = (0.25, 0.5, 0.75)
+"""The fractions of a numeric fluent's range from which a numeric threshold literal's point is
+drawn (stage b2): the quarter points by default."""
+
+
 @dataclass(frozen=True)
 class PreconditionsConfig:
     literals: dict[int, float]
     feature_rate: float
     roles: dict[str, float]
     enabled_share: float
+    numeric_share: float = 0.3
+    """The share of precondition literals that are numeric threshold literals, when the world
+    has numeric fluents (stage b2)."""
+    numeric_thresholds: tuple[float, ...] = DEFAULT_NUMERIC_THRESHOLDS
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -97,12 +107,15 @@ class PreconditionsConfig:
             "feature_rate": self.feature_rate,
             "roles": dict(self.roles),
             "enabled_share": self.enabled_share,
+            "numeric_share": self.numeric_share,
+            "numeric_thresholds": list(self.numeric_thresholds),
         }
 
 
-CONDITION_KINDS = ("feature", "fluent")
-"""The kinds of a condition literal: a static feature, or a Boolean fluent."""
-DEFAULT_CONDITION_KINDS = {"feature": 0.5, "fluent": 0.5}
+CONDITION_KINDS = ("feature", "fluent", "numeric")
+"""The kinds of a condition literal: a static feature, a Boolean fluent, or a numeric threshold
+(stage b2)."""
+DEFAULT_CONDITION_KINDS = {"feature": 0.4, "fluent": 0.4, "numeric": 0.2}
 
 
 @dataclass(frozen=True)
@@ -115,8 +128,13 @@ class EffectsConfig:
     condition_literals: dict[int, float] = None  # type: ignore[assignment]
     """Weights over the number of literals of a condition."""
     condition_kinds: dict[str, float] = None  # type: ignore[assignment]
-    """Weights over the kind of a condition literal, ``feature`` or ``fluent`` (Jon's ruling 1
-    on stage b1): a choice of the generator, not a frequency of the world."""
+    """Weights over the kind of a condition literal, ``feature``, ``fluent``, or ``numeric``
+    (Jon's ruling 1 on stage b1): a choice of the generator, not a frequency of the world."""
+    numeric_share: float = 0.3
+    """The share of effects that are numeric (``+=`` or ``-=``), when the world has numeric
+    fluents (stage b2)."""
+    numeric_amounts: tuple[float, float] = (0.1, 0.5)
+    """The interval a numeric effect's constant is drawn from, uniformly."""
 
     def __post_init__(self) -> None:
         if self.condition_literals is None:
@@ -132,6 +150,54 @@ class EffectsConfig:
             "conditional_share": self.conditional_share,
             "condition_literals": dict(self.condition_literals),
             "condition_kinds": dict(self.condition_kinds),
+            "numeric_share": self.numeric_share,
+            "numeric_amounts": list(self.numeric_amounts),
+        }
+
+
+@dataclass(frozen=True)
+class NumericFluentSetting:
+    """The per-fluent overrides of ``numeric_fluents.fluents.NUMFL.<n>``."""
+
+    range: tuple[float, float] | None
+    initial: dict[str, Any] | None
+    drift: float | None
+    drift_set: bool
+    """Whether the entry gives a drift (a number, or null for none), which replaces the draw."""
+
+    def resolved(self) -> dict[str, Any]:
+        data: dict[str, Any] = {}
+        if self.range is not None:
+            data["range"] = list(self.range)
+        if self.initial is not None:
+            data["initial"] = dict(self.initial)
+        if self.drift_set:
+            data["drift"] = self.drift
+        return data
+
+
+@dataclass(frozen=True)
+class NumericFluentsConfig:
+    """The numeric fluents (stage b2): how many, the default range and initial distribution,
+    the drift draw, the weight of a numeric threshold literal in a derived fluent's rule, and the
+    per-fluent overrides."""
+
+    count: int
+    range: tuple[float, float]
+    initial: dict[str, Any]
+    drift_share: float
+    drift_amounts: tuple[float, float]
+    rule_weight: float
+    fluents: dict[str, NumericFluentSetting]
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "count": self.count,
+            "range": list(self.range),
+            "initial": dict(self.initial),
+            "drift": {"share": self.drift_share, "amounts": list(self.drift_amounts)},
+            "rule_weight": self.rule_weight,
+            "fluents": {label: setting.resolved() for label, setting in self.fluents.items()},
         }
 
 
@@ -289,6 +355,17 @@ class Config:
     event_types: EventTypesConfig
     source: str
     taxonomy_run: TaxonomyRunConfig
+    numeric_fluents: NumericFluentsConfig = None  # type: ignore[assignment]
+    """The numeric fluents (stage b2); the code's defaults when the file has no block."""
+
+    def __post_init__(self) -> None:
+        if self.numeric_fluents is None:
+            object.__setattr__(
+                self,
+                "numeric_fluents",
+                _read_numeric_fluents(_Node("<default>", "numeric_fluents", {})),
+            )
+
     """The validated taxonomy configuration the world generates from."""
 
     @property
@@ -322,6 +399,7 @@ class Config:
                 "resolved": self.taxonomy_run.resolved(),
             },
             "fluents": self.fluents.resolved(),
+            "numeric_fluents": self.numeric_fluents.resolved(),
             "event_types": self.event_types.resolved(),
         }
 
@@ -381,6 +459,94 @@ def _read_fluents(node: _Node) -> FluentsConfig:
     return config
 
 
+def _read_pair(node: _Node, key: str, default: list[float]) -> tuple[float, float]:
+    """A pair ``[low, high]`` of numbers with ``low < high``."""
+    value = node.get(key, default)
+    if not isinstance(value, list) or len(value) != 2:
+        raise node.error(key, f"expected a pair [low, high], found {_describe(value)}")
+    low = float(node.check_number(key, value[0]))
+    high = float(node.check_number(key, value[1]))
+    if not low < high:
+        raise node.error(key, f"expected low < high, found {value!r}")
+    return (low, high)
+
+
+def _read_initial(node: _Node, key: str, default: dict[str, Any] | None) -> dict[str, Any] | None:
+    """An initial distribution of a numeric fluent: ``{kind: uniform}``, ``{kind: fixed, value}``,
+    or ``{kind: beta, mean, concentration}``, as a validated plain mapping."""
+    value = node.get(key, default, nullable=default is None)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = {"kind": value}
+    if not isinstance(value, dict):
+        raise node.error(key, f"expected a mapping with a kind, found {_describe(value)}")
+    inner = _Node(node.source, node.field(key), value)
+    kind = inner.choice("kind", "uniform", ("uniform", "fixed", "beta"))
+    result: dict[str, Any] = {"kind": kind}
+    if kind == "fixed":
+        result["value"] = float(inner.number("value", _MISSING))
+    elif kind == "beta":
+        result["mean"] = float(inner.number("mean", _MISSING))
+        result["concentration"] = float(inner.number("concentration", 2.0, min=0))
+        if result["concentration"] <= 0:
+            raise inner.error("concentration", "must be above 0")
+    inner.finish()
+    return result
+
+
+def _check_initial_in_range(
+    node: _Node, key: str, initial: dict[str, Any], low: float, high: float
+) -> None:
+    for field in ("value", "mean"):
+        if field in initial and not low <= initial[field] <= high:
+            raise node.error(
+                f"{key}.{field}",
+                f"must be inside the range [{low}, {high}], found {initial[field]}",
+            )
+    if initial.get("kind") == "beta" and initial["mean"] in (low, high):
+        raise node.error(f"{key}.mean", "a beta distribution's mean is strictly inside the range")
+
+
+def _read_numeric_fluents(node: _Node) -> NumericFluentsConfig:
+    count = node.int("count", 2, min=0)
+    default_range = _read_pair(node, "range", [0.0, 1.0])
+    initial = _read_initial(node, "initial", {"kind": "uniform"})
+    assert initial is not None
+    _check_initial_in_range(node, "initial", initial, *default_range)
+    drift = node.mapping("drift")
+    share = drift.probability("share", 0.5)
+    amounts = _read_pair(drift, "amounts", [-0.1, 0.1])
+    drift.finish()
+    rule_weight = float(node.number("rule_weight", 1.0, min=0))
+    fluents: dict[str, NumericFluentSetting] = {}
+    entries = node.mapping("fluents")
+    for label in list(entries.data):
+        prefix, _, number = str(label).partition(".")
+        if prefix != "NUMFL" or not number.isdigit() or not 1 <= int(number) <= count:
+            raise entries.error(label, f"expected a numeric fluent label NUMFL.1 to NUMFL.{count}")
+        entry = entries.mapping(label)
+        fluent_range = (
+            _read_pair(entry, "range", None) if entry.data.get("range") is not None else None
+        )
+        entry.seen.add("range")
+        fluent_initial = _read_initial(entry, "initial", None)
+        drift_set = "drift" in entry.data
+        fluent_drift = entry.number("drift", None, nullable=True) if drift_set else None
+        entry.finish()
+        low, high = fluent_range or default_range
+        _check_initial_in_range(entry, "initial", fluent_initial or initial, low, high)
+        fluents[str(label)] = NumericFluentSetting(
+            fluent_range,
+            fluent_initial,
+            None if fluent_drift is None else float(fluent_drift),
+            drift_set,
+        )
+    entries.finish()
+    node.finish()
+    return NumericFluentsConfig(count, default_range, initial, share, amounts, rule_weight, fluents)
+
+
 def _read_roles(node: _Node, key: str, default: dict[str, float]) -> dict[str, float]:
     return node.weights(key, default, allowed=ROLES)
 
@@ -406,8 +572,18 @@ def _read_preconditions(node: _Node) -> PreconditionsConfig:
     rate = node.probability("feature_rate", 0.3)
     roles = _read_roles(node, "roles", {"agent": 0.5, "patient": 0.5})
     enabled = node.probability("enabled_share", 0.7)
+    numeric_share = node.probability("numeric_share", 0.3)
+    thresholds = node.get("numeric_thresholds", list(DEFAULT_NUMERIC_THRESHOLDS))
+    if not isinstance(thresholds, list) or not thresholds:
+        raise node.error(
+            "numeric_thresholds",
+            f"expected a non-empty list of fractions, found {_describe(thresholds)}",
+        )
+    points = tuple(float(node.check_number("numeric_thresholds", v)) for v in thresholds)
+    if any(not 0.0 < v < 1.0 for v in points):
+        raise node.error("numeric_thresholds", "every fraction is strictly between 0 and 1")
     node.finish()
-    return PreconditionsConfig(literals, rate, roles, enabled)
+    return PreconditionsConfig(literals, rate, roles, enabled, numeric_share, points)
 
 
 def _read_effects(node: _Node) -> EffectsConfig:
@@ -421,8 +597,21 @@ def _read_effects(node: _Node) -> EffectsConfig:
     condition_kinds = node.weights(
         "condition_kinds", dict(DEFAULT_CONDITION_KINDS), allowed=CONDITION_KINDS
     )
+    numeric_share = node.probability("numeric_share", 0.3)
+    amounts = _read_pair(node, "numeric_amounts", [0.1, 0.5])
+    if amounts[0] < 0:
+        raise node.error("numeric_amounts", "the constants of numeric effects are positive")
     node.finish()
-    return EffectsConfig(count, rate, roles, conditional_share, condition_literals, condition_kinds)
+    return EffectsConfig(
+        count,
+        rate,
+        roles,
+        conditional_share,
+        condition_literals,
+        condition_kinds,
+        numeric_share,
+        amounts,
+    )
 
 
 def _read_unary(node: _Node, taxonomy: TaxonomyRunConfig) -> UnaryConfig:
@@ -572,9 +761,10 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         _taxonomy_mapping(source, taxonomy, taxonomy_seed), source=taxonomy.config
     )
     fluents = _read_fluents(root.mapping("fluents"))
+    numeric = _read_numeric_fluents(root.mapping("numeric_fluents"))
     event_types = _read_event_types(root.mapping("event_types"), taxonomy_run)
     root.finish()
-    return Config(name, master_seed, taxonomy, fluents, event_types, source, taxonomy_run)
+    return Config(name, master_seed, taxonomy, fluents, event_types, source, taxonomy_run, numeric)
 
 
 def load_config(path: str | Path, *, seed: int | None = None) -> Config:

@@ -360,6 +360,7 @@ def test_relation_files_load_with_the_expected_columns(
             "static_features.csv",
             CAPACITIES_FILE,
             CAPACITY_ROLES_FILE,
+            "comparison_classes.csv",
             *RELATION_FILES,
         }
     )
@@ -449,7 +450,6 @@ def test_instance_count_never_changes_rules_thresholds_event_tree_or_constraints
     assert not a.relation_stats.pairs.equals(b.relation_stats.pairs)
 
 
-@pytest.mark.slow
 def test_binary_settings_never_change_the_taxonomy_or_the_one_place_side(tmp_path: Path) -> None:
     a = define(
         world_config(

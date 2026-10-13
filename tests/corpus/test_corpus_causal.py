@@ -169,7 +169,10 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
                 for e in entries
             ), (leaf, form)
         kinds[proposition.predicate.kind] += 1
-    assert kinds[EFFECT] > 5 and kinds[PRECONDITION] > 2, kinds
+    # a sanity count, not a figure: the tiny world of stage b2 states 5 effect statements and
+    # 4 precondition statements, the numeric effects and literals taking the place of some
+    # Boolean ones
+    assert kinds[EFFECT] > 2 and kinds[PRECONDITION] > 1, kinds
     if name == "default":
         assert about_categories > 0
 
@@ -220,11 +223,13 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
 
 
 def record_entries(record: dict, label: str, key: str) -> list[dict]:
-    """The unconditional effects, or the precondition literals, of an event type's record."""
+    """The unconditional Boolean effects, or the Boolean precondition literals, of an event
+    type's record: a conditional effect (stage b1), a numeric effect (an ``amount``, stage b2),
+    and a numeric literal (a ``threshold``) are no entries of a causal statement."""
     entry = next(e for e in record["event_types"] if e["label"] == label)
     if key == "effects":
-        return [e for e in entry["effects"] if not e.get("condition")]
-    return entry["precondition"]["literals"]
+        return [e for e in entry["effects"] if not e.get("condition") and "amount" not in e]
+    return [lit for lit in entry["precondition"]["literals"] if "threshold" not in lit]
 
 
 @pytest.mark.slow
@@ -999,9 +1004,22 @@ def test_causal_propositions_the_truth_tests_reject(cases) -> None:
     assert not judge(
         predicate=Predicate("property", world.features["property"][0], value=True)
     ).valid
+    # a numeric effect (stage b2) makes no statement: a numeric fluent is no base fluent of
+    # the corpus
+    numeric = next(
+        (e for et in world.definition.event_types for e in et.effects if e.numeric), None
+    )
+    if numeric is not None:
+        rejected = judge(
+            subject=EventTerm(binary, AGENT),
+            predicate=Predicate(EFFECT, numeric.fluent, value=True),
+        )
+        assert not rejected.valid and "not a base fluent" in rejected.reason
     # the truth: the definition has the entry, or not
     record = world.definition.event_type(binary)
     for effect in record.effects:
+        if effect.numeric:
+            continue
         found = judge(
             subject=EventTerm(binary, effect.role),
             predicate=Predicate(EFFECT, effect.fluent, value=effect.value),

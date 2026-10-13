@@ -87,8 +87,26 @@ def default() -> WorldResult:
 
 
 def _random_state(definition: RuntimeDefinition, rng: np.random.Generator) -> State:
+    """A random state: every Boolean fluent at 0 or 1, every numeric fluent uniform in its
+    range, and one value in four exactly at a quarter point of the range, so that thresholds
+    are hit."""
     shape = (definition.entity_count, len(definition.base_fluents))
-    return State(rng.integers(0, 2, size=shape, dtype=np.uint8))
+    values = rng.integers(0, 2, size=shape, dtype=np.uint8)
+    low, high = definition.range_bounds
+    numeric = rng.uniform(
+        low, high, size=(definition.entity_count, len(definition.numeric_fluents))
+    )
+    at_point = rng.random(numeric.shape) < 0.25
+    points = low + rng.choice([0.25, 0.5, 0.75], size=numeric.shape) * (high - low)
+    numeric = np.where(at_point, points, numeric)
+    return State(values, numeric)
+
+
+def _brute_numeric(definition: RuntimeDefinition, state: State) -> dict[str, dict[str, float]]:
+    return {
+        label: {f: float(state.numeric[i, j]) for j, f in enumerate(definition.numeric_fluents)}
+        for i, label in enumerate(definition.entity_labels)
+    }
 
 
 def _brute_state(definition: RuntimeDefinition, state: State) -> dict[str, frozenset[str]]:
@@ -134,7 +152,7 @@ def test_every_effect_of_the_conditional_tiny_world_has_a_condition(
     assert sum(1 for e in effects if e.condition) == len(effects) - dropped
     assert dropped == 0
     kinds = {lit.kind for e in effects for lit in e.condition}
-    assert kinds == {"feature", "fluent"}, kinds
+    assert {"feature", "fluent"} <= kinds <= {"feature", "fluent", "numeric"}, kinds
     for effect in effects:
         assert 1 <= len(effect.condition) <= 2
         assert effect.text.startswith("when ") and " then " in effect.text
@@ -143,7 +161,9 @@ def test_every_effect_of_the_conditional_tiny_world_has_a_condition(
             lit.text for lit in effect.condition
         )
         assert [
-            ConditionLiteral(**{k: v for k, v in r.items() if k != "kind"})
+            ConditionLiteral(r["role"], r["symbol"], r["operator"] == ">", r["threshold"])
+            if r["kind"] == "numeric"
+            else ConditionLiteral(r["role"], r["symbol"], r["value"])
             for r in record["condition"]["literals"]
         ] == list(effect.condition)
 
@@ -250,10 +270,11 @@ def test_check_dynamics_enforces_the_condition_rules(conditional: WorldResult) -
         for i, f in enumerate(fluents.base)
         for v in np.unique(fluents.initial_values[:, i])
     }
-    for label, column in derived_initial_values(fluents, conditional.taxonomy).items():
+    numeric = conditional.numeric
+    for label, column in derived_initial_values(fluents, conditional.taxonomy, numeric).items():
         present |= {(label, bool(v)) for v in np.unique(column)}
     features = tuple(f.label for f in conditional.taxonomy.features.features)
-    check_dynamics(conditional.event_types, fluents, present, features)
+    check_dynamics(conditional.event_types, fluents, present, features, numeric)
     event_types = conditional.event_types
     et = next(e for e in event_types.leaves if e.effects)
     effect = et.effects[0]
@@ -270,18 +291,30 @@ def test_check_dynamics_enforces_the_condition_rules(conditional: WorldResult) -
     def literal(symbol: str, value: bool = True, role: str = "agent") -> ConditionLiteral:
         return ConditionLiteral(role, symbol, value)
 
+    effect = next(e for e in et.effects if not e.numeric)
     own = literal(effect.fluent, not effect.value, effect.role)
     with pytest.raises(ValueError, match="reads the fluent the effect sets"):
-        check_dynamics(with_effect(dataclasses.replace(effect, condition=(own,))), fluents, present)
+        check_dynamics(
+            with_effect(dataclasses.replace(effect, condition=(own,))),
+            fluents,
+            present,
+            numeric=numeric,
+        )
     twice = (literal("PROPERTY.1"), literal("PROPERTY.1", False))
     with pytest.raises(ValueError, match="twice"):
-        check_dynamics(with_effect(dataclasses.replace(effect, condition=twice)), fluents, present)
+        check_dynamics(
+            with_effect(dataclasses.replace(effect, condition=twice)),
+            fluents,
+            present,
+            numeric=numeric,
+        )
     with pytest.raises(ValueError, match="unknown feature"):
         check_dynamics(
             with_effect(dataclasses.replace(effect, condition=(literal("PROPERTY.99"),))),
             fluents,
             present,
             features,
+            numeric,
         )
     if et.precondition:
         pre = et.precondition[0]
@@ -314,13 +347,14 @@ def test_conditional_effects_fire_exactly_when_their_condition_held(
     for _ in range(RANDOM_STATES):
         state = _random_state(runtime, rng)
         brute_state = _brute_state(runtime, state)
+        numeric = _brute_numeric(runtime, state)
         for event in _legal_events(runtime, state):
             et = runtime.event_type(event.event_type)
             binding = _labels(runtime, event.event_type, event.binding)
             after = apply(runtime, state, [event])
             # the brute-force evaluator's independent reading of the step
             assert after.true_fluents(runtime) == brute.state_record(
-                brute.apply(brute_state, [BruteEvent(event.event_type, binding)])
+                brute.apply(brute_state, [BruteEvent(event.event_type, binding)], numeric)
             )
             expected = []
             for effect in et.effects:
@@ -329,8 +363,13 @@ def test_conditional_effects_fire_exactly_when_their_condition_held(
                     for e in brute.event_types[et.label]["effects"]
                     if e["fluent"] == effect.fluent and e["role"] == effect.role
                 )
-                holds = brute.condition_holds(record, binding, brute_state)
+                holds = brute.condition_holds(record, binding, brute_state, numeric)
                 entity = event.binding[et.roles.index(effect.role)]
+                if effect.numeric:
+                    # a numeric effect's firing is checked value by value in test_world_numeric
+                    if holds:
+                        expected.append(effect)
+                    continue
                 column = runtime.base_fluent_index(effect.fluent)
                 if holds:
                     expected.append(effect)
@@ -377,13 +416,14 @@ def test_applying_together_equals_one_at_a_time_with_conditional_effects(
         for permutation in itertools.permutations(chosen):
             step = state
             for event in permutation:
-                step = apply(runtime, step, [event])
-            assert step == together
+                # the effects alone: the drift is added once per step, after them
+                step = apply(runtime, step, [event], drift=False)
+            assert step == apply(runtime, state, chosen, drift=False)
+            assert np.array_equal(step.values, together.values)
         sets += 1
     assert sets == RANDOM_SETS and with_conditions > RANDOM_SETS // 2
 
 
-@pytest.mark.slow
 def test_events_whose_conditions_read_what_another_writes_interfere(
     runtime: RuntimeDefinition, brute: BruteForce
 ) -> None:
@@ -430,7 +470,7 @@ def test_the_hand_world_interference_through_a_condition_names_the_condition() -
         Path("tests/fixtures/world/hand_17_condition_read_by_another_event.json")
     )
     definition = runtime_definition(fixture["definition"], fixture["entities"])
-    state = State.from_true(definition, fixture["initial"])
+    state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
     reader = Event.from_labels(definition, "EVENTTYPE1.5", {"agent": "INSTANCE.1.1.1"})
     writer = Event.from_labels(definition, "EVENTTYPE1.3", {"agent": "INSTANCE.1.1.1"})
     for order in ([reader, writer], [writer, reader]):
@@ -461,15 +501,19 @@ def _check_satisfiable(result: WorldResult) -> int:
         for i, f in enumerate(fluents.base)
         for v in np.unique(fluents.initial_values[:, i])
     }
-    for label, column in derived_initial_values(fluents, result.taxonomy).items():
+    for label, column in derived_initial_values(fluents, result.taxonomy, result.numeric).items():
         present |= {(label, bool(v)) for v in np.unique(column)}
+    from semantic_world.world.event_types import produced_numeric
+
+    signs = produced_numeric(result.event_types)
     count = 0
     for et in result.event_types.leaves:
         keys = [(e.role, e.fluent) for e in et.effects]
         assert len(keys) == len(set(keys)), f"{et.label}: two effects write one fluent"
         pre = {(lit.role, lit.fluent): lit.value for lit in et.precondition}
         for effect in et.effects:
-            assert pre.get((effect.role, effect.fluent)) != effect.value, "an empty effect"
+            if not effect.numeric:
+                assert pre.get((effect.role, effect.fluent)) != effect.value, "an empty effect"
             if not effect.condition:
                 continue
             count += 1
@@ -479,7 +523,12 @@ def _check_satisfiable(result: WorldResult) -> int:
             masks = {role: np.ones(definition.entity_count, dtype=bool) for role in et.roles}
             for lit in effect.condition:
                 assert lit.role in et.roles
-                if lit.kind == "fluent":
+                if lit.kind == "numeric":
+                    # stage b2: achievable by an initial value, the drift, or an effect
+                    assert lit.threshold is not None
+                    assert result.numeric.achievable(lit.symbol, lit.value, lit.threshold, signs)
+                    assert (lit.role, lit.symbol) not in pre
+                elif lit.kind == "fluent":
                     assert (lit.symbol, lit.value) in produced | present
                     assert (lit.role, lit.symbol) not in pre
                     assert (lit.role, lit.symbol) != (effect.role, effect.fluent)
@@ -534,7 +583,6 @@ def test_an_inherited_effect_brings_its_condition_to_every_event_type(default: W
     assert set(stats["fix_ups"]) >= {"conditions_redrawn", "conditions_dropped"}
 
 
-@pytest.mark.slow
 def test_the_conditions_have_a_stream_of_their_own() -> None:
     """Changing the condition settings changes no other draw: the effects without their
     conditions, the preconditions, and the static side are those of the a8 world."""
@@ -572,6 +620,8 @@ def test_replay_reproduces_every_recorded_change_under_conditions(
                 et = runtime.event_type(event.type)
                 live = fired_effects(runtime, before, runtime_event)
                 for effect in et.effects:
+                    if effect.numeric:
+                        continue  # test_world_numeric checks the numeric changes
                     entity = runtime_event.binding[et.roles.index(effect.role)]
                     label = runtime.entity_labels[entity]
                     recorded = any(
@@ -587,7 +637,6 @@ def test_replay_reproduces_every_recorded_change_under_conditions(
     assert fired > 0 and not_fired > 0
 
 
-@pytest.mark.slow
 def test_an_event_file_gives_conditional_effects(tmp_path: Path) -> None:
     base = define(tiny_config(0.0))
     world = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
@@ -688,9 +737,11 @@ def test_fixtures_hold_the_condition_record() -> None:
 
 
 def test_condition_kinds_weigh_the_kinds() -> None:
-    """``event_types.effects.condition_kinds`` weighs a static feature against a fluent in the
-    draw of a condition literal: all the weight on one kind gives literals of that kind alone,
-    and the even split in any spelling is the default draw, which gives the tiny world."""
+    """``event_types.effects.condition_kinds`` weighs a static feature, a fluent, and (stage b2)
+    a numeric threshold in the draw of a condition literal: all the weight on one kind gives
+    literals of that kind alone, the default split in any spelling is the default draw, which
+    gives the tiny world, and the even split between features and fluents in any spelling is
+    the stage b1 draw."""
     features = define(tiny_config(1.0, condition_kinds={"feature": 1, "fluent": 0}))
     kinds = {
         lit.kind for et in features.event_types.leaves for e in et.effects for lit in e.condition
@@ -702,14 +753,28 @@ def test_condition_kinds_weigh_the_kinds() -> None:
     }
     assert kinds == {"fluent"}
     assert features.rule_set_id != fluents.rule_set_id
-    even = define(tiny_config(0.2, condition_kinds={"feature": 2, "fluent": 2}))
-    assert even.rule_set_id == define(tiny_config(0.2)).rule_set_id
-    assert even.config.resolved()["event_types"]["effects"]["condition_kinds"] == {
-        "feature": 2.0,
-        "fluent": 2.0,
+    numeric = define(tiny_config(1.0, condition_kinds={"numeric": 1}))
+    kinds = {
+        lit.kind for et in numeric.event_types.leaves for e in et.effects for lit in e.condition
     }
+    assert kinds == {"numeric"}
+    spelled = define(tiny_config(0.2, condition_kinds={"feature": 4, "fluent": 4, "numeric": 2}))
+    assert spelled.rule_set_id == define(tiny_config(0.2)).rule_set_id
+    assert spelled.config.resolved()["event_types"]["effects"]["condition_kinds"] == {
+        "feature": 4.0,
+        "fluent": 4.0,
+        "numeric": 2.0,
+    }
+    even = define(tiny_config(0.2, condition_kinds={"feature": 2, "fluent": 2}))
+    assert (
+        even.rule_set_id
+        == define(
+            tiny_config(0.2, condition_kinds={"feature": 0.5, "fluent": 0.5, "numeric": 0})
+        ).rule_set_id
+    )
+    assert even.rule_set_id != spelled.rule_set_id
     defaults = config_from_mapping({}).event_types.effects
-    assert defaults.condition_kinds == {"feature": 0.5, "fluent": 0.5}
+    assert defaults.condition_kinds == {"feature": 0.4, "fluent": 0.4, "numeric": 0.2}
     with pytest.raises(ConfigError, match="condition_kinds"):
         tiny_config(0.5, condition_kinds={"feature": 0, "fluent": 0})
     with pytest.raises(ConfigError, match="condition_kinds"):

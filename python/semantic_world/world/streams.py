@@ -8,9 +8,14 @@ capacities' local test), ``world:pairs`` (the sampled pairs and estimates of the
 statistics), ``world:fluents`` (fluent rules and initial rates), ``world:initial`` (initial
 values), ``world:preconditions``, ``world:effects``, ``world:conditions`` (the conditions of
 effects, stage b1: a stream of its own, so that a world with ``conditional_share: 0`` is the same
-world as before the stage), ``world:stats`` (the statistics episodes), and ``world:episodes``
-(``simulate``). An event type whose preconditions are redrawn draws from its own part,
-``world:preconditions:<label>``.
+world as before the stage), the numeric streams of stage b2 (``world:numeric`` for the drift of
+the numeric fluents, ``world:numeric_initial`` for their initial values, ``world:numeric_effects``,
+``world:numeric_preconditions``, and ``world:numeric_conditions`` for the numeric effects,
+precondition literals, and condition literals: each a stream of its own, so that with
+``numeric_fluents.count: 0``, or a numeric share of 0, every other draw is unchanged),
+``world:stats`` (the statistics episodes), and ``world:episodes`` (``simulate``). An event type
+whose preconditions are redrawn draws from its own parts, ``world:preconditions:<label>`` and
+``world:numeric_preconditions:<label>``.
 """
 
 from __future__ import annotations
@@ -30,6 +35,11 @@ STREAM_NAMES = (
     "preconditions",
     "effects",
     "conditions",
+    "numeric",
+    "numeric_initial",
+    "numeric_effects",
+    "numeric_preconditions",
+    "numeric_conditions",
     "stats",
     "episodes",
 )
@@ -47,6 +57,11 @@ class WorldStreams:
     preconditions: np.random.Generator
     effects: np.random.Generator
     conditions: np.random.Generator
+    numeric: np.random.Generator
+    numeric_initial: np.random.Generator
+    numeric_effects: np.random.Generator
+    numeric_preconditions: np.random.Generator
+    numeric_conditions: np.random.Generator
     stats: np.random.Generator
     episodes: np.random.Generator
 

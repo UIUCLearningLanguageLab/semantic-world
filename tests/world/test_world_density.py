@@ -399,7 +399,6 @@ def test_checks_on_change_the_event_types_but_keep_them_distinct() -> None:
             assert np.array_equal(a.values, b.values)
 
 
-@pytest.mark.slow
 def test_same_seed_gives_the_same_tuned_result(tmp_path: Path) -> None:
     a = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "a")
     b = define(load_config(DATA / "tiny.yaml")).write(tmp_path / "b")

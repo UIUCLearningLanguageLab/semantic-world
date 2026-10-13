@@ -34,19 +34,21 @@ from semantic_world.world.definition import RuntimeDefinition, load_definition
 from semantic_world.world.derived import DERIVED_DIR, load_derived_csv
 from semantic_world.world.errors import WorldError
 from semantic_world.world.history import (
+    DRIFT,
     EPISODES_FILE,
     Change,
     History,
     HistoryEvent,
     Step,
     changes_of,
+    numeric_changes_of,
     write_histories,
 )
 from semantic_world.world.policies import DEFAULT_POLICY, StepContext, policy
 from semantic_world.world.runtime import (
     Event,
     State,
-    apply,
+    apply_step,
     initial_state,
     legal_bindings,
 )
@@ -349,7 +351,8 @@ class EpisodeGenerator:
             self.start = initial_state(definition)
         elif self.settings.initial == "redraw":
             self.start = State(
-                np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8)
+                np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8),
+                np.zeros((definition.entity_count, len(definition.numeric_fluents))),
             )
         else:
             raise WorldError(
@@ -389,13 +392,22 @@ class EpisodeGenerator:
     # Steps -----------------------------------------------------------------------------------
 
     def _initial(self, rng: np.random.Generator, participants: tuple[int, ...]) -> State:
+        """The participants' initial values: the definition's, or redrawn (``scene.initial:
+        redraw``), the Boolean fluents at their initial rates and then the numeric fluents from
+        their initial distributions, participant by participant."""
         if self.settings.initial == "keep":
             return self.start
+        definition = self.definition
         values = np.array(self.start.values, dtype=np.uint8, copy=True)
+        numeric = np.array(self.start.numeric, dtype=np.float64, copy=True)
         for entity in participants:
-            for j, fluent in enumerate(self.definition.base_fluents):
+            for j, fluent in enumerate(definition.base_fluents):
                 values[entity, j] = 1 if rng.random() < self.initial_rates[fluent] else 0
-        return State(values)
+        for entity in participants:
+            for j, fluent in enumerate(definition.numeric_fluents):
+                low, high = definition.numeric_ranges[fluent]
+                numeric[entity, j] = definition.numeric_initial[fluent].draw(rng, low, high, 1)[0]
+        return State(values, numeric)
 
     def _legal(self, state: State, participants: tuple[int, ...]) -> dict[str, list]:
         return {
@@ -418,6 +430,16 @@ class EpisodeGenerator:
             labels[p]: tuple(f for j, f in enumerate(definition.base_fluents) if state.values[p, j])
             for p in participants
         }
+        initial_numeric = (
+            {
+                labels[p]: {
+                    f: float(state.numeric[p, j]) for j, f in enumerate(definition.numeric_fluents)
+                }
+                for p in participants
+            }
+            if definition.numeric_fluents
+            else {}
+        )
         recorded: list[Step] = []
         quiescent = False
         count = 0
@@ -436,26 +458,37 @@ class EpisodeGenerator:
             )
             wanted = int(rng.poisson(self.settings.events_per_step))
             events = self.policy(context, rng, wanted) if wanted else []
-            after = apply(definition, state, events)
+            result = apply_step(definition, state, events)
+            after = result.state
             history_events = []
             for event in events:
                 count += 1
                 et = definition.event_type(event.event_type)
                 binding = {r: labels[i] for r, i in zip(et.roles, event.binding, strict=True)}
+                event_label = f"{label}.EVENTINSTANCE.{count}"
                 history_events.append(
                     HistoryEvent(
-                        f"{label}.EVENTINSTANCE.{count}",
+                        event_label,
                         event.event_type,
                         binding["agent"],
                         binding.get("patient"),
-                        tuple(_event_changes(definition, state, after, event)),
+                        tuple(
+                            _event_changes(definition, state, after, event)
+                            + _event_numeric_changes(
+                                definition, state, result.after_effects, event, event_label
+                            )
+                        ),
                     )
                 )
+            drift = numeric_changes_of(
+                definition, result.after_effects, after.numeric, sorted(participants), DRIFT
+            )
             recorded.append(
                 Step(
                     k,
                     tuple(history_events),
                     {t: len(b) for t, b in legal.items()} if self.record_legal else None,
+                    tuple(drift),
                 )
             )
             state = after
@@ -469,6 +502,7 @@ class EpisodeGenerator:
             tuple(recorded),
             f"TIME.{len(recorded) + 1}",
             quiescent,
+            initial_numeric,
         )
 
     def run(
@@ -493,15 +527,39 @@ class EpisodeGenerator:
 def _event_changes(
     definition: RuntimeDefinition, before: State, after: State, event: Event
 ) -> list[Change]:
-    """The base fluents the event changed: of the fluents it writes, those whose value differs
-    between the states (non-interfering events write distinct fluents, so each change has one
-    event)."""
+    """The base Boolean fluents the event changed: of the fluents it writes, those whose value
+    differs between the states (non-interfering events write distinct fluents, so each change
+    has one event)."""
     et = definition.event_type(event.event_type)
     entities = sorted({event.binding[et.roles.index(e.role)] for e in et.effects})
     written = {(event.binding[et.roles.index(e.role)], e.fluent) for e in et.effects}
     return [
         change
         for change in changes_of(definition, before, after, entities)
+        if (definition.entity_index(change.entity), change.fluent) in written
+    ]
+
+
+def _event_numeric_changes(
+    definition: RuntimeDefinition,
+    before: State,
+    after_effects: np.ndarray,
+    event: Event,
+    label: str,
+) -> list[Change]:
+    """The numeric fluents the event's effects changed, judged after the effects of the step and
+    before the drift, each with the event as its cause."""
+    et = definition.event_type(event.event_type)
+    numeric = [e for e in et.effects if e.numeric]
+    if not numeric:
+        return []
+    entities = sorted({event.binding[et.roles.index(e.role)] for e in numeric})
+    written = {(event.binding[et.roles.index(e.role)], e.fluent) for e in numeric}
+    return [
+        change
+        for change in numeric_changes_of(
+            definition, before.numeric, after_effects, entities, label, [e.fluent for e in numeric]
+        )
         if (definition.entity_index(change.entity), change.fluent) in written
     ]
 

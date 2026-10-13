@@ -19,24 +19,26 @@ PLAIN_TAXONOMY = "data/taxonomy/tiny.yaml"
 """The tiny taxonomy without scalar dimensions and without verbs."""
 
 PLAIN_WORLD = """\
-# The tiny taxonomy without scalars, with no two-place event types and no fluents: a world of
-# one-place event types only.
+# The tiny taxonomy without scalars, with no two-place event types and no fluents (Boolean or
+# numeric): a world of one-place event types only.
 name: plain
 seed: 1
 taxonomy: {config: data/taxonomy/tiny.yaml}
 fluents: {count: 0}
+numeric_fluents: {count: 0}
 event_types:
   unary: {count: 4}
   binary: null
 """
 
 STATIC_WORLD = """\
-# The tiny relations taxonomy with no fluents: every able binding is legal at every time point,
-# as in the corpus's old scene generator.
+# The tiny relations taxonomy with no fluents (Boolean or numeric): every able binding is legal
+# at every time point, as in the corpus's old scene generator.
 name: static
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
 fluents: {count: 0}
+numeric_fluents: {count: 0}
 event_types:
   unary: {count: 4}
   binary:
@@ -120,11 +122,13 @@ EXAMPLE_WORLDS = {"tiny": TINY_WORLD, "default": DEFAULT_WORLD}
 
 
 def world_over(name: str, taxonomy_path: str, seed: int, event_types: str = "") -> str:
-    """A world configuration over a written taxonomy, with the default fluents, and the given
-    ``event_types`` block (the defaults when none is given)."""
+    """A world configuration over a written taxonomy, with the default Boolean fluents, no
+    numeric fluents (the written worlds test the static side and the Boolean dynamics; the
+    numeric fluents of stage b2 have tests of their own), and the given ``event_types`` block
+    (the defaults when none is given)."""
     return (
         f"name: {name}\nseed: {seed}\ntaxonomy: {{config: {taxonomy_path}, seed: {seed}}}\n"
-        + event_types
+        f"numeric_fluents: {{count: 0}}\n" + event_types
     )
 
 

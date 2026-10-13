@@ -584,10 +584,11 @@ def _invalid(reason: str) -> Evaluation:
 
 
 def unconditional_effects(record: Any) -> tuple:
-    """The effects of an event-type record that hold after every event: those without a
-    condition (stage b1). A conditional effect guarantees its fluent only when its condition
-    held, which no unconditional causal statement says."""
-    return tuple(e for e in record.effects if not e.condition)
+    """The effects of an event-type record that hold after every event: the Boolean effects
+    without a condition (stage b1). A conditional effect guarantees its fluent only when its
+    condition held, which no unconditional causal statement says; a numeric effect (stage b2)
+    is no entry either, until the ``RAISES`` and ``LOWERS`` statements of stage b3."""
+    return tuple(e for e in record.effects if not e.condition and not e.numeric)
 
 
 class Truth:
@@ -1319,11 +1320,19 @@ class Truth:
         j = definition.derived_fluent_index(fluent)
         was = bool(derive(definition, before, [row]).fluent[0, j])
         values = np.array(before.values, dtype=np.uint8, copy=True)
+        numeric = np.array(before.numeric, dtype=np.float64, copy=True)
         for change in recorded.changes:
+            # a numeric change of the event (stage b2) is applied as recorded: the value after
+            # the effect and before the drift
+            if change.numeric:
+                numeric[
+                    self.instance_index[change.entity], definition.numeric_index(change.fluent)
+                ] = float(change.to)
+                continue
             values[
                 self.instance_index[change.entity], definition.base_fluent_index(change.fluent)
             ] = int(change.to)
-        return bool(derive(definition, State(values), [row]).fluent[0, j]) != was
+        return bool(derive(definition, State(values, numeric), [row]).fluent[0, j]) != was
 
     def caused_by(self, scene: str, time: int, entity: str, fluent: str) -> str | None:
         """The event of step ``time`` of a scene whose own effect changed a participant's

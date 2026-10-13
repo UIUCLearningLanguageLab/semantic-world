@@ -1194,7 +1194,7 @@ class Planner:
         candidates = [
             (change.entity, change.fluent, change.to)
             for change in recorded.changes
-            if change.fluent in named
+            if not change.numeric and change.fluent in named
         ]
         step = event.step
         for entity in [event.agent] + ([event.patient] if event.patient is not None else []):

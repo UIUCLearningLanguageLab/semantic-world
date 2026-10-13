@@ -53,6 +53,13 @@ from semantic_world.world.matrices import (
     check_agreement,
     evaluate_by_tables,
 )
+from semantic_world.world.numeric import (
+    NUMERIC_KIND,
+    InitialDistribution,
+    NumericFluents,
+    NumericThreshold,
+    empty_numeric,
+)
 from semantic_world.world.statics import StaticWorld
 
 DEFINITION_FILE = "definition.json"
@@ -95,6 +102,20 @@ def threshold_literal(scalar_label: str, threshold: float, role: str | None) -> 
 
 def fluent_literal(label: str) -> LiteralSpec:
     return LiteralSpec(label, {"kind": "fluent", "role": None, "fluent": label})
+
+
+def numeric_threshold_literal(label: str, threshold: float) -> LiteralSpec:
+    """A numeric threshold literal of the entity scope (stage b2): ``NUMFL.1 > 0.75``."""
+    return LiteralSpec(
+        f"{label}>{threshold:.4f}",
+        {
+            "kind": "numeric_threshold",
+            "role": None,
+            "fluent": label,
+            "operator": ">",
+            "threshold": float(threshold),
+        },
+    )
 
 
 def comparison_literal(item: ScalarComparison) -> LiteralSpec:
@@ -152,12 +173,13 @@ _GROUP_ORDER = {
     (None, "feature"): 0,
     (None, "threshold"): 1,
     (None, "fluent"): 2,
-    ("agent", "feature"): 3,
-    ("agent", "threshold"): 4,
-    ("patient", "feature"): 5,
-    ("patient", "threshold"): 6,
-    ("binding", "comparison"): 7,
-    ("binding", "constraint"): 8,
+    (None, "numeric_threshold"): 3,
+    ("agent", "feature"): 4,
+    ("agent", "threshold"): 5,
+    ("patient", "feature"): 6,
+    ("patient", "threshold"): 7,
+    ("binding", "comparison"): 8,
+    ("binding", "constraint"): 9,
 }
 
 
@@ -170,6 +192,8 @@ def _literal_sort_key(spec: LiteralSpec, position_of: dict[str, int]) -> tuple:
         return (group, _natural(reads["scalar"]), reads["threshold"])
     if reads["kind"] == "fluent":
         return (group, _natural(reads["fluent"]), 0.0)
+    if reads["kind"] == "numeric_threshold":
+        return (group, _natural(reads["fluent"]), reads["threshold"])
     if reads["kind"] == "comparison":
         return (
             group,
@@ -199,9 +223,13 @@ class Definition:
     entity_matrices: RuleMatrices
     binding_matrices: RuleMatrices
     rule_set_id: str
+    numeric: NumericFluents = None  # type: ignore[assignment]
+    """The numeric fluents (stage b2); none when the world has none."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_index", {lit.key: i for i, lit in enumerate(self.literals)})
+        if self.numeric is None:
+            object.__setattr__(self, "numeric", empty_numeric(len(self.statics.instances)))
 
     @property
     def literal_count(self) -> int:
@@ -273,15 +301,22 @@ class Definition:
         return self.statics.features[label].position
 
     def entity_literal_values(
-        self, values: np.ndarray, scalars: np.ndarray, base_fluents: np.ndarray
+        self,
+        values: np.ndarray,
+        scalars: np.ndarray,
+        base_fluents: np.ndarray,
+        numeric: np.ndarray | None = None,
     ) -> np.ndarray:
         """The base literal matrix of entities: free features from ``values`` (the static
         feature matrix, by position), thresholds from ``scalars``, base fluents from
-        ``base_fluents`` (``(n, base fluents)``), and 0 for every literal that a rule computes or
-        that a binding reads."""
+        ``base_fluents`` (``(n, base fluents)``), numeric thresholds from ``numeric`` (``(n,
+        numeric fluents)``, the initial values when None), and 0 for every literal that a rule
+        computes or that a binding reads."""
         n = values.shape[0]
         matrix = self.entity_matrices.literal_matrix(n)
         base_index = {label: i for i, label in enumerate(self.fluents.base_labels)}
+        if numeric is None:
+            numeric = self.numeric.initial_values
         for i, spec in enumerate(self.literals):
             reads = spec.reads
             if reads["role"] is not None:
@@ -295,6 +330,9 @@ class Definition:
                 matrix[:, i] = (scalars[:, scalar - 1] > reads["threshold"]).astype(np.uint8)
             elif reads["kind"] == "fluent" and reads["fluent"] in base_index:
                 matrix[:, i] = base_fluents[:, base_index[reads["fluent"]]]
+            elif reads["kind"] == "numeric_threshold":
+                column = numeric[:, self.numeric.index(reads["fluent"])]
+                matrix[:, i] = (column > reads["threshold"]).astype(np.uint8)
         return matrix
 
     def binding_literal_values(
@@ -335,7 +373,7 @@ class Definition:
 
 
 def _symbols(
-    statics: StaticWorld, fluents: Fluents, event_types: EventTypes
+    statics: StaticWorld, fluents: Fluents, event_types: EventTypes, numeric: NumericFluents
 ) -> list[dict[str, Any]]:
     taxonomy = statics.taxonomy
     symbols: list[dict[str, Any]] = []
@@ -370,6 +408,8 @@ def _symbols(
                 "initial_rate": None if fluent.derived else float(fluent.initial_rate),
             }
         )
+    for numeric_fluent in numeric.fluents:
+        symbols.append(numeric_fluent.symbol_record())
     for et in event_types.event_types:
         symbols.append(
             {
@@ -383,10 +423,17 @@ def _symbols(
     return symbols
 
 
-def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventTypes) -> Definition:
+def build_definition(
+    statics: StaticWorld,
+    fluents: Fluents,
+    event_types: EventTypes,
+    numeric: NumericFluents | None = None,
+) -> Definition:
     """Assemble the definition: the literal table, both rule scopes, the matrices, and the
     identity."""
     taxonomy = statics.taxonomy
+    if numeric is None:
+        numeric = empty_numeric(len(taxonomy.instances))
     position_of = {f.label: f.position for f in statics.features.features}
     literal_specs: dict[str, LiteralSpec] = {}
 
@@ -406,6 +453,11 @@ def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventT
         for key in rule.inputs:
             if key in fluents:
                 add(fluent_literal(key))
+            elif key.startswith("NUMFL."):
+                numeric_literal: NumericThreshold = next(
+                    t for t in rule.numeric_thresholds if t.key == key
+                )
+                add(numeric_threshold_literal(numeric_literal.fluent, numeric_literal.threshold))
             elif ">" in key:
                 literal: ThresholdLiteral = next(t for t in rule.thresholds if t.key == key)
                 add(threshold_literal(literal.label, literal.threshold, None))
@@ -435,7 +487,7 @@ def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventT
     )
     entity_matrices = build_matrices(literals, entity_rules)
     binding_matrices = build_matrices(literals, binding_rules)
-    symbols = tuple(_symbols(statics, fluents, event_types))
+    symbols = tuple(_symbols(statics, fluents, event_types, numeric))
     draft = Definition(
         statics,
         fluents,
@@ -448,6 +500,7 @@ def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventT
         entity_matrices,
         binding_matrices,
         "",
+        numeric,
     )
     identity = rule_set_id(
         symbols, draft.literals_record(), draft.rules_record(), draft.event_types_record()
@@ -464,6 +517,7 @@ def build_definition(statics: StaticWorld, fluents: Fluents, event_types: EventT
         entity_matrices,
         binding_matrices,
         identity,
+        numeric,
     )
 
 
@@ -560,6 +614,8 @@ def entities_frame(definition: Definition) -> pl.DataFrame:
         data[label] = instances.scalars[:, j].astype(float).tolist()
     for i, fluent in enumerate(definition.fluents.base):
         data[fluent.label] = definition.fluents.initial_values[:, i].astype(np.int64).tolist()
+    for i, numeric_fluent in enumerate(definition.numeric.fluents):
+        data[numeric_fluent.label] = definition.numeric.initial_values[:, i].astype(float).tolist()
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
 
 
@@ -574,8 +630,14 @@ def write_definition(definition: Definition, folder: str | Path) -> None:
 # ---------------------------------------------------------------------------------------------
 
 STATIC_KINDS = ("property", "part")
-SYMBOL_KINDS = STATIC_KINDS + ("scalar", "fluent", "event_type", "event_type_category")
-LITERAL_KINDS = ("feature", "threshold", "fluent", "comparison", "constraint")
+SYMBOL_KINDS = STATIC_KINDS + (
+    "scalar",
+    "fluent",
+    NUMERIC_KIND,
+    "event_type",
+    "event_type_category",
+)
+LITERAL_KINDS = ("feature", "threshold", "fluent", "numeric_threshold", "comparison", "constraint")
 SCOPES = ("entity", "binding")
 ENTITY_COLUMNS = ("label", "leaf")
 
@@ -639,6 +701,15 @@ class RuntimeDefinition:
     initial_values: np.ndarray | None
     """Shape ``(entities, base fluents)``, uint8: the initial base fluents of ``entities.csv``;
     None when the entities table carries no fluent columns (a fixture gives them apart)."""
+    numeric_fluents: tuple[str, ...] = ()
+    """The numeric fluents (stage b2), in symbol order."""
+    numeric_ranges: dict[str, tuple[float, float]] = None  # type: ignore[assignment]
+    numeric_initial: dict[str, InitialDistribution] = None  # type: ignore[assignment]
+    """Each numeric fluent's initial distribution (``scene.initial: redraw`` draws from it)."""
+    numeric_drift: dict[str, float] = None  # type: ignore[assignment]
+    initial_numeric: np.ndarray | None = None
+    """Shape ``(entities, numeric fluents)``, float64: the initial values of ``entities.csv``;
+    None when the table carries no numeric columns (a fixture gives them apart)."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_entity_index", {v: i for i, v in enumerate(self.entity_labels)})
@@ -647,9 +718,20 @@ class RuntimeDefinition:
         object.__setattr__(
             self, "_derived_index", {v: i for i, v in enumerate(self.derived_fluents)}
         )
+        object.__setattr__(
+            self, "_numeric_index", {v: i for i, v in enumerate(self.numeric_fluents)}
+        )
+        for name in ("numeric_ranges", "numeric_initial", "numeric_drift"):
+            if getattr(self, name) is None:
+                object.__setattr__(self, name, {})
         object.__setattr__(self, "_cones", _fluent_cones(self))
         object.__setattr__(self, "cache", {})
-        for arr in (self.free_values, self.scalar_values, self.initial_values):
+        for arr in (
+            self.free_values,
+            self.scalar_values,
+            self.initial_values,
+            self.initial_numeric,
+        ):
             if arr is not None:
                 arr.setflags(write=False)
 
@@ -678,9 +760,28 @@ class RuntimeDefinition:
     def derived_fluent_index(self, label: str) -> int:
         return self._derived_index[label]  # type: ignore[attr-defined]
 
+    def is_numeric_fluent(self, label: str) -> bool:
+        return label in self._numeric_index  # type: ignore[attr-defined]
+
+    def numeric_index(self, label: str) -> int:
+        return self._numeric_index[label]  # type: ignore[attr-defined]
+
+    @property
+    def drift_vector(self) -> np.ndarray:
+        """Each numeric fluent's drift per step, in symbol order."""
+        return np.array([self.numeric_drift[f] for f in self.numeric_fluents], dtype=np.float64)
+
+    @property
+    def range_bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """The low and the high end of every numeric fluent's range, in symbol order."""
+        low = np.array([self.numeric_ranges[f][0] for f in self.numeric_fluents], dtype=np.float64)
+        high = np.array([self.numeric_ranges[f][1] for f in self.numeric_fluents], dtype=np.float64)
+        return low, high
+
     def cone(self, fluent: str) -> tuple[str, ...]:
-        """The base fluents a fluent depends on: itself for a base fluent, and for a derived
-        fluent every base fluent its rule reads, directly or through other derived fluents."""
+        """The base fluents a fluent depends on: itself for a base fluent (Boolean or numeric),
+        and for a derived fluent every base fluent its rule reads, directly or through other
+        derived fluents, numeric fluents read through threshold literals included."""
         return self._cones[fluent]  # type: ignore[attr-defined]
 
 
@@ -688,7 +789,8 @@ def _fluent_cones(definition: RuntimeDefinition) -> dict[str, tuple[str, ...]]:
     literal_of = {spec.key: spec.reads for spec in definition.literals}
     rules = {rule.output: rule for rule in definition.entity_rules}
     cones: dict[str, tuple[str, ...]] = {f: (f,) for f in definition.base_fluents}
-    base_order = {f: i for i, f in enumerate(definition.base_fluents)}
+    cones.update({f: (f,) for f in definition.numeric_fluents})
+    base_order = {f: i for i, f in enumerate(definition.base_fluents + definition.numeric_fluents)}
 
     def cone_of(label: str) -> tuple[str, ...]:
         if label in cones:
@@ -696,7 +798,7 @@ def _fluent_cones(definition: RuntimeDefinition) -> dict[str, tuple[str, ...]]:
         found: set[str] = set()
         for key in rules[label].inputs:
             reads = literal_of[key]
-            if reads["kind"] == "fluent":
+            if reads["kind"] in ("fluent", "numeric_threshold"):
                 found.update(cone_of(reads["fluent"]))
         cones[label] = tuple(sorted(found, key=base_order.__getitem__))
         return cones[label]
@@ -764,6 +866,10 @@ def _runtime_definition(
     base_fluents: list[str] = []
     derived_fluents: list[str] = []
     initial_rates: dict[str, float] = {}
+    numeric_fluents: list[str] = []
+    numeric_ranges: dict[str, tuple[float, float]] = {}
+    numeric_initial: dict[str, InitialDistribution] = {}
+    numeric_drift: dict[str, float] = {}
     for symbol in record["symbols"]:
         label, kind = str(symbol["label"]), str(symbol["kind"])
         _expect(kind in SYMBOL_KINDS, f"the symbol {label} has the unknown kind {kind!r}")
@@ -787,6 +893,30 @@ def _runtime_definition(
                 )
                 base_fluents.append(label)
                 initial_rates[label] = float(rate)
+        elif kind == NUMERIC_KIND:
+            bounds = symbol.get("range")
+            _expect(
+                isinstance(bounds, list)
+                and len(bounds) == 2
+                and all(isinstance(b, (int, float)) and not isinstance(b, bool) for b in bounds)
+                and float(bounds[0]) < float(bounds[1]),
+                f"the numeric fluent {label} has no range [low, high] with low < high",
+            )
+            try:
+                initial = InitialDistribution.from_record(symbol["initial"])
+            except (KeyError, TypeError, ValueError):
+                raise DefinitionError(
+                    f"the numeric fluent {label} has no initial distribution"
+                ) from None
+            drift = symbol.get("drift", 0.0)
+            _expect(
+                isinstance(drift, (int, float)) and not isinstance(drift, bool),
+                f"the numeric fluent {label} has no numeric drift",
+            )
+            numeric_fluents.append(label)
+            numeric_ranges[label] = (float(bounds[0]), float(bounds[1]))
+            numeric_initial[label] = initial
+            numeric_drift[label] = float(drift)
 
     # Literals.
     literals: list[LiteralSpec] = []
@@ -823,6 +953,21 @@ def _runtime_definition(
                 symbols.get(entry["fluent"], {}).get("kind") == "fluent",
                 f"the literal {key} reads {entry['fluent']}, which is not a fluent",
             )
+        elif kind == "numeric_threshold":
+            _expect(
+                role is None,
+                f"the literal {key} is a numeric threshold with the role {role!r}; it belongs "
+                f"to the entity scope",
+            )
+            _expect(
+                entry["fluent"] in numeric_fluents,
+                f"the literal {key} reads {entry['fluent']}, which is not a numeric fluent",
+            )
+            _expect(
+                entry["operator"] == ">",
+                f"the literal {key} has the operator {entry['operator']!r}; only > is defined",
+            )
+            float(entry["threshold"])
         elif kind == "comparison":
             _expect(role == "binding", f"the literal {key} is a comparison with the role {role!r}")
             for side in ("agent_scalar", "patient_scalar"):
@@ -927,6 +1072,26 @@ def _runtime_definition(
                 lit["role"] in ROLES[:arity],
                 f"the precondition of {label} reads the role {lit['role']!r}",
             )
+            if "threshold" in lit:
+                _expect(
+                    lit["fluent"] in numeric_fluents,
+                    f"the precondition of {label} reads {lit['fluent']} at a threshold, but it "
+                    f"is not a numeric fluent",
+                )
+                _expect(
+                    lit.get("operator") in (">", "<="),
+                    f"the numeric literal of {label} on {lit['fluent']} has the operator "
+                    f"{lit.get('operator')!r}; > and <= are defined",
+                )
+                precondition.append(
+                    Literal(
+                        str(lit["role"]),
+                        str(lit["fluent"]),
+                        lit["operator"] == ">",
+                        float(lit["threshold"]),
+                    )
+                )
+                continue
             _expect(
                 symbols.get(lit["fluent"], {}).get("kind") == "fluent",
                 f"the precondition of {label} reads {lit['fluent']}, which is not a fluent",
@@ -938,10 +1103,28 @@ def _runtime_definition(
                 effect["role"] in ROLES[:arity],
                 f"an effect of {label} writes the role {effect['role']!r}",
             )
-            _expect(
-                effect["fluent"] in base_fluents,
-                f"an effect of {label} writes {effect['fluent']}, which is not a base fluent",
-            )
+            if "amount" in effect:
+                _expect(
+                    effect["fluent"] in numeric_fluents,
+                    f"an effect of {label} adds to {effect['fluent']}, which is not a numeric "
+                    f"fluent",
+                )
+                _expect(
+                    effect.get("operator") in ("+=", "-="),
+                    f"the numeric effect of {label} on {effect['fluent']} has the operator "
+                    f"{effect.get('operator')!r}; += and -= are defined",
+                )
+                amount = float(effect["amount"])
+                _expect(
+                    amount > 0, f"a numeric effect of {label} has a constant that is not above 0"
+                )
+                value: bool | float = amount if effect["operator"] == "+=" else -amount
+            else:
+                _expect(
+                    effect["fluent"] in base_fluents,
+                    f"an effect of {label} writes {effect['fluent']}, which is not a base fluent",
+                )
+                value = bool(effect["value"])
             condition = []
             for lit in (effect.get("condition") or {}).get("literals", ()):
                 key = f"{lit.get('role')}.{lit.get('symbol')}"
@@ -952,24 +1135,35 @@ def _runtime_definition(
                 kind = symbols.get(lit["symbol"], {}).get("kind")
                 _expect(
                     (lit["kind"] == "fluent" and kind == "fluent")
-                    or (lit["kind"] == "feature" and kind in STATIC_KINDS),
+                    or (lit["kind"] == "feature" and kind in STATIC_KINDS)
+                    or (lit["kind"] == "numeric" and kind == NUMERIC_KIND),
                     f"the condition literal {key} of {label} is a {lit['kind']!r} literal, but "
                     f"{lit['symbol']} is {'not a symbol' if kind is None else 'a ' + kind}",
                 )
-                condition.append(
-                    ConditionLiteral(str(lit["role"]), str(lit["symbol"]), bool(lit["value"]))
-                )
+                if lit["kind"] == "numeric":
+                    _expect(
+                        lit.get("operator") in (">", "<="),
+                        f"the numeric condition literal {key} of {label} has the operator "
+                        f"{lit.get('operator')!r}; > and <= are defined",
+                    )
+                    condition.append(
+                        ConditionLiteral(
+                            str(lit["role"]),
+                            str(lit["symbol"]),
+                            lit["operator"] == ">",
+                            float(lit["threshold"]),
+                        )
+                    )
+                else:
+                    condition.append(
+                        ConditionLiteral(str(lit["role"]), str(lit["symbol"]), bool(lit["value"]))
+                    )
             _expect(
                 len({(c.role, c.symbol) for c in condition}) == len(condition),
                 f"the condition of an effect of {label} reads a symbol twice",
             )
             effects.append(
-                Effect(
-                    str(effect["role"]),
-                    str(effect["fluent"]),
-                    bool(effect["value"]),
-                    tuple(condition),
-                )
+                Effect(str(effect["role"]), str(effect["fluent"]), value, tuple(condition))
             )
         event_types.append(
             EventTypeRecord(
@@ -980,7 +1174,13 @@ def _runtime_definition(
     # Entities.
     _expect(len(rows) > 0, "the entities table is empty")
     columns = list(rows[0].keys())
-    allowed = set(ENTITY_COLUMNS) | set(free_features) | set(scalars) | set(base_fluents)
+    allowed = (
+        set(ENTITY_COLUMNS)
+        | set(free_features)
+        | set(scalars)
+        | set(base_fluents)
+        | set(numeric_fluents)
+    )
     for column in columns:
         _expect(
             column in allowed,
@@ -993,6 +1193,11 @@ def _runtime_definition(
     _expect(
         not fluent_columns or len(fluent_columns) == len(base_fluents),
         "the entities table has some base fluent columns but not all of them",
+    )
+    numeric_columns = [f for f in numeric_fluents if f in columns]
+    _expect(
+        not numeric_columns or len(numeric_columns) == len(numeric_fluents),
+        "the entities table has some numeric fluent columns but not all of them",
     )
     labels = []
     for row in rows:
@@ -1007,6 +1212,18 @@ def _runtime_definition(
         [[float(row[s]) for s in scalars] for row in rows], dtype=np.float64
     ).reshape(len(rows), len(scalars))
     initial = _bit_matrix(rows, base_fluents) if fluent_columns or not base_fluents else None
+    initial_numeric = None
+    if numeric_columns or not numeric_fluents:
+        initial_numeric = np.array(
+            [[float(row[f]) for f in numeric_fluents] for row in rows], dtype=np.float64
+        ).reshape(len(rows), len(numeric_fluents))
+        for j, f in enumerate(numeric_fluents):
+            low, high = numeric_ranges[f]
+            column = initial_numeric[:, j]
+            _expect(
+                bool(((column >= low) & (column <= high)).all()),
+                f"the entities table has a value of {f} outside its range [{low}, {high}]",
+            )
 
     definition = RuntimeDefinition(
         record=dict(record),
@@ -1028,6 +1245,11 @@ def _runtime_definition(
         free_values=free_values,
         scalar_values=scalar_values,
         initial_values=initial,
+        numeric_fluents=tuple(numeric_fluents),
+        numeric_ranges=numeric_ranges,
+        numeric_initial=numeric_initial,
+        numeric_drift=numeric_drift,
+        initial_numeric=initial_numeric,
     )
     return definition
 

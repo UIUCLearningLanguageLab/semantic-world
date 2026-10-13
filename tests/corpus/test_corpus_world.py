@@ -69,7 +69,6 @@ def test_the_world_seed_chooses_the_world() -> None:
     assert same_world(load_world(corpus_config(seed=99)), world(1))
 
 
-@pytest.mark.slow
 def test_a_run_folder_is_regenerated_and_checked(tmp_path: Path) -> None:
     folder = run_folder(tmp_path, seed=4)
     config = config_from_mapping({"world": {"run": str(folder)}})
