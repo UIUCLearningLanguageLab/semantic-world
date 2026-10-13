@@ -30,9 +30,15 @@ recorded changes, applied alone to the state at the time point, change the fluen
 Causal statements (stage a7b) are judged by re-reading the ``event_types`` block of
 ``definition.json``: ``causal`` says whether every event type below the statement's event type
 has the effect (an unconditional one: since stage b1 an effect with a ``condition`` key is no
-entry), or the precondition literal, that the statement names; ``observed`` says whether
-the statement held after (or before) every event of its type in the given scenes, with at
-least one such event, on the replayed states.
+entry, and since stage b2 an effect with an ``amount``, a numeric effect, is none either), or
+the precondition literal, that the statement names; ``observed`` says whether the statement
+held after (or before) every event of its type in the given scenes, with at least one such
+event, on the replayed states.
+
+Since stage b2 the replay carries the numeric fluents (``NUMFL`` columns of ``entities.csv``,
+the history's ``initial_numeric``), so that a derived fluent that reads a numeric threshold is
+judged on the right values; the brute-force evaluator applies the numeric effects and the
+drift. No sentence names a numeric fluent, and the oracle has nothing to say about one.
 """
 
 from __future__ import annotations
@@ -137,6 +143,7 @@ class Oracle:
         self.instance_drift = config["scalars"]["instance_drift"]
         self._matrices: dict[str, np.ndarray] = {}
         self._states: dict[str, list[dict[str, frozenset[str]]]] = {}
+        self._numerics: dict[str, list[dict[str, dict[str, float]]]] = {}
 
     # Sets of rows ----------------------------------------------------------------------------
 
@@ -359,7 +366,8 @@ class Oracle:
 
     def states(self, scene: dict[str, Any]) -> list[dict[str, frozenset[str]]]:
         """The state at every time point of a scene, replayed with the brute-force evaluator
-        from the entities' initial fluents and the history's initial fluents."""
+        from the entities' initial fluents and the history's initial fluents (the numeric values
+        beside them, in ``numerics``)."""
         if scene["label"] not in self._states:
             state = {
                 label: frozenset(f for f in self.base_fluents if row[f])
@@ -367,7 +375,11 @@ class Oracle:
             }
             for participant, fluents in scene["initial"].items():
                 state[participant] = frozenset(fluents)
+            numeric = self.brute.initial_numeric()
+            for participant, values in (scene.get("initial_numeric") or {}).items():
+                numeric[participant] = {f: float(v) for f, v in values.items()}
             states = [state]
+            numerics = [numeric]
             for step in scene["steps"]:
                 events = [
                     BruteEvent(
@@ -380,11 +392,22 @@ class Oracle:
                     for e in step["events"]
                 ]
                 for event in events:
-                    assert self.brute.legal(event, state), (scene["label"], step["step"], event)
-                state = self.brute.apply(state, events)
+                    assert self.brute.legal(event, state, numeric), (
+                        scene["label"],
+                        step["step"],
+                        event,
+                    )
+                state, numeric, _ = self.brute.step(state, numeric, events)
                 states.append(state)
+                numerics.append(numeric)
             self._states[scene["label"]] = states
+            self._numerics[scene["label"]] = numerics
         return self._states[scene["label"]]
+
+    def numerics(self, scene: dict[str, Any]) -> list[dict[str, dict[str, float]]]:
+        """The numeric values at every time point of a scene, replayed with ``states``."""
+        self.states(scene)
+        return self._numerics[scene["label"]]
 
     def legal_at(
         self, scene: dict[str, Any], time: int, label: str, agent: str, patient: str | None
@@ -392,13 +415,15 @@ class Oracle:
         """Whether the binding was legal at ``TIME.<time>`` of the scene."""
         binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
         state = self.states(scene)[time - 1]
+        numeric = self.numerics(scene)[time - 1]
         return any(
-            self.brute.legal(BruteEvent(event_type, binding), state)
+            self.brute.legal(BruteEvent(event_type, binding), state, numeric)
             for event_type in self.leaves_below(label)
         )
 
     def fluent_at(self, scene: dict[str, Any], time: int, entity: str, fluent: str) -> bool:
         """A fluent's value, base or derived, of a participant at ``TIME.<time>``."""
+        self.brute.with_numeric(self.numerics(scene)[time - 1])
         return bool(self.brute.fluent(fluent, entity, self.states(scene)[time - 1]))
 
     def changed(self, scene: dict[str, Any], entity: str, fluent: str) -> bool:
@@ -421,16 +446,21 @@ class Oracle:
         if not self.symbols[fluent]["derived"]:
             return any(c["entity"] == entity and c["fluent"] == fluent for c in event["changes"])
         before = self.states(scene)[time - 1]
+        numeric_before = self.numerics(scene)[time - 1]
         after = {e: set(v) for e, v in before.items()}
+        numeric_after = {e: dict(v) for e, v in numeric_before.items()}
         for change in event["changes"]:
-            if change["to"]:
+            if "from" in change:
+                numeric_after[change["entity"]][change["fluent"]] = float(change["to"])
+            elif change["to"]:
                 after[change["entity"]].add(change["fluent"])
             else:
                 after[change["entity"]].discard(change["fluent"])
         after_state = {e: frozenset(v) for e, v in after.items()}
-        return self.brute.fluent(fluent, entity, before) != self.brute.fluent(
-            fluent, entity, after_state
-        )
+        self.brute.with_numeric(numeric_before)
+        was = self.brute.fluent(fluent, entity, before)
+        self.brute.with_numeric(numeric_after)
+        return was != self.brute.fluent(fluent, entity, after_state)
 
     def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
         """Whether a state form (``HOLDS``) is true of the scene."""
@@ -463,9 +493,9 @@ class Oracle:
         for some event type below the category."""
         binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
         return any(
-            self.brute.legal(BruteEvent(event_type, binding), state)
+            self.brute.legal(BruteEvent(event_type, binding), state, numeric)
             for event_type in self.leaves_below(label)
-            for state in self.states(scene)
+            for state, numeric in zip(self.states(scene), self.numerics(scene), strict=True)
         )
 
     def matching(self, form: dict[str, Any], scene: dict[str, Any]) -> list[dict]:
@@ -499,11 +529,13 @@ class Oracle:
         """The effects (``effect``) or the precondition literals (``precondition``) of an event
         type, as ``definition.json`` records them. An effect with a ``condition`` key is left
         out (stage b1): it holds only when its condition held, so it makes no unconditional
-        causal statement true."""
+        causal statement true. A numeric effect (an ``amount``) and a numeric threshold literal
+        (a ``threshold``) are left out too (stage b2): no statement of this stage is about
+        them."""
         record = self.event_types[event_type]
         if kind == "effect":
-            return [e for e in record["effects"] if not e.get("condition")]
-        return record["precondition"]["literals"]
+            return [e for e in record["effects"] if not e.get("condition") and "amount" not in e]
+        return [lit for lit in record["precondition"]["literals"] if "threshold" not in lit]
 
     def causal(self, form: dict[str, Any]) -> bool | None:
         """Whether a causal statement is true: every event type below its event type (itself,

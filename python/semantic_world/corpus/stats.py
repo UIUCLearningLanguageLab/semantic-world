@@ -374,13 +374,17 @@ def _scenes(planner: Planner) -> dict[str, Any]:
     scenes = planner.scenes
     steps = [step for scene in scenes for step in scene.steps]
     events = [event for step in steps for event in step.events]
-    changes = sum(len(event.changes) for event in events)
+    changes = sum(1 for event in events for c in event.changes if not c.numeric)
+    numeric_changes = sum(1 for event in events for c in event.changes if c.numeric)
+    drift_changes = sum(len(step.drift) for step in steps)
     quiescent = sum(scene.quiescent for scene in scenes)
     return {
         "count": len(scenes),
         "steps": len(steps),
         "events": len(events),
         "mean_changes_per_event": _share(changes, len(events)),
+        "numeric_changes_per_event": _share(numeric_changes, len(events)),
+        "drift_changes_per_step": _share(drift_changes, len(steps)),
         "quiescent_share": _share(quiescent, len(scenes)),
     }
 

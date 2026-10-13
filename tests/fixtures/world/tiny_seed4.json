@@ -2,10 +2,10 @@
  "version": 1,
  "name": "tiny_seed4",
  "description": "6 random steps of the tiny world from its initial state, fixture seed 4: at each step, up to three non-interfering legal events.",
- "rule_set_id": "6777fdc1b604932160b8a6c9a9912675d6b53f0dd440e41238f6bf8aaeb2d43f",
+ "rule_set_id": "06ce2c7213352db7b76fbf5cda9c534d39920b326f6b4984e53a4ad2fe04113d",
  "definition": {
   "version": 1,
-  "rule_set_id": "6777fdc1b604932160b8a6c9a9912675d6b53f0dd440e41238f6bf8aaeb2d43f",
+  "rule_set_id": "06ce2c7213352db7b76fbf5cda9c534d39920b326f6b4984e53a4ad2fe04113d",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": false, "fluent": false, "arity": 1},
@@ -28,6 +28,26 @@
    {"label": "BOOLFL.2", "kind": "fluent", "derived": false, "fluent": true, "arity": 1, "initial_rate": 0.20000000000000001},
    {"label": "BOOLFL.3", "kind": "fluent", "derived": false, "fluent": true, "arity": 1, "initial_rate": 1.0},
    {"label": "BOOLFL.4", "kind": "fluent", "derived": true, "fluent": true, "arity": 1, "initial_rate": null},
+   {
+    "label": "NUMFL.1",
+    "kind": "numeric_fluent",
+    "derived": false,
+    "fluent": true,
+    "arity": 1,
+    "range": [0.0, 1.0],
+    "initial": {"kind": "uniform"},
+    "drift": 0.072826326908687289
+   },
+   {
+    "label": "NUMFL.2",
+    "kind": "numeric_fluent",
+    "derived": false,
+    "fluent": true,
+    "arity": 1,
+    "range": [0.0, 1.0],
+    "initial": {"kind": "uniform"},
+    "drift": 0.0055531290012368791
+   },
    {"label": "EVENTTYPE1.1", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
    {"label": "EVENTTYPE1.2", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
    {"label": "EVENTTYPE1.3", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
@@ -43,15 +63,15 @@
    {"index": 0, "key": "PROPERTY.2", "kind": "feature", "role": null, "feature": "PROPERTY.2"},
    {"index": 1, "key": "PROPERTY.4", "kind": "feature", "role": null, "feature": "PROPERTY.4"},
    {"index": 2, "key": "PROPERTY.5", "kind": "feature", "role": null, "feature": "PROPERTY.5"},
-   {"index": 3, "key": "PROPERTY.6", "kind": "feature", "role": null, "feature": "PROPERTY.6"},
+   {"index": 3, "key": "PROPERTY.7", "kind": "feature", "role": null, "feature": "PROPERTY.7"},
    {"index": 4, "key": "PART.1", "kind": "feature", "role": null, "feature": "PART.1"},
    {"index": 5, "key": "PART.2", "kind": "feature", "role": null, "feature": "PART.2"},
    {"index": 6, "key": "PART.3", "kind": "feature", "role": null, "feature": "PART.3"},
    {"index": 7, "key": "PART.4", "kind": "feature", "role": null, "feature": "PART.4"},
    {"index": 8, "key": "PART.5", "kind": "feature", "role": null, "feature": "PART.5"},
    {"index": 9, "key": "PART.6", "kind": "feature", "role": null, "feature": "PART.6"},
-   {"index": 10, "key": "PART.7", "kind": "feature", "role": null, "feature": "PART.7"},
-   {"index": 11, "key": "SCALARDIM.1>-0.5822", "kind": "threshold", "role": null, "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.58220000000000005},
+   {"index": 10, "key": "SCALARDIM.1>-0.5822", "kind": "threshold", "role": null, "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.58220000000000005},
+   {"index": 11, "key": "SCALARDIM.1>-0.4916", "kind": "threshold", "role": null, "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.49159999999999998},
    {"index": 12, "key": "BOOLFL.2", "kind": "fluent", "role": null, "fluent": "BOOLFL.2"},
    {"index": 13, "key": "agent.PROPERTY.1", "kind": "feature", "role": "agent", "feature": "PROPERTY.1"},
    {"index": 14, "key": "agent.PROPERTY.2", "kind": "feature", "role": "agent", "feature": "PROPERTY.2"},
@@ -87,10 +107,10 @@
   ],
   "rules": [
    {"output": "PROPERTY.7", "scope": "entity", "family": "compositional", "inputs": [0, 2, 6, 7], "truth_table": "1101111111111111", "expression": "PROPERTY.2 OR PROPERTY.5 OR NOT PART.3 OR PART.4"},
-   {"output": "PROPERTY.8", "scope": "entity", "family": "shj", "inputs": [8, 9, 11], "truth_table": "11000011", "expression": "(NOT PART.5 AND NOT PART.6) OR (PART.5 AND PART.6)"},
+   {"output": "PROPERTY.8", "scope": "entity", "family": "shj", "inputs": [8, 9, 10], "truth_table": "11000011", "expression": "(NOT PART.5 AND NOT PART.6) OR (PART.5 AND PART.6)"},
    {"output": "PART.7", "scope": "entity", "family": "compositional", "inputs": [1, 5, 6, 8], "truth_table": "1001011001101001", "expression": "PROPERTY.4 XOR NOT PART.2 XOR NOT PART.3 XOR NOT PART.5"},
    {"output": "PART.8", "scope": "entity", "family": "shj", "inputs": [0, 1, 4], "truth_table": "11000101", "expression": "(NOT PROPERTY.2 AND NOT PROPERTY.4) OR (PROPERTY.2 AND PART.1)"},
-   {"output": "BOOLFL.4", "scope": "entity", "family": "compositional", "inputs": [2, 3, 10, 12], "truth_table": "0000000000000010", "expression": "PROPERTY.5 AND PROPERTY.6 AND PART.7 AND NOT BOOLFL.2"},
+   {"output": "BOOLFL.4", "scope": "entity", "family": "compositional", "inputs": [2, 3, 12, 11], "truth_table": "0000000000000100", "expression": "PROPERTY.5 AND PROPERTY.7 AND NOT BOOLFL.2 AND SCALARDIM.1 > -0.4916"},
    {"output": "CONSTRAINT.EVENTTYPE1.1", "scope": "binding", "family": "compositional", "inputs": [13, 15, 21, 24], "truth_table": "1001011001101001", "expression": "agent.PROPERTY.1 XOR agent.PROPERTY.3 XOR agent.PART.1 XOR NOT agent.PART.5"},
    {"output": "CONSTRAINT.EVENTTYPE1.2", "scope": "binding", "family": "literal", "inputs": [15], "truth_table": "10", "expression": "NOT agent.PROPERTY.3"},
    {"output": "CONSTRAINT.EVENTTYPE1.3", "scope": "binding", "family": "binary", "inputs": [14, 19], "truth_table": "1011", "expression": "agent.PROPERTY.2 OR NOT agent.PROPERTY.7"},
@@ -147,7 +167,7 @@
     "scope": "entity",
     "layer": 2,
     "terms": [
-     {"literals": [2, 3, 10, 12], "complemented": [false, false, false, true], "threshold": 4}
+     {"literals": [2, 3, 12, 11], "complemented": [false, false, true, false], "threshold": 4}
     ],
     "outputs": [
      {"output": "BOOLFL.4", "terms": [0], "threshold": 1}
@@ -248,13 +268,13 @@
       "role": "agent",
       "fluent": "BOOLFL.2",
       "value": true,
-      "expression": "when agent.BOOLFL.3 AND NOT agent.PROPERTY.1 then agent.BOOLFL.2 := 1",
+      "expression": "when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 1",
       "condition": {
        "literals": [
-        {"role": "agent", "kind": "fluent", "symbol": "BOOLFL.3", "value": true},
-        {"role": "agent", "kind": "feature", "symbol": "PROPERTY.1", "value": false}
+        {"role": "agent", "kind": "fluent", "symbol": "BOOLFL.4", "value": false},
+        {"role": "agent", "kind": "feature", "symbol": "PROPERTY.2", "value": true}
        ],
-       "expression": "agent.BOOLFL.3 AND NOT agent.PROPERTY.1"
+       "expression": "NOT agent.BOOLFL.4 AND agent.PROPERTY.2"
       }
      }
     ]
@@ -276,7 +296,7 @@
      "expression": "NOT agent.BOOLFL.2"
     },
     "effects": [
-     {"role": "agent", "fluent": "BOOLFL.1", "value": true, "expression": "agent.BOOLFL.1 := 1"}
+     {"role": "agent", "fluent": "NUMFL.2", "operator": "+=", "amount": 0.30667193889333533, "expression": "agent.NUMFL.2 += 0.3066719388933353"}
     ]
    },
    {
@@ -309,9 +329,14 @@
     "features": [],
     "explicit": false,
     "requirement": {"constraints": ["CONSTRAINT.EVENTTYPE1.4"], "output": "REQUIREMENT.EVENTTYPE1.4", "expression": "CONSTRAINT.EVENTTYPE1.4"},
-    "precondition": {"literals": [], "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"role": "agent", "fluent": "NUMFL.2", "operator": ">", "threshold": 0.25}
+     ],
+     "expression": "agent.NUMFL.2 > 0.25"
+    },
     "effects": [
-     {"role": "agent", "fluent": "BOOLFL.1", "value": false, "expression": "agent.BOOLFL.1 := 0"}
+     {"role": "agent", "fluent": "BOOLFL.3", "value": false, "expression": "agent.BOOLFL.3 := 0"}
     ]
    },
    {
@@ -326,9 +351,9 @@
     "requirement": {"constraints": ["CONSTRAINT.EVENTFEAT.4"], "output": "REQUIREMENT.EVENTTYPE2.1", "expression": "CONSTRAINT.EVENTFEAT.4"},
     "precondition": {
      "literals": [
-      {"role": "patient", "fluent": "BOOLFL.2", "value": false}
+      {"role": "patient", "fluent": "NUMFL.2", "operator": "<=", "threshold": 0.5}
      ],
-     "expression": "NOT patient.BOOLFL.2"
+     "expression": "patient.NUMFL.2 <= 0.5"
     },
     "effects": []
    },
@@ -344,13 +369,13 @@
     "requirement": {"constraints": ["CONSTRAINT.EVENTFEAT.4", "CONSTRAINT.EVENTTYPE2.1.1"], "output": "REQUIREMENT.EVENTTYPE2.1.1", "expression": "CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.1"},
     "precondition": {
      "literals": [
-      {"role": "patient", "fluent": "BOOLFL.2", "value": false},
-      {"role": "patient", "fluent": "BOOLFL.1", "value": false}
+      {"role": "patient", "fluent": "NUMFL.2", "operator": "<=", "threshold": 0.5},
+      {"role": "patient", "fluent": "BOOLFL.1", "value": true}
      ],
-     "expression": "NOT patient.BOOLFL.2 AND NOT patient.BOOLFL.1"
+     "expression": "patient.NUMFL.2 <= 0.5 AND patient.BOOLFL.1"
     },
     "effects": [
-     {"role": "agent", "fluent": "BOOLFL.1", "value": false, "expression": "agent.BOOLFL.1 := 0"}
+     {"role": "agent", "fluent": "NUMFL.1", "operator": "-=", "amount": 0.25420163698707215, "expression": "agent.NUMFL.1 -= 0.25420163698707215"}
     ]
    },
    {
@@ -365,12 +390,14 @@
     "requirement": {"constraints": ["CONSTRAINT.EVENTFEAT.2", "CONSTRAINT.EVENTFEAT.4", "CONSTRAINT.EVENTTYPE2.1.2"], "output": "REQUIREMENT.EVENTTYPE2.1.2", "expression": "CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.2"},
     "precondition": {
      "literals": [
-      {"role": "patient", "fluent": "BOOLFL.2", "value": false}
+      {"role": "patient", "fluent": "NUMFL.2", "operator": "<=", "threshold": 0.5},
+      {"role": "agent", "fluent": "BOOLFL.2", "value": true},
+      {"role": "agent", "fluent": "NUMFL.2", "operator": "<=", "threshold": 0.5}
      ],
-     "expression": "NOT patient.BOOLFL.2"
+     "expression": "patient.NUMFL.2 <= 0.5 AND agent.BOOLFL.2 AND agent.NUMFL.2 <= 0.5"
     },
     "effects": [
-     {"role": "agent", "fluent": "BOOLFL.3", "value": true, "expression": "agent.BOOLFL.3 := 1"},
+     {"role": "agent", "fluent": "NUMFL.1", "operator": "+=", "amount": 0.11515610703946302, "expression": "agent.NUMFL.1 += 0.11515610703946302"},
      {"role": "patient", "fluent": "BOOLFL.3", "value": false, "expression": "patient.BOOLFL.3 := 0"}
     ]
    },
@@ -397,10 +424,16 @@
     "features": ["EVENTFEAT.1", "EVENTFEAT.2"],
     "explicit": false,
     "requirement": {"constraints": ["CONSTRAINT.EVENTFEAT.1", "CONSTRAINT.EVENTFEAT.2", "CONSTRAINT.EVENTTYPE2.2.1"], "output": "REQUIREMENT.EVENTTYPE2.2.1", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTTYPE2.2.1"},
-    "precondition": {"literals": [], "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"role": "agent", "fluent": "BOOLFL.2", "value": true},
+      {"role": "patient", "fluent": "BOOLFL.1", "value": true}
+     ],
+     "expression": "agent.BOOLFL.2 AND patient.BOOLFL.1"
+    },
     "effects": [
-     {"role": "patient", "fluent": "BOOLFL.3", "value": true, "expression": "patient.BOOLFL.3 := 1"},
-     {"role": "agent", "fluent": "BOOLFL.2", "value": true, "expression": "agent.BOOLFL.2 := 1"}
+     {"role": "patient", "fluent": "NUMFL.2", "operator": "+=", "amount": 0.39696669888439323, "expression": "patient.NUMFL.2 += 0.39696669888439323"},
+     {"role": "agent", "fluent": "BOOLFL.3", "value": false, "expression": "agent.BOOLFL.3 := 0"}
     ]
    },
    {
@@ -415,12 +448,23 @@
     "requirement": {"constraints": ["CONSTRAINT.EVENTFEAT.1", "CONSTRAINT.EVENTFEAT.2", "CONSTRAINT.EVENTFEAT.4", "CONSTRAINT.EVENTTYPE2.2.2"], "output": "REQUIREMENT.EVENTTYPE2.2.2", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.2.2"},
     "precondition": {
      "literals": [
-      {"role": "patient", "fluent": "BOOLFL.2", "value": false}
+      {"role": "patient", "fluent": "NUMFL.2", "operator": "<=", "threshold": 0.5}
      ],
-     "expression": "NOT patient.BOOLFL.2"
+     "expression": "patient.NUMFL.2 <= 0.5"
     },
     "effects": [
-     {"role": "patient", "fluent": "BOOLFL.2", "value": true, "expression": "patient.BOOLFL.2 := 1"}
+     {
+      "role": "patient",
+      "fluent": "BOOLFL.2",
+      "value": true,
+      "expression": "when NOT patient.PROPERTY.4 then patient.BOOLFL.2 := 1",
+      "condition": {
+       "literals": [
+        {"role": "patient", "kind": "feature", "symbol": "PROPERTY.4", "value": false}
+       ],
+       "expression": "NOT patient.PROPERTY.4"
+      }
+     }
     ]
    }
   ]
@@ -440,16 +484,30 @@
   {"label": "INSTANCE.2.2.3", "leaf": "CATEGORY.2.2", "PROPERTY.1": 0, "PROPERTY.2": 0, "PROPERTY.3": 0, "PROPERTY.4": 0, "PROPERTY.5": 1, "PROPERTY.6": 0, "PART.1": 0, "PART.2": 1, "PART.3": 0, "PART.4": 0, "PART.5": 0, "PART.6": 0, "SCALARDIM.1": 2.5682581815041048}
  ],
  "initial": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+ "initial_numeric": {
+  "INSTANCE.1.1.1": {"NUMFL.1": 0.31841716750180282, "NUMFL.2": 0.36918198501890775},
+  "INSTANCE.1.1.2": {"NUMFL.1": 0.53492541441380659, "NUMFL.2": 0.19978413831197672},
+  "INSTANCE.1.1.3": {"NUMFL.1": 0.68198506956409566, "NUMFL.2": 0.49843426866649787},
+  "INSTANCE.1.2.1": {"NUMFL.1": 0.19819369902841399, "NUMFL.2": 0.66636038553752786},
+  "INSTANCE.1.2.2": {"NUMFL.1": 0.76817808247874597, "NUMFL.2": 0.99330388330863872},
+  "INSTANCE.1.2.3": {"NUMFL.1": 0.8970335103690753, "NUMFL.2": 0.65395402639399203},
+  "INSTANCE.2.1.1": {"NUMFL.1": 0.81805588983538069, "NUMFL.2": 0.10171366515393132},
+  "INSTANCE.2.1.2": {"NUMFL.1": 0.72688351696216713, "NUMFL.2": 0.94845558030810295},
+  "INSTANCE.2.1.3": {"NUMFL.1": 0.8957483842674332, "NUMFL.2": 0.55406662772389248},
+  "INSTANCE.2.2.1": {"NUMFL.1": 0.68315673162464319, "NUMFL.2": 0.044148621628420814},
+  "INSTANCE.2.2.2": {"NUMFL.1": 0.08628066671837098, "NUMFL.2": 0.93671041959957579},
+  "INSTANCE.2.2.3": {"NUMFL.1": 0.40160337859564754, "NUMFL.2": 0.6222584792947462}
+ },
  "steps": [
   {
    "events": [
     {
-     "event_type": "EVENTTYPE1.1",
-     "binding": {"agent": "INSTANCE.2.1.2"}
+     "event_type": "EVENTTYPE2.2.2",
+     "binding": {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     },
     {
-     "event_type": "EVENTTYPE2.2.1",
-     "binding": {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"}
+     "event_type": "EVENTTYPE2.1.1",
+     "binding": {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"}
     }
    ],
    "legal": {
@@ -475,148 +533,489 @@
      {"agent": "INSTANCE.2.2.2"}
     ],
     "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.2.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
-    ],
-    "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
     ],
+    "EVENTTYPE2.1.2": [],
     "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
     ],
     "EVENTTYPE2.2.2": [
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.39124349441049011, "NUMFL.2": 0.37473511402014464},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.60775174132249388, "NUMFL.2": 0.20533726731321361},
+    "INSTANCE.1.1.3": {"NUMFL.1": 0.75481139647278295, "NUMFL.2": 0.5039873976677347},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.27102002593710128, "NUMFL.2": 0.67191351453876469},
+    "INSTANCE.1.2.2": {"NUMFL.1": 0.84100440938743326, "NUMFL.2": 0.99885701230987556},
+    "INSTANCE.1.2.3": {"NUMFL.1": 0.96985983727776259, "NUMFL.2": 0.65950715539522886},
+    "INSTANCE.2.1.1": {"NUMFL.1": 0.89088221674406798, "NUMFL.2": 0.1072667941551682},
+    "INSTANCE.2.1.2": {"NUMFL.1": 0.79970984387085442, "NUMFL.2": 0.95400870930933979},
+    "INSTANCE.2.1.3": {"NUMFL.1": 0.96857471117612048, "NUMFL.2": 0.55961975672512931},
+    "INSTANCE.2.2.1": {"NUMFL.1": 0.75598305853333048, "NUMFL.2": 0.04970175062965769},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.072826326908687289, "NUMFL.2": 0.94226354860081263},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.47442970550433483, "NUMFL.2": 0.62781160829598304}
+   }
+  },
+  {
+   "events": [],
+   "legal": {
+    "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.2": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.2.2.2"}
+    ],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.1.3"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE2.1.1": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
+    ],
+    "EVENTTYPE2.1.2": [],
+    "EVENTTYPE2.2.1": [
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.4640698213191774, "NUMFL.2": 0.38028824302138153},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.68057806823118117, "NUMFL.2": 0.2108903963144505},
+    "INSTANCE.1.1.3": {"NUMFL.1": 0.82763772338147024, "NUMFL.2": 0.50954052666897154},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.34384635284578857, "NUMFL.2": 0.67746664354000152},
+    "INSTANCE.1.2.2": {"NUMFL.1": 0.91383073629612055, "NUMFL.2": 1.0},
+    "INSTANCE.1.2.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.6650602843964657},
+    "INSTANCE.2.1.1": {"NUMFL.1": 0.96370854365275527, "NUMFL.2": 0.11281992315640507},
+    "INSTANCE.2.1.2": {"NUMFL.1": 0.87253617077954171, "NUMFL.2": 0.95956183831057662},
+    "INSTANCE.2.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.56517288572636615},
+    "INSTANCE.2.2.1": {"NUMFL.1": 0.82880938544201777, "NUMFL.2": 0.055254879630894566},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.14565265381737458, "NUMFL.2": 0.94781667760204946},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.54725603241302212, "NUMFL.2": 0.63336473729721987}
+   }
+  },
+  {
+   "events": [
+    {
+     "event_type": "EVENTTYPE1.1",
+     "binding": {"agent": "INSTANCE.1.2.3"}
+    },
+    {
+     "event_type": "EVENTTYPE1.1",
+     "binding": {"agent": "INSTANCE.1.1.2"}
+    }
+   ],
+   "legal": {
+    "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.2": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.2.2.2"}
+    ],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.1.3"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE2.1.1": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
+    ],
+    "EVENTTYPE2.1.2": [],
+    "EVENTTYPE2.2.1": [
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.53689614822786469, "NUMFL.2": 0.38584137202261842},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.75340439513986845, "NUMFL.2": 0.21644352531568739},
+    "INSTANCE.1.1.3": {"NUMFL.1": 0.90046405029015752, "NUMFL.2": 0.51509365567020837},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.41667267975447586, "NUMFL.2": 0.68301977254123836},
+    "INSTANCE.1.2.2": {"NUMFL.1": 0.98665706320480784, "NUMFL.2": 1.0},
+    "INSTANCE.1.2.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.67061341339770253},
+    "INSTANCE.2.1.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.11837305215764195},
+    "INSTANCE.2.1.2": {"NUMFL.1": 0.945362497688229, "NUMFL.2": 0.96511496731181345},
+    "INSTANCE.2.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.57072601472760298},
+    "INSTANCE.2.2.1": {"NUMFL.1": 0.90163571235070505, "NUMFL.2": 0.060808008632131441},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.21847898072606187, "NUMFL.2": 0.9533698066032863},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.62008235932170941, "NUMFL.2": 0.6389178662984567}
+   }
   },
   {
    "events": [
     {
      "event_type": "EVENTTYPE2.2.1",
-     "binding": {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"}
+     "binding": {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"}
+    },
+    {
+     "event_type": "EVENTTYPE2.1.1",
+     "binding": {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"}
+    }
+   ],
+   "legal": {
+    "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.2": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.2.2"}
+    ],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.1.3"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE2.1.1": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
+    ],
+    "EVENTTYPE2.1.2": [
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.1": [
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.60972247513655198, "NUMFL.2": 0.39139450102385531},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.82623072204855574, "NUMFL.2": 0.22199665431692428},
+    "INSTANCE.1.1.3": {"NUMFL.1": 0.97329037719884481, "NUMFL.2": 0.91761348355583838},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.48949900666316315, "NUMFL.2": 0.68857290154247519},
+    "INSTANCE.1.2.2": {"NUMFL.1": 1.0, "NUMFL.2": 1.0},
+    "INSTANCE.1.2.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.67616654239893936},
+    "INSTANCE.2.1.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.12392618115887882},
+    "INSTANCE.2.1.2": {"NUMFL.1": 1.0, "NUMFL.2": 0.97066809631305029},
+    "INSTANCE.2.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.57627914372883982},
+    "INSTANCE.2.2.1": {"NUMFL.1": 0.97446203925939234, "NUMFL.2": 0.066361137633368317},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.072826326908687289, "NUMFL.2": 0.95892293560452313},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.6929086862303967, "NUMFL.2": 0.64447099529969354}
+   }
+  },
+  {
+   "events": [
+    {
+     "event_type": "EVENTTYPE1.2",
+     "binding": {"agent": "INSTANCE.2.1.2"}
+    }
+   ],
+   "legal": {
+    "EVENTTYPE1.1": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.2": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE1.3": [
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.2.2"}
+    ],
+    "EVENTTYPE1.4": [
+     {"agent": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.2.1.3"},
+     {"agent": "INSTANCE.2.2.2"},
+     {"agent": "INSTANCE.2.2.3"}
+    ],
+    "EVENTTYPE2.1.1": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
+    ],
+    "EVENTTYPE2.1.2": [
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.1": [
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
+    ],
+    "EVENTTYPE2.2.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
+    ]
+   },
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.68254880204523927, "NUMFL.2": 0.3969476300250922},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.89905704895724303, "NUMFL.2": 0.22754978331816117},
+    "INSTANCE.1.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.92316661255707522},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.56232533357185044, "NUMFL.2": 0.69412603054371202},
+    "INSTANCE.1.2.2": {"NUMFL.1": 1.0, "NUMFL.2": 1.0},
+    "INSTANCE.1.2.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.6817196714001762},
+    "INSTANCE.2.1.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.12947931016011571},
+    "INSTANCE.2.1.2": {"NUMFL.1": 1.0, "NUMFL.2": 1.0},
+    "INSTANCE.2.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.58183227273007665},
+    "INSTANCE.2.2.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.071914266634605192},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.14565265381737458, "NUMFL.2": 0.96447606460575996},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.76573501313908399, "NUMFL.2": 0.65002412430093037}
+   }
+  },
+  {
+   "events": [
+    {
+     "event_type": "EVENTTYPE2.1.1",
+     "binding": {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"}
     },
     {
      "event_type": "EVENTTYPE2.2.2",
-     "binding": {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"}
+     "binding": {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     }
    ],
    "legal": {
@@ -630,252 +1029,60 @@
     ],
     "EVENTTYPE1.2": [
      {"agent": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.3"},
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.3"},
      {"agent": "INSTANCE.2.2.2"}
     ],
     "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.2.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
-    ],
-    "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
+     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.2.2.1"},
      {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
-    ]
-   },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
-  },
-  {
-   "events": [
-    {
-     "event_type": "EVENTTYPE2.2.1",
-     "binding": {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"}
-    }
-   ],
-   "legal": {
-    "EVENTTYPE1.1": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.2": [
-     {"agent": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"}
-    ],
-    "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
+     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.2.1"}
     ],
     "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"}
     ],
     "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
     ],
@@ -892,382 +1099,22 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
-  },
-  {
-   "events": [
-    {
-     "event_type": "EVENTTYPE2.2.1",
-     "binding": {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"}
-    },
-    {
-     "event_type": "EVENTTYPE1.3",
-     "binding": {"agent": "INSTANCE.1.2.1"}
-    },
-    {
-     "event_type": "EVENTTYPE2.2.1",
-     "binding": {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"}
-    }
-   ],
-   "legal": {
-    "EVENTTYPE1.1": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.2": [
-     {"agent": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"}
-    ],
-    "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
-    ],
-    "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
-    ]
-   },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
-  },
-  {
-   "events": [],
-   "legal": {
-    "EVENTTYPE1.1": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.2": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"}
-    ],
-    "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
-    ],
-    "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
-    ]
-   },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
-  },
-  {
-   "events": [],
-   "legal": {
-    "EVENTTYPE1.1": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.2": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.2.2"}
-    ],
-    "EVENTTYPE1.4": [
-     {"agent": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3"},
-     {"agent": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2"},
-     {"agent": "INSTANCE.2.1.3"},
-     {"agent": "INSTANCE.2.2.1"},
-     {"agent": "INSTANCE.2.2.2"},
-     {"agent": "INSTANCE.2.2.3"}
-    ],
-    "EVENTTYPE2.1.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"}
-    ],
-    "EVENTTYPE2.1.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.2.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.1.2.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.1", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.1"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.2.1.1"}
-    ],
-    "EVENTTYPE2.2.2": [
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
-    ]
-   },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": [], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]}
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.2", "BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.75537512895392656, "NUMFL.2": 0.40250075902632909},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.97188337586593032, "NUMFL.2": 0.23310291231939806},
+    "INSTANCE.1.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.92871974155831205},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.63515166048053773, "NUMFL.2": 0.69967915954494886},
+    "INSTANCE.1.2.2": {"NUMFL.1": 0.81862468992161519, "NUMFL.2": 1.0},
+    "INSTANCE.1.2.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.68727280040141303},
+    "INSTANCE.2.1.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.1350324391613526},
+    "INSTANCE.2.1.2": {"NUMFL.1": 1.0, "NUMFL.2": 1.0},
+    "INSTANCE.2.1.3": {"NUMFL.1": 1.0, "NUMFL.2": 0.58738540173131348},
+    "INSTANCE.2.2.1": {"NUMFL.1": 1.0, "NUMFL.2": 0.077467395635842068},
+    "INSTANCE.2.2.2": {"NUMFL.1": 0.21847898072606187, "NUMFL.2": 0.9700291936069968},
+    "INSTANCE.2.2.3": {"NUMFL.1": 0.83856134004777128, "NUMFL.2": 0.65557725330216721}
+   }
   }
  ],
  "error": null

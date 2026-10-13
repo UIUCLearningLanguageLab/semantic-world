@@ -23,6 +23,14 @@ fluents:
   max_chain_depth: 1
   initial_rates: [0.0, 0.2, 0.8, 1.0]        # each base fluent's initial rate is drawn from this list
 
+numeric_fluents:                              # the numeric fluents (stage b2); 0 gives the world of stage b1
+  count: 2
+  range: [0.0, 1.0]                           # the range of every numeric fluent, unless `fluents` gives one its own
+  initial: {kind: uniform}                    # the initial distribution: uniform over the range, {kind: fixed, value: v}, or {kind: beta, mean: m, concentration: c}
+  drift: {share: 0.5, amounts: [-0.1, 0.1]}   # a share of the numeric fluents drifts at every step, by an amount drawn from this interval
+  rule_weight: 1.0                            # the weight of a numeric threshold literal in the input pool of a derived fluent's rule (a Boolean fluent weighs 1)
+  fluents: {}                                 # per-fluent overrides, NUMFL.<n>: {range, initial, drift}
+
 event_types:
   unary:                                      # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
     count: 20
@@ -37,11 +45,15 @@ event_types:
     feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal
     roles: {agent: 0.5, patient: 0.5}
     enabled_share: 0.7                        # the share of literals drawn from values that some effect produces
+    numeric_share: 0.3                        # the share of literals that are numeric threshold literals (stage b2), when the world has numeric fluents
+    numeric_thresholds: [0.25, 0.5, 0.75]     # the fractions of a numeric fluent's range a threshold is drawn from
   effects:
     count: {1: 0.7, 2: 0.3}                   # weights over the number of an event type's own effects
     feature_rate: 0.5
     roles: {agent: 0.4, patient: 0.6}
     conditional_share: 0.2                    # the share of effects that get a condition (stage b1); 0 gives the unconditional world of phase (a)
     condition_literals: {1: 0.7, 2: 0.3}      # weights over the number of literals of a condition
-    condition_kinds: {feature: 0.5, fluent: 0.5}   # weights over the kind of a condition literal, a static feature or a fluent
+    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2}   # weights over the kind of a condition literal, a static feature, a Boolean fluent, or a numeric threshold (stage b2)
+    numeric_share: 0.3                        # the share of effects that are numeric (+= or -=, stage b2), when the world has numeric fluents
+    numeric_amounts: [0.1, 0.5]               # the interval a numeric effect's constant is drawn from
   event_file: null                            # a file of explicit event types

@@ -17,6 +17,7 @@ from semantic_world.world.fixtures import (
     check_fixture,
     check_fixture_brute,
     check_fixtures,
+    fixture_initial_numeric,
     fixture_inputs,
     fixture_paths,
     generate_fixture,
@@ -42,6 +43,17 @@ HAND_CASES = (
     "fluent_condition_holds",
     "fluent_condition_fails",
     "condition_read_by_another_event",
+    # stage b2: comparisons and numeric fluents
+    "comparison_ties",
+    "comparison_entity",
+    "comparison_category_mean",
+    "numeric_effect",
+    "numeric_drift",
+    "numeric_clamp_both_ends",
+    "numeric_effect_and_drift",
+    "numeric_precondition_at_threshold",
+    "numeric_condition",
+    "numeric_read_by_another_event",
 )
 
 
@@ -87,7 +99,10 @@ def test_every_fixture_passes_the_brute_force_evaluator(path: Path) -> None:
 
 def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
-    fixture = generate_fixture("probe", "a probe", record, entities, initial, 3, 3)
+    numeric = fixture_initial_numeric(tiny.definition)
+    fixture = generate_fixture(
+        "probe", "a probe", record, entities, initial, 3, 3, initial_numeric=numeric
+    )
     broken = json.loads(json.dumps(fixture))
     first = next(k for k, v in broken["steps"][0]["legal"].items() if v)
     broken["steps"][0]["legal"][first] = []
@@ -99,11 +114,26 @@ def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
     broken["steps"][0]["state"][entity] = [] if fluents else ["BOOLFL.1"]
     with pytest.raises(FixtureError, match="brute-force state"):
         check_fixture_brute(broken)
-    illegal = generate_fixture("probe", "a probe", record, entities, initial, 3, 3, error="illegal")
+    illegal = generate_fixture(
+        "probe",
+        "a probe",
+        record,
+        entities,
+        initial,
+        3,
+        3,
+        error="illegal",
+        initial_numeric=numeric,
+    )
     wrong = json.loads(json.dumps(illegal))
     wrong["error"]["kind"] = "interference"
     with pytest.raises(FixtureError, match="finds illegal"):
         check_fixture_brute(wrong)
+    broken = json.loads(json.dumps(fixture))
+    entity = broken["entities"][0]["label"]
+    broken["steps"][0]["numeric"][entity]["NUMFL.1"] += 0.001
+    with pytest.raises(FixtureError, match="brute-force numeric values"):
+        check_fixture_brute(broken)
 
 
 def test_hand_fixtures_are_what_the_hand_world_script_writes() -> None:
@@ -145,18 +175,22 @@ def test_brute_force_reads_truth_tables_only(tiny: WorldResult) -> None:
     record["layers"] = []
     brute = BruteForce(record, entities)
     state = {e: frozenset(initial[e]) for e in brute.entity_labels}
-    derived = brute.derived_record(state)
+    numeric = fixture_initial_numeric(tiny.definition)
+    derived = brute.derived_record(state, numeric)
     assert set(derived) == set(brute.entity_labels)
-    legal = brute.legal_record(state)
+    legal = brute.legal_record(state, numeric)
     assert set(legal) == set(brute.performable())
     for label, bindings in legal.items():
         for binding in bindings:
-            assert brute.legal(BruteEvent(label, binding), state)
+            assert brute.legal(BruteEvent(label, binding), state, numeric)
 
 
 def test_check_fixture_reports_disagreements(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
-    fixture = generate_fixture("probe", "a probe", record, entities, initial, 1, 3)
+    numeric = fixture_initial_numeric(tiny.definition)
+    fixture = generate_fixture(
+        "probe", "a probe", record, entities, initial, 1, 3, initial_numeric=numeric
+    )
     check_fixture(fixture)
     broken = json.loads(json.dumps(fixture))
     broken["rule_set_id"] = "0" * 64
@@ -178,11 +212,27 @@ def test_check_fixture_reports_disagreements(tiny: WorldResult) -> None:
     del broken["steps"][2]["state"]
     with pytest.raises(FixtureError, match="raised no error"):
         check_fixture(broken)
+    broken = json.loads(json.dumps(fixture))
+    entity = broken["entities"][0]["label"]
+    broken["steps"][0]["numeric"][entity]["NUMFL.1"] += 0.001
+    with pytest.raises(FixtureError, match="numeric values after the step"):
+        check_fixture(broken)
 
 
 def test_error_fixtures_need_the_right_kind(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
-    fixture = generate_fixture("probe", "a probe", record, entities, initial, 2, 4, error="illegal")
+    numeric = fixture_initial_numeric(tiny.definition)
+    fixture = generate_fixture(
+        "probe",
+        "a probe",
+        record,
+        entities,
+        initial,
+        2,
+        4,
+        error="illegal",
+        initial_numeric=numeric,
+    )
     assert fixture["error"] == {"step": 4, "kind": "illegal"}
     assert "state" not in fixture["steps"][-1]
     check_fixture(fixture)

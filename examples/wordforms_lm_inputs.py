@@ -89,6 +89,9 @@ def main(argv: list[str] | None = None) -> dict[str, float]:
 
     run = Path(args.run) if args.run else default_output_dir(load_config(args.config))
     ensure_run(args.config, run, args.embedding)
+    # One thread and a fixed seed, so that the loss does not depend on what else is running
+    # (Jon's ruling 6 on the process cleanup: the example failed its bound under two suites at once).
+    torch.set_num_threads(1)
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 

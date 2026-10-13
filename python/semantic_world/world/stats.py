@@ -29,15 +29,25 @@ from typing import TYPE_CHECKING, Any
 from semantic_world.world.event_types import EventTypes
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.history import History
+from semantic_world.world.numeric import NumericFluents
 
 if TYPE_CHECKING:
     from semantic_world.world.statics import StaticWorld
 
 
+def _produces(effect) -> tuple[str, Any]:
+    """What an effect produces, as a precondition literal would require it: ``(fluent, value)``
+    for a Boolean effect, ``(fluent, True)`` for a numeric effect that adds (it can bring a
+    value above a threshold) and ``(fluent, False)`` for one that subtracts."""
+    if effect.numeric:
+        return (effect.fluent, effect.amount > 0)
+    return (effect.fluent, effect.value)
+
+
 def enabling_edges(event_types: EventTypes) -> list[tuple[str, str]]:
     """Every edge (A, B) of the enabling graph over the event types that can occur."""
     leaves = event_types.leaves
-    produced = {et.label: {(e.fluent, e.value) for e in et.effects} for et in leaves}
+    produced = {et.label: {_produces(e) for e in et.effects} for et in leaves}
     edges = []
     for a in leaves:
         for b in leaves:
@@ -103,7 +113,8 @@ def absorbing_fluents(event_types: EventTypes, fluents: Fluents) -> list[str]:
     set_to: dict[str, set[bool]] = {f.label: set() for f in fluents.base}
     for et in event_types.leaves:
         for effect in et.effects:
-            set_to[effect.fluent].add(effect.value)
+            if not effect.numeric:
+                set_to[effect.fluent].add(effect.value)
     return [label for label, values in set_to.items() if len(values) == 1]
 
 
@@ -128,7 +139,9 @@ def episode_stats(
         for label in {e.type for e in step.events}:
             occurred_steps[label] += 1
     events = [e for step in steps for e in step.events]
-    changes = sum(len(e.changes) for e in events)
+    changes = sum(1 for e in events for c in e.changes if not c.numeric)
+    numeric_changes = sum(1 for e in events for c in e.changes if c.numeric)
+    drift_changes = sum(len(step.drift) for step in steps)
     never = [label for label in event_types if legal_steps[label] == 0]
     quiescent = sum(1 for h in histories if h.quiescent)
     reasons = {label: "never_able" if label in never_able else "preconditions" for label in never}
@@ -144,6 +157,8 @@ def episode_stats(
             for label in event_types
         },
         "mean_changes_per_event": round(changes / len(events), 6) if events else 0.0,
+        "numeric_changes_per_event": round(numeric_changes / len(events), 6) if events else 0.0,
+        "drift_changes_per_step": round(drift_changes / total, 6) if total else 0.0,
         "quiescent_share": round(quiescent / len(histories), 6) if histories else 0.0,
         "two_place_share": round(sum(1 for e in events if e.patient is not None) / len(events), 6)
         if events
@@ -188,11 +203,98 @@ def _share(count: int, total: int) -> float:
     return round(count / total, 6) if total else 0.0
 
 
+def numeric_stats(
+    numeric: NumericFluents | None, event_types: EventTypes, fluents: Fluents
+) -> dict[str, Any]:
+    """The ``numeric_fluents`` block of ``world_stats.yaml`` (stage b2): the fluents with their
+    ranges, initial distributions, and drifts; the numeric effects, precondition literals, and
+    condition literals by kind of event type and role; and the derived Boolean rules that read a
+    numeric threshold."""
+    leaves = event_types.leaves
+    effects = {
+        "total": 0,
+        "add": 0,
+        "subtract": 0,
+        "one_place": 0,
+        "two_place": 0,
+        "agent": 0,
+        "patient": 0,
+    }
+    literals = {
+        "total": 0,
+        "above": 0,
+        "at_or_below": 0,
+        "one_place": 0,
+        "two_place": 0,
+        "agent": 0,
+        "patient": 0,
+    }
+    conditions = {"total": 0, "above": 0, "at_or_below": 0, "agent": 0, "patient": 0}
+    for et in leaves:
+        kind = "one_place" if et.arity == 1 else "two_place"
+        for effect in et.effects:
+            if effect.numeric:
+                effects["total"] += 1
+                effects["add" if effect.amount > 0 else "subtract"] += 1
+                effects[kind] += 1
+                effects[effect.role] += 1
+            for lit in effect.condition:
+                if lit.numeric:
+                    conditions["total"] += 1
+                    conditions["above" if lit.value else "at_or_below"] += 1
+                    conditions[lit.role] += 1
+        for lit in et.precondition:
+            if lit.numeric:
+                literals["total"] += 1
+                literals["above" if lit.value else "at_or_below"] += 1
+                literals[kind] += 1
+                literals[lit.role] += 1
+    rules_reading = sum(1 for rule in fluents.rules if rule.numeric_thresholds)
+    fluent_rows = {}
+    if numeric is not None:
+        for f in numeric.fluents:
+            fluent_rows[f.label] = {
+                "range": [f.low, f.high],
+                "initial": f.initial.record(),
+                "drift": f.drift,
+            }
+    return {
+        "count": len(fluent_rows),
+        "drifting": sum(1 for row in fluent_rows.values() if row["drift"] != 0.0),
+        "fluents": fluent_rows,
+        "effects": {
+            "total": effects["total"],
+            "by_operator": {"add": effects["add"], "subtract": effects["subtract"]},
+            "by_kind": {"one_place": effects["one_place"], "two_place": effects["two_place"]},
+            "by_role": {"agent": effects["agent"], "patient": effects["patient"]},
+            "from_features": sum(
+                1 for v in event_types.feature_effects.values() if v is not None and v.numeric
+            ),
+        },
+        "precondition_literals": {
+            "total": literals["total"],
+            "by_side": {"above": literals["above"], "at_or_below": literals["at_or_below"]},
+            "by_kind": {"one_place": literals["one_place"], "two_place": literals["two_place"]},
+            "by_role": {"agent": literals["agent"], "patient": literals["patient"]},
+            "from_features": sum(
+                1 for v in event_types.feature_preconditions.values() if v is not None and v.numeric
+            ),
+        },
+        "condition_literals": {
+            "total": conditions["total"],
+            "by_side": {"above": conditions["above"], "at_or_below": conditions["at_or_below"]},
+            "by_role": {"agent": conditions["agent"], "patient": conditions["patient"]},
+        },
+        "rules_reading_a_threshold": rules_reading,
+    }
+
+
 def world_stats(
     fluents: Fluents,
     event_types: EventTypes,
     episodes: dict[str, Any] | None = None,
     statics: StaticWorld | None = None,
+    numeric: NumericFluents | None = None,
 ) -> dict[str, Any]:
     leaves = event_types.leaves
     by_kind = {
@@ -205,7 +307,14 @@ def world_stats(
     literals_by_kind = {"one_place": 0, "two_place": 0}
     effects_by_kind = {"one_place": 0, "two_place": 0}
     conditional = {"one_place": 0, "two_place": 0}
-    condition_literals = {"total": 0, "feature": 0, "fluent": 0, "agent": 0, "patient": 0}
+    condition_literals = {
+        "total": 0,
+        "feature": 0,
+        "fluent": 0,
+        "numeric": 0,
+        "agent": 0,
+        "patient": 0,
+    }
     for et in leaves:
         kind = "one_place" if et.arity == 1 else "two_place"
         for lit in et.precondition:
@@ -254,6 +363,7 @@ def world_stats(
                 "by_symbol": {
                     "feature": condition_literals["feature"],
                     "fluent": condition_literals["fluent"],
+                    "numeric": condition_literals["numeric"],
                 },
                 "by_role": {
                     "agent": condition_literals["agent"],
@@ -270,6 +380,7 @@ def world_stats(
             "longest_chain": longest_chain([et.label for et in leaves], edges),
         },
         "absorbing_fluents": absorbing_fluents(event_types, fluents),
+        "numeric_fluents": numeric_stats(numeric, event_types, fluents),
         "relations": relation_stats(statics) if statics is not None else None,
         "episodes": episodes,
     }

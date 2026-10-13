@@ -5,11 +5,17 @@ rule-set identity; the base fluents true at ``TIME.1``; each step's events with 
 each event changed; the last time point; and whether the episode ended in quiescence. The
 corpus writes histories to ``scenes.jsonl`` and ``simulate`` to ``episodes.jsonl``, with the same
 schema, which the 3D engine will write too. Phase (a) records Boolean changes (``to: true`` or
-``false``); phase (b) adds numeric changes with their causes, in the same ``changes`` list.
+``false``). Since stage b2 an event's ``changes`` also hold the numeric changes its effects made
+(``from``, ``to``, and ``cause``, the event's label), judged after the effect and before the
+drift, and each step records the drift's changes apart under ``drift`` (``"cause": "drift"``),
+so that every numeric change of a step is recorded with its cause; a history's ``initial_numeric``
+holds each participant's numeric values at ``TIME.1``. A world without numeric fluents writes
+none of these keys, so its histories are as before.
 
 ``replay`` runs a history's events through the runtime from its initial state and checks that
-every step is legal and free of interference, and that the recorded changes are exactly the
-base fluents that changed.
+every step is legal and free of interference, that the recorded Boolean changes are exactly the
+base fluents that changed, and that every recorded numeric value is reproduced exactly, by the
+same operations in the same order (``clamp(clamp(v + e) + d)``, in float64).
 """
 
 from __future__ import annotations
@@ -20,11 +26,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from semantic_world.world.definition import RuntimeDefinition
 from semantic_world.world.errors import WorldError
-from semantic_world.world.runtime import Event, State, apply
+from semantic_world.world.runtime import Event, State, apply_step
 
 EPISODES_FILE = "episodes.jsonl"
+DRIFT = "drift"
+"""The cause of a numeric change by drift alone."""
 
 
 class HistoryError(WorldError):
@@ -34,17 +44,41 @@ class HistoryError(WorldError):
 
 @dataclass(frozen=True)
 class Change:
-    """One base fluent of one entity that an event changed."""
+    """One base fluent of one entity that changed: a Boolean fluent an event set (``to`` is the
+    new value), or a numeric fluent an event's effect or the drift moved (``from_`` and ``to``
+    are the values before and after, and ``cause`` the event's label or ``drift``)."""
 
     entity: str
     fluent: str
-    to: bool
+    to: bool | float
+    from_: float | None = None
+    cause: str | None = None
+
+    @property
+    def numeric(self) -> bool:
+        return self.from_ is not None
 
     def to_json(self) -> dict[str, Any]:
-        return {"entity": self.entity, "fluent": self.fluent, "to": self.to}
+        if self.numeric:
+            return {
+                "entity": self.entity,
+                "fluent": self.fluent,
+                "from": float(self.from_),  # type: ignore[arg-type]
+                "to": float(self.to),
+                "cause": self.cause,
+            }
+        return {"entity": self.entity, "fluent": self.fluent, "to": bool(self.to)}
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any]) -> Change:
+        if "from" in data:
+            return cls(
+                str(data["entity"]),
+                str(data["fluent"]),
+                float(data["to"]),
+                float(data["from"]),
+                None if data.get("cause") is None else str(data["cause"]),
+            )
         return cls(str(data["entity"]), str(data["fluent"]), bool(data["to"]))
 
 
@@ -90,11 +124,16 @@ class Step:
     legal: dict[str, int] | None = None
     """With ``--legal``: the number of legal bindings of each event type among the participants
     in the state before the step."""
+    drift: tuple[Change, ...] = ()
+    """The numeric changes the drift made to the participants in the step, after the effects
+    (stage b2); written only when there are any."""
 
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {"step": self.step, "events": [e.to_json() for e in self.events]}
         if self.legal is not None:
             data["legal"] = dict(self.legal)
+        if self.drift:
+            data["drift"] = [change.to_json() for change in self.drift]
         return data
 
     @classmethod
@@ -104,6 +143,7 @@ class Step:
             int(data["step"]),
             tuple(HistoryEvent.from_json(e) for e in data["events"]),
             None if legal is None else {str(k): int(v) for k, v in legal.items()},
+            tuple(Change.from_json(c) for c in data.get("drift", ())),
         )
 
 
@@ -122,23 +162,42 @@ class History:
     final: str = "TIME.1"
     """The last time point."""
     quiescent: bool = False
+    initial_numeric: dict[str, dict[str, float]] = field(default_factory=dict)
+    """For each participant, its numeric fluents at ``TIME.1`` (stage b2); empty in a world
+    without numeric fluents, and then not written."""
 
     @property
     def events(self) -> tuple[HistoryEvent, ...]:
         return tuple(e for step in self.steps for e in step.events)
 
+    @property
+    def numeric_changes(self) -> tuple[Change, ...]:
+        """Every numeric change of the history, the effects' and the drift's, in time order."""
+        return tuple(
+            change
+            for step in self.steps
+            for change in [c for e in step.events for c in e.changes if c.numeric]
+            + list(step.drift)
+        )
+
     def to_json(self) -> dict[str, Any]:
-        return {
+        data = {
             "label": self.label,
             "seed": self.seed,
             "participants": list(self.participants),
             "policy": self.policy,
             "rule_set_id": self.rule_set_id,
             "initial": {p: list(self.initial[p]) for p in self.participants},
-            "steps": [step.to_json() for step in self.steps],
-            "final": self.final,
-            "quiescent": self.quiescent,
         }
+        if self.initial_numeric:
+            data["initial_numeric"] = {
+                p: {f: float(v) for f, v in self.initial_numeric[p].items()}
+                for p in self.participants
+            }
+        data["steps"] = [step.to_json() for step in self.steps]
+        data["final"] = self.final
+        data["quiescent"] = self.quiescent
+        return data
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any]) -> History:
@@ -152,6 +211,10 @@ class History:
             tuple(Step.from_json(s) for s in data["steps"]),
             str(data["final"]),
             bool(data["quiescent"]),
+            {
+                str(p): {str(f): float(v) for f, v in values.items()}
+                for p, values in (data.get("initial_numeric") or {}).items()
+            },
         )
 
 
@@ -183,24 +246,60 @@ def initial_state_of(definition: RuntimeDefinition, history: History) -> State:
 
     if definition.initial_values is None:
         true: dict[str, list[str]] = {label: [] for label in definition.entity_labels}
+        numeric = np.zeros((definition.entity_count, len(definition.numeric_fluents)))
     else:
-        true = initial_state(definition).true_fluents(definition)
+        start = initial_state(definition)
+        true = start.true_fluents(definition)
+        numeric = np.array(start.numeric, copy=True)
     for participant, fluents in history.initial.items():
         true[participant] = list(fluents)
-    return State.from_true(definition, true)
+    for participant, values in history.initial_numeric.items():
+        row = definition.entity_index(participant)
+        for fluent, value in values.items():
+            numeric[row, definition.numeric_index(fluent)] = float(value)
+    state = State.from_true(definition, true, {})
+    return State(state.values, numeric)
 
 
 def changes_of(
     definition: RuntimeDefinition, before: State, after: State, entities: Sequence[int]
 ) -> list[Change]:
-    """The base fluents of the given entities whose value differs between two states, in entity
-    and then fluent order."""
+    """The base Boolean fluents of the given entities whose value differs between two states,
+    in entity and then fluent order."""
     found = []
     for entity in entities:
         for j, fluent in enumerate(definition.base_fluents):
             if before.values[entity, j] != after.values[entity, j]:
                 found.append(
                     Change(definition.entity_labels[entity], fluent, bool(after.values[entity, j]))
+                )
+    return found
+
+
+def numeric_changes_of(
+    definition: RuntimeDefinition,
+    before: np.ndarray,
+    after: np.ndarray,
+    entities: Sequence[int],
+    cause: str,
+    fluents: Sequence[str] | None = None,
+) -> list[Change]:
+    """The numeric fluents (all, or the given ones) of the given entities whose value differs
+    between two value matrices, each with the cause, in entity and then fluent order."""
+    found = []
+    wanted = definition.numeric_fluents if fluents is None else tuple(fluents)
+    for entity in entities:
+        for fluent in wanted:
+            j = definition.numeric_index(fluent)
+            if before[entity, j] != after[entity, j]:
+                found.append(
+                    Change(
+                        definition.entity_labels[entity],
+                        fluent,
+                        float(after[entity, j]),
+                        float(before[entity, j]),
+                        cause,
+                    )
                 )
     return found
 
@@ -216,13 +315,15 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
         )
     state = initial_state_of(definition, history)
     states = [state]
+    participants = sorted(definition.entity_index(p) for p in history.participants)
     for step in history.steps:
         events = [Event.from_labels(definition, e.type, e.binding) for e in step.events]
         try:
-            after = apply(definition, state, events)
+            result = apply_step(definition, state, events)
         except WorldError as error:
             raise HistoryError(f"{history.label}, step {step.step}: {error}") from None
-        recorded = [c for e in step.events for c in e.changes]
+        after = result.state
+        recorded = [c for e in step.events for c in e.changes if not c.numeric]
         found = changes_of(
             definition, state, after, sorted(set(i for e in events for i in e.binding))
         )
@@ -243,6 +344,31 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
                         f"{history.label}, step {step.step}: {recorded_event.label} records a "
                         f"change to {change.fluent} of {change.entity}, which it does not write"
                     )
+            # The numeric changes of the event: its numeric effects, judged after the effect
+            # and before the drift, reproduced exactly.
+            expected = numeric_changes_of(
+                definition,
+                state.numeric,
+                result.after_effects,
+                sorted(set(event.binding)),
+                recorded_event.label,
+                [e.fluent for e in et.effects if e.numeric],
+            )
+            expected = [c for c in expected if (c.entity, c.fluent) in written]
+            got = [c for c in recorded_event.changes if c.numeric]
+            if sorted(got, key=_numeric_key) != sorted(expected, key=_numeric_key):
+                raise HistoryError(
+                    f"{history.label}, step {step.step}: {recorded_event.label} records the "
+                    f"numeric changes {got}, but its effects make {expected}"
+                )
+        drift = numeric_changes_of(
+            definition, result.after_effects, after.numeric, participants, DRIFT
+        )
+        if sorted(step.drift, key=_numeric_key) != sorted(drift, key=_numeric_key):
+            raise HistoryError(
+                f"{history.label}, step {step.step}: the recorded drift is {list(step.drift)}, "
+                f"but the drift makes {drift}"
+            )
         state = after
         states.append(state)
     if history.final != f"TIME.{len(history.steps) + 1}":
@@ -253,10 +379,21 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
 
 
 def _change_key(change: Change) -> tuple[str, str, bool]:
-    return (change.entity, change.fluent, change.to)
+    return (change.entity, change.fluent, bool(change.to))
+
+
+def _numeric_key(change: Change) -> tuple[str, str, float, float, str]:
+    return (
+        change.entity,
+        change.fluent,
+        float(change.from_ or 0.0),
+        float(change.to),
+        change.cause or "",
+    )
 
 
 __all__ = [
+    "DRIFT",
     "EPISODES_FILE",
     "Change",
     "History",
@@ -265,6 +402,7 @@ __all__ = [
     "Step",
     "changes_of",
     "initial_state_of",
+    "numeric_changes_of",
     "read_histories",
     "replay",
     "write_histories",

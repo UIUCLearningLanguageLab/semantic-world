@@ -159,6 +159,7 @@ def test_event_labels_and_numbering(tiny: WorldResult) -> None:
 def test_without_fluents_every_able_binding_is_available_at_every_step(tmp_path: Path) -> None:
     data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
     data["fluents"] = {"count": 0}
+    data["numeric_fluents"] = {"count": 0}
     data["taxonomy"]["config"] = str(Path("data/taxonomy/tiny_relations.yaml"))
     path = tmp_path / "static.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -234,7 +235,6 @@ def test_chain_example_events_follow_the_preconditions(chain: WorldResult) -> No
     assert _catch_before_eat(chain, silence=True) > 20
 
 
-@pytest.mark.slow
 def test_chain_example_completes_on_every_seed() -> None:
     """The acceptance test of stage a5b: with the chain's explicit requirement (the agent is
     bigger than the patient on the first scalar, shared by both event types), whatever is
@@ -268,10 +268,13 @@ def _occurrence_and_legal(result: WorldResult, name: str, count: int) -> tuple[d
 @pytest.mark.slow
 def test_policies_differ_in_the_expected_direction(default: WorldResult) -> None:
     """Under uniform_event, an event type legal for many bindings occurs more often, so the
-    occurrences follow the legal counts more closely than under uniform_event_type."""
+    occurrences follow the legal counts more closely than under uniform_event_type. Over 1,000
+    episodes: on the default world of stage b2 the two correlations are 0.95 and 0.94, and 300
+    episodes once put them the other way round (0.93 and 0.95 on seed 5, while seed 7 and every
+    run of 1,000 or 2,000 episodes kept the order), so the sample is the larger one."""
     assert set(policy_names()) >= {"uniform_event", "uniform_event_type"}
-    uniform_event, legal_event = _occurrence_and_legal(default, "uniform_event", 300)
-    uniform_type, legal_type = _occurrence_and_legal(default, "uniform_event_type", 300)
+    uniform_event, legal_event = _occurrence_and_legal(default, "uniform_event", 1000)
+    uniform_type, legal_type = _occurrence_and_legal(default, "uniform_event_type", 1000)
     assert legal_event == legal_type or sum(legal_event.values()) > 0
     labels = [label for label in uniform_event if legal_event[label] > 0]
     assert len(labels) > 5
@@ -474,8 +477,10 @@ def test_quiescence_ends_an_episode() -> None:
     """A world where nothing is ever legal ends at TIME.1 with no steps."""
     fixture = read_fixture(Path("tests/fixtures/world/hand_01_no_event.json"))
     record = dict(fixture["definition"])
-    # without the event types that are always legal (EVENTTYPE1.4 and EVENTTYPE1.5 since b1)
-    always = {"EVENTTYPE1.3", "EVENTTYPE1.4", "EVENTTYPE1.5"}
+    # without the event types that are always legal (EVENTTYPE1.4 and EVENTTYPE1.5 since b1,
+    # EVENTTYPE1.6 and EVENTTYPE1.8 since b2; EVENTTYPE1.7 needs NUMFL.1 above 0.5, which the
+    # fixed initial value 0 never gives)
+    always = {"EVENTTYPE1.3", "EVENTTYPE1.4", "EVENTTYPE1.5", "EVENTTYPE1.6", "EVENTTYPE1.8"}
     record["symbols"] = [s for s in record["symbols"] if s["label"] not in always]
     record["event_types"] = [e for e in record["event_types"] if e["label"] not in always]
     entities = [{**row, "PROPERTY.1": 1} for row in fixture["entities"]]
@@ -484,7 +489,8 @@ def test_quiescence_ends_an_episode() -> None:
     initial = {label: ["BOOLFL.1"] for label in definition.entity_labels}
     from semantic_world.world.runtime import State
 
-    state = State.from_true(definition, initial)
+    zeros = {label: {"NUMFL.1": 0.0, "NUMFL.2": 0.0} for label in definition.entity_labels}
+    state = State.from_true(definition, initial, zeros)
     assert all(not legal_bindings(definition, state, label) for label in _performable(definition))
     relatedness = Relatedness.from_frames(definition, None)
     generator = EpisodeGenerator(

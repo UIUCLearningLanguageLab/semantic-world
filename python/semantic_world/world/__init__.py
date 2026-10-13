@@ -7,8 +7,10 @@ their manifest (REL.16). Stage a2 is the world generator (``define``). Stage a3 
 definition from its files (``RuntimeDefinition``), and the conformance fixtures
 (``fixtures.py``). Stage a4 adds episodes and histories. Stage a5b moves the one-place and
 two-place event types here from the taxonomy (``unary.py``, ``event_tree.py``,
-``constraints.py``, ``projections.py``, ``relation_stats.py``, bundled by ``statics.py``). The
-package runs with Python alone: NumPy, polars, and PyYAML.
+``constraints.py``, ``projections.py``, ``relation_stats.py``, bundled by ``statics.py``). Stage
+b1 adds conditional effects, and stage b2 the comparisons (``comparisons.py``, and the functions
+beside ``derive`` in ``runtime.py``) and the numeric fluents (``numeric.py``). The package runs
+with Python alone: NumPy, polars, and PyYAML.
 """
 
 from semantic_world.world.derived import (

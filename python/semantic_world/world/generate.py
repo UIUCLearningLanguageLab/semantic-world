@@ -20,6 +20,7 @@ from semantic_world.world.capacities import (
     capacities_frame,
     capacity_roles_frame,
 )
+from semantic_world.world.comparisons import COMPARISON_CLASSES_FILE, comparison_classes_frame
 from semantic_world.world.config import Config
 from semantic_world.world.definition import (
     Definition,
@@ -38,6 +39,7 @@ from semantic_world.world.event_types import (
     redraw_preconditions,
 )
 from semantic_world.world.fluents import Fluents, derived_initial_values, generate_fluents
+from semantic_world.world.numeric import NumericFluents, generate_numeric_fluents
 from semantic_world.world.statics import StaticWorld, build_statics
 from semantic_world.world.stats import episode_stats, world_stats
 from semantic_world.world.streams import WorldStreams
@@ -61,6 +63,7 @@ class WorldResult:
     fluents: Fluents
     event_types: EventTypes
     definition: Definition
+    numeric: NumericFluents
     report: DefinitionReport
     stream_seeds: dict[str, int]
     stats: dict[str, Any]
@@ -76,6 +79,7 @@ class WorldResult:
             STATIC_FEATURES_FILE: static_features_frame(self.taxonomy),
             CAPACITIES_FILE: capacities_frame(self.statics),
             CAPACITY_ROLES_FILE: capacity_roles_frame(self.statics),
+            COMPARISON_CLASSES_FILE: comparison_classes_frame(self.taxonomy),
         }
         if self.statics.relation_stats is not None:
             frames.update(self.statics.relation_stats.frames())
@@ -114,21 +118,29 @@ def define(config: Config) -> WorldResult:
         event_file = load_event_file(path)
     streams = WorldStreams(config.seed)
     statics = build_statics(taxonomy, config, streams, event_file)
+    numeric = generate_numeric_fluents(
+        config,
+        taxonomy,
+        streams,
+        explicit=event_file.numeric if event_file is not None else None,
+        explicit_source=event_file.source if event_file is not None else None,
+    )
     fluents = generate_fluents(
         config,
         taxonomy,
         streams,
         explicit_rates=event_file.fluents if event_file is not None else None,
         explicit_source=event_file.source if event_file is not None else None,
+        numeric=numeric,
     )
-    derived_initial = derived_initial_values(fluents, taxonomy)
+    derived_initial = derived_initial_values(fluents, taxonomy, numeric)
     event_types = generate_event_types(
-        statics, fluents, config, streams, event_file, derived_initial
+        statics, fluents, config, streams, event_file, derived_initial, numeric
     )
     initial_present = _initial_present(fluents, derived_initial)
     features = tuple(f.label for f in taxonomy.features.features)
-    _check(event_types, fluents, initial_present, features)
-    definition = build_definition(statics, fluents, event_types)
+    _check(event_types, fluents, initial_present, features, numeric)
+    definition = build_definition(statics, fluents, event_types, numeric)
     fixed = set()
     if event_file is not None:
         fixed = {
@@ -138,6 +150,7 @@ def define(config: Config) -> WorldResult:
         }
     redraws: dict[str, int] = {}
     parts: dict[str, np.random.Generator] = {}
+    numeric_parts: dict[str, np.random.Generator] = {}
     episodes = statistics_episodes(definition, statics, config, redraws)
     for _ in range(MAX_REDRAW_ROUNDS):
         never = [
@@ -149,15 +162,16 @@ def define(config: Config) -> WorldResult:
             break
         for label in never:
             parts.setdefault(label, streams.part("preconditions", label))
+            numeric_parts.setdefault(label, streams.part("numeric_preconditions", label))
             redraws[label] = redraws.get(label, 0) + 1
         event_types = redraw_preconditions(
-            event_types, never, fluents, config, parts, derived_initial
+            event_types, never, fluents, config, parts, derived_initial, numeric, numeric_parts
         )
-        _check(event_types, fluents, initial_present, features)
-        definition = build_definition(statics, fluents, event_types)
+        _check(event_types, fluents, initial_present, features, numeric)
+        definition = build_definition(statics, fluents, event_types, numeric)
         episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
-    stats = world_stats(fluents, event_types, episodes, statics)
+    stats = world_stats(fluents, event_types, episodes, statics, numeric)
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     return WorldResult(
         config=config,
@@ -167,6 +181,7 @@ def define(config: Config) -> WorldResult:
         fluents=fluents,
         event_types=event_types,
         definition=definition,
+        numeric=numeric,
         report=report,
         stream_seeds=seeds,
         stats=stats,
@@ -175,10 +190,14 @@ def define(config: Config) -> WorldResult:
 
 
 def _check(
-    event_types: EventTypes, fluents: Fluents, initial_present: set, features: tuple[str, ...]
+    event_types: EventTypes,
+    fluents: Fluents,
+    initial_present: set,
+    features: tuple[str, ...],
+    numeric: NumericFluents | None = None,
 ) -> None:
     try:
-        check_dynamics(event_types, fluents, initial_present, features)
+        check_dynamics(event_types, fluents, initial_present, features, numeric)
     except ValueError as error:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
 

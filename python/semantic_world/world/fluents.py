@@ -3,10 +3,15 @@
 A world has ``fluents.count`` fluents ``BOOLFL.1`` to ``BOOLFL.n``. The first ones are base
 fluents, with an initial rate drawn from ``fluents.initial_rates`` and an initial value drawn per
 entity at that rate. The last ``fluents.derived_proportion`` of them are derived: each has a rule
-that reads at least one fluent of the layer below, and may also read static features and
-threshold literals on scalars. Rule complexity comes from the taxonomy's rule settings. Rules and
-rates draw from ``world:fluents``; initial values draw from ``world:initial``. Fluents named in an
-event file are always base fluents, and take the file's initial rates.
+that reads at least one fluent of the layer below, and may also read static features, threshold
+literals on scalars, and, since stage b2, threshold literals on numeric fluents (``NUMFL.1 >
+0.75``, at a point of the fluent's range drawn from the fractions of
+``event_types.preconditions.numeric_thresholds``, weighed in the input pool by
+``numeric_fluents.rule_weight``). Rule complexity comes from the
+taxonomy's rule settings. Rules and rates draw from ``world:fluents``; initial values draw from
+``world:initial``. Fluents named in an event file are always base fluents, and take the file's
+initial rates. With no numeric fluents the input pool is as it was before stage b2, so every
+rule draw is unchanged.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.rules import MAX_TRIES, _draw, build_function, model_quantile_threshold
 from semantic_world.world.config import Config
 from semantic_world.world.errors import WorldError
+from semantic_world.world.numeric import NumericFluent, NumericFluents, NumericThreshold
 from semantic_world.world.streams import WorldStreams
 
 FLUENT_PREFIX = "BOOLFL"
@@ -79,6 +85,8 @@ class FluentRule:
     family: str
     nesting_depth: int | None
     thresholds: tuple[ThresholdLiteral, ...]
+    numeric_thresholds: tuple[NumericThreshold, ...] = ()
+    """The numeric threshold literals the rule reads (stage b2)."""
 
     @property
     def min_dnf_literals(self) -> int:
@@ -154,6 +162,14 @@ class Fluents:
                 found.setdefault(t.key, t)
         return tuple(sorted(found.values(), key=lambda t: (t.scalar, t.threshold)))
 
+    def numeric_thresholds(self) -> tuple[NumericThreshold, ...]:
+        """Every distinct numeric threshold literal the rules read, by fluent and threshold."""
+        found: dict[str, NumericThreshold] = {}
+        for rule in self.rules:
+            for t in rule.numeric_thresholds:
+                found.setdefault(t.key, t)
+        return tuple(sorted(found.values(), key=lambda t: (t.fluent, t.threshold)))
+
 
 def fluent_label(index: int) -> str:
     return f"{FLUENT_PREFIX}.{index}"
@@ -172,9 +188,11 @@ def generate_fluents(
     streams: WorldStreams,
     explicit_rates: Mapping[str, float] | None = None,
     explicit_source: str | None = None,
+    numeric: NumericFluents | None = None,
 ) -> Fluents:
     """Draw the fluents of a world. ``explicit_rates`` are the initial rates of fluents named
-    in an event file; those fluents are base fluents."""
+    in an event file; those fluents are base fluents. ``numeric`` gives the numeric fluents,
+    whose threshold literals join the input pool of the derived fluents' rules."""
     settings = config.fluents
     explicit_rates = dict(explicit_rates or {})
     count = settings.count
@@ -221,7 +239,7 @@ def generate_fluents(
             rate = float(explicit_rates[label])
         fluents.append(Fluent(label, index, False, 0, float(rate)))
 
-    rules = _draw_rules(fluents, taxonomy, rng)
+    rules = _draw_rules(fluents, taxonomy, rng, config, numeric)
     base = [f for f in fluents if not f.derived]
     n = len(taxonomy.instances)
     initial = np.zeros((n, len(base)), dtype=np.uint8)
@@ -232,7 +250,11 @@ def generate_fluents(
 
 
 def _draw_rules(
-    fluents: Sequence[Fluent], taxonomy: TaxonomyResult, rng: np.random.Generator
+    fluents: Sequence[Fluent],
+    taxonomy: TaxonomyResult,
+    rng: np.random.Generator,
+    world_config: Config | None = None,
+    numeric: NumericFluents | None = None,
 ) -> list[FluentRule]:
     config: TaxonomyConfig = taxonomy.config
     sampling: RuleSampling = config.rules.sampling
@@ -244,6 +266,14 @@ def _draw_rules(
         if config.scalars.count and sampling.scalar_weight > 0
         else []
     )
+    numeric_pool: list[NumericFluent] = []
+    numeric_weight = 0.0
+    fractions: tuple[float, ...] = ()
+    if numeric is not None and len(numeric) and world_config is not None:
+        numeric_weight = world_config.numeric_fluents.rule_weight
+        fractions = world_config.event_types.preconditions.numeric_thresholds
+        if numeric_weight > 0:
+            numeric_pool = list(numeric.fluents)
     rules: list[FluentRule] = []
     seen: set[tuple] = set()
     for output in sorted((f for f in fluents if f.derived), key=lambda f: (f.layer, f.index)):
@@ -254,7 +284,9 @@ def _draw_rules(
                 f"the derived fluent {output.label} at layer {output.layer} has no fluent at "
                 f"layer {output.layer - 1} to read"
             )
-        pool: list[Fluent | Feature | int] = list(below) + list(static_pool) + list(scalar_pool)
+        pool: list[Fluent | Feature | int | NumericFluent] = (
+            list(below) + list(static_pool) + list(scalar_pool) + list(numeric_pool)
+        )
         for _ in range(MAX_TRIES):
             arity = _draw(rng, sampling.arity)
             if arity > len(pool):
@@ -264,14 +296,16 @@ def _draw_rules(
                 )
             first = previous[int(rng.integers(len(previous)))]
             rest = [entry for entry in pool if entry is not first]
-            chosen: list[Fluent | Feature | int] = [first]
+            chosen: list[Fluent | Feature | int | NumericFluent] = [first]
             if arity > 1:
-                weights = np.array([_weight(entry, sampling) for entry in rest], dtype=float)
+                weights = np.array(
+                    [_weight(entry, sampling, numeric_weight) for entry in rest], dtype=float
+                )
                 picks = rng.choice(
                     len(rest), size=arity - 1, replace=False, p=weights / weights.sum()
                 )
                 chosen.extend(rest[int(i)] for i in picks)
-            inputs, atoms, thresholds = _inputs(chosen, config, rng)
+            inputs, atoms, thresholds, numeric_thresholds = _inputs(chosen, config, rng, fractions)
             keys = [k for k in inputs]
             draw = build_function(rng, sampling, atoms, keys)
             key = (tuple(sorted(inputs)), draw.table.permute_inputs(_sort_permutation(inputs)).bits)
@@ -287,6 +321,7 @@ def _draw_rules(
                     draw.family,
                     draw.nesting_depth,
                     tuple(thresholds),
+                    tuple(numeric_thresholds),
                 )
             )
             break
@@ -301,25 +336,35 @@ def _sort_permutation(inputs: Sequence[str]) -> list[int]:
     return [new_index[i] for i in range(len(inputs))]
 
 
-def _weight(entry: Fluent | Feature | int, sampling: RuleSampling) -> float:
+def _weight(
+    entry: Fluent | Feature | int | NumericFluent, sampling: RuleSampling, numeric_weight: float
+) -> float:
     if isinstance(entry, Fluent):
         return FLUENT_WEIGHT
+    if isinstance(entry, NumericFluent):
+        return numeric_weight
     if isinstance(entry, int):
         return sampling.scalar_weight
     return sampling.input_type_weights[entry.type]
 
 
 def _inputs(
-    chosen: Sequence[Fluent | Feature | int], config: TaxonomyConfig, rng: np.random.Generator
-) -> tuple[list[str], list[Expr], list[ThresholdLiteral]]:
-    """Inputs in a fixed order: static features by position, fluents by index, then threshold
-    literals by scalar (drawn in that order)."""
+    chosen: Sequence[Fluent | Feature | int | NumericFluent],
+    config: TaxonomyConfig,
+    rng: np.random.Generator,
+    fractions: Sequence[float] = (),
+) -> tuple[list[str], list[Expr], list[ThresholdLiteral], list[NumericThreshold]]:
+    """Inputs in a fixed order: static features by position, fluents by index, threshold
+    literals by scalar (drawn in that order), then numeric threshold literals by fluent (each at
+    a point of the range drawn from the fractions, stage b2)."""
     features = sorted((e for e in chosen if isinstance(e, Feature)), key=lambda f: f.position)
     fluents = sorted((e for e in chosen if isinstance(e, Fluent)), key=lambda f: f.index)
     scalars = sorted(e for e in chosen if isinstance(e, int))
+    numeric = sorted((e for e in chosen if isinstance(e, NumericFluent)), key=lambda f: f.index)
     keys: list[str] = []
     atoms: list[Expr] = []
     thresholds: list[ThresholdLiteral] = []
+    numeric_thresholds: list[NumericThreshold] = []
     for feature in features:
         keys.append(feature.label)
         atoms.append(Var(feature.label))
@@ -335,10 +380,18 @@ def _inputs(
         thresholds.append(literal)
         keys.append(literal.key)
         atoms.append(literal.atom())
-    return keys, atoms, thresholds
+    for fluent in numeric:
+        fraction = fractions[int(rng.integers(len(fractions)))]
+        literal = NumericThreshold(fluent.label, fluent.point(fraction))
+        numeric_thresholds.append(literal)
+        keys.append(literal.key)
+        atoms.append(Gt(fluent.label, literal.threshold))
+    return keys, atoms, thresholds, numeric_thresholds
 
 
-def derived_initial_values(fluents: Fluents, taxonomy: TaxonomyResult) -> dict[str, np.ndarray]:
+def derived_initial_values(
+    fluents: Fluents, taxonomy: TaxonomyResult, numeric: NumericFluents | None = None
+) -> dict[str, np.ndarray]:
     """Every derived fluent's value for every entity in the initial state, by truth-table
     lookup in layer order (the reference evaluation; the matrices are checked against it)."""
     features = taxonomy.features
@@ -354,6 +407,10 @@ def derived_initial_values(fluents: Fluents, taxonomy: TaxonomyResult) -> dict[s
         for key in rule.inputs:
             if key in columns:
                 inputs.append(columns[key])
+            elif key.startswith("NUMFL."):
+                assert numeric is not None
+                literal = next(t for t in rule.numeric_thresholds if t.key == key)
+                inputs.append(literal.values(numeric.initial_values, numeric.index(literal.fluent)))
             elif ">" in key:
                 literal = next(t for t in rule.thresholds if t.key == key)
                 inputs.append(literal.values(scalars))

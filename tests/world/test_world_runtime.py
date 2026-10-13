@@ -65,8 +65,26 @@ def tiny_folder(tiny: WorldResult, tmp_path_factory: pytest.TempPathFactory) -> 
 
 
 def _random_state(definition: RuntimeDefinition, rng: np.random.Generator) -> State:
+    """A random state: every Boolean fluent at 0 or 1, every numeric fluent uniform in its
+    range, and one value in four exactly at a quarter point of the range, so that thresholds
+    are hit."""
     shape = (definition.entity_count, len(definition.base_fluents))
-    return State(rng.integers(0, 2, size=shape, dtype=np.uint8))
+    values = rng.integers(0, 2, size=shape, dtype=np.uint8)
+    low, high = definition.range_bounds
+    numeric = rng.uniform(
+        low, high, size=(definition.entity_count, len(definition.numeric_fluents))
+    )
+    at_point = rng.random(numeric.shape) < 0.25
+    points = low + rng.choice([0.25, 0.5, 0.75], size=numeric.shape) * (high - low)
+    numeric = np.where(at_point, points, numeric)
+    return State(values, numeric)
+
+
+def _brute_numeric(definition: RuntimeDefinition, state: State) -> dict[str, dict[str, float]]:
+    return {
+        label: {f: float(state.numeric[i, j]) for j, f in enumerate(definition.numeric_fluents)}
+        for i, label in enumerate(definition.entity_labels)
+    }
 
 
 def _brute_state(definition: RuntimeDefinition, state: State) -> dict[str, frozenset[str]]:
@@ -214,10 +232,13 @@ def test_legal_and_derive_agree_with_brute_force_in_random_states(
     for _ in range(RANDOM_STATES):
         state = _random_state(runtime, rng)
         brute_state = _brute_state(runtime, state)
-        assert derive(runtime, state).true_fluents(runtime) == brute.derived_record(brute_state)
+        numeric = _brute_numeric(runtime, state)
+        assert derive(runtime, state).true_fluents(runtime) == brute.derived_record(
+            brute_state, numeric
+        )
         for label in _performable(runtime):
             got = [_labels(runtime, label, b) for b in legal_bindings(runtime, state, label)]
-            assert got == brute.legal_bindings(label, brute_state), label
+            assert got == brute.legal_bindings(label, brute_state, None, numeric), label
 
 
 def test_legal_bindings_order_and_subsets(runtime: RuntimeDefinition) -> None:
@@ -258,6 +279,7 @@ def test_apply_writes_effects_and_keeps_the_rest(runtime: RuntimeDefinition) -> 
     written = {
         (event.binding[et.roles.index(e.role)], runtime.base_fluent_index(e.fluent)): e.value
         for e in et.effects
+        if not e.numeric
     }
     for (entity, j), value in written.items():
         assert after.values[entity, j] == int(value)
@@ -266,7 +288,13 @@ def test_apply_writes_effects_and_keeps_the_rest(runtime: RuntimeDefinition) -> 
         mask[entity, j] = False
     assert np.array_equal(after.values[mask], state.values[mask])
     assert not after.values.flags.writeable
-    assert apply(runtime, state, []) == State(state.values)
+    # a step with no events changes no Boolean fluent, and moves the numeric fluents by the
+    # drift alone (stage b2)
+    quiet = apply(runtime, state, [])
+    assert np.array_equal(quiet.values, state.values)
+    low, high = runtime.range_bounds
+    drifted = np.minimum(np.maximum(state.numeric + runtime.drift_vector, low), high)
+    assert np.array_equal(quiet.numeric, drifted)
 
 
 def test_illegal_events_name_the_event_and_the_reason(runtime: RuntimeDefinition) -> None:
@@ -312,7 +340,6 @@ def test_malformed_events_are_illegal(runtime: RuntimeDefinition) -> None:
         able(runtime, "EVENTTYPE2.1.1", [(0, 0)])
 
 
-@pytest.mark.slow
 def test_interfering_events_raise_the_documented_error(
     runtime: RuntimeDefinition, brute: BruteForce
 ) -> None:
@@ -350,7 +377,7 @@ def test_interference_through_a_derived_fluent_cone() -> None:
     fixture = read_fixture(Path("tests/fixtures/world/hand_10_interfere_through_cone.json"))
     definition = runtime_definition(fixture["definition"], fixture["entities"])
     assert definition.cone("BOOLFL.3") == ("BOOLFL.1", "BOOLFL.2")
-    state = State.from_true(definition, fixture["initial"])
+    state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
     reader = Event.from_labels(definition, "EVENTTYPE1.2", {"agent": "INSTANCE.1.1.2"})
     writer = Event.from_labels(definition, "EVENTTYPE1.3", {"agent": "INSTANCE.1.1.2"})
     assert legal(definition, state, reader.event_type, [reader.binding])[0]
@@ -393,8 +420,10 @@ def test_applying_together_equals_one_at_a_time_in_every_order(
         for permutation in itertools.permutations(chosen):
             step = state
             for event in permutation:
-                step = apply(runtime, step, [event])
-            assert step == together
+                # the effects alone: the drift is added once per step, after them
+                step = apply(runtime, step, [event], drift=False)
+            assert step == apply(runtime, state, chosen, drift=False)
+            assert np.array_equal(step.values, together.values)
         sets += 1
     assert sets == RANDOM_SETS
 

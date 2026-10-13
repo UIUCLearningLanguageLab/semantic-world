@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_16_fluent_condition_fails",
  "description": "A fluent condition that fails, judged in the step's starting state (stage b1): EVENTTYPE1.5 on INSTANCE.1.1.1, which has BOOLFL.2 but not BOOLFL.1, so BOOLFL.3 is false and the effect does nothing; in the same step EVENTTYPE1.1 on INSTANCE.1.2.1 sets BOOLFL.1 of another entity. In step 2 EVENTTYPE1.1 sets BOOLFL.1 of INSTANCE.1.1.1, so BOOLFL.3 becomes true; in step 3 EVENTTYPE1.5 fires and clears BOOLFL.2.",
- "rule_set_id": "5b8332acfbbce478e6a2c3efce549ed8fcb1ded3107055a6272098f2c0bf2cbb",
+ "rule_set_id": "300cebf58433fd185f3c9abd7faf907f16cde874feaa291759978eaa25587a21",
  "definition": {
   "version": 1,
-  "rule_set_id": "5b8332acfbbce478e6a2c3efce549ed8fcb1ded3107055a6272098f2c0bf2cbb",
+  "rule_set_id": "300cebf58433fd185f3c9abd7faf907f16cde874feaa291759978eaa25587a21",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -18,7 +18,30 @@
    {"label": "EVENTTYPE1.3", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
    {"label": "EVENTTYPE2.1", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
    {"label": "EVENTTYPE1.4", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
-   {"label": "EVENTTYPE1.5", "kind": "event_type", "derived": false, "fluent": false, "arity": 1}
+   {"label": "EVENTTYPE1.5", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
+   {
+    "label": "NUMFL.1",
+    "kind": "numeric_fluent",
+    "derived": false,
+    "fluent": true,
+    "arity": 1,
+    "range": [0.0, 1.0],
+    "initial": {"kind": "fixed", "value": 0.0},
+    "drift": 0.0
+   },
+   {
+    "label": "NUMFL.2",
+    "kind": "numeric_fluent",
+    "derived": false,
+    "fluent": true,
+    "arity": 1,
+    "range": [0.0, 1.0],
+    "initial": {"kind": "fixed", "value": 0.0},
+    "drift": 0.25
+   },
+   {"label": "EVENTTYPE1.6", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
+   {"label": "EVENTTYPE1.7", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
+   {"label": "EVENTTYPE1.8", "kind": "event_type", "derived": false, "fluent": false, "arity": 1}
   ],
   "literals": [
    {"index": 0, "key": "PROPERTY.1", "kind": "feature", "role": null, "feature": "PROPERTY.1"},
@@ -43,7 +66,10 @@
    {"output": "REQUIREMENT.EVENTTYPE1.3", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
    {"output": "REQUIREMENT.EVENTTYPE2.1", "scope": "binding", "family": "requirement", "inputs": [9], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE2.1"},
    {"output": "REQUIREMENT.EVENTTYPE1.4", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
-   {"output": "REQUIREMENT.EVENTTYPE1.5", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
+   {"output": "REQUIREMENT.EVENTTYPE1.5", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE1.6", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE1.7", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE1.8", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
   ],
   "layers": [
    {
@@ -67,6 +93,9 @@
      {"literals": [3, 5, 6], "complemented": [false, true, false], "threshold": 3},
      {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0}
     ],
     "outputs": [
@@ -75,7 +104,10 @@
      {"output": "CONSTRAINT.EVENTTYPE2.1", "terms": [2], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE1.3", "terms": [3], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE1.4", "terms": [4], "threshold": 1},
-     {"output": "REQUIREMENT.EVENTTYPE1.5", "terms": [5], "threshold": 1}
+     {"output": "REQUIREMENT.EVENTTYPE1.5", "terms": [5], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE1.6", "terms": [6], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE1.7", "terms": [7], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE1.8", "terms": [8], "threshold": 1}
     ]
    },
    {
@@ -220,6 +252,67 @@
       }
      }
     ]
+   },
+   {
+    "label": "EVENTTYPE1.6",
+    "kind": "event_type",
+    "arity": 1,
+    "roles": ["agent"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE1.6", "expression": "TRUE"},
+    "precondition": {"literals": [], "expression": "TRUE"},
+    "effects": [
+     {"role": "agent", "fluent": "NUMFL.1", "operator": "+=", "amount": 0.5, "expression": "agent.NUMFL.1 += 0.5"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE1.7",
+    "kind": "event_type",
+    "arity": 1,
+    "roles": ["agent"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE1.7", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"role": "agent", "fluent": "NUMFL.1", "operator": ">", "threshold": 0.5}
+     ],
+     "expression": "agent.NUMFL.1 > 0.5"
+    },
+    "effects": [
+     {"role": "agent", "fluent": "NUMFL.2", "operator": "-=", "amount": 0.5, "expression": "agent.NUMFL.2 -= 0.5"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE1.8",
+    "kind": "event_type",
+    "arity": 1,
+    "roles": ["agent"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE1.8", "expression": "TRUE"},
+    "precondition": {"literals": [], "expression": "TRUE"},
+    "effects": [
+     {
+      "role": "agent",
+      "fluent": "BOOLFL.2",
+      "value": true,
+      "expression": "when agent.NUMFL.1 > 0.5 then agent.BOOLFL.2 := 1",
+      "condition": {
+       "literals": [
+        {"role": "agent", "kind": "numeric", "symbol": "NUMFL.1", "operator": ">", "threshold": 0.5}
+       ],
+       "expression": "agent.NUMFL.1 > 0.5"
+      }
+     }
+    ]
    }
   ]
  },
@@ -229,6 +322,11 @@
   {"label": "INSTANCE.1.2.1", "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25}
  ],
  "initial": {"INSTANCE.1.1.1": ["BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
+ "initial_numeric": {
+  "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.0},
+  "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.0},
+  "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.0}
+ },
  "steps": [
   {
    "events": [
@@ -262,10 +360,26 @@
      {"agent": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.6": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.7": [],
+    "EVENTTYPE1.8": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
     ]
    },
    "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.25},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.25},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.25}
+   }
   },
   {
    "events": [
@@ -294,10 +408,26 @@
      {"agent": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.6": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.7": [],
+    "EVENTTYPE1.8": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
     ]
    },
    "derived": {"INSTANCE.1.1.1": ["BOOLFL.3"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.2"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.5},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.5},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.5}
+   }
   },
   {
    "events": [
@@ -326,10 +456,26 @@
      {"agent": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.6": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE1.7": [],
+    "EVENTTYPE1.8": [
+     {"agent": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.2.1"}
     ]
    },
    "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]}
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1"], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": ["BOOLFL.1"]},
+   "numeric": {
+    "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.75},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.75},
+    "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.75}
+   }
   }
  ],
  "error": null

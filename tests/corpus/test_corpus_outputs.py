@@ -515,8 +515,13 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         len(steps),
         len(events),
     )
-    changes = sum(len(event["changes"]) for event in events)
+    changes = sum(1 for event in events for c in event["changes"] if "from" not in c)
     assert block["mean_changes_per_event"] == pytest.approx(changes / len(events), abs=1e-6)
+    # the numeric changes of the events and of the drift (stage b2)
+    numeric = sum(1 for event in events for c in event["changes"] if "from" in c)
+    assert block["numeric_changes_per_event"] == pytest.approx(numeric / len(events), abs=1e-6)
+    drift = sum(len(step.get("drift", ())) for step in steps)
+    assert block["drift_changes_per_step"] == pytest.approx(drift / len(steps), abs=1e-6)
     quiescent = sum(scene["quiescent"] for scene in scenes)
     assert block["quiescent_share"] == pytest.approx(quiescent / len(scenes), abs=1e-6)
     assert stats["propositions"]["distinct"] == len({form["id"] for form in forms})
@@ -771,7 +776,6 @@ def test_statistics_without_test_sets_and_without_documents(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.slow
 def test_the_generate_command(tmp_path, capsys) -> None:
     out = tmp_path / "tiny"
     assert main(["generate", "data/corpus/tiny.yaml", "--out", str(out)]) == 0

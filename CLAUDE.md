@@ -51,7 +51,7 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 
 ## Tests
 
-- Two tiers. `pytest` runs the fast tier, on tiny worlds, in a few minutes. `pytest --slow` runs the tests that need default-scale runs. The full check list runs both (`pytest --all`).
+- Two tiers. `pytest -n auto` runs the fast tier, on tiny worlds, on every core, in about two minutes (1 minute 32 seconds on October 12, 2026). `pytest --slow -n auto` runs the tests that need default-scale runs, and the word-form audio tests. The full check list runs both (`pytest --all -n auto`). A test of the tiny world is in the fast tier whatever its run time (Jon's ruling 5 on the process cleanup).
 - Properties, not counts. A test checks what must be true: truth by the oracle, an invariant of the output, determinism of the same seed. A test never pins a count of a default or tiny run.
 - One snapshot of figures. The figures of the default and tiny runs live in `tests/figures/snapshot.yaml`, compared by one test. `python -m semantic_world.figures snapshot` rewrites the snapshot on purpose and prints what moved.
 - Bounds come from the configuration. A test that checks a rate states its bound from the configured rate and a sampling margin for the sample size, never a number fitted to the last run. A failing bound is a finding to report, not a number to lower.
@@ -59,7 +59,8 @@ The project's planning documents (decisions, to-do lists, research goals, and th
 
 ## Random streams for new features
 
-- A new feature draws from a named random stream of its own, created after the existing streams, so that with the feature off every earlier output stays byte-identical. Each new feature gets a test that checks this, against an identity kept in the snapshot file.
+- A feature of the world draws from a named random stream of its own, created after the existing streams, so that with the feature off every earlier output stays byte-identical. Each new world feature gets a test that checks this, against an identity kept in the snapshot file (Jon's ruling 3 on the process cleanup, PR.2).
+- A feature of the corpus makes no such promise: corpus features share the space of a document, so turning one off reshuffles the others, and designing around exact identity would constrain the corpus for no scientific reason. A new corpus feature still draws from its own stream where that is easy, because it helps review. When a study needs a paired comparison of corpus content, a filter tool that removes one kind of sentence from a full corpus will be built, as change-track work.
 
 ## Figures in the guides
 
@@ -75,8 +76,9 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 maturin develop --release        # build the Python module into the active virtual environment
 ruff check python tests
-pytest --all                     # both tiers of the tests; plain pytest runs the fast tier, pytest --slow the slow tier
-pytest --slow -n auto            # the slow tier on every core (pytest-xdist): about 6 minutes in place of 23; -n auto works with --all too
+pytest -n auto                   # the fast tier on every core (pytest-xdist): about 2 minutes; plain pytest, on one core, takes several times longer
+pytest --slow -n auto            # the slow tier on every core: about 6 minutes
+pytest --all -n auto             # both tiers, as the full check list runs them
 ```
 
 Other commands:
