@@ -312,6 +312,8 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
         "states": {
             "events_with_result_share": stats["states"]["events_with_result_share"],
             "result_sentences": stats["states"]["result_sentences"],
+            "numeric_state_sentences": stats["states"].get("numeric_state_sentences"),
+            "numeric_change_sentences": stats["states"].get("numeric_change_sentences"),
         },
         "narratives_short": {
             kind: by_type[kind]["shorter_than_drawn_share"] for kind in ("entity", "situational")

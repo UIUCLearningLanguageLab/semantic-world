@@ -46,8 +46,22 @@ mouse is asleep", "is not asleep"); a change is ``become`` with the state adject
 become asleep", "become not asleep": the ``not`` gives the fluent's new value); an ``able_now``
 sentence is "can" (``lexicon.can_words: shared``) or the word ``can_now`` (``distinct``) with
 the verb, always with the auxiliary, and ``not`` for a blocked event. The tense of such a
-sentence is marked on its auxiliary when the morphology realizes the tense as a separate word;
-an affix never attaches to a function word, so with an affixal tense the auxiliary stays bare.
+sentence is marked on its auxiliary: as a separate word beside it, or, since stage b3b, as an
+affix joined to it (``LEXEME.176-PAST``) when the morphology realizes the tense as an affix, so
+that the past of "was", "became", and "could" has a form.
+
+**Numeric fluents** (stage b3b). A numeric pole adjective is said like a state adjective at a
+time point ("the owl was hungry": the copula and the adjective); a numeric change is ``become``
+with the adjective's comparative form ("the owl became hungrier"); a numeric comparative is the
+copula, the comparative form, and ``than`` the object, at a time point ("the owl was hungrier
+than the mouse"); and a numeric effect statement is ``become`` with the comparative form and a
+category as the subject ("things that eat things become fuller").
+
+**Conditional causal statements** (stage b3b). The condition stands on the subject and on the
+other participant: static literals as modifiers ("red things that things strike", "things that
+strike things with wings"), and fluent literals as ``before`` predications of a relative clause
+("things that strike things and are awake before", "things that strike things that are asleep
+before").
 
 **Comparatives** (stage b3a). "The owl is bigger than the mouse" is the copula with the
 comparative form of the pole adjective and the standard of comparison: the function word
@@ -258,12 +272,17 @@ class _Builder:
         return lexemes[int(self.rng.integers(len(lexemes)))]
 
     def function(self, label: str, gloss: str, marks: tuple[str, ...] = ()) -> Tree:
-        """A function word, with the inflections among ``marks`` that are realized as separate
-        words standing beside it; an affix never attaches to a function word."""
+        """A function word, with its inflections: an affix joins the token (the tense affix on
+        an auxiliary, stage b3b), and an inflection realized as a word stands beside it."""
         try:
             token = self.lexicon.function_word(gloss).label
         except KeyError as error:
             raise GrammarError(str(error.args[0])) from None
+        affixes = [m for m in marks if self.realizer._marker[m].realization == "affix"]
+        if len(affixes) > 1:
+            raise GrammarError(f"a word takes one affix, and {gloss} would take {affixes}")
+        if affixes:
+            token = f"{token}-{affixes[0]}"
         words = [m for m in marks if self.realizer._marker[m].realization == "word"]
         if not words:
             return [label, token]
@@ -416,17 +435,25 @@ class _Builder:
         auxiliary: str | None = None
         negated = False
         target: Tree | None = None
-        # the tense of a sentence about a time point, marked on its auxiliary when the
-        # morphology realizes the tense as a word
+        # the tense of a sentence about a time point, marked on its auxiliary, as a word beside
+        # it or as an affix joined to it (stage b3b)
         timed_marks: tuple[str, ...] = ()
         if predication.time is not None:
             if morphology.tense.enabled and predication.tense == PAST_TENSE:
                 timed_marks = (PAST,)
         adverb: Tree | None = None
-        if kind == STATE_KIND:
+        if kind == STATE_KIND and predication.comparative_form:
+            # a numeric change (stage b3b): become with the comparative form of the pole
+            auxiliary = "become"
+            head = self.word("A", predication.label, (COMPARATIVE,))
+        elif kind == STATE_KIND:
             auxiliary = "become" if predication.become else ("are" if plural and agree else "is")
             negated = not polarity
             head = self.word("A", predication.label)
+        elif kind == EFFECT and predication.comparative_form:
+            # a numeric effect statement (stage b3b): become with the comparative form
+            auxiliary = "become"
+            head = self.word("A", predication.label, (COMPARATIVE,))
         elif kind in (EFFECT, PRECONDITION):
             # a causal statement: become, or the copula with "before", and the state adjective
             auxiliary = "become" if kind == EFFECT else ("are" if plural and agree else "is")
@@ -482,7 +509,7 @@ class _Builder:
             head = self.word("A", predication.label, (COMPARATIVE,))
             assert predication.object is not None
             target = self.standard(predication.object)
-        else:  # a property, a scalar pole, or an exposed patient projection
+        else:  # a property, a scalar or numeric pole, or an exposed patient projection
             auxiliary = "are" if plural and agree else "is"
             negated = not polarity
             head = self.word("A", predication.label)

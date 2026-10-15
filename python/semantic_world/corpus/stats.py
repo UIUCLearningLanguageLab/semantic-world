@@ -10,13 +10,15 @@ They hold:
   share of negative sentences, the share of progressive reports among the event sentences, the
   lengths, and the depths of the relative clauses;
 - ``states``: the initial-state, result, and blocked sentences of the narratives, the share of
-  event sentences followed by a result sentence, and the share of blocked sentences that are
-  negative;
+  event sentences followed by a result sentence, the share of blocked sentences that are
+  negative, and (stage b3b) the numeric state and numeric change sentences among them;
 - ``causal``: the causal statements of the feature documents, by kind (effect and
-  precondition);
+  precondition), and (stage b3b) the ``raises``, ``lowers``, and conditional statements among
+  them, with the conditional effects of the world that make no statement, by reason;
 - ``comparisons`` (stage b3a): the sentences whose main clause is a comparison (a scalar pole)
-  or a comparative, by level, and the pole adjectives used as modifiers of mentions and as
-  restrictions of class-level subjects;
+  or a comparative, by level, the pole adjectives used as modifiers of mentions and as
+  restrictions of class-level subjects, and (stage b3b) the numeric comparatives at a time
+  point;
 - ``quantifiers``: the quantifier mix of the class-level sentences, by the quantifier of each
   fact (the strongest true one the language can state, which ``quantifiers.weights``
   reweights), and how many are said with a bare plural;
@@ -84,6 +86,7 @@ from semantic_world.corpus.planner import (
 )
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
+    CHANGE,
     CLASS,
     COMPARATIVE,
     COMPARISON,
@@ -91,11 +94,14 @@ from semantic_world.corpus.propositions import (
     EVENT,
     INSTANCE,
     LEVELS,
+    LOWERS,
     PRECONDITION,
     PROGRESSIVE,
     QUANTIFIERS,
+    RAISES,
     STATE,
     CategoryTerm,
+    EventTerm,
 )
 from semantic_world.corpus.realize import token_parts
 from semantic_world.corpus.testsets import ItemSet
@@ -310,6 +316,13 @@ def _states(documents: Sequence[Document]) -> dict[str, Any]:
     sections = Counter(s.section for s in sentences)
     blocked = [s for s in sentences if s.section == BLOCKED]
     negative = sum(not s.proposition.polarity for s in blocked)
+    numeric_states = sum(
+        s.proposition.level == STATE and s.proposition.predicate.kind == COMPARISON
+        for s in sentences
+    )
+    numeric_changes = sum(
+        s.proposition.level == CHANGE and s.proposition.predicate.numeric for s in sentences
+    )
     return {
         "initial_state_sentences": sections[INITIAL_STATE],
         "result_sentences": sections[RESULT],
@@ -317,17 +330,30 @@ def _states(documents: Sequence[Document]) -> dict[str, Any]:
         "event_sentences": sections[EVENT_SECTION],
         "events_with_result_share": _share(sections[RESULT], sections[EVENT_SECTION]),
         "blocked_negative_share": _share(negative, len(blocked)),
+        "numeric_state_sentences": numeric_states,
+        "numeric_change_sentences": numeric_changes,
     }
 
 
-def _causal(documents: Sequence[Document]) -> dict[str, Any]:
-    """The causal statements of the feature documents, by kind."""
+def _causal(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
+    """The causal statements of the feature documents, by kind, with the numeric and the
+    conditional statements among them (stage b3b)."""
     sentences = [s for d in documents for s in d.sentences if s.section == CAUSAL]
     kinds = Counter(s.proposition.predicate.kind for s in sentences)
+    directions = Counter(s.proposition.predicate.direction for s in sentences)
+    conditional = sum(
+        isinstance(s.proposition.subject, EventTerm) and bool(s.proposition.subject.condition)
+        for s in sentences
+    )
+    planner.facts.causal_statements()  # the report on the conditional effects is made with them
     return {
         "causal_sentences": len(sentences),
         "effect_sentences": kinds[EFFECT],
         "precondition_sentences": kinds[PRECONDITION],
+        "raises_sentences": directions[RAISES],
+        "lowers_sentences": directions[LOWERS],
+        "conditional_sentences": conditional,
+        "conditional_effects": dict(planner.facts.causal_report),
     }
 
 
@@ -341,6 +367,7 @@ def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
     comparative = Counter(
         s.proposition.level for s in sentences if s.proposition.predicate.kind == COMPARATIVE
     )
+    numeric_comparatives = comparative[STATE]
     modifiers = sum(
         1
         for s in sentences
@@ -357,6 +384,7 @@ def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
         "comparison_sentences": {CLASS: comparison[CLASS], INSTANCE: comparison[INSTANCE]},
         "comparative_sentences": {CLASS: comparative[CLASS], INSTANCE: comparative[INSTANCE]},
         "comparative_descriptions": sum(s.section == COMPARATIVE_SECTION for s in sentences),
+        "numeric_comparative_sentences": numeric_comparatives,
         "pole_modifiers": modifiers,
         "pole_restrictions": restrictions,
     }
@@ -441,7 +469,7 @@ def corpus_stats(
         "documents": _documents(documents),
         "sentences": _sentences(documents),
         "states": _states(documents),
-        "causal": _causal(documents),
+        "causal": _causal(planner, documents),
         "comparisons": _comparisons(documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,

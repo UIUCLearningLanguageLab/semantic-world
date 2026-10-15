@@ -238,6 +238,8 @@ With `affixes.source: english`, the glosses PLURAL, PAST, and PROGRESSIVE become
 
 ### Inflected forms
 
+(As built, stage b3b of the world-and-language refactor: an `inflect` entry may name function words by gloss, `{function_words: [is, become], affixes: [PAST]}`, beside the entries that name words or lexemes. The corpus writes such an entry when its tense is an affix, because the auxiliary of a sentence about a time point then carries it. A function word that an entry names gets a form that can take the entry's affixes, and its inflected forms, labeled `FUNCWORD.<n>.AFFIX.<m>`, follow the function words. Nothing else changes: the content words, the assignment, and their audio and embeddings are the same with and without the entry.)
+
 Every stem and affix pair named by an `inflect` entry becomes an inflected form, labeled `W.<n>.AF.<m>`. Inflected forms are synthesized, cached, and embedded like any word, by every speaker. Inflection multiplies synthesis: inflecting 500 words with 3 affixes quadruples the audio. The default configuration therefore inflects nothing, and the tiny configuration inflects every word with every affix.
 
 ### Independence from content words

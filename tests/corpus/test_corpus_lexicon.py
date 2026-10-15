@@ -106,6 +106,7 @@ def test_parts_of_speech(default_world) -> None:
         "event_category": TRANSITIVE_VERB,
         "patient_projection": ADJECTIVE,
         "scalar": ADJECTIVE,
+        "numeric": ADJECTIVE,
         GENERIC: NOUN,
         FUNCTION: FUNCTION_WORD,
     }
@@ -214,7 +215,7 @@ def test_an_event_type_that_holds_for_no_pair_gets_no_lexeme(tiny_world, monkeyp
 def units(lexicon: Lexicon, concept_type: str) -> list[str]:
     """The units a named proportion counts: concepts, or scalar dimensions."""
     labels = [c.label for c in lexicon.of_type(concept_type)]
-    if concept_type == "scalar":
+    if concept_type in ("scalar", "numeric"):
         return sorted({label.rsplit(".", 1)[0] for label in labels})
     return labels
 
@@ -262,7 +263,7 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
     assert counts["concepts"] == {**concepts, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
     named = {
         t: round_half_up(proportions.get(t, 1.0) * len(units(lexicon, t)))
-        * (2 if t == "scalar" else 1)
+        * (2 if t in ("scalar", "numeric") else 1)
         for t in CONCEPT_TYPES
     }
     assert counts["named_concepts"] == {**named, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}

@@ -15,7 +15,8 @@ There are four document types (``documents.mix``):
   matching fact about a sibling category, at ``documents.sibling_contrast_rate``, when the
   sibling differs;
 - **encyclopedic, about a feature.** The topic is a PROPERTY or PART feature, a one-place event
-  type, a two-place event type or category, or a base fluent. A sentence states a rule, at
+  type, a two-place event type or category, a base fluent, or, since stage b3b, a numeric
+  fluent, whose content is the event types that raise and lower it. A sentence states a rule, at
   ``propositions.rule_statement_rate``, or says which categories have the feature and which lack
   it. About an event type, a sentence is first a causal statement, at
   ``propositions.causal_statement_rate``: what its events do and need. About a fluent, every
@@ -35,9 +36,11 @@ the event, a base fluent or a derived fluent (``documents.result_rate``); a bloc
 saying what a participant of the event could not do at that time point, a binding that is able
 and not legal (``documents.blocked_rate``), or, at one minus
 ``propositions.negation_rate.able_now``, could do and did not; a comparative description of the
-two participants of a two-place event, on a scalar where their values differ, with the agent as
-its subject ("the owl is bigger than the mouse", or "smaller than" when the agent is the lesser;
-``documents.comparative_rate``, drawn from the document's part of ``corpus:comparatives``); and
+two participants of a two-place event, on a scalar where their values differ, or, since stage
+b3b, on a numeric fluent where their values differ at the event's time point ("the owl was
+hungrier than the mouse"), with the agent as its subject ("the owl is bigger than the mouse", or
+"smaller than" when the agent is the lesser; ``documents.comparative_rate``, drawn from the
+document's part of ``corpus:comparatives``); and
 an instance-level description (``documents.instance_description_rate``): of the topic in an
 entity narrative, and of a participant of the event in a situational narrative, a newly
 introduced one first. Each report
@@ -104,6 +107,7 @@ from semantic_world.corpus.mentions import (
     comparative_plan,
     happened,
     plan_for,
+    timed_predication,
 )
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
@@ -112,8 +116,10 @@ from semantic_world.corpus.propositions import (
     CLASS,
     COMPARATIVE,
     COMPARISON,
+    DECREASE,
     EVENT,
     HAS,
+    INCREASE,
     INSTANCE,
     IS,
     MEMBER,
@@ -419,6 +425,7 @@ class Planner:
             + facts.features[CAN]
             + facts.verbs
             + facts.base_fluents
+            + facts.numeric_fluents
         )
         self._available: dict[str, dict[str, tuple[tuple, ...]]] = {}
         self._tense = config.propositions.event_tense
@@ -478,7 +485,7 @@ class Planner:
             )
             proposition = dataclasses.replace(proposition, id=identifier)
             sentence = self.realizer.realize(plan, rng)
-            form = logical_form(plan, proposition, referents, self.config.scalar_z)
+            form = logical_form(plan, proposition, referents, self.config.scalar_z, self.truth.cuts)
             sentences.append(
                 DocumentSentence(
                     label=f"{label}{SENTENCE_INFIX}{number}",
@@ -904,7 +911,7 @@ class Planner:
         topic = self._feature_topics[int(rng.integers(len(self._feature_topics)))]
         length = self._length(kind, rng)
         is_verb = topic in facts.verbs
-        is_fluent = topic in facts.base_fluents
+        is_fluent = topic in facts.base_fluents or topic in facts.numeric_fluents
         rules: list[Proposition] = []
         causal: list[Proposition] = []
         topic_kind = VERB
@@ -1082,7 +1089,9 @@ class Planner:
                     and len(items) < length
                     and comparative_rng.random() < settings.comparative_rate
                 ):
-                    compared = self._comparative(comparative_rng, mention_rng, event, mentions)
+                    compared = self._comparative(
+                        comparative_rng, mention_rng, event, scene, mentions
+                    )
                     if compared is not None:
                         items.append(compared)
                 if len(items) < length and facts_rng.random() < rate:
@@ -1210,18 +1219,7 @@ class Planner:
         if isinstance(predicate.patient, str):
             target = mentions.noun_phrase(rng, predicate.patient)
         assert proposition.scene is not None and proposition.time is not None
-        plan = SentencePlan(
-            subject,
-            Predication(
-                predicate.kind,
-                predicate.label,
-                proposition.polarity,
-                target,
-                tense=proposition.tense,
-                time=time_key(proposition.scene, proposition.time),
-                become=proposition.level == CHANGE,
-            ),
-        )
+        plan = SentencePlan(subject, timed_predication(proposition, target))
         mentions.end_sentence(proposition.subject)
         return plan
 
@@ -1234,27 +1232,28 @@ class Planner:
         step: int,
         mentions: Mentions,
     ) -> _Item | None:
-        """A sentence stating one of a participant's fluents at ``TIME.<step>``: the polarity
-        at ``propositions.negation_rate.state``, the fluent drawn among those with a word that
-        have the value then (the other polarity when none has)."""
-        fluents = self.facts.fluents
-        if not fluents:
+        """A sentence stating one of a participant's fluents at ``TIME.<step>``, or a numeric
+        pole (stage b3b): the polarity at ``propositions.negation_rate.state``, the predicate
+        drawn among the Boolean fluents with a word and the numeric poles with words that have
+        the value then (the other polarity when none has)."""
+        truth = self.truth
+        predicates = [Predicate(STATE_KIND, f) for f in self.facts.fluents]
+        predicates += self.facts.numeric_pole_predicates()
+        if not predicates:
             return None
         negative = bool(facts_rng.random() < self.config.propositions.negation_rate[STATE])
         for polarity in (not negative, negative):
             pool = [
-                f
-                for f in fluents
-                if self.truth.fluent_value(scene.label, step, participant, f) == polarity
+                p
+                for p in predicates
+                if truth.predicate_holds(scene.label, step, participant, p) == polarity
             ]
             if pool:
                 break
         else:
             return None
-        fluent = pool[int(facts_rng.integers(len(pool)))]
-        proposition = self._timed(
-            STATE, participant, Predicate(STATE_KIND, fluent), polarity, scene, step
-        )
+        predicate = pool[int(facts_rng.integers(len(pool)))]
+        proposition = self._timed(STATE, participant, predicate, polarity, scene, step)
         return _Item(INITIAL_STATE, proposition, self._timed_plan(rng, proposition, mentions))
 
     def _result(
@@ -1266,18 +1265,33 @@ class Planner:
         mentions: Mentions,
     ) -> _Item | None:
         """A sentence stating one change that the event's own effects made in its step: a base
-        fluent the event changed, or a derived fluent of a participant of the event that the
-        event's own changes alone bring to its new value. None when the event changed nothing
-        that has a word."""
+        fluent the event changed, a derived fluent of a participant of the event that the
+        event's own changes alone bring to its new value, or, since stage b3b, a numeric fluent
+        with words that the event's own effect moved, when the step's net change (``TIME.k+1``
+        against ``TIME.k``, the drift included) has the effect's direction ("became hungrier").
+        A change by drift alone is never a result. None when the event changed nothing that has
+        a word."""
         truth = self.truth
         named = set(self.facts.fluents)
+        numeric_named = set(self.facts.numeric_fluents)
         recorded = self._history_events(scene)[event.label]
-        candidates = [
-            (change.entity, change.fluent, change.to)
+        candidates: list[tuple[str, Predicate, bool]] = [
+            (change.entity, Predicate(STATE_KIND, change.fluent), bool(change.to))
             for change in recorded.changes
             if not change.numeric and change.fluent in named
         ]
         step = event.step
+        for change in recorded.changes:
+            if not change.numeric or change.fluent not in numeric_named:
+                continue
+            direction = INCREASE if float(change.to) > float(change.from_) else DECREASE
+            before = truth.numeric_value(scene.label, step, change.entity, change.fluent)
+            after = truth.numeric_value(scene.label, step + 1, change.entity, change.fluent)
+            if (after > before and direction == INCREASE) or (
+                after < before and direction == DECREASE
+            ):
+                predicate = Predicate(STATE_KIND, change.fluent, direction=direction)
+                candidates.append((change.entity, predicate, True))
         for entity in [event.agent] + ([event.patient] if event.patient is not None else []):
             for fluent in self._derived_fluents:
                 before = truth.fluent_value(scene.label, step, entity, fluent)
@@ -1285,11 +1299,11 @@ class Planner:
                 if before != after and truth.made_by(
                     scene.label, step, entity, fluent, event.label
                 ):
-                    candidates.append((entity, fluent, after))
+                    candidates.append((entity, Predicate(STATE_KIND, fluent), after))
         if not candidates:
             return None
-        entity, fluent, value = candidates[int(facts_rng.integers(len(candidates)))]
-        proposition = self._timed(CHANGE, entity, Predicate(STATE_KIND, fluent), value, scene, step)
+        entity, predicate, value = candidates[int(facts_rng.integers(len(candidates)))]
+        proposition = self._timed(CHANGE, entity, predicate, value, scene, step)
         return _Item(RESULT, proposition, self._timed_plan(rng, proposition, mentions))
 
     def _blocked(
@@ -1348,29 +1362,42 @@ class Planner:
         comparative_rng: np.random.Generator,
         rng: np.random.Generator,
         event: SceneEvent,
+        scene: History,
         mentions: Mentions,
     ) -> _Item | None:
         """A comparative description of the two participants of a two-place event, on a scalar
-        with a word where their values differ, drawn uniformly among such scalars. The agent is
-        the subject: "the owl is bigger than the mouse", or "smaller than" when the agent is the
-        lesser. None when no scalar tells the two apart."""
+        with a word where their values differ, or (stage b3b) on a numeric fluent with words
+        where their values differ at the event's time point, drawn uniformly among such
+        dimensions. The agent is the subject: "the owl is bigger than the mouse", or "smaller
+        than" when the agent is the lesser; "the owl was hungrier than the mouse" at
+        ``TIME.<step>``. None when no dimension tells the two apart."""
         facts = self.facts
         agent, patient = event.agent, event.patient
         assert patient is not None
+        time = time_label(event.step)
         options = [
             (scalar, fact)
             for scalar in facts.scalars
             if (fact := facts.instance_comparison(agent, patient, scalar)) is not None
         ]
+        options += [
+            (fluent, fact)
+            for fluent in facts.numeric_fluents
+            if (fact := facts.instance_comparison_at(agent, patient, fluent, scene.label, time))
+            is not None
+        ]
         if not options:
             return None
-        scalar, fact = options[int(comparative_rng.integers(len(options)))]
+        dimension, fact = options[int(comparative_rng.integers(len(options)))]
         low = fact.subject != agent
         greater_phrase = mentions.noun_phrase(rng, agent)
         lesser_phrase = mentions.noun_phrase(rng, patient)
         if low:
             greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
-        plan = comparative_plan(greater_phrase, lesser_phrase, scalar, low)
+        when = None if fact.time is None else time_key(scene.label, fact.time)
+        plan = comparative_plan(
+            greater_phrase, lesser_phrase, dimension, low, when, fact.tense if when else None
+        )
         mentions.end_sentence(agent)
         return _Item(COMPARATIVE_SECTION, fact, plan)
 

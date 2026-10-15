@@ -58,7 +58,7 @@ from semantic_world.corpus.propositions import (
     Proposition,
 )
 from semantic_world.corpus.readings import readings
-from semantic_world.corpus.realize import Realizer, leaves
+from semantic_world.corpus.realize import Realizer, leaves, token_parts
 from semantic_world.corpus.renderings import (
     BoundEvent,
     Described,
@@ -115,7 +115,7 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
     record = json.loads((case.folder / "definition.json").read_text(encoding="utf-8"))
     event_types = {e["label"]: e for e in record["event_types"]}
     kinds: Counter = Counter()
-    about_categories = 0
+    about_categories = numeric_statements = conditional_statements = 0
     for document, sentence in causal_sentences(corpus):
         proposition = sentence.proposition
         assert document.type == "encyclopedic_feature" and sentence.section == CAUSAL
@@ -129,24 +129,36 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
         assert oracle.causal(form) is True, form
         # no causal statement names a derived fluent
         fluent = proposition.predicate.label
-        assert fluent in world.base_fluents and fluent not in world.derived_fluents
-        # the JSON form: the event term, the predicate with its value, and the causal record
-        assert form["subject"] == {
+        assert fluent not in world.derived_fluents
+        assert fluent in world.base_fluents or fluent in world.numeric_fluents
+        # the JSON form: the event term (with the condition of a conditional statement, stage
+        # b3b), the predicate with its value (or the direction of a numeric effect statement),
+        # and the causal record
+        subject = {
             "head": "THING",
             "event": proposition.subject.event_type,
             "role": proposition.subject.role,
         }
-        assert form["predicate"] == {
-            "kind": proposition.predicate.kind,
-            "label": fluent,
-            "value": proposition.predicate.value,
-        }
-        assert form["causal"] == {
+        condition = [c.to_json() for c in proposition.subject.condition]
+        if condition:
+            subject["condition"] = condition
+        assert form["subject"] == subject
+        said = {"kind": proposition.predicate.kind, "label": fluent}
+        record_entry = {
             "event_type": proposition.subject.event_type,
             "role": proposition.subject.role,
             "fluent": fluent,
-            "value": proposition.predicate.value,
         }
+        if proposition.predicate.direction is not None:
+            said["direction"] = record_entry["direction"] = proposition.predicate.direction
+            numeric_statements += 1
+        else:
+            said["value"] = record_entry["value"] = proposition.predicate.value
+        if condition:
+            record_entry["condition"] = condition
+            conditional_statements += 1
+        assert form["predicate"] == said
+        assert form["causal"] == record_entry
         assert form["grounding"]["test"] == "definition"
         # a statement about a category holds for every event type below it, by the record
         entry = event_types[proposition.subject.event_type]
@@ -160,12 +172,25 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
                 if proposition.predicate.kind == EFFECT
                 else event_types[leaf]["precondition"]["literals"]
             )
-            # an effect with a condition is no entry (stage b1)
+            # the entry: the value of a Boolean effect or literal, or the sign of a numeric
+            # effect, under the statement's condition (none for an unconditional statement,
+            # stage b1; a conditional statement's own since stage b3b)
             assert any(
                 e["role"] == proposition.subject.role
                 and e["fluent"] == fluent
-                and e["value"] == proposition.predicate.value
-                and not e.get("condition")
+                and (
+                    (e["operator"] == "+=") == (proposition.predicate.direction == "raises")
+                    if "amount" in e
+                    else e["value"] == proposition.predicate.value
+                )
+                and [
+                    {"role": c["role"], "label": c["symbol"], "value": c["value"]}
+                    for c in sorted(
+                        (e.get("condition") or {}).get("literals", []),
+                        key=lambda c: (c["role"], c["symbol"]),
+                    )
+                ]
+                == sorted(condition, key=lambda c: (c["role"], c["label"]))
                 for e in entries
             ), (leaf, form)
         kinds[proposition.predicate.kind] += 1
@@ -175,6 +200,9 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
     assert kinds[EFFECT] > 2 and kinds[PRECONDITION] > 1, kinds
     if name == "default":
         assert about_categories > 0
+    if name in ("tiny", "default"):
+        # these worlds have numeric fluents and conditional effects (stage b3b)
+        assert numeric_statements > 0 and conditional_statements > 0
 
 
 @pytest.mark.parametrize("name", WORLDS)
@@ -199,21 +227,25 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
                     if kind == EFFECT
                     else record_entries(record, leaf, "literals")
                 )
-                keys = {(e["role"], e["fluent"], e["value"]) for e in entries}
+                keys = {entry_key(e) for e in entries}
                 found = keys if found is None else found & keys
-            for role, fluent, value in found or ():
-                if fluent in facts.base_fluents and oracle.able_somewhere(label):
-                    expected.add((label, role, fluent, value, kind))
+            for role, fluent, value, condition in found or ():
+                named = fluent in facts.base_fluents or fluent in facts.numeric_fluents
+                if named and oracle.able_somewhere(label) and realizable(role, condition):
+                    expected.add((label, role, fluent, value, condition, kind))
     listed = {
         (
             p.subject.event_type,
             p.subject.role,
             p.predicate.label,
-            p.predicate.value,
+            p.predicate.value if p.predicate.direction is None else p.predicate.direction,
+            tuple(sorted((c.role, c.label, c.value) for c in p.subject.condition)),
             p.predicate.kind,
         )
         for p in facts.causal_statements()
     }
+    # a condition whose concept has no word makes no statement
+    expected = {key for key in expected if all(label in facts.named for _, label, _ in key[4])}
     assert listed == expected
     assert len(facts.causal_statements(kind=EFFECT)) + len(
         facts.causal_statements(kind=PRECONDITION)
@@ -223,13 +255,45 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
 
 
 def record_entries(record: dict, label: str, key: str) -> list[dict]:
-    """The unconditional Boolean effects, or the Boolean precondition literals, of an event
-    type's record: a conditional effect (stage b1), a numeric effect (an ``amount``, stage b2),
-    and a numeric literal (a ``threshold``) are no entries of a causal statement."""
+    """The effects, or the Boolean precondition literals, of an event type's record that make
+    causal statements: every effect but one under a numeric threshold condition (decision 23;
+    since stage b3b a conditional effect makes a conditional statement and a numeric effect a
+    ``RAISES`` or ``LOWERS`` statement), and every literal but a numeric one."""
     entry = next(e for e in record["event_types"] if e["label"] == label)
     if key == "effects":
-        return [e for e in entry["effects"] if not e.get("condition") and "amount" not in e]
+        return [
+            e
+            for e in entry["effects"]
+            if not any(
+                lit["kind"] == "numeric" for lit in (e.get("condition") or {}).get("literals", [])
+            )
+        ]
     return [lit for lit in entry["precondition"]["literals"] if "threshold" not in lit]
+
+
+def entry_key(entry: dict) -> tuple:
+    """What an effect or literal record states: its role, its fluent, its value (the direction
+    of a numeric effect), and its condition as sorted literals."""
+    if "amount" in entry:
+        value = "raises" if entry["operator"] == "+=" else "lowers"
+    else:
+        value = entry["value"]
+    literals = (entry.get("condition") or {}).get("literals", [])
+    condition = tuple(sorted((lit["role"], lit["symbol"], lit["value"]) for lit in literals))
+    return (entry["role"], entry["fluent"], value, condition)
+
+
+def realizable(role: str, condition: tuple) -> bool:
+    """Whether the grammar can say the condition in a statement about the role: a statement
+    about the patient is an object relative, which holds one verb, so a fluent literal or a
+    negated PROPERTY literal of the patient's role has no place in it (stage b3b)."""
+    if role != "patient":
+        return True
+    return not any(
+        r == "patient"
+        and (label.startswith("BOOLFL.") or (not value and label.startswith("PROPERTY.")))
+        for r, label, value in condition
+    )
 
 
 @pytest.mark.slow
@@ -253,6 +317,7 @@ def test_no_causal_statement_is_true_by_a_conditional_effect(cases, runs) -> Non
     listed = {
         (p.subject.event_type, p.subject.role, p.predicate.label, p.predicate.value)
         for p in facts.causal_statements(kind=EFFECT)
+        if not p.subject.condition  # a conditional statement states its condition (b3b)
     }
     checked = 0
     for label, effect in conditional:
@@ -351,14 +416,21 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
                 form = item.input["logical_form"]
                 assert form["level"] == CLASS and "head" in form["subject"]
                 assert form["predicate"]["kind"] == kind
-                assert "causal" not in form and item.meta["causal"] == {
+                record_entry = {
                     "event_type": form["subject"]["event"],
                     "role": form["subject"]["role"],
                     "fluent": form["predicate"]["label"],
-                    "value": form["predicate"]["value"],
                 }
+                if "direction" in form["predicate"]:
+                    record_entry["direction"] = form["predicate"]["direction"]
+                else:
+                    record_entry["value"] = form["predicate"]["value"]
+                if "condition" in form["subject"]:
+                    record_entry["condition"] = form["subject"]["condition"]
+                assert "causal" not in form and item.meta["causal"] == record_entry
                 assert item.input["document"] is None
-                assert form["predicate"]["label"] in world.base_fluents
+                label = form["predicate"]["label"]
+                assert label in world.base_fluents or label in world.numeric_fluents
                 # true by the definition, or false under NEC: the definition lacks the entry
                 assert oracle.causal(form) is item.meta["truth"], form
             assert true.meta["observed"] is False
@@ -380,6 +452,9 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
     if name == "default":
         assert kinds[("causal_effect", ROLE, "")] > 0
         assert sum(count for (_, _, kind), count in kinds.items() if kind == LAWLIKE) > 0
+    if name in ("tiny", "default"):
+        # the condition change: a conditional statement without its condition (stage b3b)
+        assert kinds[("causal_effect", "condition", "")] > 0, kinds
 
 
 @pytest.mark.parametrize("name", WORLDS)
@@ -485,7 +560,15 @@ def test_an_observed_false_item_held_of_every_event_in_the_scenes(runs) -> None:
                     if event.type not in below:
                         continue
                     entity = event.agent if subject.role == AGENT else event.patient
+                    # a conditional item is about the events under its condition (stage b3b)
+                    if not truth.condition_held(scene.label, event, subject.condition):
+                        continue
                     events += 1
+                    if predicate.numeric:
+                        # a numeric statement is about the effect: the event's own recorded
+                        # change has its direction (stage b3b)
+                        assert truth.recorded_direction(scene.label, event, entity, predicate)
+                        continue
                     value = truth.fluent_value(
                         scene.label, event.step + offset, entity, predicate.label
                     )
@@ -671,7 +754,10 @@ def test_the_record_of_which_state_item_changed_agrees_with_the_history(cases, r
             for item in (true, false):
                 form = item.input["logical_form"]
                 changed = oracle.changed(
-                    scenes[form["scene"]], form["subject"]["instance"], form["predicate"]["label"]
+                    scenes[form["scene"]],
+                    form["subject"]["instance"],
+                    form["predicate"]["label"],
+                    form["predicate"].get("cut"),
                 )
                 assert item.meta["changed"] == changed
                 marks.append(changed)
@@ -712,10 +798,11 @@ def test_feature_documents_about_event_types_and_fluents(runs) -> None:
         topic = document.topic
         causal = [s for s in document.sentences if s.proposition.causal]
         others = [s for s in document.sentences if not s.proposition.causal]
-        if topic in facts.base_fluents:
-            # a document about a fluent: the event types that set it, clear it, and need it,
-            # one causal statement per sentence, up to its drawn length or the statements
-            # about its fluent (stage a8, Jon's ruling 1 on stage a7b)
+        if topic in facts.base_fluents or topic in facts.numeric_fluents:
+            # a document about a fluent: the event types that set it, clear it, and need it
+            # (raise it and lower it, for a numeric fluent, stage b3b), one causal statement
+            # per sentence, up to its drawn length or the statements about its fluent (stage
+            # a8, Jon's ruling 1 on stage a7b)
             topics["fluent"] += 1
             assert causal and not others
             assert all(s.proposition.predicate.label == topic for s in causal)
@@ -742,7 +829,8 @@ def test_the_causal_statement_rate_is_a_setting(runs) -> None:
             if document.type != "encyclopedic_feature":
                 continue
             topic = document.topic
-            if topic in corpus.planner.facts.base_fluents:
+            facts = corpus.planner.facts
+            if topic in facts.base_fluents or topic in facts.numeric_fluents:
                 found["fluent_documents"] += 1
                 found["fluent_sentences"] += len(document.sentences)
             else:
@@ -802,23 +890,28 @@ def test_readings_and_renderings_of_causal_sentences(runs) -> None:
         (main,) = parsed
         assert isinstance(main, Quantified) and main.quantifier == NEC_ALL
         assert isinstance(main.restrictor[0], BoundEvent) and isinstance(main.scope, Temporal)
-        assert main.scope.operator == (
-            "AFTER" if sentence.proposition.predicate.kind == EFFECT else "BEFORE"
-        )
+        predicate = sentence.proposition.predicate
+        if predicate.direction is not None:
+            expected = "RAISES" if predicate.direction == "raises" else "LOWERS"
+        else:
+            expected = "AFTER" if predicate.kind == EFFECT else "BEFORE"
+        assert main.scope.operator == expected
         assert proposition_of(parsed) == sentence.proposition
         assert Proposition.from_json(sentence.logical_form) == sentence.proposition
         operators[main.scope.operator] += 1
         record = sentence.sentence
-        assert record.events == (None, None)  # no verb phrase reports an event
+        assert all(e is None for e in record.events)  # no verb phrase reports an event
         read = interpret(record.tree, lexicon, record.referents, record.events, NEC_ALL)
         assert read == sentence.plan
         assert tuple(leaves(record.tree)) == record.tokens
         # the words: the generic noun, the event's verb, become or the copula with before
-        glosses = [lexicon.lexeme(t).gloss for t in record.tokens]
+        glosses = [lexicon.lexeme(token_parts(t)[0]).gloss for t in record.tokens]
         assert glosses.count("THING") >= 1 and "that" in glosses
         assert "can" not in glosses
+        fluent_condition = any(c.fluent for c in sentence.proposition.subject.condition)
         if sentence.proposition.predicate.kind == EFFECT:
-            assert "become" in glosses and BEFORE_WORD not in glosses
+            # "before" stands in the subject's relative clause with a fluent condition (b3b)
+            assert "become" in glosses and (BEFORE_WORD in glosses) == fluent_condition
         else:
             assert glosses[-1] == BEFORE_WORD and "is" in glosses and "become" not in glosses
     assert operators["AFTER"] > 5 and operators["BEFORE"] > 2
@@ -1014,7 +1107,7 @@ def test_causal_propositions_the_truth_tests_reject(cases) -> None:
             subject=EventTerm(binary, AGENT),
             predicate=Predicate(EFFECT, numeric.fluent, value=True),
         )
-        assert not rejected.valid and "not a base fluent" in rejected.reason
+        assert not rejected.valid and "has a direction" in rejected.reason
     # the truth: the definition has the entry, or not
     record = world.definition.event_type(binary)
     for effect in record.effects:
@@ -1092,11 +1185,13 @@ def test_the_tiny_corpus_holds_every_new_thing(runs) -> None:
     assert any("{" in s.propositional for d in corpus.documents for s in d.sentences)
     names = [s.name for s in corpus.test_sets]
     # the causal sets: both kinds by the four changes, each with a law-like twin but the
-    # polarity swap, which is never observed
+    # polarity swap, which is never observed, and the condition change of the effect
+    # statements (stage b3b)
     expected = [
         name
         for level in CAUSAL_LEVELS
         for change in (PREDICATE, POLARITY, EVENT_SWAP, ROLE)
+        + (("condition",) if level == "causal_effect" else ())
         for name in (
             [f"{level}_{change}"] + ([] if change == POLARITY else [f"{level}_{change}_{LAWLIKE}"])
         )

@@ -36,7 +36,12 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   next, ``BECOME(SCENE.8, TIME.2, PAST, NOT BOOLFL.3(REF.1))`` for the change to false. What was
   possible at a time point is ``ABLE_NOW(SCENE.8, TIME.2, PAST, EVENTTYPE2.1.2(REF.1,
   REF.2))``, and ``NOT ABLE_NOW(...)`` says that the binding was not legal then. The tense is
-  written in all three, as in ``EVENT``, so that the rendering parses back to the logical form;
+  written in all three, as in ``EVENT``, so that the rendering parses back to the logical form.
+  A numeric fluent (stage b3b) is stated at a time point through its poles, ``HOLDS(SCENE.8,
+  TIME.2, PAST, ABOVE(NUMFL.1, REF.1, RANGE, 0.75))``, at the language's cut for the pole's
+  adjective, or through a comparative, ``HOLDS(SCENE.8, TIME.2, PAST, GREATER(NUMFL.1, REF.1,
+  REF.2))``; a numeric change is ``INCREASE(SCENE.8, TIME.2, PAST, NUMFL.1(REF.1))`` or
+  ``DECREASE``, with the tense written as in ``BECOME``;
 - ``REF.n`` is one individual, a referent of the document, and ``VAR.n`` is a variable bound by
   a quantifier;
 - a class-level form is a quantifier with a restrictor and a scope:
@@ -55,7 +60,12 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   time point after the event (``AFTER``) or before it (``BEFORE``):
   ``NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``
   for "things that things catch become caught". The agent is ``VAR.1`` and the patient
-  ``VAR.2``, whichever the statement is about.
+  ``VAR.2``, whichever the statement is about. A numeric effect statement (stage b3b) has
+  ``RAISES`` or ``LOWERS`` as its scope, ``LOWERS(EVENTVAR.1, NUMFL.1(VAR.1))``, and a
+  conditional statement's condition joins the restrictor after the bound event, a static literal
+  as an atom and a fluent literal under ``BEFORE``: ``NEC(ALL(EVENT(EVENTVAR.1,
+  EVENTTYPE2.1.2(VAR.1, VAR.2)) AND PROPERTY.4(VAR.2) AND BEFORE(EVENTVAR.1, BOOLFL.2(VAR.1)),
+  AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``.
 
 A sentence about instances is a conjunction. Each noun phrase gives its noun and its modifiers,
 then the propositions of its relative clause, and the proposition of the main clause comes last.
@@ -91,15 +101,18 @@ from semantic_world.corpus.propositions import (
     CLASS,
     COMPARATIVE,
     COMPARISON,
+    DECREASE,
     EFFECT,
     EVENT,
     GREATER,
     HAS,
     HIGH,
+    INCREASE,
     INSTANCE,
     IS,
     LABEL_KEY,
     LOW,
+    LOWERS,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -109,6 +122,7 @@ from semantic_world.corpus.propositions import (
     PATIENT,
     PRECONDITION,
     PROJECTION,
+    RAISES,
     SOME,
     STATE,
     STATE_KIND,
@@ -116,6 +130,7 @@ from semantic_world.corpus.propositions import (
     VERB,
     CategoryTerm,
     Clause,
+    Condition,
     EventTerm,
     Literal,
     Predicate,
@@ -123,6 +138,7 @@ from semantic_world.corpus.propositions import (
     comparison_class_of,
     event_of,
     is_event_variable,
+    is_numeric,
     low_word,
     pole_dimension,
     pole_operator,
@@ -131,6 +147,7 @@ from semantic_world.corpus.propositions import (
 from semantic_world.corpus.world import (
     CATEGORY_PREFIX,
     FLUENT_PREFIX,
+    NUMERIC_PREFIX,
     ONE_PLACE_PREFIX,
     PART_PREFIX,
     PATIENT_CAPACITY_PREFIX,
@@ -138,6 +155,7 @@ from semantic_world.corpus.world import (
     SCALAR_PREFIX,
     TWO_PLACE_PREFIX,
 )
+from semantic_world.world.runtime import RANGE
 
 REFERENT_MODES = ("local", "instance")
 DESCRIPTION_MODES = ("marked", "omitted")
@@ -231,9 +249,11 @@ class Comparison:
     dimension: str
     arguments: tuple[str, ...]
     standard: str | None = None
-    """``ABOVE`` and ``BELOW``: the comparison class, a category or ``ENTITY``."""
+    """``ABOVE`` and ``BELOW``: the comparison class, a category or ``ENTITY``, or ``RANGE``
+    for a numeric fluent (stage b3b)."""
     z: float | None = None
-    """``ABOVE`` and ``BELOW``: the threshold, in standard deviations of the class."""
+    """``ABOVE`` and ``BELOW``: the threshold, in standard deviations of the class, or, against
+    ``RANGE``, the language's cut as a fraction of the range."""
 
     def __str__(self) -> str:
         parts = [self.dimension, *self.arguments]
@@ -279,7 +299,11 @@ class Timed:
 
 
 TIMED_OPERATORS = {STATE: "HOLDS", CHANGE: "BECOME", ABLE_NOW: "ABLE_NOW"}
+CHANGE_OPERATORS = {INCREASE: "INCREASE", DECREASE: "DECREASE"}
+"""The operators of a numeric change (stage b3b), in place of ``BECOME``."""
 _LEVEL_OF_OPERATOR = {operator: level for level, operator in TIMED_OPERATORS.items()}
+_LEVEL_OF_OPERATOR.update(dict.fromkeys(CHANGE_OPERATORS.values(), CHANGE))
+_DIRECTION_OF_OPERATOR = {operator: direction for direction, operator in CHANGE_OPERATORS.items()}
 
 
 @dataclass(frozen=True)
@@ -309,6 +333,12 @@ class Temporal:
 
 CAUSAL_OPERATORS = {EFFECT: "AFTER", PRECONDITION: "BEFORE"}
 _KIND_OF_CAUSAL_OPERATOR = {operator: kind for kind, operator in CAUSAL_OPERATORS.items()}
+EFFECT_OPERATORS = {RAISES: "RAISES", LOWERS: "LOWERS"}
+"""The operators of a numeric effect statement (stage b3b), in place of ``AFTER``."""
+_DIRECTION_OF_EFFECT_OPERATOR = {
+    operator: direction for direction, operator in EFFECT_OPERATORS.items()
+}
+_TEMPORAL_OPERATORS = set(CAUSAL_OPERATORS.values()) | set(EFFECT_OPERATORS.values())
 
 
 @dataclass(frozen=True)
@@ -437,11 +467,37 @@ def _predication(
     label = predicate[_JSON_KEY[kind]]
     if timed is not None:
         level, scene, time, tense = timed
+        if kind == STATE_KIND and predicate.get("direction") is not None:
+            # a numeric change (stage b3b): INCREASE or DECREASE in place of BECOME
+            if level != CHANGE:
+                raise RenderingError(f"a change of {label} with a direction is a change")
+            operator = CHANGE_OPERATORS[predicate["direction"]]
+            return Timed(operator, scene, time, tense, Atom(label, (subject,)))
         if kind == STATE_KIND:
             atom = Atom(label, (subject,))
             return Timed(
                 TIMED_OPERATORS[level], scene, time, tense, atom if polarity else Not(atom)
             )
+        if kind == COMPARISON:
+            # a numeric pole at a time point, against RANGE at the language's cut
+            cut = predicate.get("cut")
+            if cut is None:
+                raise RenderingError(f"the numeric pole {label} records no cut")
+            body = Comparison(
+                pole_operator(label), pole_dimension(label), (subject,), RANGE, float(cut)
+            )
+            return Timed(
+                TIMED_OPERATORS[level], scene, time, tense, body if polarity else Not(body)
+            )
+        if kind == COMPARATIVE:
+            if patient is None:
+                raise RenderingError(f"the comparative on {label} has no second argument")
+            if not polarity:
+                raise RenderingError("a comparative is never negated")
+            if low_word(predicate):
+                subject, patient = patient, subject
+            body = Comparison(GREATER, label, (subject, patient))
+            return Timed(TIMED_OPERATORS[level], scene, time, tense, body)
         if kind == VERB:
             if patient is None:
                 raise RenderingError(f"the verb {label} has no patient")
@@ -479,7 +535,10 @@ def _predication(
 
 def _causal(form: dict[str, Any]) -> Formula:
     """The formula of a causal statement: ``NEC(ALL(EVENT(EVENTVAR.1, <event type>(VAR.1[,
-    VAR.2])), AFTER|BEFORE(EVENTVAR.1, [NOT] <fluent>(<the role's variable>))))``."""
+    VAR.2])) [AND <condition>], AFTER|BEFORE(EVENTVAR.1, [NOT] <fluent>(<the role's
+    variable>))))``, or with ``RAISES`` or ``LOWERS`` for a numeric effect statement (stage
+    b3b). A condition's static literal is an atom of the role's variable, and a fluent literal
+    ``BEFORE(EVENTVAR.1, <fluent>(<variable>))``."""
     subject, predicate = form["subject"], form["predicate"]
     event_type, role = subject["event"], subject["role"]
     variables = {AGENT: "VAR.1"}
@@ -488,10 +547,26 @@ def _causal(form: dict[str, Any]) -> Formula:
     if role not in variables:
         raise RenderingError(f"{event_type} has no {role}")
     bound = BoundEvent("EVENTVAR.1", Atom(event_type, tuple(variables.values())))
+    restrictor: list[Any] = [bound]
+    for literal in subject.get("condition", ()):
+        if literal["role"] not in variables:
+            raise RenderingError(f"{event_type} has no {literal['role']} for a condition")
+        atom = Atom(literal["label"], (variables[literal["role"]],))
+        body = atom if literal["value"] else Not(atom)
+        if literal["label"].startswith(FLUENT_PREFIX):
+            restrictor.append(Temporal(CAUSAL_OPERATORS[PRECONDITION], "EVENTVAR.1", body))
+        else:
+            restrictor.append(body)
     atom = Atom(predicate[LABEL_KEY], (variables[role],))
-    operator = CAUSAL_OPERATORS[predicate["kind"]]
-    scope = Temporal(operator, "EVENTVAR.1", atom if predicate["value"] else Not(atom))
-    return (Quantified(form["quantifier"], (bound,), scope),)
+    direction = predicate.get("direction")
+    if direction is not None:
+        if predicate["kind"] != EFFECT:
+            raise RenderingError("only an effect statement has a direction")
+        scope: Any = Temporal(EFFECT_OPERATORS[direction], "EVENTVAR.1", atom)
+    else:
+        operator = CAUSAL_OPERATORS[predicate["kind"]]
+        scope = Temporal(operator, "EVENTVAR.1", atom if predicate["value"] else Not(atom))
+    return (Quantified(form["quantifier"], tuple(restrictor), scope),)
 
 
 def formula(form: dict[str, Any], referents: str = "local", descriptions: str = MARKED) -> Formula:
@@ -678,7 +753,7 @@ class _Parser:
             if not isinstance(body, Atom):
                 raise RenderingError(f"EVENT binds an atom in {self.text!r}")
             return BoundEvent(variable, body)
-        if word in _KIND_OF_CAUSAL_OPERATOR:
+        if word in _TEMPORAL_OPERATORS:
             variable = self.take()
             self.take(",")
             body = self.item()
@@ -688,6 +763,8 @@ class _Parser:
                 raise RenderingError(
                     f"{word} holds an atom about an event variable in {self.text!r}"
                 )
+            if word in _DIRECTION_OF_EFFECT_OPERATOR and isinstance(body, Not):
+                raise RenderingError(f"{word} is never negated in {self.text!r}")
             return Temporal(word, variable, body)
         if word == "EVENT":
             event = self.take()
@@ -717,8 +794,15 @@ class _Parser:
             body = self.item()
             self.take(")")
             inner = body.body if isinstance(body, Not) else body
-            if not isinstance(inner, Atom) or (
-                isinstance(body, Not) and word == TIMED_OPERATORS[ABLE_NOW]
+            if isinstance(inner, Comparison):
+                # a numeric pole or comparative at a time point (stage b3b)
+                if word != TIMED_OPERATORS[STATE] or not is_numeric(inner.dimension):
+                    raise RenderingError(f"{word} holds no comparison in {self.text!r}")
+                if isinstance(body, Not) and inner.operator == GREATER:
+                    raise RenderingError(f"a comparative is never negated in {self.text!r}")
+            elif not isinstance(inner, Atom) or (
+                isinstance(body, Not)
+                and (word == TIMED_OPERATORS[ABLE_NOW] or word in _DIRECTION_OF_OPERATOR)
             ):
                 raise RenderingError(f"{word} holds an atom in {self.text!r}")
             return Timed(word, scene, time, tense, body)
@@ -763,6 +847,7 @@ def _kind(label: str) -> str:
         (PROPERTY_PREFIX, IS),
         (PART_PREFIX, HAS),
         (FLUENT_PREFIX, STATE_KIND),
+        (NUMERIC_PREFIX, STATE_KIND),
         (PATIENT_CAPACITY_PREFIX, PROJECTION),
         (ONE_PLACE_PREFIX, CAN),
         (TWO_PLACE_PREFIX, VERB),
@@ -853,25 +938,46 @@ def _comparison_proposition(
 
 
 def _causal_proposition(main: Quantified) -> Proposition:
-    """The causal statement that a quantified formula with a temporal scope says."""
+    """The causal statement that a quantified formula with a temporal scope says: the bound
+    event, the condition's literals beside it (stage b3b), and the scope's effect or
+    precondition, Boolean or numeric."""
     scope = main.scope
     assert isinstance(scope, Temporal)
     bound = [part for part in main.restrictor if isinstance(part, BoundEvent)]
-    if len(bound) != 1 or len(main.restrictor) != 1 or bound[0].variable != scope.variable:
-        raise RenderingError("a causal statement binds one event, which its scope is about")
+    if len(bound) != 1 or main.restrictor[0] is not bound[0] or bound[0].variable != scope.variable:
+        raise RenderingError("a causal statement binds one event first, which its scope is about")
+    event = bound[0].body
+
+    def role_of(argument: str) -> str:
+        if argument not in event.arguments:
+            raise RenderingError(f"{scope.operator} is about a participant of the event")
+        return AGENT if event.arguments.index(argument) == 0 else PATIENT
+
+    condition: list[Condition] = []
+    for part in main.restrictor[1:]:
+        if isinstance(part, Temporal):
+            if part.operator != CAUSAL_OPERATORS[PRECONDITION] or part.variable != scope.variable:
+                raise RenderingError("a fluent condition holds BEFORE the event")
+            literal = part.body
+        else:
+            literal = part
+        positive = not isinstance(literal, Not)
+        atom = literal if positive else literal.body
+        if not isinstance(atom, Atom) or len(atom.arguments) != 1:
+            raise RenderingError("a condition is a literal about one participant of the event")
+        condition.append(Condition(role_of(atom.arguments[0]), atom.label, positive))
     value = not isinstance(scope.body, Not)
     atom = scope.body if value else scope.body.body
-    event = bound[0].body
-    if atom.arguments[0] not in event.arguments:
-        raise RenderingError(f"{scope.operator} is about a participant of the event")
-    role = AGENT if event.arguments.index(atom.arguments[0]) == 0 else PATIENT
-    kind = _KIND_OF_CAUSAL_OPERATOR[scope.operator]
+    role = role_of(atom.arguments[0])
+    if scope.operator in _DIRECTION_OF_EFFECT_OPERATOR:
+        predicate = Predicate(
+            EFFECT, atom.label, direction=_DIRECTION_OF_EFFECT_OPERATOR[scope.operator]
+        )
+    else:
+        kind = _KIND_OF_CAUSAL_OPERATOR[scope.operator]
+        predicate = Predicate(kind, atom.label, value=value)
     return Proposition(
-        CLASS,
-        EventTerm(event.label, role),
-        Predicate(kind, atom.label, value=value),
-        True,
-        main.quantifier,
+        CLASS, EventTerm(event.label, role, tuple(condition)), predicate, True, main.quantifier
     )
 
 
@@ -912,19 +1018,28 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         inner = body.body
         if isinstance(inner, Not):
             polarity, inner = False, inner.body
+        when = {"scene": body.scene, "time": body.time, "tense": body.tense}
+        if isinstance(inner, Comparison):
+            # a numeric pole or comparative at a time point (stage b3b)
+            first = names.get(inner.arguments[0], inner.arguments[0])
+            if inner.operator == GREATER:
+                other = names.get(inner.arguments[1], inner.arguments[1])
+                predicate = Predicate(COMPARATIVE, inner.dimension, other)
+            else:
+                predicate = Predicate(COMPARISON, inner.pole, comparison=inner.standard)
+            return Proposition(level, first, predicate, polarity, **when)
         kind = _kind(inner.label)
         subject = names.get(inner.arguments[0], inner.arguments[0])
         patient = None
         if kind == VERB:
             patient = names.get(inner.arguments[1], inner.arguments[1])
+        direction = _DIRECTION_OF_OPERATOR.get(body.operator)
         return Proposition(
             level,
             subject,
-            Predicate(kind, inner.label, patient),
+            Predicate(kind, inner.label, patient, direction=direction),
             polarity,
-            scene=body.scene,
-            time=body.time,
-            tense=body.tense,
+            **when,
         )
     atom = body.body if isinstance(body, Able | Report) else body
     kind = _kind(atom.label)

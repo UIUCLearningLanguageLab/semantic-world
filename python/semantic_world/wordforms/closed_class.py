@@ -256,18 +256,43 @@ def _add_statistics(
 # ---------------------------------------------------------------------------------------------
 
 
+def can_take(
+    settings: ClosedClassConfig, english: English, phones: tuple[str, ...], affixes: list[Affix]
+) -> bool:
+    """Whether a form can take every one of the affixes: each join passes the phonotactic check
+    (with the repairs) and is not a common English word."""
+    for affix in affixes:
+        joined = repair_join(english, phones, affix, settings.epenthesis, settings.glide)
+        if joined is None or english.is_common_pronunciation(joined[0]):
+            return False
+    return True
+
+
+def function_affixes(settings: ClosedClassConfig, affixes: list[Affix]) -> dict[str, list[Affix]]:
+    """For each function word that an inflect entry names (by gloss), the affixes its form must
+    take (stage b3b of the world-and-language refactor)."""
+    by_gloss = {affix.gloss: affix for affix in affixes}
+    return {
+        gloss: [by_gloss[g] for g in glosses]
+        for gloss, glosses in settings.function_requirements().items()
+    }
+
+
 def generate_function_words(
     settings: ClosedClassConfig,
     rng: np.random.Generator,
     english: English,
     content: list[WordForm],
     avoid: set[tuple[str, ...]] | None = None,
+    requirements: dict[str, list[Affix]] | None = None,
 ) -> tuple[list[WordForm], dict[str, Any]]:
     """One function word for each gloss, without statistics, and a report of the draws. The
     glosses are in order of frequency, and the first ``SHORT_SHARE`` of them (rounded up) take
     two-phoneme shapes when a two-phoneme shape has weight. ``avoid`` holds more forms, without
-    stress, that a function word must not be."""
+    stress, that a function word must not be. ``requirements`` gives, for a gloss that an
+    inflect entry names, the affixes its form must be able to take."""
     content_forms = {w.stripped for w in content} | (avoid or set())
+    requirements = requirements or {}
     pools: dict[str, list[tuple[Syllable, float]]] = {}
     candidates: dict[str, dict[str, int]] = {}
     for shape in settings.function_shapes:
@@ -308,6 +333,12 @@ def generate_function_words(
                 if lexicon_distance(strip_stress(s.phones), accepted, settings.min_distance)
                 >= settings.min_distance
             ]
+            if gloss in requirements:
+                live = [
+                    (s, w)
+                    for s, w in live
+                    if can_take(settings, english, s.phones, requirements[gloss])
+                ]
             if live:
                 break
             used_up.add(shape)
@@ -328,10 +359,13 @@ def generate_function_words(
 
 
 def english_function_words(
-    settings: ClosedClassConfig, english: English
+    settings: ClosedClassConfig,
+    english: English,
+    requirements: dict[str, list[Affix]] | None = None,
 ) -> tuple[list[WordForm], dict[str, Any]]:
     """Each gloss's English word: its citation pronunciation (the first dictionary pronunciation
-    with primary stress, or else the first), with the other pronunciations as weak forms."""
+    with primary stress, or else the first), with the other pronunciations as weak forms. A word
+    that an inflect entry names must be able to take its affixes (``requirements``)."""
     words: list[WordForm] = []
     for index, gloss in enumerate(settings.glosses):
         prons = english.words.get(gloss)
@@ -354,7 +388,34 @@ def english_function_words(
                 weak_forms=weak,
             )
         )
+    for word in words:
+        affixes = (requirements or {}).get(word.gloss or "", [])
+        if affixes and not can_take(settings, english, word.phones, affixes):
+            raise GenerationError(
+                f"the English function word {word.gloss!r} cannot take the affix "
+                f"{affixes[0].gloss} that the request inflects it with"
+            )
     return words, {"source": "english", "count": len(words)}
+
+
+def function_word_pairs(
+    settings: ClosedClassConfig, function_words: list[WordForm], affixes: list[Affix]
+) -> list[tuple[WordForm, Affix]]:
+    """The function word and affix pairs that the inflect entries naming function words ask
+    for, each once, in word order and then affix order (stage b3b of the world-and-language
+    refactor: the tense affix on an auxiliary)."""
+    by_gloss = {affix.gloss: affix for affix in affixes}
+    wanted: set[tuple[str, str]] = set()
+    for entry in settings.function_inflect:
+        for gloss in entry.function_words or ():
+            word = next((w for w in function_words if w.gloss == gloss), None)
+            if word is None:
+                raise GenerationError(
+                    f"the request inflects the function word {gloss!r}, which it lacks"
+                )
+            for affix_gloss in entry.affixes:
+                wanted.add((word.label, by_gloss[affix_gloss].label))
+    return [(w, a) for w in function_words for a in affixes if (w.label, a.label) in wanted]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -631,6 +692,14 @@ def add_closed_class(
     content_forms = [w.stripped for w in content]
     spellings = {w.spelling for w in content}
 
+    # The affixes come first (their stream is their own), so that a function word that an
+    # inflect entry names can be drawn among the forms that take its affixes (stage b3b).
+    if settings.affix_source == "english":
+        affixes, affix_report = english_affixes(settings, tables[0])
+    else:
+        affixes, affix_report = generate_affixes(
+            settings, streams.substream("closed_class", "affixes"), english, tables[0], content
+        )
     if config.assigns_lexemes:
         # With the lexemes of a request, the function words are made after the assignment
         # (add_function_words), so that the assignment never depends on them: their forms
@@ -638,17 +707,21 @@ def add_closed_class(
         function_words, function_report = [], {"count": 0}
     else:
         function_words, function_report = _function_words(
-            config, streams, english, content, tables, speller, spellings
+            config,
+            streams,
+            english,
+            content,
+            tables,
+            speller,
+            spellings,
+            requirements=function_affixes(settings, affixes),
         )
 
-    if settings.affix_source == "english":
-        affixes, affix_report = english_affixes(settings, tables[0])
-    else:
-        affixes, affix_report = generate_affixes(
-            settings, streams.substream("closed_class", "affixes"), english, tables[0], content
-        )
-    # The entries that name lexemes wait for the assignment (add_inflected).
+    # The entries that name lexemes wait for the assignment (add_inflected), and so do those
+    # that name function words, which are made then too (add_function_words).
     pairs = inflection_pairs(settings, content, affixes)
+    if not config.assigns_lexemes:
+        pairs += function_word_pairs(settings, function_words, affixes)
     inflected, skipped = inflect(settings, english, speller, pairs)
     for form, spelling in inflected:
         _add_statistics(form, spelling, english, tables, content_forms, spellings)
@@ -690,14 +763,22 @@ def _function_words(
     speller: Speller,
     spellings: set[str],
     avoid: set[tuple[str, ...]] | None = None,
+    requirements: dict[str, list[Affix]] | None = None,
 ) -> tuple[list[WordForm], dict[str, Any]]:
-    """The function words of a configuration, with their statistics, and the report."""
+    """The function words of a configuration, with their statistics, and the report.
+    ``requirements`` gives the affixes that a function word named by an inflect entry must be
+    able to take."""
     settings = config.closed_class
     if settings.function_source == "english":
-        function_words, report = english_function_words(settings, english)
+        function_words, report = english_function_words(settings, english, requirements)
     else:
         function_words, report = generate_function_words(
-            settings, streams.substream("closed_class", "function_words"), english, content, avoid
+            settings,
+            streams.substream("closed_class", "function_words"),
+            english,
+            content,
+            avoid,
+            requirements,
         )
     content_forms = [w.stripped for w in content]
     for word in function_words:
@@ -717,7 +798,9 @@ def add_function_words(
     the lexemes of a request takes after the assignment. A function word is none of the forms in
     ``avoid`` (the marked forms, the markers, and every form that a word could have with an
     affix), beside the content words. The function words stand right after the content words,
-    as in every run."""
+    as in every run. A function word that an inflect entry names gets a form that can take its
+    affixes, and its inflected forms follow the function words (stage b3b)."""
+    settings = config.closed_class
     english = english or load_english(
         config.wordforms.english_min_zipf, config.wordforms.exclude_inflections
     )
@@ -731,6 +814,7 @@ def add_function_words(
         Speller.load(),
         {w.spelling for w in lexicon.words},
         avoid,
+        function_affixes(settings, lexicon.affixes),
     )
     rest = [w for w in lexicon.words if w.kind != "content"]
     lexicon.words = content + function_words + rest
@@ -740,6 +824,9 @@ def add_function_words(
             lexicon.closed_class["english_words"][word.label] = english.words_with_pronunciation(
                 word.phones
             )[0]
+    pairs = function_word_pairs(settings, function_words, lexicon.affixes)
+    if pairs:
+        add_inflected(config, lexicon, pairs, english)
     return function_words
 
 

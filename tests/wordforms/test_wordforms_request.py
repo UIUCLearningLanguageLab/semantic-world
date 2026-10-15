@@ -6,6 +6,7 @@ words, and the inflected forms are made from the forms that the lexemes got."""
 from __future__ import annotations
 
 import hashlib
+import re
 
 import numpy as np
 import polars as pl
@@ -642,3 +643,70 @@ def test_the_forms_command_assigns_the_lexemes(tmp_path, capsys):
     # a second seed gives other words
     assert main(["forms", str(config_path), "--out", str(again), "--seed", "2"]) == 0
     assert (again / "words.csv").read_bytes() != (out / "words.csv").read_bytes()
+
+
+# ---------------------------------------------------------------------------------------------
+# Inflected function words (stage b3b of the world-and-language refactor)
+# ---------------------------------------------------------------------------------------------
+
+
+def test_inflected_function_words(tmp_path, common_english):
+    """An inflect entry can name function words by gloss: the auxiliaries of a corpus whose
+    tense is an affix. Each named function word gets a form that takes the entry's affixes, its
+    inflected forms are made and labeled ``FUNCWORD.<n>.AFFIX.<m>``, and the content words and
+    the assignment are the same as without the entry."""
+    plain = request_data()
+    inflected = request_data()
+    inflected["inflect"] = inflected["inflect"] + [
+        {"function_words": ["is", "can"], "affixes": ["PAST"]}
+    ]
+    runs = {}
+    for name, data in (("plain", plain), ("inflected", inflected)):
+        path = write_request(tmp_path, data, f"{name}.yaml")
+        runs[name] = run_forms(
+            request_config(tmp_path, path, assignment=mode_settings("arbitrary"))
+        )
+    one, two = runs["plain"], runs["inflected"]
+    # the content words and the assignment do not change
+    assert one.assignment.frame().equals(two.assignment.frame())
+    for kind in ("content", "marked"):
+        mine = _records(w for w in one.lexicon.words if w.kind == kind)
+        assert mine == _records(w for w in two.lexicon.words if w.kind == kind), kind
+    # the inflected forms of the function words, after the function words, each with its stem
+    # and its affix, and the forms of the named function words take the affix
+    function = {w.gloss: w for w in two.lexicon.words if w.kind == "function"}
+    affix = next(a for a in two.lexicon.affixes if a.gloss == "PAST")
+    made = [
+        w for w in two.lexicon.words if w.kind == "inflected" and w.stem.startswith("FUNCWORD.")
+    ]
+    assert {w.stem for w in made} == {function["is"].label, function["can"].label}
+    for form in made:
+        assert form.label == f"{form.stem}.{affix.label}" and form.affix == affix.label
+        stem = next(w for w in two.lexicon.words if w.label == form.stem)
+        joined = repair_join(common_english, stem.phones, affix, True)
+        assert joined is not None and form.phones == joined[0]
+        assert not common_english.is_common_pronunciation(form.phones)
+    labels = [w.label for w in two.lexicon.words]
+    first_function = min(i for i, w in enumerate(two.lexicon.words) if w.kind == "function")
+    assert all(labels.index(w.label) > first_function for w in made)
+    # no inflected function word without the entry, and the report counts the forms
+    assert not any(
+        w.kind == "inflected" and w.stem.startswith("FUNCWORD.") for w in one.lexicon.words
+    )
+    assert (
+        two.lexicon.closed_class["inflected"]["made"]
+        == one.lexicon.closed_class["inflected"]["made"] + 2
+    )
+    # the resolved configuration keeps the entry
+    entry = next(e for e in two.config.closed_class.inflect if e.function_words is not None)
+    assert entry.resolved() == {"function_words": ["is", "can"], "affixes": ["PAST"]}
+    # a gloss that the request lacks, or an entry naming two kinds, is an error naming the field
+    for bad, field in (
+        ({"function_words": ["the", "whom"], "affixes": ["PAST"]}, "inflect[2].function_words"),
+        ({"function_words": ["is"], "lexemes": ["L.1"], "affixes": ["PAST"]}, "inflect[2]"),
+    ):
+        data = request_data()
+        data["inflect"] = data["inflect"] + [bad]
+        path = write_request(tmp_path, data, "bad.yaml")
+        with pytest.raises(ConfigError, match=re.escape(field)):
+            request_config(tmp_path, path, assignment=mode_settings("arbitrary"))

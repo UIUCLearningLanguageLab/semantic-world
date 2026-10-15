@@ -159,17 +159,34 @@ def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
             if "-" in token:
                 label, gloss = token.split("-")
                 found.setdefault(gloss, set()).add(label)
-    assert [entry["affixes"] for entry in request["inflect"]] == [
-        [gloss] for gloss in ("PLURAL", "PAST", "COMPARATIVE") if gloss in found
-    ]
+    # one entry per affix for the content lexemes, and one for the function words that carry
+    # it (the tense affix on an auxiliary, stage b3b)
+    content = {x.label for x in lexicon.content_lexemes}
+    expected_entries = []
+    for gloss in ("PLURAL", "PAST", "COMPARATIVE"):
+        if gloss in found and found[gloss] & content:
+            expected_entries.append(("lexemes", gloss))
+        if gloss in found and found[gloss] - content:
+            expected_entries.append(("function_words", gloss))
+    assert [
+        ("lexemes" if "lexemes" in entry else "function_words", entry["affixes"][0])
+        for entry in request["inflect"]
+    ] == expected_entries
     assert "COMPARATIVE" in found  # the corpus states comparatives
+    assert ("function_words", "PAST") in expected_entries  # the auxiliaries of timed sentences
 
     pos = {x.label: x.pos for x in lexicon.lexemes}
+    gloss_of = {x.label: x.gloss for x in lexicon.lexemes}
     for entry in request["inflect"]:
         (gloss,) = entry["affixes"]
-        assert set(entry["lexemes"]) == found[gloss]
-        assert entry["lexemes"] == sorted(entry["lexemes"], key=lambda x: int(x.split(".")[1]))
-        assert all(gloss in request["takes"][pos[label]] for label in entry["lexemes"])
+        if "lexemes" in entry:
+            assert set(entry["lexemes"]) == found[gloss] & content
+            assert entry["lexemes"] == sorted(entry["lexemes"], key=lambda x: int(x.split(".")[1]))
+            assert all(gloss in request["takes"][pos[label]] for label in entry["lexemes"])
+        else:
+            assert set(entry["function_words"]) == {gloss_of[x] for x in found[gloss] - content}
+            order = {word: rank for rank, word in enumerate(request["function_words"])}
+            assert entry["function_words"] == sorted(entry["function_words"], key=order.get)
     # the meanings: the taxonomy's categories_generative.csv with the labels of the world,
     # beside the request
     assert request["meanings"] == MEANINGS_FILE
@@ -183,7 +200,12 @@ def test_the_request_of_a_language_without_inflection(chains) -> None:
     request = yaml.safe_load(before[REQUEST_FILE])
     assert request["takes"] == {"adjective": ["COMPARATIVE"]}
     assert request["affixes"] == [{"gloss": "COMPARATIVE", "position": "suffix"}]
-    poles = {x.label for x in corpus.planner.lexicon.lexemes if x.concept.startswith("SCALARDIM.")}
+    # the poles of the scalars and of the numeric fluents (stage b3b) take the comparative
+    poles = {
+        x.label
+        for x in corpus.planner.lexicon.lexemes
+        if x.concept.startswith("SCALARDIM.") or x.concept.startswith("NUMFL.")
+    }
     for entry in request["inflect"]:
         assert entry["affixes"] == ["COMPARATIVE"] and set(entry["lexemes"]) <= poles
     assert len(request["function_words"]) == len(FUNCTION_WORDS)
@@ -310,15 +332,30 @@ def test_generate_make_word_forms_and_render(chains, name, mode, sections) -> No
     assert summary["mode"] == mode and summary["lexemes"]["count"] == len(by_lexeme)
     if mode == "target_correlation":
         assert summary["target_correlation"]["reached"]
-    # only the inflections that the corpus uses are made
+    # only the inflections that the corpus uses are made: those of the lexemes, and (stage b3b)
+    # those of the function words that carry the tense affix
     affix = {row["gloss"]: row["label"] for row in pl.read_csv(forms / "affixes.csv").iter_rows(named=True)}  # fmt: skip
-    wanted = {
-        f"{form_of[label]}.{affix[gloss]}"
-        for entry in request["inflect"]
-        for label in entry["lexemes"]
-        for gloss in entry["affixes"]
-    }
+    function_label = {row["gloss"]: row["label"] for row in function}
+    wanted = set()
+    for entry in request["inflect"]:
+        stems = (
+            [form_of[label] for label in entry["lexemes"]]
+            if "lexemes" in entry
+            else [function_label[gloss] for gloss in entry["function_words"]]
+        )
+        wanted |= {f"{stem}.{affix[gloss]}" for stem in stems for gloss in entry["affixes"]}
     assert {label for label, row in words.items() if row["kind"] == "inflected"} == wanted
+    tense = corpus.config.grammar.morphology.tense
+    if tense.enabled and tense.realization == "affix":
+        # the auxiliaries of the timed sentences carry the past as an affix (stage b3b)
+        inflected_function = [
+            row
+            for row in words.values()
+            if row["kind"] == "inflected" and row["stem"].startswith("FUNCWORD.")
+        ]
+        assert inflected_function and all(
+            row["affix"] == affix["PAST"] for row in inflected_function
+        )
     # the comparative affix is on by default (stage b3a), so the pole adjectives the corpus
     # compares with are inflected even without number, tense, or aspect
     assert wanted

@@ -10,7 +10,9 @@ A false proposition is made from a true one by one minimal change:
   requirement does not hold;
 - **polarity** (causal statements only): the opposite value of the effect or the literal;
 - **event** (causal statements only): another event type, or category at the same level, that
-  lacks the effect or the literal.
+  lacks the effect or the literal;
+- **condition** (conditional effect statements only, stage b3b): the statement without its
+  condition, which the definition does not guarantee.
 
 Every false item is checked false by the same truth tests that ground the true propositions. A
 false item is never vacuous: its subject set has at least one instance.
@@ -36,10 +38,15 @@ kinds of item have test sets of their own:
   (``blocked``), or its binding is not able (``impossible``);
 - ``state_<change>_changed`` and ``state_<change>_unchanged``. A state item continues a
   situational narrative and states a fluent of one of its participants at the scene's final time
-  point. Each item is marked ``changed`` when the fluent's value at the final time point differs
-  from its value at ``TIME.1``; a pair whose true item or false item changed goes into the
-  ``_changed`` set, because only tracking what the events did can answer it, and a pair with
+  point, or (stage b3b) a numeric pole of one, ``HOLDS(SCENE.8, TIME.6, PAST, ABOVE(NUMFL.1,
+  REF.1, RANGE, 0.75))``. Each item is marked ``changed`` when the fluent's value at the final
+  time point differs from its value at ``TIME.1`` (for a numeric pole, when the pole holds at
+  one time point and not at the other); a pair whose true item or false item changed goes into
+  the ``_changed`` set, because only tracking what the events did can answer it, and a pair with
   neither into ``_unchanged``;
+- ``state_comparison_role`` (stage b3b). A numeric comparative between two participants of a
+  situational narrative at the scene's final time point, ``HOLDS(SCENE.8, TIME.6, PAST,
+  GREATER(NUMFL.1, REF.1, REF.2))``; the false item swaps the two participants;
 - ``able_now_<change>_blocked`` and ``able_now_<change>_impossible``. An ``able_now`` item
   continues a situational narrative and says that a participant could do something at the
   scene's final time point. A false item's binding is able and not legal then (``blocked``), or
@@ -53,7 +60,13 @@ kinds of item have test sets of their own:
   (another fluent), a polarity swap (the opposite value), an event swap (another event type, or
   category at the same level), and a role swap (the other role, for two-place event types). The
   polarity swap has no ``_lawlike`` twin: the true effect or literal guarantees the opposite
-  value, so a polarity swap is never observed. The causal sets are not drawn: every true causal
+  value, so a polarity swap is never observed. Since stage b3b the effect sets hold the numeric
+  effect statements too (``RAISES`` and ``LOWERS``, whose predicate swap is another numeric
+  fluent and whose polarity swap is the other direction; a numeric statement is observed when
+  every event of its type recorded a change of the fluent in its direction) and the
+  conditional statements, with one more change, ``condition``: the statement without its
+  condition, which goes into the ``_lawlike`` twin when it held after every event of the type
+  in the scenes. The causal sets are not drawn: every true causal
   statement of the world is paired with every valid false item of the set's change, and a set
   with more than ``test_sets.size`` pairs keeps a uniform draw of them. Both items of a pair
   record the true statement they test (``statement``: its propositional rendering), so that an
@@ -105,7 +118,12 @@ import numpy as np
 
 from semantic_world.corpus.errors import CorpusError
 from semantic_world.corpus.facts import Facts
-from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
+from semantic_world.corpus.grammar import (
+    NounPhrase,
+    Predication,
+    SentencePlan,
+    realizable_condition,
+)
 from semantic_world.corpus.histories import (
     SceneEvent,
     is_event_label,
@@ -121,6 +139,7 @@ from semantic_world.corpus.mentions import (
     clause_propositions,
     comparative_label,
     plan_for,
+    timed_predication,
 )
 from semantic_world.corpus.planner import (
     COMPARISON_KIND,
@@ -134,7 +153,6 @@ from semantic_world.corpus.propositions import (
     ABLE_NOW,
     AGENT,
     CAN,
-    CHANGE,
     CLASS,
     COMPARATIVE,
     COMPARISON,
@@ -146,6 +164,7 @@ from semantic_world.corpus.propositions import (
     INSTANCE,
     IS,
     LOW,
+    LOWERS,
     MEMBER,
     MOST,
     NEC_KINDS,
@@ -155,6 +174,7 @@ from semantic_world.corpus.propositions import (
     PROGRESSIVE,
     PROJECTION,
     QUANTIFIERS,
+    RAISES,
     SIMPLE,
     SOME,
     STATE,
@@ -172,6 +192,7 @@ from semantic_world.corpus.realize import as_json
 from semantic_world.corpus.renderings import TIMED_OPERATORS, propositional
 from semantic_world.corpus.world import PROPERTY_PREFIX
 from semantic_world.world.history import History
+from semantic_world.world.runtime import RANGE
 
 PREDICATE = "predicate"
 SUBJECT = "subject"
@@ -180,7 +201,10 @@ ROLE = "role"
 POLARITY = "polarity"
 EVENT_SWAP = "event"
 """The event swap of the causal sets (``test_sets.changes`` writes it ``event``)."""
-CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE)
+CONDITION = "condition"
+"""The condition change of the conditional effect statements (stage b3b): the condition
+dropped."""
+CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE, CONDITION)
 
 LAWLIKE = "lawlike"
 POSSIBLE = "possible"
@@ -198,12 +222,17 @@ _CAUSAL_KIND = {CAUSAL_EFFECT: EFFECT, CAUSAL_PRECONDITION: PRECONDITION}
 INSTANCE_COMPARISON = "instance_comparison"
 """The "level" of the instance comparison sets (stage b3a): their items are instance-level
 comparatives between two referents of a narrative document."""
+STATE_COMPARISON = "state_comparison"
+"""The "level" of the set ``state_comparison_role`` (stage b3b): its items are numeric
+comparatives between two participants of a situational narrative at the scene's final time
+point, state-level propositions."""
 ITEM_LEVELS = (
     CLASS,
     INSTANCE,
     INSTANCE_COMPARISON,
     EVENT,
     STATE,
+    STATE_COMPARISON,
     ABLE_NOW,
     CAUSAL_EFFECT,
     CAUSAL_PRECONDITION,
@@ -229,14 +258,16 @@ LEVEL_CHANGES = {
     INSTANCE_COMPARISON: (PREDICATE, ROLE),
     EVENT: (PREDICATE, SUBJECT, ROLE),
     STATE: (PREDICATE, SUBJECT),
+    STATE_COMPARISON: (ROLE,),
     ABLE_NOW: (PREDICATE, SUBJECT),
-    CAUSAL_EFFECT: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
+    CAUSAL_EFFECT: (PREDICATE, POLARITY, EVENT_SWAP, ROLE, CONDITION),
     CAUSAL_PRECONDITION: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
 }
 """The changes that can apply at each level: only a class-level proposition has a quantifier,
 the state and ``able_now`` sets take a predicate swap and a subject swap, the instance
-comparison sets a predicate swap (the scalar) and a role swap (the arguments), and the causal
-sets the predicate, polarity, event, and role swaps."""
+comparison sets a predicate swap (the scalar) and a role swap (the arguments), the state
+comparison set a role swap, and the causal sets the predicate, polarity, event, and role swaps,
+with the condition change for the effect statements."""
 
 INPUT_FIELDS = (
     "document",
@@ -294,14 +325,20 @@ def candidates(
             # is kept
             return with_predicate(facts.verbs if predicate.kind == VERB else facts.features[CAN])
         if predicate.kind == STATE_KIND:
+            if predicate.numeric:
+                return with_predicate(facts.numeric_fluents)  # another numeric fluent
             return with_predicate(facts.fluents)
         if predicate.kind in FEATURE_KINDS:
             return with_predicate(facts.features[predicate.kind])
         if predicate.kind == PROJECTION:
             return with_predicate(facts.projections)
         if predicate.kind == COMPARISON:
+            if predicate.numeric:
+                return with_predicate(facts.numeric_poles)  # another numeric pole
             return with_predicate(facts.poles)
         if predicate.kind == COMPARATIVE:
+            if predicate.numeric:
+                return with_predicate(facts.numeric_fluents)
             return with_predicate(facts.scalars)  # another scalar dimension
         if predicate.kind == VERB:
             return with_predicate(facts.verbs)
@@ -351,21 +388,32 @@ def candidates(
 
 
 def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
-    """The candidates of a causal statement: another base fluent with a word (``predicate``),
-    the opposite value (``polarity``), another event type or category at the same level with a
-    word (``event``), or the other role of a two-place event type (``role``)."""
+    """The candidates of a causal statement: another base fluent with a word (``predicate``; for
+    a numeric statement, another numeric fluent with words), the opposite value or, for a
+    numeric statement, the other direction (``polarity``), another event type or category at
+    the same level with a word (``event``), the other role of a two-place event type
+    (``role``), or the statement without its condition (``condition``, stage b3b)."""
     subject, predicate = proposition.subject, proposition.predicate
     assert isinstance(subject, EventTerm)
     world = facts.world
     if change == PREDICATE:
+        fluents = facts.numeric_fluents if predicate.numeric else facts.base_fluents
         return [
             dataclasses.replace(proposition, predicate=dataclasses.replace(predicate, label=f))
-            for f in facts.base_fluents
+            for f in fluents
             if f != predicate.label
         ]
     if change == POLARITY:
-        flipped = dataclasses.replace(predicate, value=not predicate.value)
+        if predicate.direction is not None:
+            other = LOWERS if predicate.direction == RAISES else RAISES
+            flipped = dataclasses.replace(predicate, direction=other)
+        else:
+            flipped = dataclasses.replace(predicate, value=not predicate.value)
         return [dataclasses.replace(proposition, predicate=flipped)]
+    if change == CONDITION:
+        if not subject.condition:
+            return []
+        return [dataclasses.replace(proposition, subject=subject.unconditional)]
     if change == EVENT_SWAP:
         info = world.event_types[subject.event_type]
         return [
@@ -379,7 +427,10 @@ def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> l
         if world.event_types[subject.event_type].arity < 2:
             return []
         other = PATIENT if subject.role == AGENT else AGENT
-        return [dataclasses.replace(proposition, subject=dataclasses.replace(subject, role=other))]
+        swapped = dataclasses.replace(subject, role=other)
+        if not realizable_condition(swapped):
+            return []  # the condition has no place in a statement about the other role
+        return [dataclasses.replace(proposition, subject=swapped)]
     return []
 
 
@@ -434,6 +485,8 @@ def changes_for(proposition: Proposition) -> tuple[str, ...]:
         changes = [PREDICATE, POLARITY, EVENT_SWAP]
         if not proposition.subject.event_type.startswith("EVENTTYPE1."):
             changes.append(ROLE)
+        if proposition.subject.condition:
+            changes.append(CONDITION)
         return tuple(changes)
     if proposition.predicate.kind == COMPARATIVE:
         return (PREDICATE, ROLE)
@@ -572,10 +625,14 @@ _FREE_TEXT = ("formal", "conceptual", "propositional", "text")
 their notation follows from those fields."""
 _OPTIONAL = "clauses"
 """The field that the logical form leaves out when it is empty."""
-_OPTIONAL_KEYS = (_OPTIONAL, "z")
+_OPTIONAL_KEYS = (_OPTIONAL, "z", "condition")
 """The fields that a logical form holds only when there is something to hold: the relative
-clauses of a term or a mention, and the threshold ``z`` of a form with a pole adjective (a
-mention's modifier can be a pole in one item of a pair and not in the other)."""
+clauses of a term or a mention, the threshold ``z`` of a form with a pole adjective (a
+mention's modifier can be a pole in one item of a pair and not in the other), and the
+``condition`` of a conditional causal statement (stage b3b), which the condition change drops."""
+_CONDITION_LABEL = ".condition[].label"
+"""The label of a condition literal, a static feature or a Boolean fluent by the world's design:
+the literals of one condition are not in one notation."""
 _INDICES = re.compile(r"\d+(\.\d+)*")
 _EVENT_LABEL = re.compile(r"\bSCENE\.\d+\.EVENTINSTANCE\.\d+\b")
 _SCENE_LABEL = re.compile(r"SCENE\.\d+")
@@ -634,7 +691,7 @@ def format_differences(a: Any, b: Any, path: str = "input") -> list[str]:
                 if (x is None) != (y is None):
                     found.append(f"{path}: {x!r} and {y!r} are not of one type")
         return found
-    if isinstance(a, str) and notation(a) != notation(b):
+    if isinstance(a, str) and notation(a) != notation(b) and not path.endswith(_CONDITION_LABEL):
         return [f"{path}: {a!r} and {b!r} are not in one notation"]
     return []
 
@@ -757,7 +814,8 @@ def _kinds(level: str, change: str) -> tuple[str, ...]:
     if level == ABLE_NOW:
         return (BLOCKED, IMPOSSIBLE)
     if level in CAUSAL_LEVELS:
-        # a polarity swap is never observed: the true entry guarantees the opposite value
+        # a polarity swap is never observed: the true entry guarantees the opposite value (for
+        # a numeric statement, the event's own recorded change has the effect's sign)
         return (_ORDINARY,) if change == POLARITY else (_ORDINARY, LAWLIKE)
     return (_ORDINARY,)
 
@@ -852,6 +910,7 @@ class TestSetBuilder:
             INSTANCE_COMPARISON: self._draw_instance_comparison,
             EVENT: self._draw_event,
             STATE: self._draw_state,
+            STATE_COMPARISON: self._draw_state_comparison,
             ABLE_NOW: self._draw_able_now,
         }
         idle = 0
@@ -955,7 +1014,7 @@ class TestSetBuilder:
             return LAWLIKE if law_like(self.truth, false) else _ORDINARY
         if level in CAUSAL_LEVELS:
             return LAWLIKE if self.truth.observed(false) else _ORDINARY
-        if level in (INSTANCE, INSTANCE_COMPARISON):
+        if level in (INSTANCE, INSTANCE_COMPARISON, STATE_COMPARISON):
             return _ORDINARY
         assert document is not None and false.grounding is not None
         if level == STATE:
@@ -1044,30 +1103,50 @@ class TestSetBuilder:
     def _draw_state(
         self, rng: np.random.Generator, change: str, aspects: np.random.Generator
     ) -> tuple[Document, Proposition, bool] | None:
-        """A fluent with a word that holds of a participant of a situational narrative at the
-        scene's final time point."""
-        if not self.situational or not self.facts.fluents:
+        """A fluent with a word, or a numeric pole with words (stage b3b), that holds of a
+        participant of a situational narrative at the scene's final time point."""
+        predicates = [Predicate(STATE_KIND, f) for f in self.facts.fluents]
+        predicates += self.facts.numeric_pole_predicates()
+        if not self.situational or not predicates:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]
         scene = document.scenes[0]
         referents = tuple(document.referents.values())
         instance = referents[int(rng.integers(len(referents)))]
         final = time_index(scene.final)
-        fluents = self.facts.fluents
-        fluent = fluents[int(rng.integers(len(fluents)))]
-        if not self.truth.fluent_value(scene.label, final, instance, fluent):
+        predicate = predicates[int(rng.integers(len(predicates)))]
+        if not self.truth.predicate_holds(scene.label, final, instance, predicate):
             return None
         proposition = self.truth.grounded(
             Proposition(
                 STATE,
                 instance,
-                Predicate(STATE_KIND, fluent),
+                predicate,
                 scene=scene.label,
                 time=scene.final,
                 tense=self._tense,
             )
         )
         return None if proposition is None else (document, proposition, False)
+
+    def _draw_state_comparison(
+        self, rng: np.random.Generator, change: str, aspects: np.random.Generator
+    ) -> tuple[Document, Proposition, bool] | None:
+        """A true numeric comparative between two participants of a situational narrative at the
+        scene's final time point (stage b3b): the document, the two referents, and the numeric
+        fluent are drawn uniformly, and the comparison is oriented so that it is true."""
+        if not self.situational or not self.facts.numeric_fluents:
+            return None
+        document = self.situational[int(rng.integers(len(self.situational)))]
+        scene = document.scenes[0]
+        referents = tuple(document.referents.values())
+        if len(referents) < 2:
+            return None
+        first, second = (referents[int(i)] for i in rng.choice(len(referents), 2, replace=False))
+        fluents = self.facts.numeric_fluents
+        fluent = fluents[int(rng.integers(len(fluents)))]
+        fact = self.facts.instance_comparison_at(first, second, fluent, scene.label, scene.final)
+        return None if fact is None else (document, fact, False)
 
     def _draw_able_now(
         self, rng: np.random.Generator, change: str, aspects: np.random.Generator
@@ -1127,6 +1206,12 @@ class TestSetBuilder:
         takes the bare plural when the language has no word for its quantifier."""
         items = []
         changed_item = None
+        low = False
+        if true.predicate.kind == COMPARATIVE:
+            # the word of a comparative item, "bigger" or "smaller", drawn half and half from
+            # the pair's part of the tests stream, the same for both items (Jon's ruling 3 on
+            # stage b3a)
+            low = bool(self.streams.substream("tests", f"{name}.{number}:word").random() < 0.5)
         if level == STATE:
             assert true.grounding is not None and false.grounding is not None
             marks = (true.grounding["changed"], false.grounding["changed"])
@@ -1142,7 +1227,7 @@ class TestSetBuilder:
                 is_bare = not sayable or (bare and self.truth.bare_plural_expresses(proposition))
             else:
                 is_bare = proposition.level == CLASS
-            record = self._input(name, number, document, proposition, is_bare)
+            record = self._input(name, number, document, proposition, is_bare, low)
             if record is None:
                 return None
             assert proposition.grounding is not None
@@ -1203,15 +1288,17 @@ class TestSetBuilder:
         document: Document | None,
         proposition: Proposition,
         bare: bool = False,
+        low: bool = False,
     ) -> dict[str, Any] | None:
         """The model-facing fields of an item: its sentence, said as a continuation of its
-        document. None when a referent has no noun."""
+        document. ``low`` says a comparative with the low pole's word. None when a referent has
+        no noun."""
         planner = self.planner
         predicate = proposition.predicate
         referents: dict[str, str] = {}
         mentions: Mentions | None = None
         if document is None:
-            plan = plan_for(self.facts, proposition, bare=bare)
+            plan = plan_for(self.facts, proposition, bare=bare, low=low)
         else:
             referents = {instance: label for label, instance in document.referents.items()}
             cast = tuple(dict.fromkeys(p for scene in document.scenes for p in scene.participants))
@@ -1235,7 +1322,7 @@ class TestSetBuilder:
             else:
                 subject = phrase(
                     proposition.subject,
-                    noun=predicate.comparison,
+                    noun=predicate.comparison if predicate.comparison != RANGE else None,
                     exclude=predicate.label if predicate.kind == MEMBER else None,
                     avoid=avoid,
                 )
@@ -1246,6 +1333,9 @@ class TestSetBuilder:
                 target = phrase(str(predicate.patient), avoid=avoid)
             if subject.pronoun or (target is not None and target.pronoun):
                 return None  # no noun can name the referent, and "it" would not pick it out
+            if predicate.kind == COMPARATIVE and low:
+                # "smaller than": the lesser argument is the subject
+                subject, target = target, subject
             if proposition.level == EVENT:
                 assert proposition.scene is not None
                 said = Predication(
@@ -1257,20 +1347,22 @@ class TestSetBuilder:
                     proposition.tense,
                     proposition.aspect,
                 )
-            elif proposition.timed:
-                assert proposition.scene is not None and proposition.time is not None
-                said = Predication(
-                    predicate.kind,
-                    predicate.label,
-                    proposition.polarity,
-                    target,
-                    tense=proposition.tense,
-                    time=time_key(proposition.scene, proposition.time),
-                    become=proposition.level == CHANGE,
-                )
             elif predicate.kind == COMPARATIVE:
-                # the high pole's word, with the greater argument as the subject
-                said = Predication(COMPARATIVE, comparative_label(predicate.label), True, target)
+                # the drawn pole's word; with the low pole's, the lesser argument is the subject
+                time = None
+                if proposition.timed:
+                    assert proposition.scene is not None and proposition.time is not None
+                    time = time_key(proposition.scene, proposition.time)
+                said = Predication(
+                    COMPARATIVE,
+                    comparative_label(predicate.label, low),
+                    True,
+                    target,
+                    tense=proposition.tense if time else None,
+                    time=time,
+                )
+            elif proposition.timed:
+                said = timed_predication(proposition, target)
             else:
                 said = Predication(predicate.kind, predicate.label, proposition.polarity, target)
             plan = SentencePlan(subject, said)
@@ -1278,7 +1370,7 @@ class TestSetBuilder:
             raise CorpusError(f"the plan of a test item of {name} says another proposition")
         grammar_rng = self.streams.substream("grammar", f"tests:{name}.{number}")
         sentence = planner.realizer.realize(plan, grammar_rng)
-        form = logical_form(plan, proposition, referents, self.config.scalar_z)
+        form = logical_form(plan, proposition, referents, self.config.scalar_z, planner.truth.cuts)
 
         for key in ("id", "grounding", "rule", "causal"):
             form.pop(key, None)

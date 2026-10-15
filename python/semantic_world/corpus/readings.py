@@ -8,7 +8,9 @@ one of three kinds of logical form, one for each level:
   penguin can swim");
 - ``event``: an event-level sentence, about what happened ("the penguin swam");
 - ``state``: a sentence about a fluent at a time point ("the mouse was asleep", "the mouse
-  became asleep"): the predicate word is a state adjective, or ``become`` stands before it;
+  became asleep"): the predicate word is a state adjective or a numeric adjective (stage b3b:
+  "the owl was hungry", "became hungrier", "was hungrier than the mouse"), or ``become`` stands
+  before it;
 - ``able_now``: what a participant could do at a time point ("the owl could not eat the
   mouse"). With ``lexicon.can_words: shared``, "can" expresses ``ABLE`` and ``ABLE_NOW`` alike,
   so a sentence about an instance with "can" has both the ``capacity`` and the ``able_now``
@@ -58,6 +60,7 @@ from semantic_world.corpus.realize import Tree, token_parts
 from semantic_world.corpus.world import (
     CATEGORY_PREFIX,
     FLUENT_PREFIX,
+    NUMERIC_PREFIX,
     PROPERTY_PREFIX,
     SCALAR_PREFIX,
 )
@@ -247,7 +250,11 @@ class _Reader:
             adjective = self.child(node, "A")
             if adjective is not None:
                 concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
-                if concept.startswith(FLUENT_PREFIX) or auxiliary_gloss == "become":
+                if (
+                    concept.startswith(FLUENT_PREFIX)
+                    or concept.startswith(NUMERIC_PREFIX)
+                    or auxiliary_gloss == "become"
+                ):
                     return {STATE}
                 if in_clause and negated and concept.startswith(PROPERTY_PREFIX):
                     # "that is not red" restricts its noun phrase, at any level

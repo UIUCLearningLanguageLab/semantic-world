@@ -63,6 +63,9 @@ PROPERTY_PREFIX = "PROPERTY."
 PART_PREFIX = "PART."
 CATEGORY_PREFIX = "CATEGORY."
 FLUENT_PREFIX = "BOOLFL."
+NUMERIC_PREFIX = "NUMFL."
+"""The prefix of a numeric fluent's label (stage b3b): the dimension of a numeric pole
+(``NUMFL.1.HIGH``), of a numeric comparative, and of a numeric change or effect statement."""
 SCALAR_POLES = ("HIGH", "LOW")
 
 PROPERTY_KIND = "property"
@@ -333,7 +336,16 @@ class World:
         self.base_fluents: tuple[str, ...] = tuple(self.definition.base_fluents)
         self.derived_fluents: tuple[str, ...] = tuple(self.definition.derived_fluents)
         self.fluents: tuple[str, ...] = self.base_fluents + self.derived_fluents
-        """Every fluent, base then derived: the concepts of the state adjectives."""
+        """Every Boolean fluent, base then derived: the concepts of the state adjectives."""
+        self.numeric_fluents: tuple[str, ...] = tuple(self.definition.numeric_fluents)
+        """The numeric fluents (stage b3b): each gives two absolute adjectives, its high and low
+        poles, judged against the ends of its range."""
+        self.numeric_ranges: dict[str, tuple[float, float]] = {
+            f: tuple(self.definition.numeric_ranges[f]) for f in self.numeric_fluents
+        }
+        self.numeric_poles: tuple[str, ...] = tuple(
+            f"{fluent}.{pole}" for fluent in self.numeric_fluents for pole in SCALAR_POLES
+        )
         self._rules = statics.rules
         self._rules_by_output = {r.output.label: r for r in statics.rules.rules}
         self._free_index = {f.label: i for i, f in enumerate(features.free)}
@@ -356,12 +368,22 @@ class World:
         return self.scalar_values[:, self.scalars.index(scalar)]
 
     def is_pole(self, label: str) -> bool:
+        """Whether a label is a pole of a scalar dimension (a relative adjective)."""
         scalar, _, side = label.rpartition(".")
         return side in SCALAR_POLES and scalar in self.scalars
+
+    def is_numeric_pole(self, label: str) -> bool:
+        """Whether a label is a pole of a numeric fluent (an absolute adjective, stage b3b)."""
+        fluent, _, side = label.rpartition(".")
+        return side in SCALAR_POLES and fluent in self.numeric_fluents
 
     def pole_parts(self, pole: str) -> tuple[str, str]:
         scalar, _, side = pole.rpartition(".")
         return scalar, side
+
+    def numeric_column(self, state: Any, fluent: str) -> np.ndarray:
+        """A numeric fluent's values over every instance in a runtime state."""
+        return state.numeric[:, self.definition.numeric_index(fluent)]
 
     # Event types -----------------------------------------------------------------------------
 
@@ -570,6 +592,7 @@ __all__ = [
     "EXACT",
     "FEATURE_KINDS",
     "LOCAL",
+    "NUMERIC_PREFIX",
     "PART_KIND",
     "PROPERTY_KIND",
     "THING",

@@ -40,6 +40,8 @@ from semantic_world.corpus.propositions import (
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EVENT,
     INSTANCE,
     STATE,
@@ -111,9 +113,27 @@ def test_state_and_change_sentences_are_true_of_their_history(cases, runs, name)
         # the JSON form: the level, the scene, the time point, the tense, and no aspect
         assert form["level"] == proposition.level and form["time"] == proposition.time
         assert form["tense"] == "past" and "aspect" not in form and "event" not in form
-        if proposition.level in (STATE, CHANGE):
-            assert form["predicate"] == {"kind": STATE_KIND, "label": proposition.predicate.label}
-            assert proposition.predicate.label.startswith("BOOLFL.")
+        predicate = proposition.predicate
+        if proposition.level in (STATE, CHANGE) and not predicate.numeric:
+            assert form["predicate"] == {"kind": STATE_KIND, "label": predicate.label}
+            assert predicate.label.startswith("BOOLFL.")
+        elif proposition.level == CHANGE:
+            # a numeric change (stage b3b): the fluent and its direction
+            assert form["predicate"] == {
+                "kind": STATE_KIND,
+                "label": predicate.label,
+                "direction": predicate.direction,
+            }
+            assert predicate.label.startswith("NUMFL.") and predicate.direction in (
+                "increase",
+                "decrease",
+            )
+        elif proposition.level == STATE and predicate.kind == COMPARISON:
+            # a numeric pole at a time point, against the range at the language's cut
+            assert form["predicate"]["class"] == "RANGE"
+            assert form["predicate"]["cut"] == corpus.planner.truth.cut(predicate.label)
+        elif proposition.level == STATE:
+            assert predicate.kind == COMPARATIVE and predicate.label.startswith("NUMFL.")
         else:
             assert form["predicate"]["kind"] in (CAN, VERB)
         counts[proposition.level] += 1
@@ -138,15 +158,17 @@ def test_result_sentences_state_a_change_the_events_own_effect_made(cases, runs,
             # the change is at the event's step, about a participant of the event
             assert proposition.scene == event.scene and proposition.time == f"TIME.{event.step}"
             assert event.involves(proposition.subject)
-            # and the event's own effect made it: by the history alone
+            # and the event's own effect made it: by the history alone (for a numeric change,
+            # the event's own recorded change has the direction, stage b3b)
             scene = scenes[event.scene]
-            fluent = proposition.predicate.label
-            assert oracle.made_by(scene, event.step, proposition.subject, fluent, event.label)
+            fluent, direction = proposition.predicate.label, proposition.predicate.direction
+            subject = proposition.subject
+            assert oracle.made_by(scene, event.step, subject, fluent, event.label, direction)
             assert oracle.change(sentence.logical_form, scene)
             # the grounding names an event of the step whose own effect made it
             caused_by = proposition.grounding["caused_by"]
             assert caused_by is not None and caused_by.startswith(event.scene + ".EVENTINSTANCE.")
-            assert oracle.made_by(scene, event.step, proposition.subject, fluent, caused_by)
+            assert oracle.made_by(scene, event.step, subject, fluent, caused_by, direction)
             results += 1
             derived += fluent in corpus.planner.world.derived_fluents
     assert results > 20
@@ -264,7 +286,10 @@ def test_changed_marks_agree_with_the_history(cases, runs, name) -> None:
                 assert document.type == "situational"
                 assert item.proposition.subject in document.referents.values()
                 changed = oracle.changed(
-                    scene, form["subject"]["instance"], form["predicate"]["label"]
+                    scene,
+                    form["subject"]["instance"],
+                    form["predicate"]["label"],
+                    form["predicate"].get("cut"),
                 )
                 assert item.meta["changed"] == changed
                 assert oracle.state(form, scene) == item.meta["truth"]
@@ -471,7 +496,15 @@ def test_the_statistics_count_the_new_sentences(runs) -> None:
     assert states["blocked_negative_share"] == round(negative / sections[BLOCKED], 6)
     levels = stats["sentences"]["by_level"]
     assert set(levels) == {CLASS, INSTANCE, EVENT, STATE, CHANGE, ABLE_NOW}
-    assert levels[STATE] == sections[INITIAL_STATE] and levels[CHANGE] == sections[RESULT]
+    # the state-level sentences: the initial states, and the numeric comparatives at a time
+    # point among the comparative descriptions (stage b3b)
+    numeric_comparatives = sum(
+        s.proposition.level == STATE and s.proposition.predicate.kind == COMPARATIVE
+        for d in corpus.documents
+        for s in d.sentences
+    )
+    assert levels[STATE] == sections[INITIAL_STATE] + numeric_comparatives
+    assert levels[CHANGE] == sections[RESULT]
     assert levels[ABLE_NOW] == sections[BLOCKED]
     assert set(stats["sentences"]["negative_share"]) == {CLASS, INSTANCE, STATE, ABLE_NOW}
     for test_set in corpus.test_sets:
@@ -615,14 +648,16 @@ def test_the_grammar_of_timed_sentences(cases) -> None:
         f"THE {noun} CAN_NOW {verb}",
         ["able_now"],
     )
-    # the tense is marked on the auxiliary when it is a word, and never as an affix
+    # the tense is marked on the auxiliary: as a word beside it, or (stage b3b) as an affix
+    # joined to it
     word = {"grammar": {"morphology": {"tense": {"enabled": True, "realization": "word"}}}}
     assert say(became, **word) == (f"THE {noun} BECOME PAST {fluent}", ["state"])
     assert say(held, **word) == (f"THE {noun} IS PAST {fluent}", ["state"])
     assert say(could, **word) == (f"THE {noun} CAN PAST {verb}", ["able_now"])
     affix = {"grammar": {"morphology": {"tense": {"enabled": True}}}}
-    assert say(became, **affix) == (f"THE {noun} BECOME {fluent}", ["state"])
-    assert say(could, **affix) == (f"THE {noun} CAN {verb}", ["capacity", "able_now"])
+    assert say(became, **affix) == (f"THE {noun} BECOME-PAST {fluent}", ["state"])
+    assert say(held, **affix) == (f"THE {noun} IS-PAST {fluent}", ["state"])
+    assert say(could, **affix) == (f"THE {noun} CAN-PAST {verb}", ["able_now"])
     # the plan's level, and the proposition
     assert SentencePlan(subject, became).level == CHANGE
     assert SentencePlan(subject, held).level == STATE

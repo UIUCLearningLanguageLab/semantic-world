@@ -70,22 +70,27 @@ from semantic_world.corpus.propositions import (
     CLASS,
     COMPARATIVE,
     COMPARISON,
+    EFFECT,
     EVENT,
     HAS,
     HIGH,
     IS,
     LOW,
     MEMBER,
+    PRECONDITION,
     SIMPLE,
+    STATE_KIND,
     VERB,
     CategoryTerm,
     EventTerm,
     Literal,
     Predicate,
     Proposition,
+    direction_pole,
 )
 from semantic_world.corpus.streams import Streams
 from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX
+from semantic_world.world.runtime import RANGE
 
 REFERENT_PREFIX = "REF."
 
@@ -116,14 +121,23 @@ def comparative_label(dimension: str, low: bool = False) -> str:
 
 
 def comparative_plan(
-    greater: NounPhrase, lesser: NounPhrase, dimension: str, low: bool = False
+    greater: NounPhrase,
+    lesser: NounPhrase,
+    dimension: str,
+    low: bool = False,
+    time: str | None = None,
+    tense: str | None = None,
 ) -> SentencePlan:
     """The plan of ``GREATER(dimension, greater, lesser)``: "the greater is bigger than the
     lesser", or with ``low`` "the lesser is smaller than the greater". The language chooses the
-    word; the proposition is the one form (CG.66)."""
+    word; the proposition is the one form (CG.66). A comparative of a numeric fluent (stage b3b)
+    is about a time point of a scene, ``time`` (``SCENE.8.TIME.2``) with the scene's tense."""
     subject, target = (lesser, greater) if low else (greater, lesser)
     return SentencePlan(
-        subject, Predication(COMPARATIVE, comparative_label(dimension, low), True, target)
+        subject,
+        Predication(
+            COMPARATIVE, comparative_label(dimension, low), True, target, tense=tense, time=time
+        ),
     )
 
 
@@ -151,6 +165,11 @@ def plan_for(
         determiner = None if bare or quantifier is None else WORD_OF[quantifier]
         subject = class_phrase(proposition.subject, determiner)
         if proposition.causal:
+            if predicate.direction is not None:
+                # a numeric effect statement (stage b3b): the pole whose comparative form
+                # says the direction, "become hungrier"
+                pole = direction_pole(predicate.label, predicate.direction)
+                return SentencePlan(subject, Predication(EFFECT, pole, True), quantifier)
             # the value of an effect or a precondition is the polarity of its predication
             assert predicate.value is not None
             return SentencePlan(
@@ -173,10 +192,19 @@ def plan_for(
     assert isinstance(proposition.subject, str)
     if predicate.kind == COMPARATIVE:
         assert isinstance(predicate.patient, str)
+        time = None
+        if proposition.timed:
+            assert proposition.scene is not None and proposition.time is not None
+            time = time_key(proposition.scene, proposition.time)
         return comparative_plan(
-            phrase(proposition.subject), phrase(predicate.patient), predicate.label, low
+            phrase(proposition.subject),
+            phrase(predicate.patient),
+            predicate.label,
+            low,
+            time,
+            proposition.tense if proposition.timed else None,
         )
-    noun = predicate.comparison
+    noun = predicate.comparison if predicate.comparison != RANGE else None
     if predicate.kind == MEMBER and predicate.label == leaf_of(facts, proposition.subject):
         # "the penguin is a penguin" says nothing: name the instance by the category above
         path = facts.truth.paths[facts.truth.instance_index[proposition.subject]]
@@ -190,18 +218,7 @@ def plan_for(
     target = None if predicate.patient is None else phrase(str(predicate.patient))
     if proposition.timed:
         assert proposition.scene is not None and proposition.time is not None
-        return SentencePlan(
-            subject,
-            Predication(
-                predicate.kind,
-                predicate.label,
-                proposition.polarity,
-                target,
-                tense=proposition.tense,
-                time=time_key(proposition.scene, proposition.time),
-                become=proposition.level == CHANGE,
-            ),
-        )
+        return SentencePlan(subject, timed_predication(proposition, target))
     if proposition.level != EVENT:
         return SentencePlan(
             subject, Predication(predicate.kind, predicate.label, proposition.polarity, target)
@@ -217,6 +234,26 @@ def plan_for(
             proposition.tense,
             proposition.aspect,
         ),
+    )
+
+
+def timed_predication(proposition: Proposition, target: NounPhrase | None) -> Predication:
+    """The predication of a state, a change, or an ``able_now`` proposition: its predicate at
+    the time point, with ``become`` for a change. A numeric change (stage b3b) is said with the
+    pole adjective whose comparative form states its direction."""
+    predicate = proposition.predicate
+    label = predicate.label
+    if predicate.kind == STATE_KIND and predicate.direction is not None:
+        label = direction_pole(label, predicate.direction)
+    assert proposition.scene is not None and proposition.time is not None
+    return Predication(
+        predicate.kind,
+        label,
+        proposition.polarity,
+        target,
+        tense=proposition.tense,
+        time=time_key(proposition.scene, proposition.time),
+        become=proposition.level == CHANGE,
     )
 
 
@@ -426,7 +463,7 @@ def clause_propositions(plan: SentencePlan) -> list[Proposition]:
             return
         for predication in clause.predications:
             target = predication.object
-            if predication.kind == COMPARISON:
+            if predication.kind in (COMPARISON, PRECONDITION) or predication.bound:
                 continue
             found.append(
                 proposition(
