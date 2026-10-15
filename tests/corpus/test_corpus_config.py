@@ -50,6 +50,7 @@ def test_default_values() -> None:
         "event_category",
         "patient_projection",
         "scalar",
+        "numeric",
     ]
     assert lexicon.named_proportion["patient_projection"] == 0.25
     assert all(v == 1.0 for k, v in lexicon.named_proportion.items() if k != "patient_projection")
@@ -137,6 +138,8 @@ def test_default_values() -> None:
     assert config.propositions.causal_statement_rate == 0.5
     assert config.propositional_descriptions == "marked"
     assert config.test_sets.size == 500
+    assert (config.cut_high, config.cut_low) == (0.75, 0.25)
+    assert config.documents.comparison_partners == "siblings"
     assert config.test_sets.changes == (
         "predicate",
         "subject",
@@ -144,6 +147,7 @@ def test_default_values() -> None:
         "polarity",
         "event",
         "role",
+        "condition",
     )
     assert config.test_sets.seen_descriptions is True
 

@@ -29,6 +29,13 @@ The reading undoes the grammar's fixed choices:
   word ``COMPARATIVE`` beside it) and the standard ``than`` + object, it is a comparative; a
   class-level pole takes its comparison class from the record (``standard``), as a class-level
   sentence takes its quantifier, because the words do not say it;
+- a numeric pole adjective (stage b3b) states a numeric pole at the time point the record gives
+  (the copula), a numeric change (``become`` and the comparative mark), or a numeric comparative
+  at the time point (the comparative mark and ``than``); with a category as the subject and
+  ``become``, it makes a numeric effect statement;
+- in a causal statement, the modifiers of the subject and of the other participant, and the
+  ``before`` predications of their relative clauses, are the condition of a conditional effect
+  statement (stage b3b);
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
 
@@ -82,6 +89,7 @@ from semantic_world.corpus.realize import COMPARATIVE as COMPARATIVE_MARK
 from semantic_world.corpus.realize import NP_LABELS, Tree, preorder, token_parts
 from semantic_world.corpus.world import (
     FLUENT_PREFIX,
+    NUMERIC_PREFIX,
     ONE_PLACE_PREFIX,
     PATIENT_CAPACITY_PREFIX,
     SCALAR_PREFIX,
@@ -225,18 +233,24 @@ class _Reader:
     @staticmethod
     def bound_subject(subject: NounPhrase) -> NounPhrase:
         """The subject of a causal statement, with the verb of its relative clause bound to the
-        event variable: the clause names the events of the verb's event type."""
+        event variable: the clause names the events of the verb's event type. The clause's
+        ``before`` predications stay as they are: the fluent condition of a conditional
+        statement (stage b3b)."""
         clause = subject.clause
-        if subject.kind != CLASS_NP or clause is None or len(clause.predications) != 1:
+        verbs = [] if clause is None else [p for p in clause.predications if p.kind in (CAN, VERB)]
+        if subject.kind != CLASS_NP or clause is None or len(verbs) != 1:
             raise GrammarError(
                 "the subject of a causal statement is a category with a relative clause that "
                 "names the event"
             )
-        bound = dataclasses.replace(
-            clause.predications[0], event=EVENT_VARIABLE, tense=PRESENT, aspect=None
+        predications = tuple(
+            dataclasses.replace(p, event=EVENT_VARIABLE, tense=PRESENT, aspect=None)
+            if p.kind in (CAN, VERB)
+            else p
+            for p in clause.predications
         )
         return dataclasses.replace(
-            subject, clause=dataclasses.replace(clause, predications=(bound,))
+            subject, clause=dataclasses.replace(clause, predications=predications)
         )
 
     def noun_phrase(self, node: Tree) -> NounPhrase:
@@ -343,6 +357,8 @@ class _Reader:
             return Predication(kind, concept, polarity, patient, event, tense, aspect), auxiliary
         if adjective is not None:
             concept = self.concept(adjective)
+            if concept.startswith(NUMERIC_PREFIX):
+                return self.numeric(node, concept, auxiliary, polarity, target, subject_kind)
             if concept.startswith(FLUENT_PREFIX) and subject_kind == CLASS_NP:
                 # a causal statement: an effect with become, a precondition with the copula
                 # and "before"
@@ -398,6 +414,60 @@ class _Reader:
 
         if nominal is None:
             raise GrammarError("a verb phrase has a verb, an adjective, or a predicate noun")
+        return self.nominal(nominal, auxiliary, polarity)
+
+    def numeric(
+        self,
+        node: Tree,
+        concept: str,
+        auxiliary: str | None,
+        polarity: bool,
+        target: Tree | None,
+        subject_kind: str,
+    ) -> tuple[Predication, str | None]:
+        """A numeric pole adjective (stage b3b): an effect statement with a category as the
+        subject, or, at the time point the record gives, a change (``become`` and the
+        comparative form), a comparative (the comparative form and ``than``), or a pole (the
+        copula)."""
+        adjective = self.child(node, "A")
+        assert adjective is not None
+        comparative = COMPARATIVE_MARK in self.marks(adjective)
+        if subject_kind == CLASS_NP:
+            if auxiliary != "become" or not comparative or target is not None:
+                raise GrammarError(
+                    f"the numeric adjective {concept} with a category as the subject makes an "
+                    "effect statement: become with the comparative form"
+                )
+            return Predication(EFFECT, concept, polarity), auxiliary
+        report = self.event[id(node)]
+        if report is None or not is_time_key(report[0]):
+            raise GrammarError(
+                f"the numeric adjective {concept} is about a time point, and no time point was "
+                "given for its verb phrase"
+            )
+        time, tense, _ = report
+        if comparative and target is not None:
+            if auxiliary not in ("is", "are"):
+                raise GrammarError("a numeric comparative takes the copula")
+            patient = self.noun_phrase(target)
+            return (
+                Predication(COMPARATIVE, concept, polarity, patient, tense=tense, time=time),
+                auxiliary,
+            )
+        if comparative:
+            if auxiliary != "become":
+                raise GrammarError("a numeric change is become with the comparative form")
+            return (
+                Predication(STATE_KIND, concept, polarity, tense=tense, time=time, become=True),
+                auxiliary,
+            )
+        if auxiliary not in ("is", "are"):
+            raise GrammarError("a numeric pole is stated with the copula")
+        return Predication(COMPARISON, concept, polarity, tense=tense, time=time), auxiliary
+
+    def nominal(
+        self, nominal: Tree, auxiliary: str | None, polarity: bool
+    ) -> tuple[Predication, str | None]:
         noun = self.child(nominal, "N")
         if noun is None:
             raise GrammarError("a predicate noun phrase has a noun")

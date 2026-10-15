@@ -5,10 +5,12 @@ fluent (base or derived), a one-place event type, a two-place event type or a ca
 a patient capacity, a pole of a scalar dimension, the generic head noun, or a function word. Each
 concept has a concept label: the world's label (``CATEGORY.1.3.2``, ``PROPERTY.12``,
 ``BOOLFL.3``, ``EVENTTYPE2.1.2``, ``CANBE.EVENTTYPE2.1.1``). A scalar pole is its dimension's
-label with ``HIGH`` or ``LOW`` (``SCALARDIM.1.HIGH``). The generic head noun is ``THING``, and a
-function word's concept label is its gloss in capitals (``THE``). A fluent's word is a **state
-adjective** (concept type ``state``), which the lexeme tells from a static adjective: it names a
-fluent, and a static adjective a PROPERTY feature, a patient capacity, or a scalar pole.
+label with ``HIGH`` or ``LOW`` (``SCALARDIM.1.HIGH``), and so is a pole of a numeric fluent
+(``NUMFL.1.HIGH``, an absolute adjective, concept type ``numeric``, stage b3b). The generic head
+noun is ``THING``, and a function word's concept label is its gloss in capitals (``THE``). A
+Boolean fluent's word is a **state adjective** (concept type ``state``), which the lexeme tells
+from a static adjective: it names a fluent, and a static adjective a PROPERTY feature, a patient
+capacity, or a scalar pole.
 
 A **lexeme** is a word of the language, labeled ``LEXEME.<n>``. Every lexeme has exactly one
 concept. By default there is one lexeme per named concept. Two knobs add ambiguity:
@@ -47,6 +49,9 @@ from semantic_world.corpus.world import (
     THING,
     World,
 )
+
+NUMERIC = "numeric"
+"""The concept type of a numeric fluent's two absolute adjectives (stage b3b)."""
 
 NOUN = "noun"
 ADJECTIVE = "adjective"
@@ -278,6 +283,11 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
         for pole in SCALAR_POLES:
             label = f"{scalar}.{pole}"
             concepts.append(Concept(label, "scalar", ADJECTIVE, label))
+    for fluent in world.numeric_fluents:
+        # the two absolute adjectives of a numeric fluent (stage b3b), after the scalar poles
+        for pole in SCALAR_POLES:
+            label = f"{fluent}.{pole}"
+            concepts.append(Concept(label, NUMERIC, ADJECTIVE, label))
     concepts.append(Concept(THING, GENERIC, NOUN, THING))
     return tuple(concepts)
 
@@ -307,14 +317,18 @@ def _named(config: Config, streams: Streams, concepts: tuple[Concept, ...]) -> s
     """The content concepts that get a word. For each concept type, the number of named units is
     the proportion times the number of units, rounded half up, and the units are drawn at random
     from the type's own part of the lexicon stream. A unit is one concept, or the two poles of
-    one scalar dimension."""
+    one scalar dimension or of one numeric fluent."""
     named = {c.label for c in concepts if c.type == GENERIC}
     for concept_type in CONCEPT_TYPES:
         units: dict[str, list[str]] = {}
         for concept in concepts:
             if concept.type != concept_type:
                 continue
-            unit = concept.label.rsplit(".", 1)[0] if concept_type == "scalar" else concept.label
+            unit = (
+                concept.label.rsplit(".", 1)[0]
+                if concept_type in ("scalar", NUMERIC)
+                else concept.label
+            )
             units.setdefault(unit, []).append(concept.label)
         keys = list(units)
         count = _round_half_up(config.lexicon.named_proportion[concept_type] * len(keys))

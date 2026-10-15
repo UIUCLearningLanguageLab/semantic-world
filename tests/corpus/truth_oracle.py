@@ -38,7 +38,16 @@ event, on the replayed states.
 Since stage b2 the replay carries the numeric fluents (``NUMFL`` columns of ``entities.csv``,
 the history's ``initial_numeric``), so that a derived fluent that reads a numeric threshold is
 judged on the right values; the brute-force evaluator applies the numeric effects and the
-drift. No sentence names a numeric fluent, and the oracle has nothing to say about one.
+drift. Since stage b3b the corpus states them, and the oracle judges every such form on the
+replayed values and the ``range`` of the fluent's symbol record: a numeric pole at a time point
+(``ABOVE`` or ``BELOW`` against ``RANGE`` at the ``cut`` the form records), a numeric change
+(``INCREASE`` or ``DECREASE``: the value at the next time point against the value at the time
+point, whatever moved it), a numeric comparative at a time point, and the numeric effect
+statements ``RAISES`` and ``LOWERS`` (an unconditional numeric effect of the sign on the role).
+A conditional causal statement (stage b3b) is true when every event type below its event type
+has the effect under exactly the condition the form's subject records, and ``observed`` counts
+only the events whose participants satisfied the condition; a numeric statement is observed
+when every event of its type recorded a change of the fluent in its direction.
 
 Comparisons of scalars (stage b3a) are recomputed from the ``SCALARDIM`` columns of
 ``entities.csv`` alone: a pole (kind ``comparison``) against the mean and the population standard
@@ -85,6 +94,14 @@ class Oracle:
         self.base_fluents = [
             s["label"] for s in self.record["symbols"] if s["kind"] == "fluent" and not s["derived"]
         ]
+        self.numeric_fluents = [
+            s["label"] for s in self.record["symbols"] if s["kind"] == "numeric_fluent"
+        ]
+        self.ranges = {
+            s["label"]: (float(s["range"][0]), float(s["range"][1]))
+            for s in self.record["symbols"]
+            if s["kind"] == "numeric_fluent"
+        }
         self.free = {
             s["label"]
             for s in self.record["symbols"]
@@ -440,23 +457,63 @@ class Oracle:
         self.brute.with_numeric(self.numerics(scene)[time - 1])
         return bool(self.brute.fluent(fluent, entity, self.states(scene)[time - 1]))
 
-    def changed(self, scene: dict[str, Any], entity: str, fluent: str) -> bool:
+    def changed(
+        self, scene: dict[str, Any], entity: str, fluent: str, cut: float | None = None
+    ) -> bool:
         """Whether the fluent's value at the scene's final time point differs from its value
-        at ``TIME.1``."""
+        at ``TIME.1``; for a numeric pole (``NUMFL.1.HIGH``, with the form's ``cut``), whether
+        the pole holds at one of the two time points and not at the other."""
         final = int(scene["final"].split(".")[1])
+        if fluent.startswith("NUMFL."):
+            assert cut is not None
+            return self.pole_at(scene, final, entity, fluent, cut) != self.pole_at(
+                scene, 1, entity, fluent, cut
+            )
         return self.fluent_at(scene, final, entity, fluent) != self.fluent_at(
             scene, 1, entity, fluent
         )
 
+    def numeric_at(self, scene: dict[str, Any], time: int, entity: str, fluent: str) -> float:
+        """A numeric fluent's value of a participant at ``TIME.<time>``."""
+        return float(self.numerics(scene)[time - 1][entity][fluent])
+
+    def pole_at(self, scene: dict[str, Any], time: int, entity: str, pole: str, cut: float) -> bool:
+        """Whether a numeric pole holds of a participant at ``TIME.<time>``: ``HIGH`` when the
+        value is at least the fraction ``cut`` of the way through the range, ``LOW`` when at
+        most that fraction."""
+        fluent, side = pole.rsplit(".", 1)
+        low, high = self.ranges[fluent]
+        value = self.numeric_at(scene, time, entity, fluent)
+        point = low + cut * (high - low)
+        return value >= point if side == "HIGH" else value <= point
+
     def made_by(
-        self, scene: dict[str, Any], time: int, entity: str, fluent: str, event_label: str
+        self,
+        scene: dict[str, Any],
+        time: int,
+        entity: str,
+        fluent: str,
+        event_label: str,
+        direction: str | None = None,
     ) -> bool:
         """Whether the event's own recorded changes, applied alone to the state at
-        ``TIME.<time>``, change the fluent of the participant."""
+        ``TIME.<time>``, change the fluent of the participant; for a numeric fluent, whether the
+        event recorded a change of it in the ``direction`` (``increase`` or ``decrease``)."""
         step = next(s for s in scene["steps"] if s["step"] == time)
         event = next((e for e in step["events"] if e["label"] == event_label), None)
         if event is None:
             return False
+        if fluent in self.numeric_fluents:
+            return any(
+                c["entity"] == entity
+                and c["fluent"] == fluent
+                and "from" in c
+                and (
+                    direction is None
+                    or (float(c["to"]) > float(c["from"])) == (direction == "increase")
+                )
+                for c in event["changes"]
+            )
         if not self.symbols[fluent]["derived"]:
             return any(c["entity"] == entity and c["fluent"] == fluent for c in event["changes"])
         before = self.states(scene)[time - 1]
@@ -477,16 +534,41 @@ class Oracle:
         return was != self.brute.fluent(fluent, entity, after_state)
 
     def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
-        """Whether a state form (``HOLDS``) is true of the scene."""
+        """Whether a state form (``HOLDS``) is true of the scene: a Boolean fluent's value, a
+        numeric pole against the range at the form's ``cut``, or a numeric comparative at the
+        time point (with the sentence's word deciding which argument is the greater)."""
         time = int(form["time"].split(".")[1])
-        value = self.fluent_at(scene, time, form["subject"]["instance"], form["predicate"]["label"])
+        predicate = form["predicate"]
+        entity = form["subject"]["instance"]
+        if predicate["kind"] == "comparison":
+            if predicate["class"] != "RANGE":
+                return None  # type: ignore[return-value]
+            held = self.pole_at(scene, time, entity, predicate["label"], float(predicate["cut"]))
+            return held == form["polarity"]
+        if predicate["kind"] == "comparative":
+            other = predicate["patient"]["instance"]
+            if other == entity or not form["polarity"]:
+                return None  # type: ignore[return-value]
+            first = self.numeric_at(scene, time, entity, predicate["label"])
+            second = self.numeric_at(scene, time, other, predicate["label"])
+            if self._low_word(predicate):
+                first, second = second, first
+            return first > second
+        value = self.fluent_at(scene, time, entity, predicate["label"])
         return value == form["polarity"]
 
     def change(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
-        """Whether a change form (``BECOME``) is true of the scene: the fluent had the other
-        value at the time point and the stated value at the next."""
+        """Whether a change form (``BECOME``, or ``INCREASE`` and ``DECREASE`` for a numeric
+        fluent) is true of the scene: the fluent had the other value at the time point and the
+        stated value at the next; the numeric value at the next time point is greater, or less,
+        than at the time point."""
         time = int(form["time"].split(".")[1])
         entity, fluent = form["subject"]["instance"], form["predicate"]["label"]
+        direction = form["predicate"].get("direction")
+        if direction is not None:
+            before = self.numeric_at(scene, time, entity, fluent)
+            after = self.numeric_at(scene, time + 1, entity, fluent)
+            return after > before if direction == "increase" else after < before
         before = self.fluent_at(scene, time, entity, fluent)
         after = self.fluent_at(scene, time + 1, entity, fluent)
         return before != form["polarity"] and after == form["polarity"]
@@ -553,20 +635,81 @@ class Oracle:
 
     def causal(self, form: dict[str, Any]) -> bool | None:
         """Whether a causal statement is true: every event type below its event type (itself,
-        for an event type) has the entry. None for a statement about a derived fluent, or about
-        a role the event type lacks."""
+        for an event type) has the entry: the Boolean effect or literal with the value, the
+        numeric effect of the ``direction``'s sign (``raises``: ``+=``), under exactly the
+        ``condition`` the form's subject records (none for an unconditional statement; an
+        effect under a numeric threshold condition is no entry). None for a statement about a
+        derived fluent, or about a role the event type lacks."""
         subject, predicate = form["subject"], form["predicate"]
         event_type, role = subject["event"], subject["role"]
-        fluent, value = predicate["label"], predicate["value"]
+        fluent, value = predicate["label"], predicate.get("value")
+        direction = predicate.get("direction")
+        condition = {
+            (c["role"], c["label"], bool(c["value"])) for c in subject.get("condition", ())
+        }
         if form["quantifier"] != NEC_ALL or not form["polarity"]:
             return None
-        if fluent not in self.base_fluents or role not in self.event_types[event_type]["roles"]:
+        if role not in self.event_types[event_type]["roles"]:
+            return None
+        if fluent in self.numeric_fluents:
+            if predicate["kind"] != "effect" or direction not in ("raises", "lowers"):
+                return None
+        elif fluent not in self.base_fluents or direction is not None:
+            return None
+        if condition and predicate["kind"] != "effect":
             return None
         for label in self.leaves_below(event_type):
-            if not any(
-                e["role"] == role and e["fluent"] == fluent and e["value"] == value
-                for e in self.entries(label, predicate["kind"])
-            ):
+            record = self.event_types[label]
+            if predicate["kind"] == "precondition":
+                found = any(
+                    lit["role"] == role
+                    and lit["fluent"] == fluent
+                    and "threshold" not in lit
+                    and lit["value"] == value
+                    for lit in record["precondition"]["literals"]
+                )
+            else:
+                found = any(
+                    self._effect_matches(e, role, fluent, value, direction, condition)
+                    for e in record["effects"]
+                )
+            if not found:
+                return False
+        return True
+
+    @staticmethod
+    def _effect_matches(
+        effect: dict[str, Any],
+        role: str,
+        fluent: str,
+        value: bool | None,
+        direction: str | None,
+        condition: set[tuple[str, str, bool]],
+    ) -> bool:
+        if effect["role"] != role or effect["fluent"] != fluent:
+            return False
+        if "amount" in effect:
+            if direction is None or (effect["operator"] == "+=") != (direction == "raises"):
+                return False
+        elif direction is not None or effect["value"] != value:
+            return False
+        literals = (effect.get("condition") or {}).get("literals", [])
+        if any(lit["kind"] == "numeric" for lit in literals):
+            return False
+        return {(lit["role"], lit["symbol"], bool(lit["value"])) for lit in literals} == condition
+
+    def condition_held(self, scene: dict[str, Any], event: dict[str, Any], condition) -> bool:
+        """Whether a conditional statement's condition held of an event's participants at the
+        event's time point (``step``)."""
+        for literal in condition:
+            entity = event.get(literal["role"])
+            if entity is None:
+                return False
+            if literal["label"].startswith("BOOLFL."):
+                held = self.fluent_at(scene, event["step"], entity, literal["label"])
+            else:
+                held = bool(self.column[literal["label"]][self.row[entity]] == 1)
+            if held != bool(literal["value"]):
                 return False
         return True
 
@@ -578,6 +721,8 @@ class Oracle:
         subject, predicate = form["subject"], form["predicate"]
         below = set(self.leaves_below(subject["event"]))
         offset = 1 if predicate["kind"] == "effect" else 0
+        condition = subject.get("condition", ())
+        direction = predicate.get("direction")
         seen = False
         for scene in scenes:
             for step in scene["steps"]:
@@ -587,7 +732,20 @@ class Oracle:
                     entity = event.get(subject["role"])
                     if entity is None:
                         continue
+                    if not self.condition_held(scene, {**event, "step": step["step"]}, condition):
+                        continue
                     seen = True
+                    if direction is not None:
+                        recorded = any(
+                            c["entity"] == entity
+                            and c["fluent"] == predicate["label"]
+                            and "from" in c
+                            and ((float(c["to"]) > float(c["from"])) == (direction == "raises"))
+                            for c in event["changes"]
+                        )
+                        if not recorded:
+                            return False
+                        continue
                     value = self.fluent_at(scene, step["step"] + offset, entity, predicate["label"])
                     if value != predicate["value"]:
                         return False

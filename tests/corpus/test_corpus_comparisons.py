@@ -40,6 +40,7 @@ from semantic_world.corpus.propositions import (
     COMPARISON,
     GREATER,
     INSTANCE,
+    STATE,
     CategoryTerm,
     Predicate,
     Proposition,
@@ -111,8 +112,8 @@ def test_every_comparison_sentence_is_true_by_the_oracle(cases, runs, name) -> N
         for instance, noun, pole in pole_modifiers(form):
             assert oracle.pole(pole, oracle.below(noun), form["z"])[oracle.row[instance]]
             counts["modifier"] += 1
-        if kind not in (COMPARISON, COMPARATIVE):
-            continue
+        if kind not in (COMPARISON, COMPARATIVE) or proposition.predicate.numeric:
+            continue  # the numeric comparisons of stage b3b have tests of their own
         # the main clause is true by the oracle, which reads the scalar columns alone
         assert oracle.truth(form) is True, form
         assert corpus.planner.truth.is_true(proposition)
@@ -169,7 +170,10 @@ def test_every_comparison_sentence_is_true_by_the_oracle(cases, runs, name) -> N
             plan.predication.standard,
         )
         assert read == plan
-    assert counts["instance comparative"] > 10 and counts["class comparative"] > 10, counts
+    # with comparative_rate at 0.6 the run has many comparative descriptions; since stage b3b
+    # they are shared with the numeric fluents, so the scalar ones are fewer in a world with
+    # numeric fluents (the tiny world: one scalar, two numeric fluents)
+    assert counts["instance comparative"] > 0 and counts["class comparative"] > 10, counts
     assert counts["class pole"] > 0 and counts["modifier"] > 10, counts
     if name == "default":
         assert counts["instance pole"] > 0, counts
@@ -185,6 +189,8 @@ def test_every_false_comparison_item_is_false_by_the_oracle(cases, runs, name) -
         for true, false in test_set.pairs:
             if true.proposition.predicate.kind not in (COMPARISON, COMPARATIVE):
                 continue
+            if true.proposition.predicate.numeric:
+                continue  # the numeric items of stage b3b have tests of their own
             a, b = true.proposition, false.proposition
             seen[test_set.name] += 1
             for item, truth in ((true, True), (false, False)):
@@ -239,8 +245,9 @@ def test_the_comparison_sets_are_in_the_layout(runs) -> None:
             for true, false in test_set.pairs:
                 assert true.input["document"] == false.input["document"]
                 # the two items mention the shared instances alike
-                for item in (true, false):
-                    assert item.input["logical_form"]["predicate"]["word"].endswith(".HIGH")
+                # and use one word, drawn for the pair (Jon's ruling 3 on stage b3a)
+                words = {item.input["logical_form"]["predicate"]["word"] for item in (true, false)}
+                assert len(words) == 1 and words.pop().split(".")[-1] in ("HIGH", "LOW")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -552,7 +559,13 @@ def test_the_comparative_rate_and_the_statistics(cases, runs) -> None:
     assert stats["comparative_descriptions"] == sum(
         s.section == COMPARATIVE_SECTION for s in sentences
     )
-    assert stats["comparative_descriptions"] == by_kind[(COMPARATIVE, INSTANCE)] > 0
+    # the comparative descriptions: the comparatives of scalars, and since stage b3b those of
+    # numeric fluents at the event's time point, state-level propositions
+    assert stats["numeric_comparative_sentences"] == by_kind[(COMPARATIVE, STATE)]
+    assert stats["comparative_descriptions"] == (
+        by_kind[(COMPARATIVE, INSTANCE)] + by_kind[(COMPARATIVE, STATE)]
+    )
+    assert by_kind[(COMPARATIVE, INSTANCE)] > 0
     assert stats["pole_modifiers"] == sum(
         1
         for s in sentences
@@ -602,23 +615,32 @@ def test_the_comparative_rate_and_the_statistics(cases, runs) -> None:
 
 
 def test_comparison_partners(cases) -> None:
+    """``documents.comparison_partners``: the siblings with a word by default (Jon's ruling 2 on
+    stage b3a), as many thematic partners with ``thematic``, and both with ``both``."""
     case = cases("deep")
-    facts = case.facts()
     world = case.world
-    for topic in facts.categories:
-        partners = facts.comparison_partners(topic)
+    by_setting = {
+        setting: case.facts(documents={"comparison_partners": setting})
+        for setting in ("siblings", "thematic", "both")
+    }
+    assert case.facts().config.documents.comparison_partners == "siblings"
+    for topic in by_setting["both"].categories:
         info = world.category[topic]
         siblings = [
             c
-            for c in facts.categories
+            for c in by_setting["both"].categories
             if c != topic and info.parent is not None and world.category[c].parent == info.parent
         ]
-        assert partners[: len(siblings)] == tuple(siblings)
-        others = partners[len(siblings) :]
+        both = by_setting["both"].comparison_partners(topic)
+        assert both[: len(siblings)] == tuple(siblings)
+        others = both[len(siblings) :]
         assert len(others) == max(1, len(siblings)) or not [
             c
-            for c in facts.categories
-            if c != topic and facts.level[c] == info.level and c not in siblings
+            for c in by_setting["both"].categories
+            if c != topic and by_setting["both"].level[c] == info.level and c not in siblings
         ]
-        assert all(facts.level[c] == info.level and c != topic for c in partners)
-        assert len(set(partners)) == len(partners)
+        assert all(by_setting["both"].level[c] == info.level and c != topic for c in both)
+        assert len(set(both)) == len(both)
+        assert by_setting["siblings"].comparison_partners(topic) == tuple(siblings)
+        assert by_setting["thematic"].comparison_partners(topic) == others
+        assert case.facts().comparison_partners(topic) == tuple(siblings)

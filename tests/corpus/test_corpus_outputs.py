@@ -351,6 +351,7 @@ def test_test_set_settings_change_no_document(folders) -> None:
         "tests/event_subject_blocked.jsonl",
         "tests/event_subject_impossible.jsonl",
         "tests/state_subject_changed.jsonl",
+        "tests/state_comparison_role.jsonl",
         "tests/state_subject_unchanged.jsonl",
         "tests/able_now_subject_blocked.jsonl",
         "tests/able_now_subject_impossible.jsonl",

@@ -43,9 +43,19 @@ the category the noun names, at the class level the ancestor ``scalar_adjectives
 levels above the subject's category, or ``ENTITY`` when the tree runs out (CG.3). A comparison
 fact (CG.66, decision 24) compares two categories' means on one scalar, ``GREATER`` one way or
 the other, never when they are equal; a category document compares its topic with one of its
-*comparison partners*: its siblings with a word, and as many thematic partners, the other named
-categories of its level whose leaves are most related to the topic's leaves by the world's
-thematic relatedness. An instance comparison compares two instances' values the same way.
+*comparison partners*: by default its siblings with a word (``documents.comparison_partners:
+siblings``, Jon's ruling 2 on stage b3a); ``thematic`` gives as many thematic partners, the
+other named categories of its level whose leaves are most related to the topic's leaves by the
+world's thematic relatedness, and ``both`` gives both. An instance comparison compares two
+instances' values the same way.
+
+**Numeric fluents** (stage b3b). A numeric fluent with words (``numeric_fluents``) gives a
+comparative between two participants at a time point of a scene (``instance_comparison_at``),
+and two numeric poles, stated at a time point as a Boolean fluent is. The causal statements
+gain the numeric effect statements (``RAISES`` and ``LOWERS``, one for each unconditional
+numeric effect) and the conditional statements, one for each conditional effect, Boolean or
+numeric, whose condition the grammar can realize; ``causal_report`` counts the conditional
+effects that make no statement, and why.
 """
 
 from __future__ import annotations
@@ -55,6 +65,7 @@ from typing import Any
 import numpy as np
 
 from semantic_world.corpus.config import Config
+from semantic_world.corpus.grammar import realizable_condition
 from semantic_world.corpus.histories import SceneEvent
 from semantic_world.corpus.lexicon import Lexicon, world_concepts
 from semantic_world.corpus.propositions import (
@@ -64,6 +75,8 @@ from semantic_world.corpus.propositions import (
     CLASS,
     COMPARATIVE,
     COMPARISON,
+    EFFECT,
+    EFFECT_DIRECTIONS,
     EVENT,
     HAS,
     INSTANCE,
@@ -74,21 +87,27 @@ from semantic_world.corpus.propositions import (
     NEGATIVE_ORDER,
     NO,
     POSITIVE_ORDER,
+    PRECONDITION,
     PROJECTION,
+    RAISES,
     ROLES,
     SIMPLE,
+    STATE,
     STATE_KIND,
     VERB,
     CategoryTerm,
     Clause,
+    Condition,
     EventTerm,
     Literal,
     Predicate,
     Proposition,
     Truth,
+    condition_of,
     pole_dimension,
 )
 from semantic_world.corpus.world import ENTITY, PROPERTY_PREFIX, THING, World
+from semantic_world.world.runtime import RANGE
 
 SKIP_THRESHOLD = "threshold"
 """The term reads a scalar threshold, which no pole adjective states."""
@@ -152,7 +171,15 @@ class Facts:
         """The scalar dimensions whose poles have words: what a comparative can be about (the
         two poles of a dimension are named together)."""
         self.fluents = of_type("state")
-        """The fluents that have a state adjective, base then derived."""
+        """The Boolean fluents that have a state adjective, base then derived."""
+        self.numeric_poles = of_type("numeric")
+        """The poles of the numeric fluents that have words (stage b3b), the two of a fluent
+        together: ``NUMFL.1.HIGH``, ``NUMFL.1.LOW``."""
+        self.numeric_fluents: tuple[str, ...] = tuple(
+            dict.fromkeys(pole_dimension(p) for p in self.numeric_poles)
+        )
+        """The numeric fluents that have words: what a numeric comparative, a numeric change,
+        and a numeric effect statement can be about."""
         self.base_fluents = tuple(f for f in self.fluents if f in world.base_fluents)
         """The base fluents that have a state adjective: what a causal statement is about."""
         self.verbs = of_type("event", "event_category")
@@ -164,6 +191,12 @@ class Facts:
         self._rules: tuple[Proposition, ...] | None = None
         self.rule_report: dict[str, Any] = {}
         self._causal: tuple[Proposition, ...] | None = None
+        self.causal_report: dict[str, Any] = {}
+        """The conditional effects of the world's event types, and how many make no conditional
+        statement, by reason (stage b3b): ``numeric_condition`` (a numeric threshold literal,
+        decision 23), ``patient_relative`` (a fluent or a negated PROPERTY literal of the
+        patient's role in a statement about the patient, which an object relative cannot hold),
+        and ``no_word`` (a literal whose concept has no word)."""
         self._partners: dict[str, tuple[str, ...]] = {}
 
     def expressible(self, proposition: Proposition) -> bool:
@@ -446,12 +479,41 @@ class Facts:
                 return grounded
         return None
 
+    def instance_comparison_at(
+        self, x: str, y: str, fluent: str, scene: str, time: str
+    ) -> Proposition | None:
+        """The true comparative between two participants of a scene on a numeric fluent at a
+        time point (stage b3b): ``GREATER`` of ``x`` over ``y``, or the other way round, under
+        ``HOLDS``; None when the values are equal, or when the language cannot state it."""
+        tense = self.config.propositions.event_tense
+        for first, second in ((x, y), (y, x)):
+            candidate = Proposition(
+                STATE,
+                first,
+                Predicate(COMPARATIVE, fluent, second),
+                scene=scene,
+                time=time,
+                tense=tense,
+            )
+            if not self.expressible(candidate):
+                return None
+            grounded = self.truth.grounded(candidate)
+            if grounded is not None:
+                return grounded
+        return None
+
+    def numeric_pole_predicates(self) -> list[Predicate]:
+        """The predicates of the numeric poles with words, against the range (stage b3b)."""
+        return [Predicate(COMPARISON, pole, comparison=RANGE) for pole in self.numeric_poles]
+
     def comparison_partners(self, topic: str) -> tuple[str, ...]:
-        """The categories a document about ``topic`` compares it with: its siblings with a word,
-        then as many thematic partners (at least one): the other named categories of the topic's
-        level that are not its siblings, in order of the mean thematic relatedness of their
-        leaves to the topic's leaves, ties in tree order. Empty when no other category of the
-        level has a word."""
+        """The categories a document about ``topic`` compares it with
+        (``documents.comparison_partners``): its siblings with a word (``siblings``, the
+        default), as many thematic partners, at least one (``thematic``: the other named
+        categories of the topic's level that are not its siblings, in order of the mean thematic
+        relatedness of their leaves to the topic's leaves, ties in tree order), or both
+        (``both``, the pool of stage b3a). Empty when no other category of the level has a
+        word."""
         if topic not in self._partners:
             world = self.world
             info = world.category[topic]
@@ -486,7 +548,11 @@ class Facts:
 
             ranked = sorted(others, key=lambda c: -relatedness(c))
             wanted = max(1, len(siblings))
-            self._partners[topic] = tuple(siblings + ranked[:wanted])
+            setting = self.config.documents.comparison_partners
+            partners = siblings if setting != "thematic" else []
+            if setting != "siblings":
+                partners = partners + ranked[:wanted]
+            self._partners[topic] = tuple(partners)
         return self._partners[topic]
 
     # Rule statements -------------------------------------------------------------------------
@@ -578,27 +644,99 @@ class Facts:
             and (kind is None or p.predicate.kind == kind)
         )
 
+    def _conditions(
+        self, records: list[Any], role: str, fluent: str, value: bool | None, direction: str | None
+    ) -> list[tuple[Condition, ...]]:
+        """The distinct conditions under which the effects of the given event-type records set
+        the fluent of the role to the value (or move it in the direction), the empty condition
+        first when some effect is unconditional, then in one order. An effect under a numeric
+        threshold condition gives none (decision 23)."""
+        found: list[tuple[Condition, ...]] = []
+        for record in records:
+            for effect in record.effects:
+                if effect.role != role or effect.fluent != fluent:
+                    continue
+                if effect.numeric:
+                    if direction is None or (effect.amount >= 0) != (direction == RAISES):
+                        continue
+                elif direction is not None or effect.value != value:
+                    continue
+                condition = condition_of(effect)
+                if condition is not None and condition not in found:
+                    found.append(condition)
+        return sorted(found, key=lambda c: (len(c), [x.sort_key for x in c]))
+
     def _build_causal_statements(self) -> tuple[Proposition, ...]:
         truth, world = self.truth, self.world
+        definition = world.definition
         statements: list[Proposition] = []
         for label in self.event_type_labels:
+            records = [definition.event_type(leaf) for leaf in world.event_types_below(label)]
             for role in ROLES[: world.event_types[label].arity]:
+                entries: list[tuple[str, str, bool | None, str | None]] = []
                 for fluent in self.base_fluents:
                     for value in (True, False):
-                        for kind in CAUSAL_KINDS:
-                            if not truth.has_entry(label, kind, role, fluent, value):
-                                continue
-                            candidate = Proposition(
-                                CLASS,
-                                EventTerm(label, role),
-                                Predicate(kind, fluent, value=value),
-                                True,
-                                NEC_ALL,
-                            )
-                            grounded = truth.grounded(candidate)
-                            if grounded is not None:
-                                statements.append(grounded)
+                        entries += [(kind, fluent, value, None) for kind in CAUSAL_KINDS]
+                for fluent in self.numeric_fluents:
+                    entries += [(EFFECT, fluent, None, d) for d in EFFECT_DIRECTIONS]
+                for kind, fluent, value, direction in entries:
+                    if kind == PRECONDITION:
+                        conditions: list[tuple[Condition, ...]] = [()]
+                    else:
+                        conditions = self._conditions(records, role, fluent, value, direction)
+                    for condition in conditions:
+                        term = EventTerm(label, role, condition)
+                        if not realizable_condition(term):
+                            continue
+                        if not truth.has_entry(
+                            label, kind, role, fluent, value, direction, condition
+                        ):
+                            continue
+                        candidate = Proposition(
+                            CLASS,
+                            term,
+                            Predicate(kind, fluent, value=value, direction=direction),
+                            True,
+                            NEC_ALL,
+                        )
+                        if not self.expressible(candidate):
+                            continue
+                        grounded = truth.grounded(candidate)
+                        if grounded is not None:
+                            statements.append(grounded)
+        self.causal_report = self._conditional_report(statements)
         return tuple(statements)
+
+    def _conditional_report(self, statements: list[Proposition]) -> dict[str, Any]:
+        """The conditional effects of the event types that have events, and those that make no
+        conditional statement about their own event type, by reason."""
+        world = self.world
+        definition = world.definition
+        stated = {
+            (p.subject.event_type, p.subject.role, p.predicate.label, p.subject.condition)
+            for p in statements
+            if isinstance(p.subject, EventTerm) and p.subject.condition
+        }
+        reasons = {"numeric_condition": 0, "patient_relative": 0, "no_word": 0}
+        total = made = 0
+        for label in world.binary_leaves + world.unary:
+            for effect in definition.event_type(label).effects:
+                if not effect.condition:
+                    continue
+                total += 1
+                condition = condition_of(effect)
+                if condition is None:
+                    reasons["numeric_condition"] += 1
+                    continue
+                term = EventTerm(label, effect.role, condition)
+                if not realizable_condition(term):
+                    reasons["patient_relative"] += 1
+                    continue
+                if (label, effect.role, effect.fluent, condition) in stated:
+                    made += 1
+                else:
+                    reasons["no_word"] += 1
+        return {"conditional_effects": total, "stated": made, "unstated": reasons}
 
     def draw_causal_statement(
         self, rng: np.random.Generator, pool: tuple[Proposition, ...] | None = None

@@ -49,9 +49,17 @@ descriptions, which identify the referent, and ``descriptive`` is true; in an in
 pronoun has no description, and it is false too.
 
 **Causal statements.** The form is the proposition's own: the subject is the event term
-(``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``), the predicate an effect
-or a precondition with its value, and ``causal`` the definition entry that the statement
-states.
+(``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``, with the ``condition`` of
+a conditional statement, stage b3b), the predicate an effect or a precondition with its value
+(or, for a numeric effect statement, its ``direction``), and ``causal`` the definition entry
+that the statement states.
+
+**Numeric fluents** (stage b3b). A numeric pole at a time point (kind ``comparison``, class
+``RANGE``) records the language's cut for its adjective under ``cut`` in the predicate
+(``numeric_adjectives.cut_high`` or ``cut_low``), as every proposition with a numeric pole
+records the cut it used; a numeric comparative at a time point records the adjective the
+sentence uses under ``word``, as a comparative of a scalar does; a numeric change (kind
+``state``, a numeric fluent as its label) carries its ``direction``.
 """
 
 from __future__ import annotations
@@ -65,7 +73,10 @@ from semantic_world.corpus.propositions import (
     CLASS,
     COMPARATIVE,
     COMPARISON,
+    HIGH,
+    LOW,
     Proposition,
+    is_numeric,
 )
 from semantic_world.corpus.world import SCALAR_PREFIX
 
@@ -77,10 +88,12 @@ def is_descriptive(phrase: NounPhrase) -> bool:
 
 
 def has_pole(data: Any) -> bool:
-    """Whether a JSON logical form (or a part of one) holds a pole adjective: a predicate of kind
-    ``comparison``, or a pole literal in a restriction."""
+    """Whether a JSON logical form (or a part of one) holds a pole adjective of a scalar: a
+    predicate of kind ``comparison`` whose label is a scalar pole, or a pole literal in a
+    restriction. A numeric pole (``NUMFL.1.HIGH``, stage b3b) is judged at its own cut, which
+    its predicate records, and is no scalar pole."""
     if isinstance(data, dict):
-        if data.get("kind") == COMPARISON:
+        if data.get("kind") == COMPARISON and not is_numeric(str(data.get("label", ""))):
             return True
         return any(has_pole(value) for key, value in data.items() if key != "grounding")
     if isinstance(data, list):
@@ -107,17 +120,39 @@ def with_z(form: dict[str, Any], z: float | None) -> dict[str, Any]:
     return ordered
 
 
+def with_cut(form: dict[str, Any], cuts: Mapping[str, float] | None) -> dict[str, Any]:
+    """The form with the language's cut for its numeric pole recorded under ``cut`` in the
+    predicate, after the comparison class, when the predicate is a numeric pole and the cuts
+    are given (``{"HIGH": 0.75, "LOW": 0.25}``); otherwise the form as it is."""
+    predicate = form.get("predicate", {})
+    label = str(predicate.get("label", ""))
+    if cuts is None or predicate.get("kind") != COMPARISON or not is_numeric(label):
+        return form
+    side = label.rsplit(".", 1)[1]
+    ordered: dict[str, Any] = {}
+    for key, value in predicate.items():
+        ordered[key] = value
+        if key == "class":
+            ordered["cut"] = float(cuts[side])
+    if "cut" not in ordered:
+        ordered["cut"] = float(cuts[side])
+    form["predicate"] = ordered
+    return form
+
+
 def logical_form(
     plan: SentencePlan,
     proposition: Proposition,
     referents: Mapping[str, str] | None = None,
     z: float | None = None,
+    cuts: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """The JSON logical form of a sentence: its main proposition, with its grounding, and the
     mentions of its plan. ``referents`` gives the referent label of every instance mentioned in
     the document. ``z`` is the language's threshold for its pole adjectives, recorded when the
-    form holds one."""
-    form = proposition.to_json()
+    form holds one, and ``cuts`` the language's cuts for its numeric adjectives, by pole
+    (``HIGH``, ``LOW``), recorded when the predicate is a numeric pole."""
+    form = with_cut(proposition.to_json(), cuts)
     if proposition.level == CLASS:
         if plan.predication.kind == COMPARATIVE:
             # the sentence's subject and object, and the adjective it uses
@@ -159,3 +194,6 @@ def logical_form(
     if plan.predication.kind == COMPARATIVE:
         form["predicate"]["word"] = plan.predication.label
     return with_z(form, z)
+
+
+CUT_SIDES = (HIGH, LOW)

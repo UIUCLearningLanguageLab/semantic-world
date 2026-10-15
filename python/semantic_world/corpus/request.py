@@ -18,8 +18,10 @@ that the word-form pipeline reads (``request:`` in its configuration). The reque
 - ``affixes``: the gloss and the position of every inflection that the grammar settings realize
   as an affix;
 - ``inflect``: the lexemes that appear inflected, in a document or in a test item, with the
-  affix each one takes. The list decides only which inflected forms are made, synthesized, and
-  embedded;
+  affix each one takes, and (stage b3b) the function words that appear inflected, by gloss
+  (``{function_words: [is, become], affixes: [PAST]}``: with the tense realized as an affix, the
+  auxiliary of a sentence about a time point carries it). The list decides only which inflected
+  forms are made, synthesized, and embedded;
 - ``meanings``: the file of the categories' meaning vectors, ``wordform_meanings.csv``, which
   ``generate`` writes beside the request. The file is the taxonomy's
   ``categories_generative.csv`` with the world's labels. The path is relative to the request
@@ -76,7 +78,8 @@ def takes(config: Config) -> dict[str, list[str]]:
 
 
 def inflected(token_lists: Iterable[Iterable[str]]) -> dict[str, set[str]]:
-    """For each affix gloss, the lexemes that appear with the affix among the tokens."""
+    """For each affix gloss, the lexemes (content and function) that appear with the affix among
+    the tokens."""
     found: dict[str, set[str]] = {}
     for tokens in token_lists:
         for token in tokens:
@@ -110,16 +113,27 @@ def wordform_request(corpus: Corpus) -> dict[str, Any]:
     ]
     found = inflected(token_lists)
     affixes = affix_items(config)
+    entries: list[dict[str, Any]] = []
+    for item in affixes:
+        gloss = item["gloss"]
+        labels = sorted(found.get(gloss, ()), key=_number)
+        content = [label for label in labels if lexicon.lexeme(label).content]
+        words = [
+            lexicon.lexeme(label).gloss for label in labels if not lexicon.lexeme(label).content
+        ]
+        if content:
+            entries.append({"lexemes": content, "affixes": [gloss]})
+        if words:
+            # the function words that carry the affix (the tense affix on an auxiliary), in the
+            # order of the request's function words
+            order = {lexeme.gloss: rank for rank, (_, lexeme) in enumerate(function)}
+            entries.append({"function_words": sorted(words, key=order.get), "affixes": [gloss]})
     return {
         "lexemes": lexemes,
         "takes": takes(config),
         "function_words": [lexeme.gloss for _, lexeme in function],
         "affixes": affixes,
-        "inflect": [
-            {"lexemes": sorted(found[item["gloss"]], key=_number), "affixes": [item["gloss"]]}
-            for item in affixes
-            if item["gloss"] in found
-        ],
+        "inflect": entries,
         "meanings": MEANINGS_FILE,
     }
 

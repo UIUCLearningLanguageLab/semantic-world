@@ -168,9 +168,13 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             assert planner.truth.is_true(proposition), sentence.label
             assert proposition.grounding is not None and proposition.id.startswith("PROP.")
             if proposition.level != EVENT:
-                # by the independent recomputation from the world run's files too
+                # by the independent recomputation from the world run's files too (a numeric
+                # pole's form records the language's cut, which the oracle judges at)
                 scene = None if proposition.scene is None else scenes[proposition.scene]
-                assert oracle.truth(proposition.to_json(), scene) is True, proposition.to_json()
+                form = proposition.to_json()
+                if "cut" in sentence.logical_form["predicate"]:
+                    form["predicate"]["cut"] = sentence.logical_form["predicate"]["cut"]
+                assert oracle.truth(form, scene) is True, form
             else:
                 assert proposition.grounding["able"] and proposition.grounding["legal"]
             if proposition.level != CLASS:
@@ -235,7 +239,7 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
         else:
             assert "VAR." not in text
             label = "REF." if mode == "local" else "INSTANCE."
-            assert f"({label}" in text
+            assert f"({label}" in text or f", {label}" in text  # a comparison's referent
             events += "EVENT(" in text
             capacities += "ABLE(" in text
             # the tense and the aspect of every event are written
@@ -710,8 +714,8 @@ def test_feature_documents(corpora) -> None:
         topic = document.topic
         if topic in facts.verbs:
             kind = VERB
-        elif topic in facts.base_fluents:
-            kind = "fluent"
+        elif topic in facts.base_fluents or topic in facts.numeric_fluents:
+            kind = "fluent"  # a numeric fluent is a topic too (stage b3b)
         else:
             kind = planner.world.feature_kind[topic]
         topics[kind] += 1
@@ -797,8 +801,9 @@ def test_narratives(cases, corpora) -> None:
                 recurring += sum(e.key == event.key and e is not event for e in events.values())
                 with_clauses += bool(clauses)
             elif sentence.section == COMPARATIVE_SECTION:
-                # a comparative description of the event's two participants (stage b3a)
-                assert proposition.level == INSTANCE
+                # a comparative description of the event's two participants (stage b3a), on a
+                # scalar (timeless) or on a numeric fluent at the event's time point (b3b)
+                assert proposition.level == (STATE if proposition.predicate.numeric else INSTANCE)
                 assert proposition.predicate.kind == COMPARATIVE
             elif sentence.section != DESCRIPTION:
                 # an initial state, a result, or a blocked sentence (test_corpus_states.py)
@@ -990,7 +995,9 @@ def test_restricted_subjects_come_from_the_proposition_layer(cases, corpora) -> 
     for _, sentence in sentences_of(documents):
         for phrase in sentence.plan.noun_phrases():
             if phrase.kind == CLASS_NP and sentence.proposition.rule is None:
-                assert not phrase.restriction  # a causal subject has none either
+                # a causal subject's modifiers are the condition of a conditional statement
+                # (stage b3b), from the proposition layer too
+                assert not phrase.restriction or sentence.proposition.causal
 
 
 @pytest.mark.slow
@@ -1191,11 +1198,14 @@ def test_readings_in_documents(corpora) -> None:
     marked = merged(bare, {"grammar": {"morphology": {"tense": {"enabled": True}}}})
     _, documents = corpora("default", 200, **marked)
     counts = reading_counts(documents)
+    # since stage b3b the affixal tense marks "can" too, so a blocked sentence has the one
+    # reading able_now
     assert set(counts["readings"]) <= {
         "generic",
         "capacity",
         "event",
         "state",
+        "able_now",
         "capacity+able_now",
         "causal",
     }

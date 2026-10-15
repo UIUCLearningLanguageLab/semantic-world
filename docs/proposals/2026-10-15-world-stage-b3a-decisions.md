@@ -204,3 +204,12 @@ All on Jon's laptop on October 15, 2026, on the final code.
 - **The full check list** of `CLAUDE.md`: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (the Rust crates are untouched by the stage), `maturin develop --release`, `ruff check python tests` (and `ruff format --check`), and both tiers of pytest pass.
 - **The tiers, each alone on every core:** the fast tier, `pytest -n auto`, in 1 minute 29 seconds (1 minute 32 seconds in stage b2); the slow tier, `pytest --slow -n auto`, in 5 minutes 55 seconds (6 minutes 1 second in stage b2). Both tiers were run alone once on the near-final code, where sixteen tests then failed on changed expectations (the four world tests of the tiny world's threshold rule, and the twelve corpus tests listed under "Changed expectations"), all fixed as expectations and none as bounds, apart from the quantifier-weights test, whose sample grew.
 - **Both tiers together** (`pytest --all -n auto`) on the final code: 2,065 tests passed in 5 minutes 56 seconds; none failed, none was skipped. The warnings are the `log10` of zero in a word-form augmentation test and a tensor conversion in the learned-embedding test, which the stage did not touch.
+
+## Jon's rulings on the open questions
+
+Jon ruled on the four open questions on October 15, 2026, in the prompt for stage b3b. WM.E207 to WM.E223 are decided.
+
+1. **The instance-level pole keeps the kind `comparison`.** One kind for both levels: the two are the same comparison.
+2. **Comparison partners default to the siblings**, with the thematic partners as a setting. Stage b3b builds the setting as its first item (`documents.comparison_partners: siblings | thematic | both`, default `siblings`), and reports the category documents' thematic co-occurrence under the new default.
+3. **A comparative test item draws its word at random**, "bigger" or "smaller" with equal chances, from the test sets' stream, recorded under `word`; the proposition stays the same. Stage b3b builds this as its second item.
+4. **The z is written only on forms with a pole**, as built.

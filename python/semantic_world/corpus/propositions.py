@@ -41,6 +41,31 @@ MEAN(CATEGORY.1.5))`` compares two categories' means. ``GREATER`` is the only co
 operator: "smaller than" is the language's word for ``GREATER`` with its arguments in the other
 order. A comparative is never negated.
 
+**Numeric fluents** (stage b3b). A numeric fluent's two words are absolute adjectives, judged
+against the ends of its range at the language's cuts (``numeric_adjectives.cut_high`` and
+``cut_low``): a numeric pole is a predicate of kind ``comparison`` whose label is the pole
+(``NUMFL.1.HIGH``), whose comparison class is ``RANGE``, and whose operator is ``ABOVE`` or
+``BELOW``, stated at a time point of a scene, ``HOLDS(SCENE.8, TIME.2, PAST, ABOVE(NUMFL.1,
+REF.1, RANGE, 0.75))``. A numeric comparative compares two participants at a time point,
+``HOLDS(SCENE.8, TIME.2, PAST, GREATER(NUMFL.1, REF.1, REF.2))``. A numeric change is a
+predicate of kind ``state`` whose label is the fluent and whose ``direction`` is ``increase`` or
+``decrease``: ``INCREASE(SCENE.8, TIME.2, PAST, NUMFL.1(REF.1))`` says that the value at the
+next time point exceeds the value at the time point, whatever moved it. A numeric effect
+statement is a predicate of kind ``effect`` whose label is the fluent and whose ``direction`` is
+``raises`` or ``lowers``: ``NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)),
+LOWERS(EVENTVAR.1, NUMFL.1(VAR.1))))`` says that the event type's effect subtracts from the
+fluent (decision 28). A numeric threshold is never stated (decision 23).
+
+**Conditional causal statements** (stage b3b). The condition of a conditional effect joins the
+event term: ``EventTerm(event_type, role, condition)``, with the condition a tuple of
+:class:`Condition` literals, each a static feature or a Boolean fluent of a role with a value.
+The restrictor of the rendering holds them beside the bound event: ``NEC(ALL(EVENT(EVENTVAR.1,
+EVENTTYPE2.1.2(VAR.1, VAR.2)) AND PROPERTY.4(VAR.2), AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``, a
+static literal as an atom and a fluent literal as ``BEFORE(EVENTVAR.1, BOOLFL.2(VAR.2))``. The
+statement is true exactly when every event type below its event type has the effect with that
+condition; the statement without its condition is false, because the definition guarantees the
+effect only when the condition held.
+
 **Polarity.** A negative proposition denies its predicate: ``most`` with a negative polarity
 says that most members of the subject set lack the predicate. ``no`` and ``nec_no`` replace
 sentence negation, so they always have a positive polarity in the logical form, and ``all`` and
@@ -116,6 +141,8 @@ from semantic_world.corpus.histories import (
 )
 from semantic_world.corpus.world import (
     ENTITY,
+    FLUENT_PREFIX,
+    NUMERIC_PREFIX,
     PART_PREFIX,
     PROPERTY_PREFIX,
     SCALAR_PREFIX,
@@ -125,6 +152,7 @@ from semantic_world.corpus.world import (
 from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT
 from semantic_world.world.history import History, replay
 from semantic_world.world.runtime import (
+    RANGE,
     Mean,
     State,
     above,
@@ -182,6 +210,17 @@ OPERATORS = (ABOVE, BELOW, GREATER)
 """The operators of the comparisons, as the propositional rendering writes them."""
 HIGH = "HIGH"
 LOW = "LOW"
+INCREASE = "increase"
+DECREASE = "decrease"
+CHANGE_DIRECTIONS = (INCREASE, DECREASE)
+"""The directions of a numeric change (stage b3b): the value at the next time point is greater
+than, or less than, the value at the time point."""
+RAISES = "raises"
+LOWERS = "lowers"
+EFFECT_DIRECTIONS = (RAISES, LOWERS)
+"""The directions of a numeric effect statement (stage b3b): the event type's effect adds to the
+fluent, or subtracts from it."""
+DIRECTIONS = CHANGE_DIRECTIONS + EFFECT_DIRECTIONS
 MEMBER = "member"
 PROJECTION = "patient_capacity"
 """The kind of a patient-capacity predicate (the old ``projection`` kind)."""
@@ -257,7 +296,7 @@ ROLES = (AGENT, PATIENT)
 EVENT_VARIABLE = "EVENTVAR.1"
 """The event variable of a causal statement, which binds the events of the subject's event
 type. A statement has one event, so the variable is always the first."""
-_LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2}
+_LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2, FLUENT_PREFIX: 3}
 
 
 def _number(value: float) -> float:
@@ -393,32 +432,95 @@ class CategoryTerm:
 
 
 @dataclass(frozen=True)
+class Condition:
+    """One literal of the condition of a conditional causal statement (stage b3b): a static
+    feature (PROPERTY or PART) or a Boolean fluent (base or derived) of one role of the event,
+    with the value it must have at the event's time point. In the JSON logical form it is
+    ``{"role": "patient", "label": "PROPERTY.4", "value": true}``."""
+
+    role: str
+    label: str
+    value: bool = True
+
+    @property
+    def fluent(self) -> bool:
+        """Whether the literal names a Boolean fluent, which the sentence says with ``before``
+        ("that are asleep before"); a static feature is a modifier."""
+        return self.label.startswith(FLUENT_PREFIX)
+
+    @property
+    def sort_key(self) -> tuple:
+        prefix, _, rest = self.label.partition(".")
+        number = rest.split(".")[0]
+        return (
+            ROLES.index(self.role),
+            _LITERAL_ORDER.get(prefix + ".", 4),
+            int(number) if number.isdecimal() else 0,
+            self.label,
+            not self.value,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {"role": self.role, "label": self.label, "value": self.value}
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> Condition:
+        return cls(data["role"], data["label"], bool(data["value"]))
+
+
+@dataclass(frozen=True)
 class EventTerm:
     """The subject of a causal statement: the things that take a role in the events of an
     event type, "things that catch things" (the agent) or "things that things catch" (the
     patient). The head is the generic noun, and the event type is a one-place event type, a
     two-place event type, or a category of two-place event types. In the JSON logical form it
-    is ``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``."""
+    is ``{"head": "THING", "event": "EVENTTYPE2.1.2", "role": "patient"}``. A conditional
+    statement (stage b3b) adds the condition of its effect, ``"condition": [{"role":
+    "patient", "label": "PROPERTY.4", "value": true}]``: the events of the event type whose
+    participants satisfied the condition at the event's time point."""
 
     event_type: str
     role: str = AGENT
     """``agent`` or ``patient``."""
+    condition: tuple[Condition, ...] = ()
+    """The condition of a conditional effect statement, in one order; empty otherwise."""
+
+    def __post_init__(self) -> None:
+        ordered = tuple(sorted(set(self.condition), key=lambda c: c.sort_key))
+        object.__setattr__(self, "condition", ordered)
 
     @property
     def category(self) -> str:
         """The head noun's category: the generic noun."""
         return THING
 
+    @property
+    def conditional(self) -> bool:
+        return bool(self.condition)
+
+    @property
+    def unconditional(self) -> EventTerm:
+        """The same term without its condition."""
+        return EventTerm(self.event_type, self.role)
+
     def concepts(self) -> list[str]:
-        """The concepts that the term needs words for: the generic noun and the event type."""
-        return [THING, self.event_type]
+        """The concepts that the term needs words for: the generic noun, the event type, and
+        the features and fluents of its condition."""
+        return [THING, self.event_type] + [c.label for c in self.condition]
 
     def to_json(self) -> dict[str, Any]:
-        return {"head": THING, "event": self.event_type, "role": self.role}
+        data: dict[str, Any] = {"head": THING, "event": self.event_type, "role": self.role}
+        if self.condition:
+            data["condition"] = [c.to_json() for c in self.condition]
+        return data
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> EventTerm:
-        return cls(data["event"], data["role"])
+        return cls(
+            data["event"],
+            data["role"],
+            tuple(Condition.from_json(c) for c in data.get("condition", ())),
+        )
 
 
 def is_event_variable(label: str | None) -> bool:
@@ -433,8 +535,29 @@ def pole_operator(pole: str) -> str:
 
 
 def pole_dimension(pole: str) -> str:
-    """The scalar dimension of a pole concept."""
+    """The scalar dimension, or the numeric fluent, of a pole concept."""
     return pole.rsplit(".", 1)[0]
+
+
+def is_numeric(label: str) -> bool:
+    """Whether a label is a numeric fluent, or a pole of one (``NUMFL.1``, ``NUMFL.1.HIGH``)."""
+    return label.startswith(NUMERIC_PREFIX)
+
+
+def pole_direction(pole: str, kind: str) -> str:
+    """The direction that a numeric pole's comparative form states (stage b3b): the high
+    pole's ("hungrier") an ``increase`` of a change (kind ``state``) or a ``raises`` of an
+    effect statement (kind ``effect``), the low pole's a ``decrease`` or a ``lowers``."""
+    high = pole.rsplit(".", 1)[1] == HIGH
+    if kind == EFFECT:
+        return RAISES if high else LOWERS
+    return INCREASE if high else DECREASE
+
+
+def direction_pole(fluent: str, direction: str) -> str:
+    """The numeric pole whose comparative form says a direction: the high pole for
+    ``increase`` and ``raises``, the low pole for ``decrease`` and ``lowers``."""
+    return f"{fluent}.{HIGH if direction in (INCREASE, RAISES) else LOW}"
 
 
 def low_word(predicate: dict[str, Any]) -> bool:
@@ -471,10 +594,20 @@ class Predicate:
     value: bool | None = None
     """Effects and preconditions only: the value the fluent is set to (an effect) or must have
     (a precondition)."""
+    direction: str | None = None
+    """Numeric fluents only (stage b3b): ``increase`` or ``decrease`` for a change of kind
+    ``state`` whose label is a numeric fluent, ``raises`` or ``lowers`` for an effect statement
+    about one."""
 
     @property
     def causal(self) -> bool:
         return self.kind in CAUSAL_KINDS
+
+    @property
+    def numeric(self) -> bool:
+        """Whether the predicate is about a numeric fluent: a numeric pole, a numeric
+        comparative, a numeric change, or a numeric effect statement."""
+        return is_numeric(self.label)
 
     @property
     def operator(self) -> str | None:
@@ -507,6 +640,8 @@ class Predicate:
             data["class"] = self.comparison
         if self.value is not None:
             data["value"] = self.value
+        if self.direction is not None:
+            data["direction"] = self.direction
         return data
 
     @classmethod
@@ -517,7 +652,14 @@ class Predicate:
             patient = (
                 patient["instance"] if "instance" in patient else CategoryTerm.from_json(patient)
             )
-        return cls(kind, data[_JSON_KEY[kind]], patient, data.get("class"), data.get("value"))
+        return cls(
+            kind,
+            data[_JSON_KEY[kind]],
+            patient,
+            data.get("class"),
+            data.get("value"),
+            data.get("direction"),
+        )
 
 
 @dataclass(frozen=True)
@@ -570,12 +712,18 @@ class Proposition:
         other proposition."""
         if not isinstance(self.subject, EventTerm):
             return None
-        return {
+        record: dict[str, Any] = {
             "event_type": self.subject.event_type,
             "role": self.subject.role,
             "fluent": self.predicate.label,
-            "value": self.predicate.value,
         }
+        if self.predicate.direction is not None:
+            record["direction"] = self.predicate.direction
+        else:
+            record["value"] = self.predicate.value
+        if self.subject.condition:
+            record["condition"] = [c.to_json() for c in self.subject.condition]
+        return record
 
     @property
     def negative(self) -> bool:
@@ -590,19 +738,24 @@ class Proposition:
         """The concepts that a sentence needs words for, apart from function words: the subject
         category, the restrictions, the predicate, and the patient category. An instance's noun
         is chosen when the instance is mentioned, so an instance adds no concept here, apart
-        from the comparison class of a scalar pole (a category; ``ENTITY`` needs no word). A
-        comparative needs the two pole adjectives of its dimension, because the language says
-        it with either ("bigger than", or "smaller than" with the arguments the other way)."""
+        from the comparison class of a scalar pole (a category; ``ENTITY`` and ``RANGE`` need no
+        word). A comparative needs the two pole adjectives of its dimension, because the
+        language says it with either ("bigger than", or "smaller than" with the arguments the
+        other way); a numeric change or effect statement needs the pole adjective whose
+        comparative form says its direction ("became hungrier", "become fuller")."""
         labels: list[str] = []
         for term in (self.subject, self.predicate.patient):
             if isinstance(term, CategoryTerm | EventTerm):
                 labels += term.concepts()
-        if self.predicate.kind == COMPARATIVE:
-            labels += [f"{self.predicate.label}.{HIGH}", f"{self.predicate.label}.{LOW}"]
+        predicate = self.predicate
+        if predicate.kind == COMPARATIVE:
+            labels += [f"{predicate.label}.{HIGH}", f"{predicate.label}.{LOW}"]
+        elif predicate.direction is not None:
+            labels.append(direction_pole(predicate.label, predicate.direction))
         else:
-            labels.append(self.predicate.label)
-        if self.predicate.comparison is not None and self.predicate.comparison != ENTITY:
-            labels.append(self.predicate.comparison)
+            labels.append(predicate.label)
+        if predicate.comparison is not None and predicate.comparison not in (ENTITY, RANGE):
+            labels.append(predicate.comparison)
         return tuple(dict.fromkeys(labels))
 
     def to_json(self) -> dict[str, Any]:
@@ -698,11 +851,45 @@ def _invalid(reason: str) -> Evaluation:
 
 
 def unconditional_effects(record: Any) -> tuple:
-    """The effects of an event-type record that hold after every event: the Boolean effects
-    without a condition (stage b1). A conditional effect guarantees its fluent only when its
-    condition held, which no unconditional causal statement says; a numeric effect (stage b2)
-    is no entry either, until the ``RAISES`` and ``LOWERS`` statements of stage b3."""
+    """The Boolean effects of an event-type record without a condition: the entries of the
+    unconditional Boolean effect statements (stage b1). A conditional effect guarantees its
+    fluent only when its condition held, which only a conditional statement says (stage b3b),
+    and a numeric effect is the entry of a ``RAISES`` or ``LOWERS`` statement."""
     return tuple(e for e in record.effects if not e.condition and not e.numeric)
+
+
+def condition_of(effect: Any) -> tuple[Condition, ...] | None:
+    """The condition of an effect record of the world, as the corpus states it: its literals
+    as :class:`Condition` literals, in one order. A numeric threshold literal has no
+    :class:`Condition` (decision 23), so an effect with one gives None."""
+    found = []
+    for literal in effect.condition:
+        if literal.numeric:
+            return None
+        found.append(Condition(literal.role, literal.symbol, bool(literal.value)))
+    return tuple(sorted(set(found), key=lambda c: c.sort_key))
+
+
+def effect_matches(
+    effect: Any,
+    role: str,
+    fluent: str,
+    value: bool | None,
+    direction: str | None,
+    condition: tuple[Condition, ...],
+) -> bool:
+    """Whether an effect record of the world is the entry of an effect statement: the same role
+    and fluent, the value (a Boolean effect) or the sign (a numeric effect: ``raises`` for an
+    addition, ``lowers`` for a subtraction), and the same condition (none for an unconditional
+    statement). An effect under a numeric threshold condition is no entry of any statement."""
+    if effect.role != role or effect.fluent != fluent:
+        return False
+    if effect.numeric:
+        if direction is None or (effect.amount >= 0) != (direction == RAISES):
+            return False
+    elif direction is not None or effect.value != value:
+        return False
+    return condition_of(effect) == condition
 
 
 class Truth:
@@ -717,6 +904,9 @@ class Truth:
         self.z = config.scalar_z
         """The language's threshold for its pole adjectives, in standard deviations of the
         comparison class (``scalar_adjectives.z``)."""
+        self.cuts = {HIGH: config.cut_high, LOW: config.cut_low}
+        """The language's cuts for the two absolute adjectives of a numeric fluent, as
+        fractions of its range (``numeric_adjectives``, stage b3b)."""
         self.cone_limit = cone_limit
         self._masks: dict[tuple[str, str], tuple[np.ndarray, float, float]] = {}
         self.count = world.count
@@ -830,6 +1020,11 @@ class Truth:
             self._masks[key] = (mask, mean, sd)
         return self._masks[key]
 
+    def cut(self, pole: str) -> float:
+        """The language's cut for a numeric pole: ``cut_high`` for the high adjective and
+        ``cut_low`` for the low one."""
+        return self.cuts[pole.rsplit(".", 1)[1]]
+
     def compare(
         self,
         operator: str,
@@ -837,16 +1032,23 @@ class Truth:
         x: int | Mean,
         y: int | Mean | None = None,
         standard: str | None = None,
+        state: State | None = None,
+        threshold: float | None = None,
     ) -> bool:
         """One comparison, judged by the world's runtime: ``GREATER`` of ``x`` over ``y``, or
         ``ABOVE`` or ``BELOW`` of ``x`` against the comparison class ``standard`` at the
-        language's ``z``. The arguments are entity indices or category means."""
+        language's ``z``. The arguments are entity indices or category means. A comparison of a
+        numeric fluent (stage b3b) takes the state at the time point, ``RANGE`` as its
+        standard, and the language's cut as its ``threshold``."""
         definition = self.world.definition
         if operator == GREATER:
             assert y is not None
-            return greater(definition, dimension, x, y)
+            return greater(definition, dimension, x, y, state)
         assert standard is not None
         judge = above if operator == ABOVE else below
+        if standard == RANGE:
+            assert threshold is not None
+            return judge(definition, dimension, x, RANGE, threshold, state)
         return judge(definition, dimension, x, comparison_class_of(standard), self.z)
 
     def is_pole(self, label: str) -> bool:
@@ -967,16 +1169,22 @@ class Truth:
                 }
                 return f"{label!r} is not {what[kind]}"
         elif kind == COMPARISON:
-            if not self.is_pole(label):
-                return f"unknown scalar pole {label!r}"
             comparison = predicate.comparison
-            if comparison is None:
+            if world.is_numeric_pole(label):
+                if comparison != RANGE:
+                    return f"a numeric pole ({label}) compares with RANGE, the ends of its range"
+            elif not self.is_pole(label):
+                return f"unknown scalar pole {label!r}"
+            elif comparison is None:
                 return "a comparison names its comparison class"
-            if comparison != ENTITY and comparison not in self.categories:
+            elif comparison != ENTITY and comparison not in self.categories:
                 return f"unknown comparison class {comparison!r}: a category, or ENTITY"
         elif kind == COMPARATIVE:
-            if label not in world.scalars:
-                return f"{label!r} is not a scalar dimension: a comparative is about one"
+            if label not in world.scalars and label not in world.numeric_fluents:
+                return (
+                    f"{label!r} is not a scalar dimension or a numeric fluent: a comparative "
+                    "is about one"
+                )
             if predicate.patient is None:
                 return "a comparative has a patient: the argument the subject exceeds"
             if predicate.comparison is not None:
@@ -991,20 +1199,44 @@ class Truth:
             if label not in world.binary:
                 return f"unknown two-place event type {label!r}"
         elif kind == STATE_KIND:
-            if label not in world.fluents:
+            if label in world.numeric_fluents:
+                if predicate.direction not in CHANGE_DIRECTIONS:
+                    return (
+                        f"a change of the numeric fluent {label} has a direction, increase or "
+                        "decrease; a numeric fluent is never a state, its poles are"
+                    )
+            elif label not in world.fluents:
                 return f"unknown fluent {label!r}"
+            elif predicate.direction is not None:
+                return f"the Boolean fluent {label} has no direction"
         elif kind in CAUSAL_KINDS:
-            if label not in world.base_fluents:
+            if label in world.numeric_fluents:
+                if kind == PRECONDITION:
+                    return (
+                        f"a precondition on the numeric fluent {label} is a threshold, which no "
+                        "word of the language states (decision 23)"
+                    )
+                if predicate.direction not in EFFECT_DIRECTIONS:
+                    return f"an effect statement about {label} has a direction, raises or lowers"
+                if predicate.value is not None:
+                    return "a numeric effect statement has a direction, not a value"
+            elif label not in world.base_fluents:
                 return (
                     f"{label!r} is not a base fluent: a causal statement is about a base "
                     "fluent, because the definition guarantees nothing about a derived one"
                 )
-            if not isinstance(predicate.value, bool):
+            elif predicate.direction is not None:
+                return f"the Boolean fluent {label} has a value, not a direction"
+            elif not isinstance(predicate.value, bool):
                 return f"an {kind} statement has a value, true or false"
         else:
             return f"unknown predicate kind {kind!r}"
         if kind not in CAUSAL_KINDS and predicate.value is not None:
             return "only an effect or a precondition has a value"
+        if predicate.direction is not None and kind not in (STATE_KIND, EFFECT):
+            return "only a numeric change or a numeric effect statement has a direction"
+        if predicate.direction is not None and not predicate.numeric:
+            return "only a predicate about a numeric fluent has a direction"
         if (kind in (VERB, COMPARATIVE)) != (predicate.patient is not None):
             return "a two-place event type or a comparative, and only one, has a patient"
         if kind != COMPARISON and predicate.comparison is not None:
@@ -1042,6 +1274,11 @@ class Truth:
             return _invalid("the subject set is empty")
 
         if kind in COMPARISON_KINDS:
+            if predicate.numeric:
+                return _invalid(
+                    "a numeric fluent is compared at a time point of a scene, never at the "
+                    "class level"
+                )
             if subject.restriction or subject.clauses:
                 return _invalid(
                     f"a class-level {kind} is a statement about the category's mean, not about "
@@ -1203,7 +1440,7 @@ class Truth:
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
-        if predicate.kind == STATE_KIND:
+        if predicate.kind == STATE_KIND or predicate.numeric:
             return _invalid("a fluent is stated at a time point of a scene, never timelessly")
         index = self.instance_index[subject]
         kind, label = predicate.kind, predicate.label
@@ -1261,20 +1498,62 @@ class Truth:
 
     # Causal statements -----------------------------------------------------------------------
 
-    def has_entry(self, event_type: str, kind: str, role: str, fluent: str, value: bool) -> bool:
+    def has_entry(
+        self,
+        event_type: str,
+        kind: str,
+        role: str,
+        fluent: str,
+        value: bool | None,
+        direction: str | None = None,
+        condition: tuple[Condition, ...] = (),
+    ) -> bool:
         """Whether an event type's definition has the effect (``kind`` ``effect``) or the
         precondition literal (``precondition``) that sets, or requires, the fluent of the role
-        to the value. A category of event types has it when every event type below it does. An
-        effect with a condition is no entry (stage b1): it guarantees nothing after every event,
-        so until stage b3 states conditional causal statements it makes no causal statement
-        true."""
+        to the value; for a numeric effect (stage b3b), the effect of the ``direction``'s sign;
+        for a conditional effect statement, the effect under exactly that ``condition``. A
+        category of event types has it when every event type below it does. An unconditional
+        statement needs an unconditional effect (stage b1): an effect with a condition
+        guarantees nothing after every event."""
         definition = self.world.definition
         for label in self.world.event_types_below(event_type):
             record = definition.event_type(label)
-            entries = unconditional_effects(record) if kind == EFFECT else record.precondition
-            if not any(e.role == role and e.fluent == fluent and e.value == value for e in entries):
+            if kind == EFFECT:
+                found = any(
+                    effect_matches(e, role, fluent, value, direction, condition)
+                    for e in record.effects
+                )
+            else:
+                found = any(
+                    not lit.numeric
+                    and lit.role == role
+                    and lit.fluent == fluent
+                    and lit.value == value
+                    for lit in record.precondition
+                )
+            if not found:
                 return False
         return True
+
+    def _condition_problem(self, subject: EventTerm, roles: tuple[str, ...]) -> str:
+        """Why a conditional statement's condition cannot be judged, or an empty string."""
+        world = self.world
+        if subject.condition and subject.event_type not in world.event_types:
+            return ""
+        for literal in subject.condition:
+            if literal.role not in roles:
+                return f"{subject.event_type} has no {literal.role} for the condition to be about"
+            if literal.label in world.fluents:
+                continue
+            if world.feature_kind.get(literal.label) in (IS, HAS):
+                continue
+            if is_numeric(literal.label):
+                return (
+                    f"a condition on the numeric fluent {literal.label} is a threshold, which no "
+                    "word of the language states (decision 23)"
+                )
+            return f"{literal.label!r} is not a PROPERTY or PART feature or a Boolean fluent"
+        return ""
 
     def _evaluate_causal(self, proposition: Proposition) -> Evaluation:
         subject, predicate = proposition.subject, proposition.predicate
@@ -1299,25 +1578,29 @@ class Truth:
             return _invalid(problem)
         if predicate.patient is not None:
             return _invalid("a causal statement has no patient: the roles are in its subject")
+        problem = self._condition_problem(subject, roles)
+        if problem:
+            return _invalid(problem)
+        if subject.condition and predicate.kind != EFFECT:
+            return _invalid("only an effect statement has a condition: a precondition has none")
         below = world.event_types_below(subject.event_type)
         able = int(world.able(subject.event_type).sum())
         if able == 0:
             return _invalid(
                 f"no binding is able for {subject.event_type}: the statement is about no event"
             )
-        definition = world.definition
-        holding = 0
-        for label in below:
-            record = definition.event_type(label)
-            entries = (
-                unconditional_effects(record) if predicate.kind == EFFECT else record.precondition
+        holding = sum(
+            self.has_entry(
+                label,
+                predicate.kind,
+                subject.role,
+                predicate.label,
+                predicate.value,
+                predicate.direction,
+                subject.condition,
             )
-            holding += any(
-                e.role == subject.role
-                and e.fluent == predicate.label
-                and e.value == predicate.value
-                for e in entries
-            )
+            for label in below
+        )
         true = holding == len(below)
         grounding = {
             "event_types": len(below),
@@ -1346,11 +1629,62 @@ class Truth:
                 entity = event.agent if subject.role == AGENT else event.patient
                 if entity is None:
                     continue
+                if not self.condition_held(scene, event, subject.condition):
+                    continue  # a conditional statement is about the events under its condition
                 seen = True
+                if predicate.numeric:
+                    # a numeric statement is about the effect: the event's own recorded change
+                    # of the fluent, in the direction's sign (stage b3b)
+                    if not self.recorded_direction(scene, event, entity, predicate):
+                        return False
+                    continue
                 value = self.fluent_value(scene, event.step + offset, entity, predicate.label)
                 if value != predicate.value:
                     return False
         return seen
+
+    def condition_held(
+        self, scene: str, event: SceneEvent, condition: tuple[Condition, ...]
+    ) -> bool:
+        """Whether the condition of a conditional statement held of an event's participants at
+        the event's time point: a static feature by the entity's value, a Boolean fluent by the
+        replayed state."""
+        for literal in condition:
+            entity = event.agent if literal.role == AGENT else event.patient
+            if entity is None:
+                return False
+            if literal.fluent:
+                held = self.fluent_value(scene, event.step, entity, literal.label)
+            else:
+                held = bool(self.world.column(literal.label)[self.instance_index[entity]])
+            if held != literal.value:
+                return False
+        return True
+
+    def recorded_direction(
+        self, scene: str, event: SceneEvent, entity: str, predicate: Predicate
+    ) -> bool:
+        """Whether an event's own recorded changes move a participant's numeric fluent in the
+        direction of a numeric effect statement (``raises``: the value after the effect exceeds
+        the value before it)."""
+        recorded = self._history_event(scene, event.label)
+        if recorded is None:
+            return False
+        return any(
+            c.numeric
+            and c.entity == entity
+            and c.fluent == predicate.label
+            and (float(c.to) > float(c.from_)) == (predicate.direction == RAISES)
+            for c in recorded.changes
+        )
+
+    def _history_event(self, scene: str, label: str):
+        history = self.scenes[scene]
+        for step in history.steps:
+            for recorded in step.events:
+                if recorded.label == label:
+                    return recorded
+        return None
 
     def _events_of_type(self, event_type: str) -> tuple[tuple[str, SceneEvent], ...]:
         """The known events of one event type, each with its scene, in scene order."""
@@ -1490,6 +1824,45 @@ class Truth:
         position = int(np.flatnonzero(rows == row)[0])
         return bool(self._derived[key][fluent][position])
 
+    def predicate_holds(self, scene: str, time: int, entity: str, predicate: Predicate) -> bool:
+        """Whether a state predicate holds of a participant at ``TIME.<time>``: a Boolean
+        fluent's value, or, for a numeric pole (stage b3b), the comparison with the range at the
+        language's cut."""
+        if predicate.kind == COMPARISON:
+            assert predicate.operator is not None
+            return self.compare(
+                predicate.operator,
+                pole_dimension(predicate.label),
+                self.instance_index[entity],
+                standard=RANGE,
+                state=self.states_of(scene)[time - 1],
+                threshold=self.cut(predicate.label),
+            )
+        return self.fluent_value(scene, time, entity, predicate.label)
+
+    def numeric_value(self, scene: str, time: int, entity: str, fluent: str) -> float:
+        """The value of a numeric fluent of a participant at ``TIME.<time>`` of a scene, from
+        the replayed history (stage b3b)."""
+        state = self.states_of(scene)[time - 1]
+        return float(self.world.numeric_column(state, fluent)[self.instance_index[entity]])
+
+    def numeric_caused_by(
+        self, scene: str, time: int, entity: str, fluent: str, direction: str
+    ) -> str | None:
+        """The event of step ``time`` whose own effect moved a participant's numeric fluent in
+        the direction (``increase``: its recorded change raised the value), or None when no
+        event's effect did: the drift alone moved it."""
+        history = self.scenes[scene]
+        step = next((s for s in history.steps if s.step == time), None)
+        if step is None:
+            return None
+        for event in step.events:
+            for change in event.changes:
+                if change.numeric and change.entity == entity and change.fluent == fluent:
+                    if (float(change.to) > float(change.from_)) == (direction == INCREASE):
+                        return event.label
+        return None
+
     def legal_at(self, scene: str, time: int, label: str, agent: str, patient: str | None) -> bool:
         """Whether a binding was legal at ``TIME.<time>`` of a scene, for the event type or for
         some event type below the category."""
@@ -1602,8 +1975,23 @@ class Truth:
                 )
             if predicate.kind == VERB and not isinstance(patient, str):
                 return _invalid("the patient of an able_now proposition is an instance")
+        elif level == STATE and predicate.kind in COMPARISON_KINDS:
+            # a numeric pole, or a numeric comparative, at a time point (stage b3b)
+            if not predicate.numeric:
+                return _invalid(
+                    "a comparison of a scalar is timeless: only a numeric fluent is compared at "
+                    "a time point"
+                )
+            if predicate.kind == COMPARATIVE and not isinstance(patient, str):
+                return _invalid("the patient of a numeric comparative is an instance")
+            if predicate.kind == COMPARATIVE and not proposition.polarity:
+                return _invalid("a comparative is never negated: say it the other way round")
         elif predicate.kind != STATE_KIND:
             return _invalid(f"a {level} proposition is about a fluent")
+        elif level == STATE and predicate.numeric:
+            return _invalid("a numeric fluent is stated through its poles: ABOVE or BELOW")
+        elif level == CHANGE and predicate.numeric and not proposition.polarity:
+            return _invalid("a numeric change is never negated: its direction says it")
         for instance in (subject, patient):
             if instance is not None and instance not in scene.participants:
                 return _invalid(f"{instance!r} takes no part in the scene {scene.label}")
@@ -1617,6 +2005,26 @@ class Truth:
             grounding.update({"able": able, "legal": legal_now, "test": HISTORY})
             return Evaluation(True, legal_now == proposition.polarity, True, grounding)
         fluent = predicate.label
+        if predicate.kind in COMPARISON_KINDS:
+            return self._evaluate_numeric_comparison(proposition, scene, time, grounding)
+        if predicate.numeric:
+            assert isinstance(predicate.direction, str)
+            before = self.numeric_value(scene.label, time, subject, fluent)
+            after = self.numeric_value(scene.label, time + 1, subject, fluent)
+            true = after > before if predicate.direction == INCREASE else after < before
+            grounding.update(
+                {
+                    "from": _number(before),
+                    "to": _number(after),
+                    "caused_by": self.numeric_caused_by(
+                        scene.label, time, subject, fluent, predicate.direction
+                    )
+                    if true
+                    else None,
+                    "test": HISTORY,
+                }
+            )
+            return Evaluation(True, true, true, grounding)
         value = self.fluent_value(scene.label, time, subject, fluent)
         initial = self.fluent_value(scene.label, 1, subject, fluent)
         if level == STATE:
@@ -1643,6 +2051,54 @@ class Truth:
         )
         return Evaluation(True, true, True, grounding)
 
+    def _evaluate_numeric_comparison(
+        self, proposition: Proposition, scene: History, time: int, grounding: dict[str, Any]
+    ) -> Evaluation:
+        """A numeric pole (``HOLDS`` around ``ABOVE`` or ``BELOW`` against ``RANGE`` at the
+        language's cut) or a numeric comparative (``HOLDS`` around ``GREATER``) at a time point
+        of a scene, judged on the replayed numeric values (stage b3b)."""
+        subject, predicate = proposition.subject, proposition.predicate
+        assert isinstance(subject, str) and predicate.operator is not None
+        row = self.instance_index[subject]
+        state = self.states_of(scene.label)[time - 1]
+        if predicate.kind == COMPARISON:
+            fluent = pole_dimension(predicate.label)
+            cut = self.cut(predicate.label)
+            has_pole = self.compare(
+                predicate.operator, fluent, row, standard=RANGE, state=state, threshold=cut
+            )
+            initial_pole = self.compare(
+                predicate.operator,
+                fluent,
+                row,
+                standard=RANGE,
+                state=self.states_of(scene.label)[0],
+                threshold=cut,
+            )
+            grounding.update(
+                {
+                    "value": _number(self.numeric_value(scene.label, time, subject, fluent)),
+                    "cut": cut,
+                    "initial": _number(self.numeric_value(scene.label, 1, subject, fluent)),
+                    "changed": has_pole != initial_pole,
+                    "test": HISTORY,
+                }
+            )
+            true = has_pole == proposition.polarity
+            return Evaluation(True, true, true, grounding)
+        patient = predicate.patient
+        assert isinstance(patient, str)
+        other = self.instance_index[patient]
+        true = self.compare(GREATER, predicate.label, row, other, state=state)
+        grounding.update(
+            {
+                "value": _number(self.numeric_value(scene.label, time, subject, predicate.label)),
+                "other": _number(self.numeric_value(scene.label, time, patient, predicate.label)),
+                "test": HISTORY,
+            }
+        )
+        return Evaluation(True, true, true, grounding)
+
 
 __all__ = [
     "ABLE_NOW",
@@ -1654,13 +2110,17 @@ __all__ = [
     "CAN",
     "CAUSAL_KINDS",
     "CHANGE",
+    "CHANGE_DIRECTIONS",
     "CLASS",
     "COMPARATIVE",
     "COMPARISON",
     "COMPARISON_KINDS",
     "COUNTERPART",
+    "DECREASE",
     "DEFINITION",
+    "DIRECTIONS",
     "EFFECT",
+    "EFFECT_DIRECTIONS",
     "EVENT",
     "EVENT_VARIABLE",
     "EXACT",
@@ -1669,12 +2129,14 @@ __all__ = [
     "HAS",
     "HIGH",
     "HISTORY",
+    "INCREASE",
     "INSTANCE",
     "IS",
     "KINDS",
     "LEVELS",
     "LOCAL",
     "LOW",
+    "LOWERS",
     "MEAN",
     "MEMBER",
     "MOST",
@@ -1695,6 +2157,7 @@ __all__ = [
     "PROGRESSIVE",
     "PROJECTION",
     "QUANTIFIERS",
+    "RAISES",
     "ROLES",
     "SIMPLE",
     "SOME",
@@ -1708,6 +2171,7 @@ __all__ = [
     "VERB",
     "CategoryTerm",
     "Clause",
+    "Condition",
     "Evaluation",
     "EventTerm",
     "Literal",
@@ -1715,10 +2179,16 @@ __all__ = [
     "Proposition",
     "Truth",
     "comparison_class_of",
+    "condition_of",
+    "direction_pole",
+    "effect_matches",
     "event_of",
     "is_event_variable",
+    "is_numeric",
     "low_word",
     "pole_dimension",
+    "pole_direction",
     "pole_operator",
     "scene_of",
+    "unconditional_effects",
 ]

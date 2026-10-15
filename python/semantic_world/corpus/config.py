@@ -47,8 +47,11 @@ CONCEPT_TYPES = (
     "event_category",
     "patient_projection",
     "scalar",
+    "numeric",
 )
-"""The concept types whose share of named concepts is a parameter."""
+"""The concept types whose share of named concepts is a parameter. ``numeric`` (stage b3b) is
+the two absolute adjectives of a numeric fluent (``NUMFL.1.HIGH`` and ``NUMFL.1.LOW``), named
+together as the two poles of a scalar are."""
 NAMED_PROPORTION_DEFAULTS = {**dict.fromkeys(CONCEPT_TYPES, 1.0), "patient_projection": 0.25}
 RENAMED_CONCEPT_TYPES = {
     "is": "property",
@@ -97,10 +100,15 @@ REALIZATIONS = ("affix", "word")
 VERB_MARKS = ("plural", "singular")
 EVENT_TENSES = ("past", "present")
 REFERENT_LABELS = ("local", "instance")
-TEST_CHANGES = ("predicate", "subject", "quantifier", "polarity", "event", "role")
+TEST_CHANGES = ("predicate", "subject", "quantifier", "polarity", "event", "role", "condition")
 """The changes a false test item can be made by. ``predicate``, ``subject``, ``quantifier``, and
 ``role`` are those of ``CORPUS_GENERATOR.md``; ``polarity`` and ``event`` are the changes of the
-causal sets (``WORLD_AND_LANGUAGE.md``, "Test sets"), beside ``predicate`` and ``role``."""
+causal sets (``WORLD_AND_LANGUAGE.md``, "Test sets"), beside ``predicate`` and ``role``;
+``condition`` (stage b3b) drops the condition of a conditional causal statement."""
+COMPARISON_PARTNERS = ("siblings", "thematic", "both")
+"""``documents.comparison_partners``: which categories a category document compares its topic
+with (stage b3b, Jon's ruling 2 on stage b3a): its siblings with a word (the default), as many
+thematic partners, or both."""
 WORLD_KINDS = ("config", "run")
 
 
@@ -200,7 +208,11 @@ class DocumentsConfig:
     participant could, or could not, do at that time point (``ABLE_NOW``)."""
     comparative_rate: float
     """The probability that an event sentence of a two-place event is followed by a comparative
-    description of its two participants, on a scalar where their values differ (stage b3a)."""
+    description of its two participants, on a scalar where their values differ (stage b3a), or
+    on a numeric fluent at the event's time point (stage b3b)."""
+    comparison_partners: str
+    """The comparison partners of a category document's topic: ``siblings``, ``thematic``, or
+    ``both`` (stage b3b)."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -219,6 +231,7 @@ class DocumentsConfig:
             "result_rate": self.result_rate,
             "blocked_rate": self.blocked_rate,
             "comparative_rate": self.comparative_rate,
+            "comparison_partners": self.comparison_partners,
         }
 
 
@@ -521,6 +534,13 @@ class Config:
     """How many levels above the subject's category the comparison class of a class-level pole
     is taken (``scalar_adjectives.class_levels_up``, default 1: the parent); ``ENTITY`` when the
     tree runs out (CG.3, stage b3a)."""
+    cut_high: float
+    """The language's cut for the high adjective of a numeric fluent (``numeric_adjectives.
+    cut_high``, default 0.75): the fraction of the range at or above which the value counts as
+    ``ABOVE`` (stage b3b, decision 27 of ``WORLD_AND_LANGUAGE.md``)."""
+    cut_low: float
+    """The cut for the low adjective (``numeric_adjectives.cut_low``, default 0.25): the
+    fraction of the range at or below which the value counts as ``BELOW``."""
     propositional_referents: str
     propositional_descriptions: str
     """``marked``: the propositional rendering writes the descriptions in braces before the
@@ -547,6 +567,7 @@ class Config:
             "mention": self.mention.resolved(),
             "grammar": self.grammar.resolved(),
             "scalar_adjectives": {"z": self.scalar_z, "class_levels_up": self.class_levels_up},
+            "numeric_adjectives": {"cut_high": self.cut_high, "cut_low": self.cut_low},
             "renderings": {
                 "propositional": {
                     "referents": self.propositional_referents,
@@ -681,6 +702,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         result_rate=node.probability("result_rate", 0.5),
         blocked_rate=node.probability("blocked_rate", 0.1),
         comparative_rate=node.probability("comparative_rate", 0.1),
+        comparison_partners=node.choice("comparison_partners", "siblings", COMPARISON_PARTNERS),
     )
     node.finish()
     return config
@@ -1024,6 +1046,12 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         raise scalar.error("z", f"expected a number above 0, found {_describe(z)}")
     class_levels_up = scalar.int("class_levels_up", 1, min=1)
     scalar.finish()
+    numeric = root.mapping("numeric_adjectives")
+    cut_high = numeric.number("cut_high", 0.75, min=0, max=1)
+    cut_low = numeric.number("cut_low", 0.25, min=0, max=1)
+    if cut_low >= cut_high:
+        raise numeric.error("cut_low", f"must be below cut_high ({cut_high}), found {cut_low}")
+    numeric.finish()
     renderings = root.mapping("renderings")
     propositional = renderings.mapping("propositional")
     referents = propositional.choice("referents", "local", REFERENT_LABELS)
@@ -1046,6 +1074,8 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         grammar=grammar,
         scalar_z=float(z),
         class_levels_up=class_levels_up,
+        cut_high=float(cut_high),
+        cut_low=float(cut_low),
         propositional_referents=referents,
         propositional_descriptions=descriptions,
         test_sets=test_sets,

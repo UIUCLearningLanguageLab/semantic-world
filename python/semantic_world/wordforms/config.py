@@ -525,20 +525,26 @@ class AffixItem:
 
 @dataclass(frozen=True)
 class InflectEntry:
-    """Which words, or which lexemes of a request, take which affixes."""
+    """Which words, which lexemes of a request, or which function words take which affixes."""
 
     words: str | tuple[str, ...]
     """``all``, ``none``, or the labels of content words. ``none`` in an entry that names
-    lexemes."""
+    lexemes or function words."""
     affixes: tuple[str, ...]
     """The glosses of the affixes."""
     lexemes: tuple[str, ...] | None = None
     """The labels of the request's lexemes whose forms are inflected, in place of ``words``. The
     form of a lexeme is known only after the assignment."""
+    function_words: tuple[str, ...] | None = None
+    """The glosses of the function words whose forms are inflected, in place of ``words``
+    (stage b3b of the world-and-language refactor: the tense affix on an auxiliary). A function
+    word named here gets a form that can take the entry's affixes."""
 
     def resolved(self) -> dict[str, Any]:
         if self.lexemes is not None:
             return {"lexemes": list(self.lexemes), "affixes": list(self.affixes)}
+        if self.function_words is not None:
+            return {"function_words": list(self.function_words), "affixes": list(self.affixes)}
         words = self.words if isinstance(self.words, str) else list(self.words)
         return {"words": words, "affixes": list(self.affixes)}
 
@@ -636,12 +642,31 @@ class ClosedClassConfig:
     @property
     def word_inflect(self) -> tuple[InflectEntry, ...]:
         """The inflect entries that name words."""
-        return tuple(entry for entry in self.inflect if entry.lexemes is None)
+        return tuple(
+            entry
+            for entry in self.inflect
+            if entry.lexemes is None and entry.function_words is None
+        )
 
     @property
     def lexeme_inflect(self) -> tuple[InflectEntry, ...]:
         """The inflect entries that name lexemes. Their forms are made after the assignment."""
         return tuple(entry for entry in self.inflect if entry.lexemes is not None)
+
+    @property
+    def function_inflect(self) -> tuple[InflectEntry, ...]:
+        """The inflect entries that name function words, by gloss."""
+        return tuple(entry for entry in self.inflect if entry.function_words is not None)
+
+    def function_requirements(self) -> dict[str, tuple[str, ...]]:
+        """For each function word that an inflect entry names, the glosses of the affixes its
+        form must be able to take."""
+        wanted: dict[str, list[str]] = {}
+        for entry in self.function_inflect:
+            for gloss in entry.function_words or ():
+                owner = wanted.setdefault(gloss, [])
+                owner.extend(g for g in entry.affixes if g not in owner)
+        return {gloss: tuple(glosses) for gloss, glosses in wanted.items()}
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -1444,17 +1469,23 @@ def _read_affix_items(source: str, field_name: str, value: Any) -> tuple[AffixIt
 
 
 def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntry, ...]:
-    """The inflect entries. An entry names words (``words``: all, none, or word labels) or the
-    lexemes of a request (``lexemes``: lexeme labels), never both."""
+    """The inflect entries. An entry names words (``words``: all, none, or word labels), the
+    lexemes of a request (``lexemes``: lexeme labels), or function words (``function_words``:
+    glosses), one of the three."""
     if not isinstance(value, list):
         raise ConfigError(source, field_name, f"expected a list, found {_describe(value)}")
     entries = []
     for i, item in enumerate(value):
         node = _Node(source, f"{field_name}[{i}]", item)
         lexemes = None
+        function_words = None
+        named = [key for key in ("words", "lexemes", "function_words") if key in node.data]
+        if len(named) > 1:
+            raise node.error(
+                named[1],
+                "an entry names words, lexemes, or function words, one of them and not both",
+            )
         if "lexemes" in node.data:
-            if "words" in node.data:
-                raise node.error("lexemes", "an entry names words or lexemes, not both")
             lexemes = node.get("lexemes")
             if not isinstance(lexemes, list) or not all(isinstance(x, str) and x for x in lexemes):
                 raise node.error(
@@ -1464,6 +1495,19 @@ def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntr
                 raise node.error("lexemes", "the lexeme labels must be distinct")
             lexemes = tuple(lexemes)
             words: Any = "none"
+        elif "function_words" in node.data:
+            function_words = node.get("function_words")
+            if not isinstance(function_words, list) or not all(
+                isinstance(x, str) and x for x in function_words
+            ):
+                raise node.error(
+                    "function_words",
+                    f"expected a list of function-word glosses, found {_describe(function_words)}",
+                )
+            if len(set(function_words)) != len(function_words):
+                raise node.error("function_words", "the glosses must be distinct")
+            function_words = tuple(function_words)
+            words = "none"
         else:
             words = node.get("words")
             if isinstance(words, list):
@@ -1484,7 +1528,7 @@ def _read_inflect(source: str, field_name: str, value: Any) -> tuple[InflectEntr
         glosses = tuple(
             _gloss(source, f"{node.field('affixes')}[{k}]", a) for k, a in enumerate(affixes)
         )
-        entries.append(InflectEntry(words, glosses, lexemes))
+        entries.append(InflectEntry(words, glosses, lexemes, function_words))
         node.finish()
     return tuple(entries)
 
@@ -1661,6 +1705,13 @@ def _read_closed_class(
                         f"{label!r} is not the label of a content word "
                         f"({word_label(1)} to {word_label(word_count)})",
                     )
+        for gloss in entry.function_words or ():
+            if gloss not in glosses:
+                raise ConfigError(
+                    owner_source,
+                    f"{inflect_field}[{i}].function_words",
+                    f"{gloss!r} is not the gloss of a function word of the request",
+                )
     affix_source = affix_node.choice("source", "pseudo", CLOSED_CLASS_SOURCES)
     if affix_source == "english":
         for i, item in enumerate(items):

@@ -53,6 +53,7 @@ from semantic_world.corpus.testsets import (
     PREDICATE,
     QUANTIFIER,
     ROLE,
+    STATE_COMPARISON,
     SUBJECT,
     TestSetBuilder,
     build_test_sets,
@@ -94,6 +95,7 @@ ALL_SETS = (
     "state_predicate_unchanged",
     "state_subject_changed",
     "state_subject_unchanged",
+    "state_comparison_role",
     "able_now_predicate_blocked",
     "able_now_predicate_impossible",
     "able_now_subject_blocked",
@@ -105,6 +107,8 @@ ALL_SETS = (
     "causal_effect_event_lawlike",
     "causal_effect_role",
     "causal_effect_role_lawlike",
+    "causal_effect_condition",
+    "causal_effect_condition_lawlike",
     "causal_precondition_predicate",
     "causal_precondition_predicate_lawlike",
     "causal_precondition_polarity",
@@ -114,9 +118,13 @@ ALL_SETS = (
     "causal_precondition_role_lawlike",
 )
 CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
+EMPTY_IN_DEFAULT = ("causal_effect_condition_lawlike",)
+"""The sets that the default world leaves empty: its four conditional statements have no
+law-like false item, because the condition fails for some event of each type (stage b3b)."""
 """The causal sets: 14 since stage a8, which dropped the two polarity law-like sets (the
 opposite value of an effect or a literal is never observed after, or before, an event of the
-type, because the true entry guarantees the value)."""
+type, because the true entry guarantees the value), and 16 since stage b3b, with the condition
+change of the effect statements and its law-like twin."""
 GRAMMARS = {
     "default": {},
     "marked": {
@@ -195,6 +203,8 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 expected = CLASS if level in CAUSAL_LEVELS else level
                 if level == INSTANCE_COMPARISON:
                     expected = INSTANCE  # an instance-level comparative, in a set of its own
+                elif level == STATE_COMPARISON:
+                    expected = STATE  # a numeric comparative at the final time point (b3b)
                 assert item.proposition.level == expected
     # the default world fills every set but some of the law-like ones (since the retune of
     # stage a7a, the possible and blocked role swaps of events fill too) and some of the causal
@@ -202,7 +212,9 @@ def test_the_layout_of_the_test_sets(runs) -> None:
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
     unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS}
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
-    assert all(sizes[name] > 0 for name in ALL_SETS), sizes
+    # the default world's conditional statements have no law-like false item: the condition
+    # fails for some event of each type (stage b3b)
+    assert all(sizes[name] > 0 for name in ALL_SETS if name not in EMPTY_IN_DEFAULT), sizes
     # a true item is used once in the sets of one level and change, except in the causal sets,
     # where a true statement is paired with every valid false item
     for level, change in {
@@ -234,6 +246,12 @@ def test_the_changes_and_the_size_are_settings(cases, runs) -> None:
         "able_now_subject_impossible",
     ]
     assert all(len(s.pairs) <= 5 for s in corpus.test_sets)
+    # the condition change makes the effect sets' condition sets alone
+    only = runs("tiny", test_sets={"size": 5, "changes": ["condition"]})
+    assert [s.name for s in only.test_sets] == [
+        "causal_effect_condition",
+        "causal_effect_condition_lawlike",
+    ]
     empty = runs("tiny", test_sets={"size": 0})
     assert [s.name for s in empty.test_sets] == list(ALL_SETS)
     assert all(not s.pairs and s.stats()["true_items_seen_share"] is None for s in empty.test_sets)
@@ -306,14 +324,25 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
                 assert dataclasses.replace(b.predicate, label=a.predicate.label) == a.predicate
             elif test_set.change == POLARITY:
                 assert changed == {"predicate"}
-                assert dataclasses.replace(b.predicate, value=a.predicate.value) == a.predicate
+                if a.predicate.direction is not None:
+                    # a numeric statement's polarity swap is the other direction (stage b3b)
+                    swapped = dataclasses.replace(b.predicate, direction=a.predicate.direction)
+                    assert swapped == a.predicate and b.predicate.direction != a.predicate.direction
+                else:
+                    assert dataclasses.replace(b.predicate, value=a.predicate.value) == a.predicate
             elif test_set.change == EVENT_SWAP:
                 assert changed == {"subject"} and b.subject.role == a.subject.role
                 assert b.subject.event_type != a.subject.event_type
+                assert b.subject.condition == a.subject.condition
+            elif test_set.change == "condition":
+                # the conditional statement without its condition (stage b3b)
+                assert changed == {"subject"} and b.subject == a.subject.unconditional
+                assert a.subject.condition and not b.subject.condition
             else:
                 assert test_set.change == ROLE and changed == {"subject"}
                 assert b.subject.event_type == a.subject.event_type
                 assert b.subject.role != a.subject.role
+                assert b.subject.condition == a.subject.condition
             continue
         if test_set.change == PREDICATE:
             assert changed == {"predicate"}
@@ -338,7 +367,7 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             assert b.predicate.label == a.predicate.label
     assert sum(made.values()) > 150, made
     if name == "default":
-        assert all(made[s] > 0 for s in ALL_SETS)
+        assert all(made[s] > 0 for s in ALL_SETS if s not in EMPTY_IN_DEFAULT)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -353,8 +382,9 @@ def shape(value, key: str = ""):
     of every mapping, the type of every value, and the notation of every label. The indices of
     a label are taken out, except those of a scene or an event, which are counted."""
     if isinstance(value, dict):
-        # a term holds clauses when it has them, and a form holds z when it has a pole
-        return {k: shape(v, k) for k, v in value.items() if k not in ("clauses", "z")}
+        # a term holds clauses when it has them, a form holds z when it has a pole, and an
+        # event term holds a condition when its statement is conditional (stage b3b)
+        return {k: shape(v, k) for k, v in value.items() if k not in ("clauses", "z", "condition")}
 
     if isinstance(value, list):
         if key in ("tokens", "restriction", "readings", "distinguished") or key in _FREE:
@@ -411,10 +441,10 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
                     assert form["event"] is None and record["events"] == [form["scene"]]
                     assert f"EVENT({form['scene']}, " in record["propositional"]
                     assert item.proposition.event is None
-                elif test_set.level in (STATE, ABLE_NOW):
+                elif test_set.level in (STATE, STATE_COMPARISON, ABLE_NOW):
                     # the verb phrase's record is the scene's final time point
                     assert record["events"] == [f"{form['scene']}.{form['time']}"]
-                    operator = "HOLDS" if test_set.level == STATE else "ABLE_NOW"
+                    operator = "ABLE_NOW" if test_set.level == ABLE_NOW else "HOLDS"
                     assert (
                         f"{operator}({form['scene']}, {form['time']}, " in record["propositional"]
                     )
@@ -423,7 +453,7 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
     assert sum(checked.values()) > 150
     # every set of the default world is checked
     if name == "default":
-        assert all(checked[s] > 0 for s in ALL_SETS), checked
+        assert all(checked[s] > 0 for s in ALL_SETS if s not in EMPTY_IN_DEFAULT), checked
 
 
 @pytest.mark.slow
@@ -485,8 +515,8 @@ def test_a_pair_that_differs_in_format_stops_the_run(runs, monkeypatch) -> None:
     builder = TestSetBuilder(corpus.planner, corpus.documents)
     real = builder._input
 
-    def leaky(name, number, document, proposition, bare):
-        record = real(name, number, document, proposition, bare)
+    def leaky(name, number, document, proposition, bare, low=False):
+        record = real(name, number, document, proposition, bare, low)
         if record is not None and proposition.grounding.get("step") is not None:
             record["logical_form"]["event"] = f"{proposition.scene}.EVENTINSTANCE.1"  # a true item
         return record
