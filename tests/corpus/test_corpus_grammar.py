@@ -34,6 +34,7 @@ from semantic_world.corpus.propositions import (
     ALL,
     CAN,
     CLASS,
+    COMPARISON,
     EVENT,
     HAS,
     INSTANCE,
@@ -43,7 +44,6 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     PROJECTION,
-    SCALAR,
     SOME,
     VERB,
     CategoryTerm,
@@ -102,7 +102,10 @@ PLANS = {
     "member": SentencePlan(
         kind_of("CATEGORY.1.1", quantifier="all"), Predication(MEMBER, "CATEGORY.1"), NEC_ALL
     ),
-    "pole": SentencePlan(kind_of("CATEGORY.1.1"), Predication(SCALAR, "SCALARDIM.1.HIGH", False)),
+    "pole": SentencePlan(
+        kind_of("CATEGORY.1.1"),
+        Predication(COMPARISON, "SCALARDIM.1.HIGH", False, standard="CATEGORY.1"),
+    ),
     "rule": SentencePlan(
         kind_of(
             "THING",
@@ -127,7 +130,7 @@ PLANS = {
     "lacks": SentencePlan(the("INSTANCE.1.1.1", "CATEGORY.1.1"), Predication(HAS, "PART.4", False)),
     "pronoun": SentencePlan(IT, Predication(MEMBER, "CATEGORY.2", False)),
     "big": SentencePlan(
-        the("INSTANCE.1.1.1", "CATEGORY.1"), Predication(SCALAR, "SCALARDIM.1.HIGH")
+        the("INSTANCE.1.1.1", "CATEGORY.1"), Predication(COMPARISON, "SCALARDIM.1.HIGH")
     ),
     "edible": SentencePlan(
         the("INSTANCE.1.1.1", "CATEGORY.1.1"),
@@ -244,14 +247,16 @@ def check(case, sentence, **grammar) -> None:
     assert tuple(leaves(sentence.tree)) == sentence.tokens
     assert len(sentence.formal.split()) == len(sentence.conceptual.split()) == len(sentence.tokens)
     quantifier = sentence.plan.quantifier
+    standard = sentence.plan.predication.standard
     assert (
-        interpret(sentence.tree, lexicon, sentence.referents, sentence.events, quantifier)
+        interpret(sentence.tree, lexicon, sentence.referents, sentence.events, quantifier, standard)
         == sentence.plan
     )
     # the referents alone, without the nouns, are enough
     referents = [referent for referent, _ in sentence.referents]
     assert (
-        interpret(sentence.tree, lexicon, referents, sentence.events, quantifier) == sentence.plan
+        interpret(sentence.tree, lexicon, referents, sentence.events, quantifier, standard)
+        == sentence.plan
     )
 
 
@@ -1280,7 +1285,8 @@ def test_class_level_relative_clauses(tiny) -> None:
             MOST,
         ),
         "object": SentencePlan(
-            kind_of("CATEGORY.1.1", clause=chased), Predication(SCALAR, "SCALARDIM.1.HIGH", False)
+            kind_of("CATEGORY.1.1", clause=chased),
+            Predication(COMPARISON, "SCALARDIM.1.HIGH", False, standard="CATEGORY.1"),
         ),
         # a clause inside a clause, and a clause on the patient
         "nested": SentencePlan(
@@ -1418,14 +1424,16 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
             kind_of("CATEGORY.1.1", quantifier="most"), swims, NEC_ALL
         ),
         "takes no quantifier": SentencePlan(
-            kind_of("CATEGORY.1.1"), Predication(SCALAR, "SCALARDIM.1.HIGH"), NEC_ALL
+            kind_of("CATEGORY.1.1"), Predication(COMPARISON, "SCALARDIM.1.HIGH"), NEC_ALL
         ),
         "takes no quantifier ": SentencePlan(
-            kind_of("CATEGORY.1.1", quantifier="all"), Predication(SCALAR, "SCALARDIM.1.HIGH")
+            kind_of("CATEGORY.1.1", quantifier="all"), Predication(COMPARISON, "SCALARDIM.1.HIGH")
         ),
         "only a class-level sentence has a quantifier": SentencePlan(subject, swims, NEC_ALL),
-        "a verb, and only a verb": SentencePlan(subject, Predication(VERB, "EVENTTYPE2.1.1")),
-        "a verb, and only a verb ": SentencePlan(
+        "a verb or a comparative, and only one": SentencePlan(
+            subject, Predication(VERB, "EVENTTYPE2.1.1")
+        ),
+        "a verb or a comparative, and only one ": SentencePlan(
             subject, Predication(CAN, "EVENTTYPE1.1", True, target)
         ),
         "never negated": SentencePlan(
@@ -1457,7 +1465,7 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
                 CAN, "EVENTTYPE1.1", event="SCENE.1.EVENTINSTANCE.1", tense="past", aspect="simple"
             ),
         ),
-        "no comparison class": SentencePlan(IT, Predication(SCALAR, "SCALARDIM.1.HIGH")),
+        "no comparison class": SentencePlan(IT, Predication(COMPARISON, "SCALARDIM.1.HIGH")),
         "already named": SentencePlan(subject, Predication(MEMBER, "CATEGORY.1.1")),
         "says something about its head": SentencePlan(
             the("INSTANCE.1.1.1", "CATEGORY.1.1", clause=RelativeClause(())), swims

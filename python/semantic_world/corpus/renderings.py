@@ -13,9 +13,16 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
 :func:`proposition_of`). The notation:
 
 - an atom is a concept label with its arguments: ``CATEGORY.1.3.2(REF.1)`` (membership),
-  ``PROPERTY.12(REF.1)``, ``PART.4(REF.1)``, ``CANBE.EVENTTYPE2.1.1(REF.1)``, and
-  ``SCALARDIM.1.HIGH(REF.1, CATEGORY.1.3.2)``, a scalar pole with its comparison class. ``NOT``
-  before an atom negates it;
+  ``PROPERTY.12(REF.1)``, ``PART.4(REF.1)``, and ``CANBE.EVENTTYPE2.1.1(REF.1)``. ``NOT`` before
+  an atom negates it;
+- a scalar pole is a comparison (CG.65, stage b3a): ``ABOVE(SCALARDIM.1, REF.1, CATEGORY.1.5,
+  1.0)`` says that the referent's value is at least 1.0 standard deviations above the mean of
+  its comparison class, the category its noun names, and ``BELOW`` says at least that far below;
+  ``ABOVE(SCALARDIM.1, MEAN(CATEGORY.1.4), CATEGORY.1, 1.0)`` compares a category's mean with an
+  ancestor, or with ``ENTITY`` (every entity) for a top-level category. The threshold is the
+  language's z, which the logical form records under ``z``. A comparative (CG.66) is
+  ``GREATER(SCALARDIM.1, REF.1, REF.2)``, the first value exceeds the second, and at the class
+  level ``GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2), MEAN(CATEGORY.1.5))``;
 - a capacity is wrapped in ``ABLE``: ``ABLE(EVENTTYPE1.3(REF.1))`` and
   ``ABLE(EVENTTYPE2.1.2(REF.1, REF.2))``, with the agent first. ``ABLE`` wraps only event types.
   A negative capacity is ``NOT ABLE(...)``;
@@ -38,8 +45,8 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   type's patient category is in the restrictor with a variable of its own, so the quantifier
   ranges over pairs: ``MOST(CATEGORY.1.2(VAR.1) AND CATEGORY.1.5(VAR.2),
   ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2)))``;
-- a class-level scalar pole is a statement about the category's mean, with no quantifier:
-  ``SCALARDIM.1.HIGH(CATEGORY.1.3, CATEGORY.1)``, the category and its comparison class;
+- a class-level comparison or comparative is a statement about the category's mean, with no
+  quantifier, written as above with ``MEAN``;
 - a relative clause about another category means at least one member of it, written ``EXISTS``
   inside the restrictor: ``MOST(CATEGORY.1.2(VAR.1) AND EXISTS(VAR.2, CATEGORY.1.5(VAR.2) AND
   ABLE(EVENTTYPE2.2.1(VAR.1, VAR.2))), PART.3(VAR.1))`` for "owls that eat mice have claws";
@@ -76,26 +83,32 @@ from semantic_world.corpus.lexicon import THING, Lexeme
 from semantic_world.corpus.propositions import (
     _JSON_KEY,
     ABLE_NOW,
+    ABOVE,
     AGENT,
     ALL,
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EFFECT,
     EVENT,
+    GREATER,
     HAS,
+    HIGH,
     INSTANCE,
     IS,
     LABEL_KEY,
+    LOW,
     MEMBER,
     MOST,
     NEC_ALL,
     NEC_NO,
     NO,
+    OPERATORS,
     PATIENT,
     PRECONDITION,
     PROJECTION,
-    SCALAR,
     SOME,
     STATE,
     STATE_KIND,
@@ -107,8 +120,12 @@ from semantic_world.corpus.propositions import (
     Literal,
     Predicate,
     Proposition,
+    comparison_class_of,
     event_of,
     is_event_variable,
+    low_word,
+    pole_dimension,
+    pole_operator,
     scene_of,
 )
 from semantic_world.corpus.world import (
@@ -133,6 +150,8 @@ _QUANTIFIERS = {name: quantifier for quantifier, name in QUANTIFIER_NAMES.items(
 _NEC_OF = {NEC_ALL: ALL, NEC_NO: NO}
 _NEC_BACK = {ALL: NEC_ALL, NO: NEC_NO}
 VARIABLE_PREFIX = "VAR."
+MEAN_PREFIX = "MEAN("
+"""A category's mean as an argument of a comparison: ``MEAN(CATEGORY.1.4)``."""
 
 
 class RenderingError(CorpusError):
@@ -177,6 +196,55 @@ class Able:
 
     def __str__(self) -> str:
         return f"ABLE({self.body})"
+
+
+def mean_of(category: str) -> str:
+    """A category's mean as an argument: ``MEAN(CATEGORY.1.4)``."""
+    return f"{MEAN_PREFIX}{category})"
+
+
+def category_of_mean(argument: str) -> str | None:
+    """The category of a ``MEAN(...)`` argument, or None for any other argument."""
+    if argument.startswith(MEAN_PREFIX) and argument.endswith(")"):
+        return argument[len(MEAN_PREFIX) : -1]
+    return None
+
+
+def pole_of(operator: str, dimension: str) -> str:
+    """The pole concept of a comparison: ``SCALARDIM.1.HIGH`` for ``ABOVE``, ``.LOW`` for
+    ``BELOW``."""
+    return f"{dimension}.{HIGH if operator == ABOVE else LOW}"
+
+
+def z_text(z: float) -> str:
+    """A threshold as the rendering writes it: Python's shortest round-trip form (``1.0``)."""
+    return repr(float(z))
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """A comparison of scalars (stage b3a): ``ABOVE(dimension, x, class, z)``,
+    ``BELOW(dimension, x, class, z)``, or ``GREATER(dimension, x, y)``. An argument is a
+    referent, a variable, an instance, or a category mean written ``MEAN(CATEGORY.1.4)``."""
+
+    operator: str
+    dimension: str
+    arguments: tuple[str, ...]
+    standard: str | None = None
+    """``ABOVE`` and ``BELOW``: the comparison class, a category or ``ENTITY``."""
+    z: float | None = None
+    """``ABOVE`` and ``BELOW``: the threshold, in standard deviations of the class."""
+
+    def __str__(self) -> str:
+        parts = [self.dimension, *self.arguments]
+        if self.operator != GREATER:
+            assert self.standard is not None and self.z is not None
+            parts += [self.standard, z_text(self.z)]
+        return f"{self.operator}({', '.join(parts)})"
+
+    @property
+    def pole(self) -> str:
+        return pole_of(self.operator, self.dimension)
 
 
 @dataclass(frozen=True)
@@ -298,14 +366,23 @@ def write(formula: Formula) -> str:
 # ---------------------------------------------------------------------------------------------
 
 
-def _literal(text: str, argument: str, comparison: str | None) -> Any:
+def _pole(pole: str, argument: str, comparison: str | None, z: float | None) -> Comparison:
+    """The comparison that a pole adjective states of an argument against a comparison class
+    (a category, or the generic noun, for every entity) at the form's threshold."""
+    if comparison is None:
+        raise RenderingError(f"the pole {pole} has no comparison class")
+    if z is None:
+        raise RenderingError(f"the pole {pole} has no threshold: the logical form records no z")
+    return Comparison(
+        pole_operator(pole), pole_dimension(pole), (argument,), comparison_class_of(comparison), z
+    )
+
+
+def _literal(text: str, argument: str, comparison: str | None, z: float | None) -> Any:
     literal = Literal.parse(text)
     if literal.pole:
-        if comparison is None:
-            raise RenderingError(f"the pole {literal.feature} has no comparison class")
-        atom = Atom(literal.feature, (argument, comparison))
-    else:
-        atom = Atom(literal.feature, (argument,))
+        return _pole(literal.feature, argument, comparison, z)
+    atom = Atom(literal.feature, (argument,))
     return atom if literal.positive else Not(atom)
 
 
@@ -318,12 +395,14 @@ class _Variables:
         return f"{VARIABLE_PREFIX}{self.count}"
 
 
-def _term(term: dict[str, Any], variable: str, variables: _Variables) -> list[Any]:
-    """The restrictor of a category term: its category, its literals, and its relative
-    clauses."""
+def _term(
+    term: dict[str, Any], variable: str, variables: _Variables, z: float | None = None
+) -> list[Any]:
+    """The restrictor of a category term: its category, its literals (a pole against the
+    term's own category, at the form's threshold ``z``), and its relative clauses."""
     category = term["category"]
     parts: list[Any] = [] if category == THING else [Atom(category, (variable,))]
-    parts += [_literal(text, variable, category) for text in term.get("restriction", ())]
+    parts += [_literal(text, variable, category, z) for text in term.get("restriction", ())]
     for clause in term.get("clauses", ()):
         label = clause[LABEL_KEY]
         if clause["kind"] == CAN:
@@ -331,10 +410,10 @@ def _term(term: dict[str, Any], variable: str, variables: _Variables) -> list[An
             continue
         other = variables.new()
         if "patient" in clause:
-            body = _term(clause["patient"], other, variables)
+            body = _term(clause["patient"], other, variables, z)
             body.append(Able(Atom(label, (variable, other))))
         else:
-            body = _term(clause["agent"], other, variables)
+            body = _term(clause["agent"], other, variables, z)
             body.append(Able(Atom(label, (other, variable))))
         parts.append(Exists(other, tuple(body)))
     if not parts:
@@ -349,10 +428,11 @@ def _predication(
     polarity: bool = True,
     report: tuple[str, str, str] | None = None,
     timed: tuple[str, str, str, str] | None = None,
+    z: float | None = None,
 ) -> Any:
-    """The proposition of one predicate: an atom, a capacity, an event, or, with ``timed`` (the
-    level, the scene, the time point, and the tense), a state, a change, or what was
-    possible."""
+    """The proposition of one predicate: an atom, a capacity, an event, a comparison (at the
+    form's threshold ``z``), or, with ``timed`` (the level, the scene, the time point, and the
+    tense), a state, a change, or what was possible."""
     kind = predicate["kind"]
     label = predicate[_JSON_KEY[kind]]
     if timed is not None:
@@ -372,15 +452,21 @@ def _predication(
         return body if polarity else Not(body)
     if kind == STATE_KIND:
         raise RenderingError(f"the fluent {label} is stated at a time point of a scene")
+    if kind == COMPARISON:
+        comparison = _pole(label, subject, predicate.get("class"), z)
+        return comparison if polarity else Not(comparison)
+    if kind == COMPARATIVE:
+        if patient is None:
+            raise RenderingError(f"the comparative on {label} has no second argument")
+        if not polarity:
+            raise RenderingError("a comparative is never negated")
+        if low_word(predicate):
+            subject, patient = patient, subject  # "smaller than": the object is the greater
+        return Comparison(GREATER, label, (subject, patient))
     if kind == VERB:
         if patient is None:
             raise RenderingError(f"the verb {label} has no patient")
         atom = Atom(label, (subject, patient))
-    elif kind == SCALAR:
-        comparison = predicate.get("class")
-        if comparison is None:
-            raise RenderingError(f"the pole {label} has no comparison class")
-        atom = Atom(label, (subject, comparison))
     else:
         atom = Atom(label, (subject,))
     body: Any = atom
@@ -418,20 +504,25 @@ def formula(form: dict[str, Any], referents: str = "local", descriptions: str = 
     if descriptions not in DESCRIPTION_MODES:
         raise ValueError(f"unknown descriptions mode {descriptions!r}")
     predicate = form["predicate"]
+    z = form.get("z")
     if form["level"] == CLASS:
         if "head" in form["subject"] or predicate["kind"] in CAUSAL_OPERATORS:
             return _causal(form)
-        if predicate["kind"] == SCALAR:
+        if predicate["kind"] in (COMPARISON, COMPARATIVE):
             # a statement about the category's mean, with no quantifier
-            return (_predication(predicate, form["subject"]["category"], None, form["polarity"]),)
+            subject = mean_of(form["subject"]["category"])
+            patient = None
+            if "patient" in predicate:
+                patient = mean_of(predicate["patient"]["category"])
+            return (_predication(predicate, subject, patient, form["polarity"], z=z),)
         variables = _Variables()
         subject = variables.new()
-        restrictor = _term(form["subject"], subject, variables)
+        restrictor = _term(form["subject"], subject, variables, z)
         patient = None
         if "patient" in predicate:
             patient = variables.new()
-            restrictor += _term(predicate["patient"], patient, variables)
-        scope = _predication(predicate, subject, patient, form["polarity"])
+            restrictor += _term(predicate["patient"], patient, variables, z)
+        scope = _predication(predicate, subject, patient, form["polarity"], z=z)
         return (Quantified(form["quantifier"], tuple(restrictor), scope),)
 
     def name(mention: dict[str, Any]) -> str:
@@ -446,7 +537,7 @@ def formula(form: dict[str, Any], referents: str = "local", descriptions: str = 
         argument, noun = name(mention), mention.get("noun")
         descriptive = bool(mention.get("descriptive", False))
         parts: list[Any] = [] if noun is None else [Atom(noun, (argument,))]
-        parts += [_literal(text, argument, noun) for text in mention.get("restriction", ())]
+        parts += [_literal(text, argument, noun, z) for text in mention.get("restriction", ())]
         found = [(part, descriptive) for part in parts]
         for clause in mention.get("clauses", ()):
             report = None
@@ -476,7 +567,9 @@ def formula(form: dict[str, Any], referents: str = "local", descriptions: str = 
         report = (form["event"] or form["scene"], form["tense"], form["aspect"])
     elif form["level"] in TIMED_LEVELS:
         timed = (form["level"], form["scene"], form["time"], form["tense"])
-    main = _predication(predicate, name(form["subject"]), patient, form["polarity"], report, timed)
+    main = _predication(
+        predicate, name(form["subject"]), patient, form["polarity"], report, timed, z
+    )
     # a noun phrase said twice gives the same proposition twice: it is written once, and a
     # part that an asserted mention contributes is asserted
     asserted = tuple(dict.fromkeys(part for part, d in found if not d and part != main))
@@ -537,11 +630,40 @@ class _Parser:
             parts.append(self.item())
         return tuple(parts)
 
+    def argument(self) -> str:
+        """One argument of a comparison: a label, or a category mean ``MEAN(CATEGORY.1.4)``."""
+        token = self.take()
+        if token != "MEAN":
+            return token
+        self.take("(")
+        category = self.take()
+        self.take(")")
+        return mean_of(category)
+
     def item(self) -> Any:
         word = self.take()
         if word == "NOT":
             return Not(self.item())
         self.take("(")
+        if word in OPERATORS:
+            dimension = self.take()
+            self.take(",")
+            first = self.argument()
+            self.take(",")
+            second = self.argument()
+            if word == GREATER:
+                self.take(")")
+                return Comparison(word, dimension, (first, second))
+            self.take(",")
+            text = self.take()
+            try:
+                z = float(text)
+            except ValueError:
+                raise RenderingError(
+                    f"cannot read the rendering {self.text!r}: {text!r} is not a threshold"
+                ) from None
+            self.take(")")
+            return Comparison(word, dimension, (first,), second, z)
         if word == "ABLE":
             body = self.item()
             self.take(")")
@@ -643,7 +765,6 @@ def _kind(label: str) -> str:
         (FLUENT_PREFIX, STATE_KIND),
         (PATIENT_CAPACITY_PREFIX, PROJECTION),
         (ONE_PLACE_PREFIX, CAN),
-        (SCALAR_PREFIX, SCALAR),
         (TWO_PLACE_PREFIX, VERB),
         (CATEGORY_PREFIX, MEMBER),
     ):
@@ -651,11 +772,9 @@ def _kind(label: str) -> str:
             return kind
     if label == THING:
         return MEMBER
+    if label.startswith(SCALAR_PREFIX):
+        raise RenderingError(f"a scalar pole is written as a comparison, not as the atom {label}")
     raise RenderingError(f"unknown kind of concept {label!r}")
-
-
-def _is_category(label: str) -> bool:
-    return label == THING or label.startswith(CATEGORY_PREFIX)
 
 
 def _read_term(variable: str, parts: tuple[Any, ...]) -> CategoryTerm:
@@ -676,6 +795,10 @@ def _read_term(variable: str, parts: tuple[Any, ...]) -> CategoryTerm:
                 clauses.append(Clause(VERB, link.body.label, agent=other))
         elif isinstance(part, Able):
             clauses.append(Clause(CAN, part.body.label))
+        elif isinstance(part, Comparison):
+            if part.operator == GREATER:
+                raise RenderingError("a restriction holds poles, not comparatives")
+            literals.append(Literal(part.pole))
         else:
             positive = not isinstance(part, Not)
             atom = part if positive else part.body
@@ -693,6 +816,40 @@ def _mentions(part: Any, variable: str) -> bool:
     while isinstance(part, Not | Able):
         part = part.body
     return part.arguments[0] == variable
+
+
+def _comparison_proposition(
+    body: Comparison, polarity: bool, names: Mapping[str, str]
+) -> Proposition:
+    """The proposition of a comparison: a pole of a referent (or a category's mean) against
+    its comparison class, or a comparative between two referents (or two means)."""
+    first = body.arguments[0]
+    category = category_of_mean(first)
+    if body.operator == GREATER:
+        other = body.arguments[1]
+        if not polarity:
+            raise RenderingError("a comparative is never negated")
+        if category is not None:
+            second = category_of_mean(other)
+            if second is None:
+                raise RenderingError("a comparative compares two means, or two referents")
+            return Proposition(
+                CLASS,
+                CategoryTerm(category),
+                Predicate(COMPARATIVE, body.dimension, CategoryTerm(second)),
+                True,
+                None,
+            )
+        return Proposition(
+            INSTANCE,
+            names.get(first, first),
+            Predicate(COMPARATIVE, body.dimension, names.get(other, other)),
+            True,
+        )
+    predicate = Predicate(COMPARISON, body.pole, comparison=body.standard)
+    if category is not None:
+        return Proposition(CLASS, CategoryTerm(category), predicate, polarity, None)
+    return Proposition(INSTANCE, names.get(first, first), predicate, polarity)
 
 
 def _causal_proposition(main: Quantified) -> Proposition:
@@ -748,6 +905,8 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         )
     polarity = not isinstance(main, Not)
     body = main if polarity else main.body
+    if isinstance(body, Comparison):
+        return _comparison_proposition(body, polarity, names)
     if isinstance(body, Timed):
         level = _LEVEL_OF_OPERATOR[body.operator]
         inner = body.body
@@ -769,18 +928,12 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         )
     atom = body.body if isinstance(body, Able | Report) else body
     kind = _kind(atom.label)
-    if kind == SCALAR and _is_category(atom.arguments[0]):
-        # a class-level scalar pole: the category's mean against its comparison class
-        return Proposition(
-            CLASS, CategoryTerm(atom.arguments[0]), Predicate(SCALAR, atom.label), polarity, None
-        )
     subject = names.get(atom.arguments[0], atom.arguments[0])
-    patient = comparison = None
+    patient = None
     if kind == VERB:
         patient = names.get(atom.arguments[1], atom.arguments[1])
-    elif kind == SCALAR:
-        comparison = atom.arguments[1]
-    predicate = Predicate(kind, atom.label, patient, comparison)
+    predicate = Predicate(kind, atom.label, patient)
+
     if isinstance(body, Report):
         return Proposition(
             EVENT,

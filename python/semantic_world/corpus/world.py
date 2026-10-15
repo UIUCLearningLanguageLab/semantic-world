@@ -48,11 +48,13 @@ from semantic_world.world.definition import (
 from semantic_world.world.derived import DERIVED_DIR, read_manifest
 from semantic_world.world.episodes import Relatedness
 from semantic_world.world.generate import WorldResult, define
-from semantic_world.world.runtime import able_table
+from semantic_world.world.runtime import ENTITY, able_table
 from semantic_world.world.unary import EVENT_TYPE1_TYPE
 
 THING = "THING"
-"""The generic head noun's concept, and the subject of a rule statement."""
+"""The generic head noun's concept, and the subject of a rule statement. ``ENTITY`` (imported
+from the runtime) is the world's symbol for every entity: the comparison class of a top-level
+category (stage b3a), where the old corpus wrote ``THING``."""
 ONE_PLACE_PREFIX = "EVENTTYPE1."
 TWO_PLACE_PREFIX = "EVENTTYPE2."
 PATIENT_CAPACITY_PREFIX = "CANBE."
@@ -243,7 +245,7 @@ class World:
         )
         self.count = len(self.instances)
         every = np.arange(self.count)
-        self._below: dict[str, np.ndarray] = {THING: every}
+        self._below: dict[str, np.ndarray] = {THING: every, ENTITY: every}
         for label in self.categories:
             self._below[label] = np.flatnonzero(
                 np.array([label in path for path in self.paths], dtype=bool)
@@ -341,7 +343,8 @@ class World:
     # Sets of instances -----------------------------------------------------------------------
 
     def below(self, category: str) -> np.ndarray:
-        """The indices of the instances below a category (every instance for ``THING``)."""
+        """The indices of the instances below a category (every instance for ``ENTITY``, and
+        for the generic noun ``THING``)."""
         return self._below[category]
 
     def column(self, feature: str) -> np.ndarray:
@@ -562,6 +565,7 @@ def leaf_of(world: World, instance: str) -> str:
 
 
 __all__ = [
+    "ENTITY",
     "EVENT_TYPE1_KIND",
     "EXACT",
     "FEATURE_KINDS",

@@ -18,6 +18,7 @@ def test_stream_names_match_the_spec() -> None:
         "mentions",
         "grammar",
         "tests",
+        "comparatives",
     )
     assert list(Streams(1).seeds()) == [f"corpus:{n}" for n in STREAM_NAMES]
 

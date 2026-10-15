@@ -142,13 +142,15 @@ def test_the_runtime_computes_the_same_classes_from_the_leaf_labels(worlds, name
 
 @pytest.mark.parametrize("name", NAMES)
 def test_the_corpus_computes_the_same_classes(worlds, name: str) -> None:
-    """The corpus's own computation of a pole adjective's comparison class (``Truth.pole_mask``
-    and ``_class_scalar``, with ``THING`` for every entity) gives the mean and the standard
-    deviation of ``comparison_classes.csv`` for every category and scalar; stage b3 moves the
-    corpus to the file."""
+    """The corpus's comparison classes are the world's (stage b3a): ``Truth.comparison_class``
+    gives, for every category and ``ENTITY`` and every scalar, the count, the mean, and the
+    standard deviation of the runtime's ``comparison_classes`` (the rows of
+    ``comparison_classes.csv``), the corpus's pole masks and groundings carry the same mean and
+    standard deviation, and the corpus names ``THING`` as no comparison class: its generic noun
+    maps to ``ENTITY``."""
     from semantic_world.corpus import Streams, build_lexicon
     from semantic_world.corpus import load_config as corpus_config
-    from semantic_world.corpus.propositions import Truth
+    from semantic_world.corpus.propositions import COMPARISON, Predicate, Proposition, Truth
     from semantic_world.corpus.world import THING, World
 
     world = world_named(worlds, name)
@@ -156,12 +158,35 @@ def test_the_corpus_computes_the_same_classes(worlds, name: str) -> None:
     corpus_world = World(world)
     build_lexicon(config, corpus_world, Streams(config.seed))
     truth = Truth(config, corpus_world)
-    table = comparison_classes(world.definition.runtime())
+    definition = world.definition.runtime()
+    table = comparison_classes(definition)
+    checked = 0
     for (category, scalar), (count, mean, sd) in table.items():
-        rows = corpus_world.below(THING if category == ENTITY else category)
+        assert truth.comparison_class(category, scalar) == (count, mean, sd)
+        rows = corpus_world.below(category)
         assert rows.size == count
-        _, corpus_mean, corpus_sd = truth.pole_mask(f"{scalar}.HIGH", rows)
-        assert corpus_mean == mean and corpus_sd == sd
+        for pole in ("HIGH", "LOW"):
+            mask, corpus_mean, corpus_sd = truth.pole_mask(f"{scalar}.{pole}", category)
+            assert corpus_mean == mean and corpus_sd == sd
+            judge = above if pole == "HIGH" else below
+            for i in range(definition.entity_count):
+                assert mask[i] == judge(definition, scalar, i, category, truth.z)
+            checked += 1
+    assert checked == 2 * len(table)
+    # the generic noun's class is ENTITY, and an instance-level grounding carries the class
+    scalar = definition.scalars[0]
+    assert truth.comparison_class(THING, scalar) == table[(ENTITY, scalar)]
+    instance = corpus_world.instances[0]
+    leaf = corpus_world.instance_leaf[0]
+    for pole in ("HIGH", "LOW"):
+        proposition = Proposition(
+            "instance", instance, Predicate(COMPARISON, f"{scalar}.{pole}", comparison=leaf)
+        )
+        evaluation = truth.evaluate(proposition)
+        assert evaluation.valid
+        _, mean, sd = table[(leaf, scalar)]
+        assert evaluation.grounding["mean"] == round(mean, 6)
+        assert evaluation.grounding["sd"] == round(sd, 6)
 
 
 # ---------------------------------------------------------------------------------------------

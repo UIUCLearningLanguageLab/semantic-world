@@ -37,6 +37,15 @@ An event is reported by an event-level proposition. Its event type is named at a
 event-type tree, as a noun names a category at a level of the category tree: the event type
 itself, or a category above it ("chase" or "hunt"), drawn by ``mention.event_level_weights``.
 Each report chooses its aspect (CG.64).
+
+**Comparisons** (stage b3a). A scalar pole is a comparison with its class: at the instance level
+the category the noun names, at the class level the ancestor ``scalar_adjectives.class_levels_up``
+levels above the subject's category, or ``ENTITY`` when the tree runs out (CG.3). A comparison
+fact (CG.66, decision 24) compares two categories' means on one scalar, ``GREATER`` one way or
+the other, never when they are equal; a category document compares its topic with one of its
+*comparison partners*: its siblings with a word, and as many thematic partners, the other named
+categories of its level whose leaves are most related to the topic's leaves by the world's
+thematic relatedness. An instance comparison compares two instances' values the same way.
 """
 
 from __future__ import annotations
@@ -53,6 +62,8 @@ from semantic_world.corpus.propositions import (
     CAN,
     CAUSAL_KINDS,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EVENT,
     HAS,
     INSTANCE,
@@ -65,7 +76,6 @@ from semantic_world.corpus.propositions import (
     POSITIVE_ORDER,
     PROJECTION,
     ROLES,
-    SCALAR,
     SIMPLE,
     STATE_KIND,
     VERB,
@@ -76,8 +86,9 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
     Truth,
+    pole_dimension,
 )
-from semantic_world.corpus.world import PROPERTY_PREFIX, THING, World
+from semantic_world.corpus.world import ENTITY, PROPERTY_PREFIX, THING, World
 
 SKIP_THRESHOLD = "threshold"
 """The term reads a scalar threshold, which no pole adjective states."""
@@ -137,6 +148,9 @@ class Facts:
         }
         self.projections = of_type("patient_projection")
         self.poles = of_type("scalar")
+        self.scalars: tuple[str, ...] = tuple(dict.fromkeys(pole_dimension(p) for p in self.poles))
+        """The scalar dimensions whose poles have words: what a comparative can be about (the
+        two poles of a dimension are named together)."""
         self.fluents = of_type("state")
         """The fluents that have a state adjective, base then derived."""
         self.base_fluents = tuple(f for f in self.fluents if f in world.base_fluents)
@@ -150,6 +164,7 @@ class Facts:
         self._rules: tuple[Proposition, ...] | None = None
         self.rule_report: dict[str, Any] = {}
         self._causal: tuple[Proposition, ...] | None = None
+        self._partners: dict[str, tuple[str, ...]] = {}
 
     def expressible(self, proposition: Proposition) -> bool:
         """Whether every concept the proposition needs has a word."""
@@ -166,8 +181,9 @@ class Facts:
         ``patients``)."""
         predicates = [Predicate(kind, f) for kind in (IS, HAS, CAN) for f in self.features[kind]]
         predicates += [Predicate(PROJECTION, p) for p in self.projections]
-        predicates += [Predicate(SCALAR, p) for p in self.poles]
         if category != THING:
+            comparison = self.comparison_class(category)
+            predicates += [Predicate(COMPARISON, p, comparison=comparison) for p in self.poles]
             level = self.level[category]
             predicates += [
                 Predicate(MEMBER, c)
@@ -185,8 +201,12 @@ class Facts:
         """The strongest true proposition that the language can state, asserting a predicate of
         a subject, or denying it with ``negative``; None when there is none. A scalar pole takes
         no quantifier; membership takes a universal."""
-        if predicate.kind == SCALAR:
+        if predicate.kind == COMPARISON:
             options: tuple[tuple[str | None, bool], ...] = ((None, not negative),)
+        elif predicate.kind == COMPARATIVE:
+            if negative:
+                return None  # a comparative is never negated: it is said the other way round
+            options = ((None, True),)
         elif predicate.kind == MEMBER:
             options = ((NEC_NO, True), (NO, True)) if negative else ((NEC_ALL, True), (ALL, True))
         else:
@@ -247,7 +267,7 @@ class Facts:
         predicates = [Predicate(kind, f) for kind in (IS, HAS, CAN) for f in self.features[kind]]
         predicates += [Predicate(PROJECTION, p) for p in self.projections]
         path = [c for c in self.truth.paths[index] if c in self.named]
-        predicates += [Predicate(SCALAR, p, comparison=c) for p in self.poles for c in path]
+        predicates += [Predicate(COMPARISON, p, comparison=c) for p in self.poles for c in path]
         predicates += [Predicate(MEMBER, c) for c in self.categories]
         others = self.world.instances if patients is None else patients
         for verb in self.verbs:
@@ -295,7 +315,7 @@ class Facts:
             for pole in self.poles:
                 if pole in stated:
                     continue
-                mask = truth.pole_mask(pole, world.below(term.category))[0]
+                mask = truth.pole_mask(pole, term.category)[0]
                 if 0 < int(mask[members].sum()) < len(members):
                     options.append(Literal(pole))
             self._restrictions[term] = tuple(options)
@@ -387,6 +407,87 @@ class Facts:
                         clause = deeper
             return CategoryTerm(term.category, term.restriction, (clause,))
         return None
+
+    # Comparisons -----------------------------------------------------------------------------
+
+    def comparison_class(self, category: str) -> str:
+        """The comparison class of a class-level pole of a category (CG.3): the ancestor
+        ``scalar_adjectives.class_levels_up`` levels above it, or ``ENTITY`` when the tree runs
+        out (a top-level category, at the default of 1)."""
+        path = self.world.category[category].path
+        up = self.config.class_levels_up
+        return path[-1 - up] if len(path) > up else ENTITY
+
+    def comparison_fact(self, a: str, b: str, dimension: str) -> Proposition | None:
+        """The true comparison fact between two categories on a scalar: ``GREATER`` of the
+        mean of ``a`` over the mean of ``b``, or the other way round; None when the means are
+        equal, or when the language cannot state it."""
+        for first, second in ((a, b), (b, a)):
+            candidate = Proposition(
+                CLASS, CategoryTerm(first), Predicate(COMPARATIVE, dimension, CategoryTerm(second))
+            )
+            if not self.expressible(candidate):
+                return None
+            grounded = self.truth.grounded(candidate)
+            if grounded is not None:
+                return grounded
+        return None
+
+    def instance_comparison(self, x: str, y: str, dimension: str) -> Proposition | None:
+        """The true comparative between two instances on a scalar: ``GREATER`` of ``x`` over
+        ``y``, or the other way round; None when the values are equal, or when the language
+        cannot state it."""
+        for first, second in ((x, y), (y, x)):
+            candidate = Proposition(INSTANCE, first, Predicate(COMPARATIVE, dimension, second))
+            if not self.expressible(candidate):
+                return None
+            grounded = self.truth.grounded(candidate)
+            if grounded is not None:
+                return grounded
+        return None
+
+    def comparison_partners(self, topic: str) -> tuple[str, ...]:
+        """The categories a document about ``topic`` compares it with: its siblings with a word,
+        then as many thematic partners (at least one): the other named categories of the topic's
+        level that are not its siblings, in order of the mean thematic relatedness of their
+        leaves to the topic's leaves, ties in tree order. Empty when no other category of the
+        level has a word."""
+        if topic not in self._partners:
+            world = self.world
+            info = world.category[topic]
+            siblings = [
+                c
+                for c in self.categories
+                if c != topic
+                and info.parent is not None
+                and world.category[c].parent == info.parent
+            ]
+            others = [
+                c
+                for c in self.categories
+                if c != topic and c not in siblings and self.level[c] == info.level
+            ]
+            leaf_index = {leaf: i for i, leaf in enumerate(world.leaves)}
+
+            def leaves_below(category: str) -> list[int]:
+                return [
+                    leaf_index[leaf]
+                    for leaf in world.leaves
+                    if category in world.category[leaf].path
+                ]
+
+            own = leaves_below(topic)
+
+            def relatedness(category: str) -> float:
+                rows = leaves_below(category)
+                if not own or not rows:
+                    return 0.0
+                return float(world.thematic[np.ix_(own, rows)].mean())
+
+            ranked = sorted(others, key=lambda c: -relatedness(c))
+            wanted = max(1, len(siblings))
+            self._partners[topic] = tuple(siblings + ranked[:wanted])
+        return self._partners[topic]
 
     # Rule statements -------------------------------------------------------------------------
 

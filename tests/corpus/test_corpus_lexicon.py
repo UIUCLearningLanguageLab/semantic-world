@@ -355,8 +355,9 @@ def test_lexeme_labels(default_world) -> None:
     assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
     assert lexicon.lexeme(f"LEXEME.{content}").concept == THING
     assert lexicon.lexeme(f"LEXEME.{content + 1}").gloss == "a"
-    assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "become"
-    assert lexicon.lexeme(f"LEXEME.{total}").gloss == "before"
+    assert lexicon.lexeme(f"LEXEME.{total - 2}").gloss == "become"
+    assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "before"
+    assert lexicon.lexeme(f"LEXEME.{total}").gloss == "than"
     with pytest.raises(KeyError, match="unknown lexeme"):
         lexicon.lexeme(f"LEXEME.{total + 1}")
     with pytest.raises(KeyError, match="unknown concept"):
@@ -396,7 +397,7 @@ def function_glosses(world, can_words: str = "shared", **morphology: Any) -> lis
 def test_function_words(tiny_world) -> None:
     base = [
         "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-        "and", "that", "it", "become", "before",
+        "and", "that", "it", "become", "before", "than",
     ]  # fmt: skip
     assert list(FUNCTION_WORDS) == base and AGREEMENT_WORDS == ("are", "have")
     assert function_glosses(tiny_world) == base
@@ -417,10 +418,15 @@ def test_function_words(tiny_world) -> None:
         "PAST"
     ]
     assert function_glosses(tiny_world, aspect={"enabled": True}) == base + ["PROGRESSIVE"]
+    # the comparative is always available: an affix by default, or a word (stage b3a)
+    assert function_glosses(tiny_world, comparative={"realization": "word"}) == base + [
+        "COMPARATIVE"
+    ]
     everything = {
         "number": {"enabled": True, "realization": "word"},
         "tense": {"enabled": True, "realization": "word"},
         "aspect": {"enabled": True, "realization": "word"},
+        "comparative": {"realization": "word"},
     }
     assert function_glosses(tiny_world, **everything) == base + [
         "are",
@@ -428,7 +434,9 @@ def test_function_words(tiny_world) -> None:
         "PLURAL",
         "PAST",
         "PROGRESSIVE",
+        "COMPARATIVE",
     ]
+
     config = corpus_config(grammar={"morphology": everything})
     assert list(function_word_glosses(config)) == function_glosses(tiny_world, **everything)
 

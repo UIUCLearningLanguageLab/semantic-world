@@ -343,6 +343,7 @@ def test_test_set_settings_change_no_document(folders) -> None:
         "tests/class_subject_lawlike.jsonl",
         "tests/instance_role.jsonl",
         "tests/instance_subject.jsonl",
+        "tests/instance_comparison_role.jsonl",
         "tests/event_role_possible.jsonl",
         "tests/event_role_blocked.jsonl",
         "tests/event_role_impossible.jsonl",
@@ -379,6 +380,7 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         "sentences",
         "states",
         "causal",
+        "comparisons",
         "quantifiers",
         "tokens",
         "ambiguity",
@@ -453,14 +455,20 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     block = stats["quantifiers"]
     stated = Counter(form["quantifier"] for form in forms if form["level"] == "class")
     assert block["class_level_sentences"] == levels["class"]
-    assert list(block["stated"]) == [*QUANTIFIERS, "pole"]
+    assert list(block["stated"]) == [*QUANTIFIERS, "pole", "comparative"]
+
+    poles = sum(f["level"] == "class" and f["predicate"]["kind"] == "comparison" for f in forms)
+    comparatives = sum(
+        f["level"] == "class" and f["predicate"]["kind"] == "comparative" for f in forms
+    )
     assert {q: v["count"] for q, v in block["stated"].items()} == {
         **{q: stated[q] for q in QUANTIFIERS},
-        "pole": stated[None],
+        "pole": poles,
+        "comparative": comparatives,
     }
+    assert stated[None] == poles + comparatives
     assert sum(v["count"] for v in block["stated"].values()) == levels["class"]
     assert sum(v["share"] for v in block["stated"].values()) == pytest.approx(1, abs=1e-5)
-    poles = sum(f["level"] == "class" and f["predicate"]["kind"] == "scalar" for f in forms)
     assert block["stated"]["pole"]["count"] == poles
     bare = sum(
         s["logical_form"]["level"] == "class" and s["tree"][1][1][0] != "Det" for s in sentences

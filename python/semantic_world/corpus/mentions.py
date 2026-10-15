@@ -68,11 +68,14 @@ from semantic_world.corpus.propositions import (
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EVENT,
     HAS,
+    HIGH,
     IS,
+    LOW,
     MEMBER,
-    SCALAR,
     SIMPLE,
     VERB,
     CategoryTerm,
@@ -106,15 +109,36 @@ def class_phrase(term: CategoryTerm | EventTerm, determiner: str | None = None) 
     return phrase_of(term, determiner)
 
 
+def comparative_label(dimension: str, low: bool = False) -> str:
+    """The pole adjective whose comparative form says a comparative on a dimension: the high
+    pole's ("bigger than"), or with ``low`` the low pole's ("smaller than")."""
+    return f"{dimension}.{LOW if low else HIGH}"
+
+
+def comparative_plan(
+    greater: NounPhrase, lesser: NounPhrase, dimension: str, low: bool = False
+) -> SentencePlan:
+    """The plan of ``GREATER(dimension, greater, lesser)``: "the greater is bigger than the
+    lesser", or with ``low`` "the lesser is smaller than the greater". The language chooses the
+    word; the proposition is the one form (CG.66)."""
+    subject, target = (lesser, greater) if low else (greater, lesser)
+    return SentencePlan(
+        subject, Predication(COMPARATIVE, comparative_label(dimension, low), True, target)
+    )
+
+
 def plan_for(
     facts: Facts,
     proposition: Proposition,
     mentions: Mapping[str, NounPhrase] | None = None,
     bare: bool = False,
+    low: bool = False,
 ) -> SentencePlan:
     """The sentence plan of a proposition. ``mentions`` gives the noun phrase of an instance;
     an instance without one is mentioned by the noun of its leaf, with ``the``. ``bare`` says a
-    class-level subject with a bare plural in place of its quantifier word."""
+    class-level subject with a bare plural in place of its quantifier word. ``low`` says a
+    comparative with the low pole's word ("smaller than"), whose subject is the lesser
+    argument."""
     mentions = mentions or {}
     predicate = proposition.predicate
 
@@ -132,15 +156,26 @@ def plan_for(
             return SentencePlan(
                 subject, Predication(predicate.kind, predicate.label, predicate.value), quantifier
             )
+        if predicate.kind == COMPARATIVE:
+            assert isinstance(predicate.patient, CategoryTerm)
+            return comparative_plan(subject, class_phrase(predicate.patient), predicate.label, low)
         target = None
         if isinstance(predicate.patient, CategoryTerm):
             target = class_phrase(predicate.patient)
+        standard = predicate.comparison if predicate.kind == COMPARISON else None
         return SentencePlan(
             subject,
-            Predication(predicate.kind, predicate.label, proposition.polarity, target),
+            Predication(
+                predicate.kind, predicate.label, proposition.polarity, target, standard=standard
+            ),
             quantifier,
         )
     assert isinstance(proposition.subject, str)
+    if predicate.kind == COMPARATIVE:
+        assert isinstance(predicate.patient, str)
+        return comparative_plan(
+            phrase(proposition.subject), phrase(predicate.patient), predicate.label, low
+        )
     noun = predicate.comparison
     if predicate.kind == MEMBER and predicate.label == leaf_of(facts, proposition.subject):
         # "the penguin is a penguin" says nothing: name the instance by the category above
@@ -391,7 +426,7 @@ def clause_propositions(plan: SentencePlan) -> list[Proposition]:
             return
         for predication in clause.predications:
             target = predication.object
-            if predication.kind == SCALAR:
+            if predication.kind == COMPARISON:
                 continue
             found.append(
                 proposition(
@@ -460,7 +495,8 @@ class MentionRules:
         """Whether an instance satisfies a literal of a noun phrase headed by ``noun``. A pole
         is relative to the noun's category."""
         if literal.pole:
-            return bool(self.truth.pole_mask(literal.feature, self.world.below(noun))[0][row])
+            return bool(self.truth.pole_mask(literal.feature, noun)[0][row])
+
         value = bool(self.world.column(literal.feature)[row])
         return value == literal.positive
 

@@ -1082,3 +1082,30 @@ def test_define_and_view_report_the_numeric_fluents(
     assert view["NUMFL.1"].to_list() == entities["NUMFL.1"].to_list()
     stats = yaml.safe_load((out / "world_stats.yaml").read_text(encoding="utf-8"))
     assert stats["numeric_fluents"]["count"] == 2
+
+
+# ---------------------------------------------------------------------------------------------
+# Stage b3a, follow-up of stage b2 (Jon's ruling 4): the default of rule_weight
+# ---------------------------------------------------------------------------------------------
+
+
+def test_the_default_rule_weight_is_the_smallest_whole_weight_that_gives_a_threshold_rule() -> None:
+    """``numeric_fluents.rule_weight`` defaults to 21: the smallest whole weight at which the
+    default world (seed 1) draws a derived Boolean fluent whose rule reads a numeric threshold
+    (stage b3a, Jon's ruling 4 on stage b2). The default world file says the same."""
+    assert tiny_config().numeric_fluents.rule_weight == 21.0
+    default = load_config(DATA / "default.yaml")
+    assert default.numeric_fluents.rule_weight == 21.0
+
+
+@pytest.mark.slow
+def test_the_default_world_has_a_derived_fluent_over_a_numeric_threshold() -> None:
+    """The default world (seed 1) has at least one derived Boolean fluent over a numeric
+    threshold, the pattern of "hungry" as ``NUMFL.1 > 0.75`` (Jon's ruling 4 on stage b2), and
+    the statistics count it."""
+    world = define(load_config(DATA / "default.yaml"))
+    reading = [rule for rule in world.fluents.rules if rule.numeric_thresholds]
+    assert reading
+    assert world.stats["numeric_fluents"]["rules_reading_a_threshold"] == len(reading)
+    literals = {lit["kind"] for lit in world.definition.record()["literals"]}
+    assert "numeric_threshold" in literals

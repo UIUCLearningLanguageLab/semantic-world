@@ -36,6 +36,7 @@ from semantic_world.corpus.planner import (
     BLOCKED,
     CAUSAL,
     CHARACTERISTIC,
+    COMPARATIVE_SECTION,
     CONTRAST,
     DEFINING,
     DESCRIPTION,
@@ -56,6 +57,8 @@ from semantic_world.corpus.propositions import (
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EVENT,
     HAS,
     INSTANCE,
@@ -65,7 +68,6 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
-    SCALAR,
     SOME,
     STATE,
     VERB,
@@ -180,7 +182,12 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             assert tuple(leaves(tree)) == sentence.sentence.tokens
             record = sentence.sentence
             read = interpret(
-                tree, planner.lexicon, record.referents, record.events, plan.quantifier
+                tree,
+                planner.lexicon,
+                record.referents,
+                record.events,
+                plan.quantifier,
+                plan.predication.standard,
             )
             assert read == plan
             levels[proposition.level] += 1
@@ -213,10 +220,15 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
         # nothing of the surface is in it: no determiner, no pronoun, no word
         assert " THE(" not in text and "LEXEME." not in text
         if sentence.proposition.level == CLASS:
-            if sentence.proposition.predicate.kind == SCALAR:
-                assert text.removeprefix("NOT ").startswith("SCALARDIM.")
+            kind = sentence.proposition.predicate.kind
+            if kind == COMPARISON:
+                assert text.removeprefix("NOT ").split("(")[0] in ("ABOVE", "BELOW")
+                assert "MEAN(" in text and f", {planner.config.scalar_z!r})" in text
+            elif kind == COMPARATIVE:
+                assert text.startswith("GREATER(") and text.count("MEAN(") == 2
             else:
                 assert text.split("(")[0] in ("NEC", "ALL", "MOST", "SOME", "NO")
+
             assert not re.search(r"\bREF\.\d|\bINSTANCE\.\d", text)  # no referent, no instance
             quantified += 1
             existential += "EXISTS(" in text
@@ -446,7 +458,7 @@ def test_pronouns_and_chains(corpora, name) -> None:
                     previous is not None
                     and phrase.referent in previous[1]
                     and (previous[1] == {phrase.referent} or previous[0] == phrase.referent)
-                    and not (phrase is plan.subject and plan.predication.kind == SCALAR)
+                    and not (phrase is plan.subject and plan.predication.kind == COMPARISON)
                 )
                 if could and [p.referent for p in phrases].index(phrase.referent) == phrases.index(
                     phrase
@@ -515,7 +527,8 @@ def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
                 continue
             level = Described.path(phrase.referent).index(phrase.noun) + 1
             named[level] += 1
-            if phrase.determiner == "a" and sentence.plan.predication.kind not in (SCALAR, MEMBER):
+            kind = sentence.plan.predication.kind
+            if phrase.determiner == "a" and kind not in (COMPARISON, MEMBER):
                 assert level == 1
     assert named[1] > 0.6 * sum(named.values())
 
@@ -564,7 +577,7 @@ def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> N
                 assert kind not in (MEMBER, VERB) and proposition.rule is None
                 if proposition.quantifier in (ALL, NO):
                     assert sentence.section == DEFINING
-                if proposition.quantifier == MOST or kind == SCALAR:
+                if proposition.quantifier == MOST or kind == COMPARISON:
                     assert sentence.section == CHARACTERISTIC
                 if proposition.quantifier == SOME:
                     assert sentence.section == RARER
@@ -661,10 +674,24 @@ def test_category_documents(corpora) -> None:
             elif predicate.kind == VERB:
                 assert topic in (subject.category, predicate.patient.category)
                 kinds["agent" if subject.category == topic else "patient"] += 1
+            elif predicate.kind == COMPARATIVE:
+                # a comparison fact: the topic against one of its partners, the greater first
+                assert topic in (subject.category, predicate.patient.category)
+                assert subject.category != predicate.patient.category
+                kinds["comparison"] += 1
             else:
                 assert subject.category == topic or subject.category in children
                 kinds["topic" if subject.category == topic else "subcategory"] += 1
-    assert set(kinds) == {"above", "apart", "below", "agent", "patient", "topic", "subcategory"}
+    assert set(kinds) == {
+        "above",
+        "apart",
+        "below",
+        "agent",
+        "patient",
+        "topic",
+        "subcategory",
+        "comparison",
+    }
     # topics come from every level, by documents.topic_level_weights (1 to 2 over three levels)
     assert set(topics) == {1, 2, 3}
 
@@ -769,6 +796,10 @@ def test_narratives(cases, corpora) -> None:
                 assert len(set(happened)) == len(happened), sentence.label
                 recurring += sum(e.key == event.key and e is not event for e in events.values())
                 with_clauses += bool(clauses)
+            elif sentence.section == COMPARATIVE_SECTION:
+                # a comparative description of the event's two participants (stage b3a)
+                assert proposition.level == INSTANCE
+                assert proposition.predicate.kind == COMPARATIVE
             elif sentence.section != DESCRIPTION:
                 # an initial state, a result, or a blocked sentence (test_corpus_states.py)
                 assert sentence.section in (INITIAL_STATE, RESULT, BLOCKED)
@@ -852,9 +883,10 @@ def test_the_relation_fact_share(corpora, world_files) -> None:
         return sum(section == RELATION for section in drawn) / len(drawn), others, found, len(drawn)
 
     default, others, documents, drawn = made()
-    # one kind among four for a topic with subcategories, and among three for a leaf; a little
-    # more in the documents, because the membership facts of a topic run out first
-    assert 0.25 < default < 0.40
+    # one kind among five for a topic with subcategories (membership, the topic, a subcategory,
+    # a relation fact, and, since stage b3a, a comparison fact), and among four for a leaf; a
+    # little more in the documents, because the membership facts of a topic run out first
+    assert 0.20 < default < 0.35
     explicit = made(relation_fact_share=None)[2]
     assert [d.to_json() for d in explicit] == [d.to_json() for d in documents]
     # 0 turns relation facts off in category documents, and only there
@@ -918,7 +950,7 @@ def test_sibling_contrasts(corpora) -> None:
             strong = planner.facts.class_fact(
                 proposition.subject, proposition.predicate, proposition.negative
             )
-            assert strong.predicate.kind == SCALAR or strong.quantifier in (
+            assert strong.predicate.kind == COMPARISON or strong.quantifier in (
                 NEC_ALL, ALL, NEC_NO, NO, MOST
             )  # fmt: skip
 
@@ -1098,8 +1130,8 @@ def test_readings_in_documents(corpora) -> None:
         assert not (set(rest) & levels)
         if level != CLASS:
             assert not rest
-        elif proposition.predicate.kind == SCALAR:
-            assert not rest
+        elif proposition.predicate.kind in (COMPARISON, COMPARATIVE):
+            assert not rest  # a pole or a comparative of a category takes no quantifier word
         else:
             # the true quantifier is among the readings of the words
             assert proposition.quantifier in rest, (sentence.readings, proposition.quantifier)
@@ -1318,13 +1350,15 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
 
     planner, base, strengths = made()
     # in the default language, "all" and "no" state the nec quantifiers
-    assert set(strengths) == {NEC_ALL, MOST, SOME, NEC_NO, "pole"}
+    assert set(strengths) == {NEC_ALL, MOST, SOME, NEC_NO, "pole", "comparative"}
     for _, sentence in sentences_of(base):
         proposition = sentence.proposition
         if proposition.level != CLASS:
             assert sentence.strength is None
-        elif proposition.predicate.kind == SCALAR:
+        elif proposition.predicate.kind == COMPARISON:
             assert sentence.strength == "pole"
+        elif proposition.predicate.kind == COMPARATIVE:
+            assert sentence.strength == "comparative" and proposition.quantifier is None
         elif proposition.causal:
             assert sentence.strength == NEC_ALL
         else:
@@ -1345,7 +1379,10 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     for _, sentence in sentences_of(lighter):
         assert planner.truth.is_true(sentence.proposition)
         proposition = sentence.proposition
-        if proposition.level == CLASS and proposition.predicate.kind != SCALAR:
+        if proposition.level == CLASS and proposition.predicate.kind not in (
+            COMPARISON,
+            COMPARATIVE,
+        ):
             fact = planner.facts.class_fact(
                 proposition.subject, proposition.predicate, proposition.negative
             )
@@ -1364,14 +1401,17 @@ def test_quantifier_weights_rebalance_the_choice_of_facts(cases) -> None:
     assert without[SOME] == 0 and without[NEC_ALL] > strengths[NEC_ALL]
     # the polarity of a fact is drawn first, at the negation rate, so the weight of "no" moves
     # the mix among the negative facts: "no" against "most ... not" and "some ... not". About 3%
-    # of the class-level sentences are "no", so the rise needs 1,000 documents to show. The
+    # of the class-level sentences are "no", so the rise needs 3,000 documents to show. The
     # margin is two standard errors of the two binomial shares, not the three the other rate
     # tests use (Jon's ruling 4 on the process cleanup): three were preferred if the rise cleared
     # them comfortably, but on this seed the rise measures about two and a half, so the test
     # keeps two (a one-sided bound at the usual level); more documents would make it slower, and
-    # a heavier weight would make it a test of another setting
-    _, _, base_many = made(count=1000)
-    _, _, heavier = made(count=1000, nec_none=4)
+    # a heavier weight would make it a test of another setting. Since stage b3a the comparison
+    # facts of the category documents, which take no weight, are a seventh of these sentences, so
+    # 1,000 documents measured the rise at one standard error on this seed (1.0; 1.6 on seed 2),
+    # 2,000 at 1.9, and 3,000 at 2.5: the property holds, and the sample grew
+    _, _, base_many = made(count=3000)
+    _, _, heavier = made(count=3000, nec_none=4)
     base_share, heavier_share = share(base_many, NEC_NO), share(heavier, NEC_NO)
     error = standard_error(base_share, sum(base_many.values())) + standard_error(
         heavier_share, sum(heavier.values())
@@ -1444,7 +1484,7 @@ def test_a_world_without_verbs_and_scalars(world_files) -> None:
     assert sections[RELATION] == 0 and sections[EVENT_SECTION] > 50
     for document, sentence in sentences_of(documents):
         proposition = sentence.proposition
-        assert proposition.predicate.kind not in (VERB, SCALAR)
+        assert proposition.predicate.kind not in (VERB, COMPARISON)
         assert planner.truth.is_true(proposition)
         parsed = parse_propositional(sentence.propositional)
         assert proposition_of(parsed, document.referents) == proposition

@@ -22,8 +22,12 @@ STREAM_NAMES = (
     "mentions",
     "grammar",
     "tests",
+    "comparatives",
 )
-"""The short names of the generator's streams. The full name is ``corpus:<short name>``."""
+"""The short names of the generator's streams. The full name is ``corpus:<short name>``.
+``comparatives`` (stage b3a) draws the comparative descriptions of the narratives, a part per
+document, so that the other draws of a document are unchanged when ``documents.comparative_rate``
+is 0."""
 
 
 class Streams:
@@ -36,6 +40,7 @@ class Streams:
     mentions: np.random.Generator
     grammar: np.random.Generator
     tests: np.random.Generator
+    comparatives: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

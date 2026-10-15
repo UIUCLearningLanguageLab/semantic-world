@@ -29,6 +29,7 @@ from semantic_world.corpus.propositions import (
     ALL,
     CAN,
     CLASS,
+    COMPARISON,
     EXACT,
     HAS,
     INSTANCE,
@@ -39,7 +40,6 @@ from semantic_world.corpus.propositions import (
     NEC_NO,
     NO,
     PROJECTION,
-    SCALAR,
     SOME,
     VERB,
     CategoryTerm,
@@ -211,7 +211,7 @@ def test_the_strongest_statable_true_quantifier_is_stated(cases, settings) -> No
             )
             for fact in facts.class_facts(category, negative):
                 kind = fact.predicate.kind
-                if kind in (SCALAR, MEMBER):
+                if kind in (COMPARISON, MEMBER):
                     continue
                 stated = order.index((fact.quantifier, fact.polarity))
                 # every stronger quantifier is false, not statable, or barred by a usage rule
@@ -248,7 +248,7 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
         HAS,
         CAN,
         PROJECTION,
-        SCALAR,
+        COMPARISON,
         MEMBER,
         VERB,
     ]
@@ -258,7 +258,7 @@ def test_facts_come_in_the_order_of_the_predicates(cases) -> None:
     assert by_kind[IS] == len(facts.features[IS]) and by_kind[HAS] == len(facts.features[HAS])
     assert by_kind[CAN] == len(facts.features[CAN])
     assert by_kind[PROJECTION] == len(facts.projections) > 0
-    assert by_kind[SCALAR] == 2 * len(facts.world.scalars)
+    assert by_kind[COMPARISON] == 2 * len(facts.world.scalars)
     assert by_kind[VERB] == len(facts.verbs) * len(facts.categories)
     assert sum(by_kind.values()) == len(predicates)
     # membership in a category at the same level or above, never in itself or in a subcategory
@@ -336,13 +336,14 @@ def test_instance_predicates(cases) -> None:
     predicates = facts.instance_predicates("INSTANCE.1.1.1")
     by_kind = Counter(p.kind for p in predicates)
     # a scalar pole against every category the instance is below
-    assert {p.comparison for p in predicates if p.kind == SCALAR} == {"CATEGORY.1", "CATEGORY.1.1"}
+    classes = {p.comparison for p in predicates if p.kind == COMPARISON}
+    assert classes == {"CATEGORY.1", "CATEGORY.1.1"}
     assert by_kind == {
         IS: len(facts.features[IS]),
         HAS: len(facts.features[HAS]),
         CAN: len(facts.features[CAN]),
         PROJECTION: len(facts.projections),
-        SCALAR: 2 * len(case.world.scalars) * 2,
+        COMPARISON: 2 * len(case.world.scalars) * 2,
         MEMBER: len(facts.categories),
         VERB: len(facts.verbs) * (case.world.count - 1),
     }

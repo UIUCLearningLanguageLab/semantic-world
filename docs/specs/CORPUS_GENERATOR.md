@@ -383,11 +383,14 @@ Readings are worked out from the tree and the lexeme tokens alone, never from th
 
 ### Scalar adjectives
 
+**Note (world-and-language refactor).** Since stage b3a, a pole adjective is a comparison that names its comparison class and the language's z (CG.65), the comparison class of a top-level category is `ENTITY`, and the comparatives are built (CG.66): "bigger than" is `GREATER` over the dimension, with the function word `than` and a comparative form of each pole adjective (`grammar.morphology.comparative`). See `docs/specs/WORLD_AND_LANGUAGE.md`, "Phase (b): the corpus".
+
 Each scalar dimension has two adjectives, one for each pole. An instance counts as "big" when its value is at least `scalar_adjectives.z` standard deviations above the mean of its comparison class, and "small" when at least that far below. The comparison class is the category named by the noun (instance level) or the subject category's parent (class level). Comparatives ("bigger than") are out of scope for now.
 
 ## Renderings
 
-**Note (world-and-language refactor).** Since stage a5a, the renderings use the new labels and the quantifiers `NEC(ALL(...))`, `ALL`, `MOST`, `SOME`, `NO`, and `NEC(NO(...))`; since stage a7, the propositional rendering has `HOLDS`, `BECOME`, `ABLE_NOW`, `AFTER`, and `BEFORE`, event variables, and the descriptions of a sentence about instances in braces before its assertion (CG.63). See `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels", "Quantifiers (CG.59 to CG.62)", "Referring content (CG.63)", "States and changes", and "Causal statements".
+**Note (world-and-language refactor).** Since stage a5a, the renderings use the new labels and the quantifiers `NEC(ALL(...))`, `ALL`, `MOST`, `SOME`, `NO`, and `NEC(NO(...))`; since stage a7, the propositional rendering has `HOLDS`, `BECOME`, `ABLE_NOW`, `AFTER`, and `BEFORE`, event variables, and the descriptions of a sentence about instances in braces before its assertion (CG.63); since stage b3a, a scalar pole is written `ABOVE(SCALARDIM.1, REF.1, CATEGORY.1.5, 1.0)` or `BELOW(...)`, with its comparison class and the language's z, a category's mean as `MEAN(CATEGORY.1.4)`, and a comparative as `GREATER(SCALARDIM.1, REF.1, REF.2)`. See
+ `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels", "Quantifiers (CG.59 to CG.62)", "Referring content (CG.63)", "States and changes", and "Causal statements".
 
 Every sentence is written in up to four renderings. The first three need no word forms, so a whole corpus can be produced in any of them alone.
 

@@ -39,6 +39,14 @@ Since stage b2 the replay carries the numeric fluents (``NUMFL`` columns of ``en
 the history's ``initial_numeric``), so that a derived fluent that reads a numeric threshold is
 judged on the right values; the brute-force evaluator applies the numeric effects and the
 drift. No sentence names a numeric fluent, and the oracle has nothing to say about one.
+
+Comparisons of scalars (stage b3a) are recomputed from the ``SCALARDIM`` columns of
+``entities.csv`` alone: a pole (kind ``comparison``) against the mean and the population standard
+deviation of its comparison class, the rows below the class's category or every row for
+``ENTITY``, at the threshold the form records under ``z``; a class-level pole compares the mean
+of the subject set the same way; a comparative (kind ``comparative``) compares two rows' values,
+or two categories' means, strictly. The oracle shares no class statistics with the corpus or the
+world package.
 """
 
 from __future__ import annotations
@@ -55,6 +63,7 @@ import yaml
 from semantic_world.world.fixtures import BruteEvent, BruteForce
 
 THING = "THING"
+ENTITY = "ENTITY"
 NEC_ALL, ALL, MOST, SOME, NO, NEC_NO = "nec_all", "all", "most", "some", "no", "nec_no"
 
 
@@ -148,26 +157,31 @@ class Oracle:
     # Sets of rows ----------------------------------------------------------------------------
 
     def below(self, category: str) -> np.ndarray:
-        if category == THING:
+        if category in (THING, ENTITY):
             return np.ones(self.n, dtype=bool)
         return np.array([category in self.path[label] for label in self.labels], dtype=bool)
 
-    def pole(self, pole: str, comparison: np.ndarray) -> np.ndarray:
+    def pole(self, pole: str, comparison: np.ndarray, z: float | None = None) -> np.ndarray:
+        """Which rows are at a pole against a comparison class (a mask of rows), at ``z``
+        standard deviations of the class (the oracle's default when none is given): ``HIGH`` at
+        least ``z`` above the class's mean, ``LOW`` at least ``z`` below; none when the class
+        has no spread."""
+        z = self.z if z is None else z
         scalar, side = pole.rsplit(".", 1)
         values = self.column[scalar].astype(float)
         mean, sd = values[comparison].mean(), values[comparison].std()
         if sd == 0:
             return np.zeros(self.n, dtype=bool)
-        return values >= mean + self.z * sd if side == "HIGH" else values <= mean - self.z * sd
+        return values >= mean + z * sd if side == "HIGH" else values <= mean - z * sd
 
-    def subject_set(self, term: dict[str, Any]) -> np.ndarray:
+    def subject_set(self, term: dict[str, Any], z: float | None = None) -> np.ndarray:
         below = self.below(term["category"])
         keep = below.copy()
         for literal in term["restriction"]:
             positive = not literal.startswith("not ")
             name = literal.removeprefix("not ")
             if name.startswith("SCALARDIM."):
-                keep &= self.pole(name, below)
+                keep &= self.pole(name, below, z)
             else:
                 keep &= self.column[name] == int(positive)
         for clause in term.get("clauses", ()):
@@ -585,6 +599,8 @@ class Oracle:
         if form["level"] == "class" and "head" in form["subject"]:
             return self.causal(form)
         if form["level"] == "class":
+            if form["predicate"]["kind"] in ("comparison", "comparative"):
+                return self._class_comparison(form)
             return self._class(form)
         if form["level"] in ("state", "change", "able_now"):
             assert scene is not None and scene["label"] == form["scene"]
@@ -596,39 +612,67 @@ class Oracle:
         """How many members of the subject set (or pairs) satisfy the predicate, and how many
         there are."""
         predicate = form["predicate"]
-        members = self.subject_set(form["subject"])
+        z = form.get("z")
+        members = self.subject_set(form["subject"], z)
         kind = predicate["kind"]
         if kind == "event_type2":
-            patients = self.subject_set(predicate["patient"])
+            patients = self.subject_set(predicate["patient"], z)
             block = self.matrix(predicate["label"])[np.ix_(members, patients)]
             return int(block.sum()), int(
                 members.sum() * patients.sum() - (members & patients).sum()
             )
         return int(self.column[predicate["label"]][members].sum()), int(members.sum())
 
-    def _class(self, form: dict[str, Any]) -> bool | None:
+    def _class_comparison(self, form: dict[str, Any]) -> bool | None:
+        """A class-level comparison (a pole of the category's mean against its comparison class,
+        an ancestor or ``ENTITY``, at the form's ``z``) or comparative (the category's mean
+        against another category's, strictly), from the scalar columns alone."""
         subject, predicate = form["subject"], form["predicate"]
         quantifier, polarity, kind = form["quantifier"], form["polarity"], predicate["kind"]
         category = subject["category"]
-        if kind == "scalar":
-            if quantifier is not None or category == THING:
-                return None
-            if subject["restriction"] or subject.get("clauses"):
-                return None  # a statement about the category, not about a restricted set
-            members = self.subject_set(subject)
+        if quantifier is not None or category == THING:
+            return None
+        if subject["restriction"] or subject.get("clauses"):
+            return None  # a statement about the category, not about a restricted set
+        members = self.subject_set(subject)
+        if kind == "comparison":
             scalar, side = predicate["label"].rsplit(".", 1)
+            comparison = predicate["class"]
+            if comparison != ENTITY and comparison not in self.ancestors(category):
+                return None
+            z = form.get("z", self.z)  # a form without a recorded z is judged at the oracle's
             values = self.column[scalar].astype(float)
-            parent = self.parent[category]
-            comparison = self.below(THING if parent is None else parent)
-            mean, sd = values[comparison].mean(), values[comparison].std()
+            rows = self.below(comparison)
+            mean, sd = values[rows].mean(), values[rows].std()
             value = values[members].mean()
             if sd == 0:
                 has_pole = False
             elif side == "HIGH":
-                has_pole = value >= mean + self.z * sd
+                has_pole = value >= mean + z * sd
             else:
-                has_pole = value <= mean - self.z * sd
+                has_pole = value <= mean - z * sd
             return bool(has_pole) == polarity
+        other = predicate["patient"]
+        if not polarity or "clauses" in other or other["restriction"]:
+            return None
+        if other["category"] in (THING, category):
+            return None
+        values = self.column[predicate["label"]].astype(float)
+        first, second = values[members].mean(), values[self.subject_set(other)].mean()
+        if self._low_word(predicate):
+            first, second = second, first  # "smaller than": the sentence's object is the greater
+        return bool(first > second)
+
+    @staticmethod
+    def _low_word(predicate: dict[str, Any]) -> bool:
+        """Whether a comparative's form says the sentence used the low pole's word, so that its
+        subject is the lesser argument (the form holds the sentence's subject and object)."""
+        return str(predicate.get("word", "")).endswith(".LOW")
+
+    def _class(self, form: dict[str, Any]) -> bool | None:
+        subject, predicate = form["subject"], form["predicate"]
+        quantifier, polarity, kind = form["quantifier"], form["polarity"], predicate["kind"]
+        category = subject["category"]
         if quantifier not in (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO):
             return None
         if quantifier in (NEC_ALL, ALL, NO, NEC_NO) and not polarity:
@@ -636,7 +680,7 @@ class Oracle:
         if quantifier in (NEC_ALL, NEC_NO):
             if kind not in ("property", "part", "event_type1", "member") or subject.get("clauses"):
                 return None
-        members = self.subject_set(subject)
+        members = self.subject_set(subject, form.get("z"))
         if not members.any():
             return None
         if kind == "member":
@@ -672,10 +716,22 @@ class Oracle:
             value = self.column[predicate["label"]][row] == 1
         elif kind == "member":
             value = predicate["label"] in path
-        elif kind == "scalar":
+        elif kind == "comparison":
             if predicate["class"] not in path:
                 return None
-            value = self.pole(predicate["label"], self.below(predicate["class"]))[row]
+            rows = self.below(predicate["class"])
+            value = self.pole(predicate["label"], rows, form.get("z", self.z))[row]
+
+        elif kind == "comparative":
+            other = predicate["patient"]["instance"]
+            if other == subject or not form["polarity"]:
+                return None
+            values = self.column[predicate["label"]].astype(float)
+            first, second = values[row], values[self.row[other]]
+            if self._low_word(predicate):
+                first, second = second, first
+            return bool(first > second)
+
         else:
             patient = predicate["patient"]["instance"]
             if patient == subject:

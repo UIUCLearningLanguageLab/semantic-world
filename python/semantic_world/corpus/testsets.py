@@ -24,6 +24,12 @@ kinds of item have test sets of their own:
   world swims, but nothing fixes it. The ordinary sets hold only items that observing the
   instances could decide;
 - ``instance_<change>``;
+- ``instance_comparison_predicate`` and ``instance_comparison_role`` (stage b3a). An instance
+  comparison item continues a narrative document and compares two of its referents on a scalar,
+  ``GREATER(SCALARDIM.1, REF.1, REF.2)``. The false item swaps the scalar for one on which the
+  comparison is false (``predicate``) or swaps the two arguments (``role``). The class-level
+  comparison facts (two categories' means) join ``class_predicate`` and ``class_role`` with the
+  same two changes;
 - ``event_<change>_possible``, ``event_<change>_blocked``, and ``event_<change>_impossible``.
   A false event is one of three kinds: its binding was legal at some time point of the scene and
   the event did not happen (``possible``), its binding is able and was never legal in the scene
@@ -110,20 +116,36 @@ from semantic_world.corpus.histories import (
 )
 from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.logical import is_descriptive, logical_form
-from semantic_world.corpus.mentions import Mentions, clause_propositions, plan_for
-from semantic_world.corpus.planner import CONTENT_KINDS, RELATION, SITUATIONAL, Document, Planner
+from semantic_world.corpus.mentions import (
+    Mentions,
+    clause_propositions,
+    comparative_label,
+    plan_for,
+)
+from semantic_world.corpus.planner import (
+    COMPARISON_KIND,
+    CONTENT_KINDS,
+    RELATION,
+    SITUATIONAL,
+    Document,
+    Planner,
+)
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     AGENT,
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EFFECT,
     EVENT,
     FEATURE_KINDS,
     HAS,
+    HIGH,
     INSTANCE,
     IS,
+    LOW,
     MEMBER,
     MOST,
     NEC_KINDS,
@@ -133,7 +155,6 @@ from semantic_world.corpus.propositions import (
     PROGRESSIVE,
     PROJECTION,
     QUANTIFIERS,
-    SCALAR,
     SIMPLE,
     SOME,
     STATE,
@@ -174,7 +195,19 @@ CAUSAL_LEVELS = (CAUSAL_EFFECT, CAUSAL_PRECONDITION)
 """The two causal "levels" of the test sets: their items are class-level propositions, and the
 sets are named by the kind of statement."""
 _CAUSAL_KIND = {CAUSAL_EFFECT: EFFECT, CAUSAL_PRECONDITION: PRECONDITION}
-ITEM_LEVELS = (CLASS, INSTANCE, EVENT, STATE, ABLE_NOW, CAUSAL_EFFECT, CAUSAL_PRECONDITION)
+INSTANCE_COMPARISON = "instance_comparison"
+"""The "level" of the instance comparison sets (stage b3a): their items are instance-level
+comparatives between two referents of a narrative document."""
+ITEM_LEVELS = (
+    CLASS,
+    INSTANCE,
+    INSTANCE_COMPARISON,
+    EVENT,
+    STATE,
+    ABLE_NOW,
+    CAUSAL_EFFECT,
+    CAUSAL_PRECONDITION,
+)
 """The levels that have test sets, in file order (a change is stated in documents only)."""
 TRUE_ITEM = "true_item"
 FALSE_ITEM = "false_item"
@@ -193,6 +226,7 @@ of one set and 300 more, and no more than 6 for each pair and 300 more without a
 LEVEL_CHANGES = {
     CLASS: (PREDICATE, SUBJECT, QUANTIFIER, ROLE),
     INSTANCE: (PREDICATE, SUBJECT, ROLE),
+    INSTANCE_COMPARISON: (PREDICATE, ROLE),
     EVENT: (PREDICATE, SUBJECT, ROLE),
     STATE: (PREDICATE, SUBJECT),
     ABLE_NOW: (PREDICATE, SUBJECT),
@@ -200,8 +234,9 @@ LEVEL_CHANGES = {
     CAUSAL_PRECONDITION: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
 }
 """The changes that can apply at each level: only a class-level proposition has a quantifier,
-the state and ``able_now`` sets take a predicate swap and a subject swap, and the causal sets
-the predicate, polarity, event, and role swaps."""
+the state and ``able_now`` sets take a predicate swap and a subject swap, the instance
+comparison sets a predicate swap (the scalar) and a role swap (the arguments), and the causal
+sets the predicate, polarity, event, and role swaps."""
 
 INPUT_FIELDS = (
     "document",
@@ -264,14 +299,18 @@ def candidates(
             return with_predicate(facts.features[predicate.kind])
         if predicate.kind == PROJECTION:
             return with_predicate(facts.projections)
-        if predicate.kind == SCALAR:
+        if predicate.kind == COMPARISON:
             return with_predicate(facts.poles)
+        if predicate.kind == COMPARATIVE:
+            return with_predicate(facts.scalars)  # another scalar dimension
         if predicate.kind == VERB:
             return with_predicate(facts.verbs)
         level = facts.level[predicate.label]
         return with_predicate([c for c in facts.categories if facts.level[c] == level])
 
     if change == SUBJECT:
+        if predicate.kind == COMPARATIVE:
+            return []  # a comparison fact takes the predicate and role swaps alone
         if isinstance(subject, CategoryTerm):
             if subject.category == THING:
                 return []
@@ -305,7 +344,7 @@ def candidates(
             if quantifier != proposition.quantifier
         ]
 
-    if predicate.kind != VERB:
+    if predicate.kind not in (VERB, COMPARATIVE):
         return []
     swapped = dataclasses.replace(predicate, patient=subject)
     return [dataclasses.replace(proposition, subject=predicate.patient, predicate=swapped)]
@@ -396,6 +435,8 @@ def changes_for(proposition: Proposition) -> tuple[str, ...]:
         if not proposition.subject.event_type.startswith("EVENTTYPE1."):
             changes.append(ROLE)
         return tuple(changes)
+    if proposition.predicate.kind == COMPARATIVE:
+        return (PREDICATE, ROLE)
     changes = [PREDICATE, SUBJECT]
     if proposition.level == CLASS:
         changes.append(QUANTIFIER)
@@ -489,7 +530,7 @@ def stated_propositions(
                 add(Proposition(INSTANCE, instance, Predicate(MEMBER, phrase.noun)))
                 for literal in phrase.restriction:
                     if literal.pole:
-                        predicate = Predicate(SCALAR, literal.feature, comparison=phrase.noun)
+                        predicate = Predicate(COMPARISON, literal.feature, comparison=phrase.noun)
                         add(Proposition(INSTANCE, instance, predicate))
                     else:
                         kind = IS if literal.feature.startswith(PROPERTY_PREFIX) else HAS
@@ -513,7 +554,7 @@ def phrase_clause_propositions(plan: SentencePlan) -> list[tuple[NounPhrase, Pro
             visit(clause.agent)
             return
         for predication in clause.predications:
-            if predication.kind != SCALAR:
+            if predication.kind != COMPARISON:
                 heads.append(phrase)
             visit(predication.object)
 
@@ -530,7 +571,11 @@ _FREE_TEXT = ("formal", "conceptual", "propositional", "text")
 """Fields whose text is made from other fields of the item (the tokens, the logical form), so
 their notation follows from those fields."""
 _OPTIONAL = "clauses"
-"""The one field that the logical form leaves out when it is empty."""
+"""The field that the logical form leaves out when it is empty."""
+_OPTIONAL_KEYS = (_OPTIONAL, "z")
+"""The fields that a logical form holds only when there is something to hold: the relative
+clauses of a term or a mention, and the threshold ``z`` of a form with a pole adjective (a
+mention's modifier can be a pole in one item of a pair and not in the other)."""
 _INDICES = re.compile(r"\d+(\.\d+)*")
 _EVENT_LABEL = re.compile(r"\bSCENE\.\d+\.EVENTINSTANCE\.\d+\b")
 _SCENE_LABEL = re.compile(r"SCENE\.\d+")
@@ -563,8 +608,8 @@ def format_differences(a: Any, b: Any, path: str = "input") -> list[str]:
     if isinstance(a, dict) and isinstance(b, dict):
         # a category term leaves ``clauses`` out when it has none, and a role swap moves the
         # clause with its category: the two forms must hold as many, wherever they stand
-        fields_a = [key for key in a if key != _OPTIONAL]
-        fields_b = [key for key in b if key != _OPTIONAL]
+        fields_a = [key for key in a if key not in _OPTIONAL_KEYS]
+        fields_b = [key for key in b if key not in _OPTIONAL_KEYS]
         if fields_a != fields_b:
             return [f"{path}: the fields {list(a)} and {list(b)} differ"]
         found: list[str] = []
@@ -573,7 +618,7 @@ def format_differences(a: Any, b: Any, path: str = "input") -> list[str]:
         for key in a:
             if key == "tree" or (key in _FREE_TEXT and type(a[key]) is type(b[key])):
                 continue
-            if key == _OPTIONAL and key not in b:
+            if key in _OPTIONAL_KEYS and key not in b:
                 continue
             found += format_differences(a[key], b[key], f"{path}.{key}")
         return found
@@ -804,6 +849,7 @@ class TestSetBuilder:
         draw = {
             CLASS: self._draw_class,
             INSTANCE: self._draw_instance,
+            INSTANCE_COMPARISON: self._draw_instance_comparison,
             EVENT: self._draw_event,
             STATE: self._draw_state,
             ABLE_NOW: self._draw_able_now,
@@ -909,7 +955,7 @@ class TestSetBuilder:
             return LAWLIKE if law_like(self.truth, false) else _ORDINARY
         if level in CAUSAL_LEVELS:
             return LAWLIKE if self.truth.observed(false) else _ORDINARY
-        if level == INSTANCE:
+        if level in (INSTANCE, INSTANCE_COMPARISON):
             return _ORDINARY
         assert document is not None and false.grounding is not None
         if level == STATE:
@@ -929,8 +975,8 @@ class TestSetBuilder:
     def _draw_class(
         self, rng: np.random.Generator, change: str, aspects: np.random.Generator
     ) -> tuple[None, Proposition, bool] | None:
-        # only a relation fact has roles to exchange
-        kinds = (RELATION,) if change == ROLE else CONTENT_KINDS
+        # only a relation fact and a comparison fact have roles to exchange
+        kinds = (RELATION, COMPARISON_KIND) if change == ROLE else CONTENT_KINDS
         drawn = self.planner.draw_class_fact(rng, kinds)
         return None if drawn is None else (None, drawn[0], drawn[1])
 
@@ -954,6 +1000,24 @@ class TestSetBuilder:
             if pool:
                 return document, pool[int(rng.integers(len(pool)))], False
         return None
+
+    def _draw_instance_comparison(
+        self, rng: np.random.Generator, change: str, aspects: np.random.Generator
+    ) -> tuple[Document, Proposition, bool] | None:
+        """A true comparative between two referents of a narrative document, on a scalar with
+        a word where their values differ: the document, the two referents, and the scalar are
+        drawn uniformly, and the comparison is oriented so that it is true."""
+        if not self.narratives or not self.facts.scalars:
+            return None
+        document = self.narratives[int(rng.integers(len(self.narratives)))]
+        referents = tuple(document.referents.values())
+        if len(referents) < 2:
+            return None
+        first, second = (referents[int(i)] for i in rng.choice(len(referents), 2, replace=False))
+        scalars = self.facts.scalars
+        scalar = scalars[int(rng.integers(len(scalars)))]
+        fact = self.facts.instance_comparison(first, second, scalar)
+        return None if fact is None else (document, fact, False)
 
     def _draw_event(
         self, rng: np.random.Generator, change: str, aspects: np.random.Generator
@@ -1162,6 +1226,10 @@ class TestSetBuilder:
                 return mentions.noun_phrase(rng, instance, pronoun=False, **options)
 
             assert isinstance(proposition.subject, str)
+            avoid: tuple[str, ...] = (predicate.label,)
+            if predicate.kind == COMPARATIVE:
+                # no pole modifier on the dimension the sentence compares
+                avoid = (f"{predicate.label}.{HIGH}", f"{predicate.label}.{LOW}")
             if proposition.level == EVENT:
                 subject = phrase(proposition.subject)
             else:
@@ -1169,9 +1237,13 @@ class TestSetBuilder:
                     proposition.subject,
                     noun=predicate.comparison,
                     exclude=predicate.label if predicate.kind == MEMBER else None,
-                    avoid=(predicate.label,),
+                    avoid=avoid,
                 )
-            target = None if predicate.patient is None else phrase(str(predicate.patient))
+            target = None
+            if predicate.patient is not None:
+                # the same avoided features as the subject: the two items of a role-swap pair
+                # then mention an instance in the same way whichever part it plays
+                target = phrase(str(predicate.patient), avoid=avoid)
             if subject.pronoun or (target is not None and target.pronoun):
                 return None  # no noun can name the referent, and "it" would not pick it out
             if proposition.level == EVENT:
@@ -1196,6 +1268,9 @@ class TestSetBuilder:
                     time=time_key(proposition.scene, proposition.time),
                     become=proposition.level == CHANGE,
                 )
+            elif predicate.kind == COMPARATIVE:
+                # the high pole's word, with the greater argument as the subject
+                said = Predication(COMPARATIVE, comparative_label(predicate.label), True, target)
             else:
                 said = Predication(predicate.kind, predicate.label, proposition.polarity, target)
             plan = SentencePlan(subject, said)
@@ -1203,7 +1278,8 @@ class TestSetBuilder:
             raise CorpusError(f"the plan of a test item of {name} says another proposition")
         grammar_rng = self.streams.substream("grammar", f"tests:{name}.{number}")
         sentence = planner.realizer.realize(plan, grammar_rng)
-        form = logical_form(plan, proposition, referents)
+        form = logical_form(plan, proposition, referents, self.config.scalar_z)
+
         for key in ("id", "grounding", "rule", "causal"):
             form.pop(key, None)
         return {

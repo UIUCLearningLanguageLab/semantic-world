@@ -1035,7 +1035,8 @@ def test_causal_propositions_the_truth_tests_reject(cases) -> None:
 def test_the_function_word_before(cases, runs) -> None:
     corpus = runs("tiny")
     lexicon = corpus.planner.lexicon
-    assert FUNCTION_WORDS[-2:] == ("become", BEFORE_WORD)
+    assert FUNCTION_WORDS[-3:] == ("become", BEFORE_WORD, "than")
+
     before = lexicon.function_word(BEFORE_WORD)
     assert before.concept == "BEFORE" and not before.content
     # appended after become: the words before it keep their labels

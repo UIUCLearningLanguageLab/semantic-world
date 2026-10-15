@@ -2,10 +2,10 @@
  "version": 1,
  "name": "tiny_illegal",
  "description": "Random steps of the tiny world, then a last step with an event that is not legal in the state: apply must raise the illegal error.",
- "rule_set_id": "06ce2c7213352db7b76fbf5cda9c534d39920b326f6b4984e53a4ad2fe04113d",
+ "rule_set_id": "912f1d3714605a6733162e153212d4428016c643bda50486f701c797ba2d78e3",
  "definition": {
   "version": 1,
-  "rule_set_id": "06ce2c7213352db7b76fbf5cda9c534d39920b326f6b4984e53a4ad2fe04113d",
+  "rule_set_id": "912f1d3714605a6733162e153212d4428016c643bda50486f701c797ba2d78e3",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": false, "fluent": false, "arity": 1},
@@ -61,9 +61,9 @@
   ],
   "literals": [
    {"index": 0, "key": "PROPERTY.2", "kind": "feature", "role": null, "feature": "PROPERTY.2"},
-   {"index": 1, "key": "PROPERTY.4", "kind": "feature", "role": null, "feature": "PROPERTY.4"},
-   {"index": 2, "key": "PROPERTY.5", "kind": "feature", "role": null, "feature": "PROPERTY.5"},
-   {"index": 3, "key": "PROPERTY.7", "kind": "feature", "role": null, "feature": "PROPERTY.7"},
+   {"index": 1, "key": "PROPERTY.3", "kind": "feature", "role": null, "feature": "PROPERTY.3"},
+   {"index": 2, "key": "PROPERTY.4", "kind": "feature", "role": null, "feature": "PROPERTY.4"},
+   {"index": 3, "key": "PROPERTY.5", "kind": "feature", "role": null, "feature": "PROPERTY.5"},
    {"index": 4, "key": "PART.1", "kind": "feature", "role": null, "feature": "PART.1"},
    {"index": 5, "key": "PART.2", "kind": "feature", "role": null, "feature": "PART.2"},
    {"index": 6, "key": "PART.3", "kind": "feature", "role": null, "feature": "PART.3"},
@@ -71,68 +71,69 @@
    {"index": 8, "key": "PART.5", "kind": "feature", "role": null, "feature": "PART.5"},
    {"index": 9, "key": "PART.6", "kind": "feature", "role": null, "feature": "PART.6"},
    {"index": 10, "key": "SCALARDIM.1>-0.5822", "kind": "threshold", "role": null, "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.58220000000000005},
-   {"index": 11, "key": "SCALARDIM.1>-0.4916", "kind": "threshold", "role": null, "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.49159999999999998},
-   {"index": 12, "key": "BOOLFL.2", "kind": "fluent", "role": null, "fluent": "BOOLFL.2"},
-   {"index": 13, "key": "agent.PROPERTY.1", "kind": "feature", "role": "agent", "feature": "PROPERTY.1"},
-   {"index": 14, "key": "agent.PROPERTY.2", "kind": "feature", "role": "agent", "feature": "PROPERTY.2"},
-   {"index": 15, "key": "agent.PROPERTY.3", "kind": "feature", "role": "agent", "feature": "PROPERTY.3"},
-   {"index": 16, "key": "agent.PROPERTY.4", "kind": "feature", "role": "agent", "feature": "PROPERTY.4"},
-   {"index": 17, "key": "agent.PROPERTY.5", "kind": "feature", "role": "agent", "feature": "PROPERTY.5"},
-   {"index": 18, "key": "agent.PROPERTY.6", "kind": "feature", "role": "agent", "feature": "PROPERTY.6"},
-   {"index": 19, "key": "agent.PROPERTY.7", "kind": "feature", "role": "agent", "feature": "PROPERTY.7"},
-   {"index": 20, "key": "agent.PROPERTY.8", "kind": "feature", "role": "agent", "feature": "PROPERTY.8"},
-   {"index": 21, "key": "agent.PART.1", "kind": "feature", "role": "agent", "feature": "PART.1"},
-   {"index": 22, "key": "agent.PART.3", "kind": "feature", "role": "agent", "feature": "PART.3"},
-   {"index": 23, "key": "agent.PART.4", "kind": "feature", "role": "agent", "feature": "PART.4"},
-   {"index": 24, "key": "agent.PART.5", "kind": "feature", "role": "agent", "feature": "PART.5"},
-   {"index": 25, "key": "agent.SCALARDIM.1>-0.5657", "kind": "threshold", "role": "agent", "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.56569999999999998},
-   {"index": 26, "key": "patient.PROPERTY.1", "kind": "feature", "role": "patient", "feature": "PROPERTY.1"},
-   {"index": 27, "key": "patient.PROPERTY.6", "kind": "feature", "role": "patient", "feature": "PROPERTY.6"},
-   {"index": 28, "key": "patient.PART.2", "kind": "feature", "role": "patient", "feature": "PART.2"},
-   {"index": 29, "key": "patient.PART.4", "kind": "feature", "role": "patient", "feature": "PART.4"},
-   {"index": 30, "key": "patient.PART.6", "kind": "feature", "role": "patient", "feature": "PART.6"},
-   {"index": 31, "key": "patient.PART.7", "kind": "feature", "role": "patient", "feature": "PART.7"},
-   {"index": 32, "key": "agent.SCALARDIM.1-patient.SCALARDIM.1>-0.3709", "kind": "comparison", "role": "binding", "agent_scalar": "SCALARDIM.1", "patient_scalar": "SCALARDIM.1", "operator": ">", "low": -0.37090000000000001, "high": null},
-   {"index": 33, "key": "CONSTRAINT.EVENTFEAT.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.1"},
-   {"index": 34, "key": "CONSTRAINT.EVENTFEAT.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.2"},
-   {"index": 35, "key": "CONSTRAINT.EVENTFEAT.4", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.4"},
-   {"index": 36, "key": "CONSTRAINT.EVENTTYPE1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.1"},
-   {"index": 37, "key": "CONSTRAINT.EVENTTYPE1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.2"},
-   {"index": 38, "key": "CONSTRAINT.EVENTTYPE1.3", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.3"},
-   {"index": 39, "key": "CONSTRAINT.EVENTTYPE1.4", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.4"},
-   {"index": 40, "key": "CONSTRAINT.EVENTTYPE2.1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1.1"},
-   {"index": 41, "key": "CONSTRAINT.EVENTTYPE2.1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1.2"},
-   {"index": 42, "key": "CONSTRAINT.EVENTTYPE2.2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.2.1"},
-   {"index": 43, "key": "CONSTRAINT.EVENTTYPE2.2.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.2.2"}
+   {"index": 11, "key": "BOOLFL.2", "kind": "fluent", "role": null, "fluent": "BOOLFL.2"},
+   {"index": 12, "key": "NUMFL.1>0.5000", "kind": "numeric_threshold", "role": null, "fluent": "NUMFL.1", "operator": ">", "threshold": 0.5},
+   {"index": 13, "key": "NUMFL.2>0.2500", "kind": "numeric_threshold", "role": null, "fluent": "NUMFL.2", "operator": ">", "threshold": 0.25},
+   {"index": 14, "key": "agent.PROPERTY.1", "kind": "feature", "role": "agent", "feature": "PROPERTY.1"},
+   {"index": 15, "key": "agent.PROPERTY.2", "kind": "feature", "role": "agent", "feature": "PROPERTY.2"},
+   {"index": 16, "key": "agent.PROPERTY.3", "kind": "feature", "role": "agent", "feature": "PROPERTY.3"},
+   {"index": 17, "key": "agent.PROPERTY.4", "kind": "feature", "role": "agent", "feature": "PROPERTY.4"},
+   {"index": 18, "key": "agent.PROPERTY.5", "kind": "feature", "role": "agent", "feature": "PROPERTY.5"},
+   {"index": 19, "key": "agent.PROPERTY.6", "kind": "feature", "role": "agent", "feature": "PROPERTY.6"},
+   {"index": 20, "key": "agent.PROPERTY.7", "kind": "feature", "role": "agent", "feature": "PROPERTY.7"},
+   {"index": 21, "key": "agent.PROPERTY.8", "kind": "feature", "role": "agent", "feature": "PROPERTY.8"},
+   {"index": 22, "key": "agent.PART.1", "kind": "feature", "role": "agent", "feature": "PART.1"},
+   {"index": 23, "key": "agent.PART.3", "kind": "feature", "role": "agent", "feature": "PART.3"},
+   {"index": 24, "key": "agent.PART.4", "kind": "feature", "role": "agent", "feature": "PART.4"},
+   {"index": 25, "key": "agent.PART.5", "kind": "feature", "role": "agent", "feature": "PART.5"},
+   {"index": 26, "key": "agent.SCALARDIM.1>-0.5657", "kind": "threshold", "role": "agent", "scalar": "SCALARDIM.1", "operator": ">", "threshold": -0.56569999999999998},
+   {"index": 27, "key": "patient.PROPERTY.1", "kind": "feature", "role": "patient", "feature": "PROPERTY.1"},
+   {"index": 28, "key": "patient.PROPERTY.6", "kind": "feature", "role": "patient", "feature": "PROPERTY.6"},
+   {"index": 29, "key": "patient.PART.2", "kind": "feature", "role": "patient", "feature": "PART.2"},
+   {"index": 30, "key": "patient.PART.4", "kind": "feature", "role": "patient", "feature": "PART.4"},
+   {"index": 31, "key": "patient.PART.6", "kind": "feature", "role": "patient", "feature": "PART.6"},
+   {"index": 32, "key": "patient.PART.7", "kind": "feature", "role": "patient", "feature": "PART.7"},
+   {"index": 33, "key": "agent.SCALARDIM.1-patient.SCALARDIM.1>-0.3709", "kind": "comparison", "role": "binding", "agent_scalar": "SCALARDIM.1", "patient_scalar": "SCALARDIM.1", "operator": ">", "low": -0.37090000000000001, "high": null},
+   {"index": 34, "key": "CONSTRAINT.EVENTFEAT.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.1"},
+   {"index": 35, "key": "CONSTRAINT.EVENTFEAT.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.2"},
+   {"index": 36, "key": "CONSTRAINT.EVENTFEAT.4", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTFEAT.4"},
+   {"index": 37, "key": "CONSTRAINT.EVENTTYPE1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.1"},
+   {"index": 38, "key": "CONSTRAINT.EVENTTYPE1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.2"},
+   {"index": 39, "key": "CONSTRAINT.EVENTTYPE1.3", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.3"},
+   {"index": 40, "key": "CONSTRAINT.EVENTTYPE1.4", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.4"},
+   {"index": 41, "key": "CONSTRAINT.EVENTTYPE2.1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1.1"},
+   {"index": 42, "key": "CONSTRAINT.EVENTTYPE2.1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1.2"},
+   {"index": 43, "key": "CONSTRAINT.EVENTTYPE2.2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.2.1"},
+   {"index": 44, "key": "CONSTRAINT.EVENTTYPE2.2.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.2.2"}
   ],
   "rules": [
-   {"output": "PROPERTY.7", "scope": "entity", "family": "compositional", "inputs": [0, 2, 6, 7], "truth_table": "1101111111111111", "expression": "PROPERTY.2 OR PROPERTY.5 OR NOT PART.3 OR PART.4"},
+   {"output": "PROPERTY.7", "scope": "entity", "family": "compositional", "inputs": [0, 3, 6, 7], "truth_table": "1101111111111111", "expression": "PROPERTY.2 OR PROPERTY.5 OR NOT PART.3 OR PART.4"},
    {"output": "PROPERTY.8", "scope": "entity", "family": "shj", "inputs": [8, 9, 10], "truth_table": "11000011", "expression": "(NOT PART.5 AND NOT PART.6) OR (PART.5 AND PART.6)"},
-   {"output": "PART.7", "scope": "entity", "family": "compositional", "inputs": [1, 5, 6, 8], "truth_table": "1001011001101001", "expression": "PROPERTY.4 XOR NOT PART.2 XOR NOT PART.3 XOR NOT PART.5"},
-   {"output": "PART.8", "scope": "entity", "family": "shj", "inputs": [0, 1, 4], "truth_table": "11000101", "expression": "(NOT PROPERTY.2 AND NOT PROPERTY.4) OR (PROPERTY.2 AND PART.1)"},
-   {"output": "BOOLFL.4", "scope": "entity", "family": "compositional", "inputs": [2, 3, 12, 11], "truth_table": "0000000000000100", "expression": "PROPERTY.5 AND PROPERTY.7 AND NOT BOOLFL.2 AND SCALARDIM.1 > -0.4916"},
-   {"output": "CONSTRAINT.EVENTTYPE1.1", "scope": "binding", "family": "compositional", "inputs": [13, 15, 21, 24], "truth_table": "1001011001101001", "expression": "agent.PROPERTY.1 XOR agent.PROPERTY.3 XOR agent.PART.1 XOR NOT agent.PART.5"},
-   {"output": "CONSTRAINT.EVENTTYPE1.2", "scope": "binding", "family": "literal", "inputs": [15], "truth_table": "10", "expression": "NOT agent.PROPERTY.3"},
-   {"output": "CONSTRAINT.EVENTTYPE1.3", "scope": "binding", "family": "binary", "inputs": [14, 19], "truth_table": "1011", "expression": "agent.PROPERTY.2 OR NOT agent.PROPERTY.7"},
-   {"output": "CONSTRAINT.EVENTTYPE1.4", "scope": "binding", "family": "compositional", "inputs": [14, 17, 23, 24], "truth_table": "1111111111101111", "expression": "NOT agent.PROPERTY.2 OR agent.PROPERTY.5 OR NOT agent.PART.4 OR NOT agent.PART.5"},
-   {"output": "CONSTRAINT.EVENTFEAT.1", "scope": "binding", "family": "agent", "inputs": [16, 18], "truth_table": "0111", "expression": "agent.PROPERTY.4 OR agent.PROPERTY.6"},
-   {"output": "CONSTRAINT.EVENTFEAT.2", "scope": "binding", "family": "key_lock", "inputs": [19, 27], "truth_table": "0001", "expression": "agent.PROPERTY.7 AND patient.PROPERTY.6"},
-   {"output": "CONSTRAINT.EVENTFEAT.3", "scope": "binding", "family": "patient", "inputs": [26, 28, 30], "truth_table": "10100101", "expression": "(NOT patient.PROPERTY.1 AND NOT patient.PART.6) OR (patient.PROPERTY.1 AND patient.PART.6)"},
-   {"output": "CONSTRAINT.EVENTFEAT.4", "scope": "binding", "family": "key_lock", "inputs": [25, 29], "truth_table": "0001", "expression": "agent.SCALARDIM.1 > -0.5657 AND patient.PART.4"},
-   {"output": "CONSTRAINT.EVENTTYPE2.1.1", "scope": "binding", "family": "agent", "inputs": [13, 23], "truth_table": "0100", "expression": "NOT agent.PROPERTY.1 AND agent.PART.4"},
-   {"output": "CONSTRAINT.EVENTTYPE2.1.2", "scope": "binding", "family": "comparison", "inputs": [32], "truth_table": "01", "expression": "agent.SCALARDIM.1 - patient.SCALARDIM.1 > -0.3709"},
-   {"output": "CONSTRAINT.EVENTTYPE2.2.1", "scope": "binding", "family": "cross", "inputs": [20, 30, 31], "truth_table": "01111111", "expression": "patient.PART.6 OR patient.PART.7 OR agent.PROPERTY.8"},
-   {"output": "CONSTRAINT.EVENTTYPE2.2.2", "scope": "binding", "family": "agent", "inputs": [13, 14, 21, 22], "truth_table": "0100110011001100", "expression": "(agent.PROPERTY.2 OR agent.PART.3 OR agent.PROPERTY.1) AND NOT agent.PART.1"},
-   {"output": "REQUIREMENT.EVENTTYPE1.1", "scope": "binding", "family": "requirement", "inputs": [36], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.1"},
-   {"output": "REQUIREMENT.EVENTTYPE1.2", "scope": "binding", "family": "requirement", "inputs": [37], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.2"},
-   {"output": "REQUIREMENT.EVENTTYPE1.3", "scope": "binding", "family": "requirement", "inputs": [38], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.3"},
-   {"output": "REQUIREMENT.EVENTTYPE1.4", "scope": "binding", "family": "requirement", "inputs": [39], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.4"},
-   {"output": "REQUIREMENT.EVENTTYPE2.1", "scope": "binding", "family": "requirement", "inputs": [35], "truth_table": "01", "expression": "CONSTRAINT.EVENTFEAT.4"},
-   {"output": "REQUIREMENT.EVENTTYPE2.1.1", "scope": "binding", "family": "requirement", "inputs": [35, 40], "truth_table": "0001", "expression": "CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.1"},
-   {"output": "REQUIREMENT.EVENTTYPE2.1.2", "scope": "binding", "family": "requirement", "inputs": [34, 35, 41], "truth_table": "00000001", "expression": "CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.2"},
-   {"output": "REQUIREMENT.EVENTTYPE2.2", "scope": "binding", "family": "requirement", "inputs": [33, 34], "truth_table": "0001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2"},
-   {"output": "REQUIREMENT.EVENTTYPE2.2.1", "scope": "binding", "family": "requirement", "inputs": [33, 34, 42], "truth_table": "00000001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTTYPE2.2.1"},
-   {"output": "REQUIREMENT.EVENTTYPE2.2.2", "scope": "binding", "family": "requirement", "inputs": [33, 34, 35, 43], "truth_table": "0000000000000001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.2.2"}
+   {"output": "PART.7", "scope": "entity", "family": "compositional", "inputs": [2, 5, 6, 8], "truth_table": "1001011001101001", "expression": "PROPERTY.4 XOR NOT PART.2 XOR NOT PART.3 XOR NOT PART.5"},
+   {"output": "PART.8", "scope": "entity", "family": "shj", "inputs": [0, 2, 4], "truth_table": "11000101", "expression": "(NOT PROPERTY.2 AND NOT PROPERTY.4) OR (PROPERTY.2 AND PART.1)"},
+   {"output": "BOOLFL.4", "scope": "entity", "family": "compositional", "inputs": [1, 11, 12, 13], "truth_table": "1001011001101001", "expression": "PROPERTY.3 XOR NOT BOOLFL.2 XOR NUMFL.1 > 0.5000 XOR NUMFL.2 > 0.2500"},
+   {"output": "CONSTRAINT.EVENTTYPE1.1", "scope": "binding", "family": "compositional", "inputs": [14, 16, 22, 25], "truth_table": "1001011001101001", "expression": "agent.PROPERTY.1 XOR agent.PROPERTY.3 XOR agent.PART.1 XOR NOT agent.PART.5"},
+   {"output": "CONSTRAINT.EVENTTYPE1.2", "scope": "binding", "family": "literal", "inputs": [16], "truth_table": "10", "expression": "NOT agent.PROPERTY.3"},
+   {"output": "CONSTRAINT.EVENTTYPE1.3", "scope": "binding", "family": "binary", "inputs": [15, 20], "truth_table": "1011", "expression": "agent.PROPERTY.2 OR NOT agent.PROPERTY.7"},
+   {"output": "CONSTRAINT.EVENTTYPE1.4", "scope": "binding", "family": "compositional", "inputs": [15, 18, 24, 25], "truth_table": "1111111111101111", "expression": "NOT agent.PROPERTY.2 OR agent.PROPERTY.5 OR NOT agent.PART.4 OR NOT agent.PART.5"},
+   {"output": "CONSTRAINT.EVENTFEAT.1", "scope": "binding", "family": "agent", "inputs": [17, 19], "truth_table": "0111", "expression": "agent.PROPERTY.4 OR agent.PROPERTY.6"},
+   {"output": "CONSTRAINT.EVENTFEAT.2", "scope": "binding", "family": "key_lock", "inputs": [20, 28], "truth_table": "0001", "expression": "agent.PROPERTY.7 AND patient.PROPERTY.6"},
+   {"output": "CONSTRAINT.EVENTFEAT.3", "scope": "binding", "family": "patient", "inputs": [27, 29, 31], "truth_table": "10100101", "expression": "(NOT patient.PROPERTY.1 AND NOT patient.PART.6) OR (patient.PROPERTY.1 AND patient.PART.6)"},
+   {"output": "CONSTRAINT.EVENTFEAT.4", "scope": "binding", "family": "key_lock", "inputs": [26, 30], "truth_table": "0001", "expression": "agent.SCALARDIM.1 > -0.5657 AND patient.PART.4"},
+   {"output": "CONSTRAINT.EVENTTYPE2.1.1", "scope": "binding", "family": "agent", "inputs": [14, 24], "truth_table": "0100", "expression": "NOT agent.PROPERTY.1 AND agent.PART.4"},
+   {"output": "CONSTRAINT.EVENTTYPE2.1.2", "scope": "binding", "family": "comparison", "inputs": [33], "truth_table": "01", "expression": "agent.SCALARDIM.1 - patient.SCALARDIM.1 > -0.3709"},
+   {"output": "CONSTRAINT.EVENTTYPE2.2.1", "scope": "binding", "family": "cross", "inputs": [21, 31, 32], "truth_table": "01111111", "expression": "patient.PART.6 OR patient.PART.7 OR agent.PROPERTY.8"},
+   {"output": "CONSTRAINT.EVENTTYPE2.2.2", "scope": "binding", "family": "agent", "inputs": [14, 15, 22, 23], "truth_table": "0100110011001100", "expression": "(agent.PROPERTY.2 OR agent.PART.3 OR agent.PROPERTY.1) AND NOT agent.PART.1"},
+   {"output": "REQUIREMENT.EVENTTYPE1.1", "scope": "binding", "family": "requirement", "inputs": [37], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.1"},
+   {"output": "REQUIREMENT.EVENTTYPE1.2", "scope": "binding", "family": "requirement", "inputs": [38], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.2"},
+   {"output": "REQUIREMENT.EVENTTYPE1.3", "scope": "binding", "family": "requirement", "inputs": [39], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.3"},
+   {"output": "REQUIREMENT.EVENTTYPE1.4", "scope": "binding", "family": "requirement", "inputs": [40], "truth_table": "01", "expression": "CONSTRAINT.EVENTTYPE1.4"},
+   {"output": "REQUIREMENT.EVENTTYPE2.1", "scope": "binding", "family": "requirement", "inputs": [36], "truth_table": "01", "expression": "CONSTRAINT.EVENTFEAT.4"},
+   {"output": "REQUIREMENT.EVENTTYPE2.1.1", "scope": "binding", "family": "requirement", "inputs": [36, 41], "truth_table": "0001", "expression": "CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.1"},
+   {"output": "REQUIREMENT.EVENTTYPE2.1.2", "scope": "binding", "family": "requirement", "inputs": [35, 36, 42], "truth_table": "00000001", "expression": "CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.1.2"},
+   {"output": "REQUIREMENT.EVENTTYPE2.2", "scope": "binding", "family": "requirement", "inputs": [34, 35], "truth_table": "0001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2"},
+   {"output": "REQUIREMENT.EVENTTYPE2.2.1", "scope": "binding", "family": "requirement", "inputs": [34, 35, 43], "truth_table": "00000001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTTYPE2.2.1"},
+   {"output": "REQUIREMENT.EVENTTYPE2.2.2", "scope": "binding", "family": "requirement", "inputs": [34, 35, 36, 44], "truth_table": "0000000000000001", "expression": "CONSTRAINT.EVENTFEAT.1 AND CONSTRAINT.EVENTFEAT.2 AND CONSTRAINT.EVENTFEAT.4 AND CONSTRAINT.EVENTTYPE2.2.2"}
   ],
   "layers": [
    {
@@ -140,72 +141,71 @@
     "layer": 1,
     "terms": [
      {"literals": [0], "complemented": [false], "threshold": 1},
-     {"literals": [2], "complemented": [false], "threshold": 1},
+     {"literals": [3], "complemented": [false], "threshold": 1},
      {"literals": [6], "complemented": [true], "threshold": 1},
      {"literals": [7], "complemented": [false], "threshold": 1},
      {"literals": [8, 9], "complemented": [true, true], "threshold": 2},
      {"literals": [8, 9], "complemented": [false, false], "threshold": 2},
-     {"literals": [1, 5, 6, 8], "complemented": [true, true, true, true], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [true, true, false, false], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [true, false, true, false], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [true, false, false, true], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [false, true, true, false], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [false, true, false, true], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [false, false, true, true], "threshold": 4},
-     {"literals": [1, 5, 6, 8], "complemented": [false, false, false, false], "threshold": 4},
-     {"literals": [0, 1], "complemented": [true, true], "threshold": 2},
-     {"literals": [0, 4], "complemented": [false, false], "threshold": 2}
+     {"literals": [2, 5, 6, 8], "complemented": [true, true, true, true], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [true, true, false, false], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [true, false, true, false], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [true, false, false, true], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [false, true, true, false], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [false, true, false, true], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [false, false, true, true], "threshold": 4},
+     {"literals": [2, 5, 6, 8], "complemented": [false, false, false, false], "threshold": 4},
+     {"literals": [0, 2], "complemented": [true, true], "threshold": 2},
+     {"literals": [0, 4], "complemented": [false, false], "threshold": 2},
+     {"literals": [1, 11, 12, 13], "complemented": [true, true, true, true], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [true, true, false, false], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [true, false, true, false], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [true, false, false, true], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [false, true, true, false], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [false, true, false, true], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [false, false, true, true], "threshold": 4},
+     {"literals": [1, 11, 12, 13], "complemented": [false, false, false, false], "threshold": 4}
     ],
     "outputs": [
      {"output": "PROPERTY.7", "terms": [0, 1, 2, 3], "threshold": 1},
      {"output": "PROPERTY.8", "terms": [4, 5], "threshold": 1},
      {"output": "PART.7", "terms": [6, 7, 8, 9, 10, 11, 12, 13], "threshold": 1},
-     {"output": "PART.8", "terms": [14, 15], "threshold": 1}
-    ]
-   },
-   {
-    "scope": "entity",
-    "layer": 2,
-    "terms": [
-     {"literals": [2, 3, 12, 11], "complemented": [false, false, true, false], "threshold": 4}
-    ],
-    "outputs": [
-     {"output": "BOOLFL.4", "terms": [0], "threshold": 1}
+     {"output": "PART.8", "terms": [14, 15], "threshold": 1},
+     {"output": "BOOLFL.4", "terms": [16, 17, 18, 19, 20, 21, 22, 23], "threshold": 1}
     ]
    },
    {
     "scope": "binding",
     "layer": 1,
     "terms": [
-     {"literals": [13, 15, 21, 24], "complemented": [true, true, true, true], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [true, true, false, false], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [true, false, true, false], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [true, false, false, true], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [false, true, true, false], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [false, true, false, true], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [false, false, true, true], "threshold": 4},
-     {"literals": [13, 15, 21, 24], "complemented": [false, false, false, false], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [true, true, true, true], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [true, true, false, false], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [true, false, true, false], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [true, false, false, true], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [false, true, true, false], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [false, true, false, true], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [false, false, true, true], "threshold": 4},
+     {"literals": [14, 16, 22, 25], "complemented": [false, false, false, false], "threshold": 4},
+     {"literals": [16], "complemented": [true], "threshold": 1},
+     {"literals": [15], "complemented": [false], "threshold": 1},
+     {"literals": [20], "complemented": [true], "threshold": 1},
      {"literals": [15], "complemented": [true], "threshold": 1},
-     {"literals": [14], "complemented": [false], "threshold": 1},
-     {"literals": [19], "complemented": [true], "threshold": 1},
-     {"literals": [14], "complemented": [true], "threshold": 1},
-     {"literals": [17], "complemented": [false], "threshold": 1},
-     {"literals": [23], "complemented": [true], "threshold": 1},
-     {"literals": [24], "complemented": [true], "threshold": 1},
-     {"literals": [16], "complemented": [false], "threshold": 1},
      {"literals": [18], "complemented": [false], "threshold": 1},
-     {"literals": [19, 27], "complemented": [false, false], "threshold": 2},
-     {"literals": [26, 30], "complemented": [true, true], "threshold": 2},
+     {"literals": [24], "complemented": [true], "threshold": 1},
+     {"literals": [25], "complemented": [true], "threshold": 1},
+     {"literals": [17], "complemented": [false], "threshold": 1},
+     {"literals": [19], "complemented": [false], "threshold": 1},
+     {"literals": [20, 28], "complemented": [false, false], "threshold": 2},
+     {"literals": [27, 31], "complemented": [true, true], "threshold": 2},
+     {"literals": [27, 31], "complemented": [false, false], "threshold": 2},
      {"literals": [26, 30], "complemented": [false, false], "threshold": 2},
-     {"literals": [25, 29], "complemented": [false, false], "threshold": 2},
-     {"literals": [13, 23], "complemented": [true, false], "threshold": 2},
-     {"literals": [32], "complemented": [false], "threshold": 1},
-     {"literals": [20], "complemented": [false], "threshold": 1},
-     {"literals": [30], "complemented": [false], "threshold": 1},
+     {"literals": [14, 24], "complemented": [true, false], "threshold": 2},
+     {"literals": [33], "complemented": [false], "threshold": 1},
+     {"literals": [21], "complemented": [false], "threshold": 1},
      {"literals": [31], "complemented": [false], "threshold": 1},
-     {"literals": [13, 21], "complemented": [false, true], "threshold": 2},
-     {"literals": [14, 21], "complemented": [false, true], "threshold": 2},
-     {"literals": [21, 22], "complemented": [true, false], "threshold": 2}
+     {"literals": [32], "complemented": [false], "threshold": 1},
+     {"literals": [14, 22], "complemented": [false, true], "threshold": 2},
+     {"literals": [15, 22], "complemented": [false, true], "threshold": 2},
+     {"literals": [22, 23], "complemented": [true, false], "threshold": 2}
     ],
     "outputs": [
      {"output": "CONSTRAINT.EVENTTYPE1.1", "terms": [0, 1, 2, 3, 4, 5, 6, 7], "threshold": 1},
@@ -226,16 +226,16 @@
     "scope": "binding",
     "layer": 2,
     "terms": [
-     {"literals": [36], "complemented": [false], "threshold": 1},
      {"literals": [37], "complemented": [false], "threshold": 1},
      {"literals": [38], "complemented": [false], "threshold": 1},
      {"literals": [39], "complemented": [false], "threshold": 1},
-     {"literals": [35], "complemented": [false], "threshold": 1},
-     {"literals": [35, 40], "complemented": [false, false], "threshold": 2},
-     {"literals": [34, 35, 41], "complemented": [false, false, false], "threshold": 3},
-     {"literals": [33, 34], "complemented": [false, false], "threshold": 2},
-     {"literals": [33, 34, 42], "complemented": [false, false, false], "threshold": 3},
-     {"literals": [33, 34, 35, 43], "complemented": [false, false, false, false], "threshold": 4}
+     {"literals": [40], "complemented": [false], "threshold": 1},
+     {"literals": [36], "complemented": [false], "threshold": 1},
+     {"literals": [36, 41], "complemented": [false, false], "threshold": 2},
+     {"literals": [35, 36, 42], "complemented": [false, false, false], "threshold": 3},
+     {"literals": [34, 35], "complemented": [false, false], "threshold": 2},
+     {"literals": [34, 35, 43], "complemented": [false, false, false], "threshold": 3},
+     {"literals": [34, 35, 36, 44], "complemented": [false, false, false, false], "threshold": 4}
     ],
     "outputs": [
      {"output": "REQUIREMENT.EVENTTYPE1.1", "terms": [0], "threshold": 1},
@@ -589,7 +589,7 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": ["BOOLFL.4"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.4"], "INSTANCE.1.2.3": ["BOOLFL.4"], "INSTANCE.2.1.1": ["BOOLFL.4"], "INSTANCE.2.1.2": ["BOOLFL.4"], "INSTANCE.2.1.3": ["BOOLFL.4"], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": ["BOOLFL.4"], "INSTANCE.2.2.3": []},
    "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
    "numeric": {
     "INSTANCE.1.1.1": {"NUMFL.1": 0.39124349441049011, "NUMFL.2": 0.37473511402014464},
@@ -683,7 +683,7 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": ["BOOLFL.4"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.4"], "INSTANCE.1.2.3": ["BOOLFL.4"], "INSTANCE.2.1.1": ["BOOLFL.4"], "INSTANCE.2.1.2": ["BOOLFL.4"], "INSTANCE.2.1.3": ["BOOLFL.4"], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": ["BOOLFL.4"], "INSTANCE.2.2.3": ["BOOLFL.4"]},
    "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": ["BOOLFL.3"], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
    "numeric": {
     "INSTANCE.1.1.1": {"NUMFL.1": 0.20986818433210525, "NUMFL.2": 0.38028824302138153},
@@ -785,8 +785,8 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": ["BOOLFL.4"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.4"], "INSTANCE.1.2.3": ["BOOLFL.4"], "INSTANCE.2.1.1": ["BOOLFL.4"], "INSTANCE.2.1.2": ["BOOLFL.4"], "INSTANCE.2.1.3": ["BOOLFL.4"], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": ["BOOLFL.4"], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
    "numeric": {
     "INSTANCE.1.1.1": {"NUMFL.1": 0.28269451124079253, "NUMFL.2": 0.38584137202261842},
     "INSTANCE.1.1.2": {"NUMFL.1": 0.75340439513986845, "NUMFL.2": 0.21644352531568739},
@@ -820,10 +820,10 @@
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.2"}
     ],
     "EVENTTYPE1.4": [
@@ -856,10 +856,6 @@
     ],
     "EVENTTYPE2.1.2": [],
     "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
@@ -878,8 +874,8 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": ["BOOLFL.4"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.4"], "INSTANCE.1.2.3": ["BOOLFL.4"], "INSTANCE.2.1.1": ["BOOLFL.4"], "INSTANCE.2.1.2": ["BOOLFL.4"], "INSTANCE.2.1.3": ["BOOLFL.4"], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": ["BOOLFL.4"], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
    "numeric": {
     "INSTANCE.1.1.1": {"NUMFL.1": 0.35552083814947982, "NUMFL.2": 0.39139450102385531},
     "INSTANCE.1.1.2": {"NUMFL.1": 0.82623072204855574, "NUMFL.2": 0.22199665431692428},
@@ -898,8 +894,8 @@
   {
    "events": [
     {
-     "event_type": "EVENTTYPE2.1.1",
-     "binding": {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"}
+     "event_type": "EVENTTYPE1.4",
+     "binding": {"agent": "INSTANCE.1.2.3"}
     }
    ],
    "legal": {
@@ -918,10 +914,10 @@
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.2"}
     ],
     "EVENTTYPE1.4": [
@@ -954,10 +950,6 @@
     ],
     "EVENTTYPE2.1.2": [],
     "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},
@@ -976,11 +968,11 @@
      {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"}
     ]
    },
-   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": [], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": [], "INSTANCE.1.2.3": [], "INSTANCE.2.1.1": [], "INSTANCE.2.1.2": [], "INSTANCE.2.1.3": [], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": [], "INSTANCE.2.2.3": ["BOOLFL.4"]},
-   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
+   "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.1.3": ["BOOLFL.4"], "INSTANCE.1.2.1": ["BOOLFL.4"], "INSTANCE.1.2.2": ["BOOLFL.4"], "INSTANCE.1.2.3": ["BOOLFL.4"], "INSTANCE.2.1.1": ["BOOLFL.4"], "INSTANCE.2.1.2": ["BOOLFL.4"], "INSTANCE.2.1.3": ["BOOLFL.4"], "INSTANCE.2.2.1": ["BOOLFL.4"], "INSTANCE.2.2.2": ["BOOLFL.4"], "INSTANCE.2.2.3": ["BOOLFL.4"]},
+   "state": {"INSTANCE.1.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.1.2": ["BOOLFL.3"], "INSTANCE.1.1.3": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.1": [], "INSTANCE.1.2.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.1.2.3": ["BOOLFL.1"], "INSTANCE.2.1.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.2": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.1.3": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.1": ["BOOLFL.1", "BOOLFL.3"], "INSTANCE.2.2.2": ["BOOLFL.1", "BOOLFL.2", "BOOLFL.3"], "INSTANCE.2.2.3": ["BOOLFL.1", "BOOLFL.3"]},
    "numeric": {
     "INSTANCE.1.1.1": {"NUMFL.1": 0.42834716505816711, "NUMFL.2": 0.3969476300250922},
-    "INSTANCE.1.1.2": {"NUMFL.1": 0.64485541197017082, "NUMFL.2": 0.22754978331816117},
+    "INSTANCE.1.1.2": {"NUMFL.1": 0.89905704895724303, "NUMFL.2": 0.22754978331816117},
     "INSTANCE.1.1.3": {"NUMFL.1": 0.79191506712046, "NUMFL.2": 0.52619991367268204},
     "INSTANCE.1.2.1": {"NUMFL.1": 0.56232533357185044, "NUMFL.2": 0.69412603054371202},
     "INSTANCE.1.2.2": {"NUMFL.1": 0.87810808003511021, "NUMFL.2": 1.0},
@@ -996,8 +988,8 @@
   {
    "events": [
     {
-     "event_type": "EVENTTYPE2.1.2",
-     "binding": {"agent": "INSTANCE.1.1.3", "patient": "INSTANCE.2.1.1"}
+     "event_type": "EVENTTYPE2.1.1",
+     "binding": {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.2.1.1"}
     }
    ],
    "legal": {
@@ -1016,10 +1008,10 @@
      {"agent": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.2"},
      {"agent": "INSTANCE.1.2.3"},
+     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.3"}
     ],
     "EVENTTYPE1.3": [
-     {"agent": "INSTANCE.2.1.2"},
      {"agent": "INSTANCE.2.2.2"}
     ],
     "EVENTTYPE1.4": [
@@ -1052,10 +1044,6 @@
     ],
     "EVENTTYPE2.1.2": [],
     "EVENTTYPE2.2.1": [
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.1"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.1.3"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.1.2.2"},
-     {"agent": "INSTANCE.2.1.2", "patient": "INSTANCE.2.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.1.3"},
      {"agent": "INSTANCE.2.1.3", "patient": "INSTANCE.1.2.2"},

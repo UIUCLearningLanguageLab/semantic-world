@@ -25,12 +25,17 @@ The reading undoes the grammar's fixed choices:
   it makes a causal statement, an effect with ``become`` and a precondition with the copula and
   ``before``, and the subject's relative clause then names the event: its verb is bound to the
   event variable. Nothing of the record is needed: the words say it;
+- a pole adjective is a comparison (stage b3a): with its comparative mark (an affix, or the
+  word ``COMPARATIVE`` beside it) and the standard ``than`` + object, it is a comparative; a
+  class-level pole takes its comparison class from the record (``standard``), as a class-level
+  sentence takes its quantifier, because the words do not say it;
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
   verb phrase before it, when that auxiliary fits its predicate word.
 
 The quantifier of a class-level sentence is not in the words either: what "all" expresses is a
 setting of the language, and a bare plural says nothing of it. The record gives it
-(``quantifier``), as it gives the events.
+(``quantifier``), as it gives the events, and the comparison class of a class-level pole
+(``standard``).
 
 The inflections, the adjective order, and the choice between synonyms carry no part of the plan,
 and are ignored.
@@ -52,10 +57,12 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
 )
 from semantic_world.corpus.histories import is_time_key
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, Lexicon
+from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, THAN_WORD, Lexicon
 from semantic_world.corpus.propositions import (
     CAN,
     CAUSAL_KINDS,
+    COMPARATIVE,
+    COMPARISON,
     EFFECT,
     EVENT_VARIABLE,
     HAS,
@@ -67,11 +74,11 @@ from semantic_world.corpus.propositions import (
     PRECONDITION,
     PRESENT,
     PROJECTION,
-    SCALAR,
     STATE_KIND,
     VERB,
     Literal,
 )
+from semantic_world.corpus.realize import COMPARATIVE as COMPARATIVE_MARK
 from semantic_world.corpus.realize import NP_LABELS, Tree, preorder, token_parts
 from semantic_world.corpus.world import (
     FLUENT_PREFIX,
@@ -89,13 +96,14 @@ def interpret(
     referents: Sequence[tuple[str, str | None]] | Sequence[str],
     events: Sequence[tuple[str, str, str | None] | None] = (),
     quantifier: str | None = None,
+    standard: str | None = None,
 ) -> SentencePlan:
     """The sentence plan that a tree realizes. ``referents`` gives the referent of every noun
     phrase, ``events`` the event of every verb phrase, as its label, its tense, and its aspect,
     or the time point a verb phrase is about (``SCENE.8.TIME.2``), its tense, and None, or
-    None, in the order of the tree, and ``quantifier`` the quantifier of a class-level
-    sentence."""
-    return _Reader(tree, lexicon, referents, events, quantifier).sentence()
+    None, in the order of the tree, ``quantifier`` the quantifier of a class-level sentence,
+    and ``standard`` the comparison class of a class-level pole."""
+    return _Reader(tree, lexicon, referents, events, quantifier, standard).sentence()
 
 
 class _Reader:
@@ -106,10 +114,12 @@ class _Reader:
         referents: Sequence,
         events: Sequence,
         quantifier: str | None,
+        standard: str | None = None,
     ) -> None:
         self.tree = tree
         self.lexicon = lexicon
         self.quantifier = quantifier
+        self.standard = standard
         nodes = preorder(tree)
         phrases = [n for n in nodes if n[0] in NP_LABELS]
         verb_phrases = [n for n in nodes if n[0] == "VP"]
@@ -182,7 +192,12 @@ class _Reader:
         if subject_node is None or verb_phrase is None:
             raise GrammarError("a sentence has a subject and a verb phrase")
         subject = self.noun_phrase(subject_node)
-        target = self.child(self.tree, "NP-OBJ") or self.child(verb_phrase, "NP-OBJ")
+        target = (
+            self.child(self.tree, "NP-OBJ")
+            or self.child(verb_phrase, "NP-OBJ")
+            or self.standard_object(self.tree)
+            or self.standard_object(verb_phrase)
+        )
         predication, _ = self.predication(verb_phrase, target, subject.kind, None)
         if predication.kind in CAUSAL_KINDS:
             # a causal statement: the subject's relative clause names the event
@@ -197,6 +212,15 @@ class _Reader:
             # the negation of a bare plural states the quantifier ("penguins are not fish")
             predication = dataclasses.replace(predication, polarity=True)
         return SentencePlan(subject, predication, quantifier)
+
+    def standard_object(self, node: Tree) -> Tree | None:
+        """The object of a comparative under a node: the noun phrase of a ``PP`` whose
+        adposition is ``than``."""
+        for phrase in self.children(node, "PP"):
+            adposition = self.child(phrase, "P")
+            if adposition is not None and self.gloss(adposition) == THAN_WORD:
+                return self.child(phrase, "NP-OBJ")
+        return None
 
     @staticmethod
     def bound_subject(subject: NounPhrase) -> NounPhrase:
@@ -356,12 +380,22 @@ class _Reader:
                     "verb phrase"
                 )
             if concept.startswith(SCALAR_PREFIX):
-                kind = SCALAR
-            elif concept.startswith(PATIENT_CAPACITY_PREFIX):
+                if COMPARATIVE_MARK in self.marks(adjective):
+                    # a comparative: the pole adjective's comparative form, and "than" the object
+                    if target is None:
+                        raise GrammarError(
+                            f"the comparative {concept} has no standard: than and a noun phrase"
+                        )
+                    patient = self.noun_phrase(target)
+                    return Predication(COMPARATIVE, concept, polarity, patient), auxiliary
+                standard = self.standard if subject_kind == CLASS_NP else None
+                return Predication(COMPARISON, concept, polarity, standard=standard), auxiliary
+            if concept.startswith(PATIENT_CAPACITY_PREFIX):
                 kind = PROJECTION
             else:
                 kind = IS
             return Predication(kind, concept, polarity), auxiliary
+
         if nominal is None:
             raise GrammarError("a verb phrase has a verb, an adjective, or a predicate noun")
         noun = self.child(nominal, "N")

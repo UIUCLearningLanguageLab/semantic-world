@@ -183,7 +183,9 @@ def test_derive_matches_the_taxonomy_and_the_reference_evaluation(
     assert list(facts.static_labels) == [f.label for f in features.determined]
     for j, label in enumerate(facts.static_labels):
         assert np.array_equal(facts.static[:, j], values[:, features[label].position]), label
-    reference = derived_initial_values(tiny.fluents, tiny.taxonomy)
+    # the tiny world's derived fluent reads a numeric threshold (stage b3a), so the reference
+    # evaluation takes the numeric fluents
+    reference = derived_initial_values(tiny.fluents, tiny.taxonomy, tiny.numeric)
     for j, label in enumerate(facts.fluent_labels):
         assert np.array_equal(facts.fluent[:, j], reference[label]), label
     subset = derive(runtime, initial_state(runtime), [3, 1])

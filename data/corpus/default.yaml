@@ -35,6 +35,7 @@ documents:
   initial_state_rate: 0.2        # the probability that the event sentence that first mentions a participant is followed by a sentence stating one of its fluents at the time point before the event
   result_rate: 0.5               # the probability that an event sentence is followed by a sentence stating a change the event's own effects made
   blocked_rate: 0.1              # the probability that an event sentence is followed by a sentence saying what a participant could not (or could) do at that time point
+  comparative_rate: 0.1          # the probability that an event sentence of a two-place event is followed by a comparative description of its two participants ("the owl is bigger than the mouse"), on a scalar where their values differ
 
 propositions:
   negation_rate: {class: 0.1, instance: 0.1, state: 0.1, able_now: 0.8}   # state: initial-state sentences; able_now: blocked sentences ("could not" rather than "could")
@@ -86,8 +87,10 @@ grammar:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
     tense: {enabled: false, realization: affix, position: after}    # whether and how the past is marked
     aspect: {enabled: false, realization: word, position: after}    # whether and how the progressive is marked
+    comparative: {realization: affix, position: after}              # how the comparative form of a pole adjective is realized ("bigger"): an affix joined to the adjective, or a separate function word, after or before it; always available
 
-scalar_adjectives: {z: 1.0}
+scalar_adjectives: {z: 1.0, class_levels_up: 1}   # z: the threshold of the pole adjectives, in standard deviations of the comparison class; class_levels_up: how many levels above a category its comparison class lies at the class level (1: the parent; ENTITY, every entity, when the tree runs out)
+
 
 renderings:
   propositional: {referents: local, descriptions: marked}   # referents: local (REF.1, REF.2, ... within each document) or instance (entity labels); descriptions: marked (in braces before the assertion) or omitted

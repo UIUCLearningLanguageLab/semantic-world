@@ -64,15 +64,21 @@ LEXEME_PREFIX = "LEXEME."
 
 FUNCTION_WORDS = (
     "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-    "and", "that", "it", "become", "before",
+    "and", "that", "it", "become", "before", "than",
 )  # fmt: skip
 """The glosses of the function words every language has, in the order of the specification:
 the fifteen of the corpus generator, then ``become`` (``docs/specs/WORLD_AND_LANGUAGE.md``,
-"States and changes") and ``before`` ("Causal statements"), each appended so that the words
-before it keep their order."""
+"States and changes"), ``before`` ("Causal statements"), and ``than`` ("Comparatives", stage
+b3a), each appended so that the words before it keep their order."""
 BEFORE_WORD = "before"
 """The gloss of the function word of a precondition statement ("things that catch things are
 awake before")."""
+THAN_WORD = "than"
+"""The gloss of the function word that introduces the standard of a comparative ("the owl is
+bigger than the mouse")."""
+COMPARATIVE_GLOSS = "COMPARATIVE"
+"""The gloss of the comparative inflection of a pole adjective: an affix, or a function word
+when ``grammar.morphology.comparative.realization`` is ``word``."""
 ABLE_NOW_WORD = "can_now"
 """The gloss of the function word that expresses ``ABLE_NOW`` when ``lexicon.can_words`` is
 ``distinct``; with ``shared``, "can" expresses ``ABLE`` and ``ABLE_NOW`` alike."""
@@ -223,7 +229,9 @@ class Lexicon:
 def function_word_glosses(config: Config) -> tuple[str, ...]:
     """The glosses of the language's function words. The set is fixed by the settings: the base
     words, ``are`` and ``have`` when verbs agree with their subjects, and one word for each
-    inflection that is realized as a separate word (``PLURAL``, ``PAST``, ``PROGRESSIVE``)."""
+    inflection that is realized as a separate word (``PLURAL``, ``PAST``, ``PROGRESSIVE``,
+    ``COMPARATIVE``)."""
+
     morphology = config.grammar.morphology
     glosses = FUNCTION_WORDS
     if config.lexicon.can_words == "distinct":

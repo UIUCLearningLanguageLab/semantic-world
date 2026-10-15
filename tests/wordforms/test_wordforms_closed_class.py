@@ -23,6 +23,7 @@ from wordforms_support import (
 from semantic_world.wordforms import Run, run_forms
 from semantic_world.wordforms.__main__ import main
 from semantic_world.wordforms.closed_class import (
+    ENGLISH_AFFIXES,
     SCHWA,
     Affix,
     add_closed_class,
@@ -843,6 +844,22 @@ def test_english_affixes_and_allomorphy(common_english):
     assert english_allomorph("PAST", ("W", "EY1", "T")) == ("IH0", "D")
     assert english_allomorph("PAST", ("N", "IY1", "D")) == ("IH0", "D")
     assert english_allomorph("PROGRESSIVE", ("W", "AO1", "K")) == ("IH0", "NG")
+    # the comparative of the corpus's pole adjectives (stage b3a): -er, one form
+    assert english_allomorph("COMPARATIVE", ("B", "IH1", "G")) == ("ER0",)
+    assert ENGLISH_AFFIXES["COMPARATIVE"] == (("ER0",),)
+    comparative = config_with(
+        {
+            "affixes": {
+                "source": "english",
+                "items": [{"gloss": "COMPARATIVE", "position": "suffix"}],
+            },
+            "inflect": [{"words": "all", "affixes": ["COMPARATIVE"]}],
+        },
+        count=20,
+    )
+    made = {a.gloss: a for a in run_forms(comparative).lexicon.affixes}
+    assert made["COMPARATIVE"].arpabet == "ER0" and made["COMPARATIVE"].allomorphs == (("ER0",),)
+
     config = config_with({"affixes": {"source": "english"}, "inflect": INFLECT_ALL}, count=40)
     run = run_forms(config)
     affixes = {a.gloss: a for a in run.lexicon.affixes}

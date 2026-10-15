@@ -23,6 +23,24 @@ Membership ("penguins are birds") is ``nec_all`` by construction, and a rule sta
 ``nec_all``. A class-level scalar pole is a statement about the category's mean, not a
 quantification over its members, and has no quantifier.
 
+**Comparisons of scalars** (``docs/specs/WORLD_AND_LANGUAGE.md``, "Phase (b): the corpus", stage
+b3a). A relative gradable adjective ("big") is a comparison: a predicate of kind ``comparison``
+whose label is the pole concept (``SCALARDIM.1.HIGH``) and whose operator is ``ABOVE`` (the high
+pole) or ``BELOW`` (the low pole), with its comparison class. At the instance level the referent
+is compared with the category its noun names, ``ABOVE(SCALARDIM.1, REF.1, CATEGORY.1.5, z)``; at
+the class level the category's mean is compared with an ancestor, or with ``ENTITY`` (every
+entity) for a top-level category, ``ABOVE(SCALARDIM.1, MEAN(CATEGORY.1.4), CATEGORY.1, z)``, a
+statement about the category with no quantifier. The threshold ``z`` is the language's
+(``scalar_adjectives.z``), in standard deviations of the comparison class; every logical form
+with a pole records it, and the truth tests judge every comparison with the world's runtime
+functions (``above``, ``below``) over the world's comparison classes. A comparative ("bigger
+than") is a predicate of kind ``comparative`` whose label is the dimension and whose patient is
+the other argument: ``GREATER(SCALARDIM.1, REF.1, REF.2)`` says that the subject's value exceeds
+the patient's, strictly, and at the class level ``GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2),
+MEAN(CATEGORY.1.5))`` compares two categories' means. ``GREATER`` is the only comparative
+operator: "smaller than" is the language's word for ``GREATER`` with its arguments in the other
+order. A comparative is never negated.
+
 **Polarity.** A negative proposition denies its predicate: ``most`` with a negative polarity
 says that most members of the subject set lack the predicate. ``no`` and ``nec_no`` replace
 sentence negation, so they always have a positive polarity in the logical form, and ``all`` and
@@ -97,6 +115,7 @@ from semantic_world.corpus.histories import (
     time_label,
 )
 from semantic_world.corpus.world import (
+    ENTITY,
     PART_PREFIX,
     PROPERTY_PREFIX,
     SCALAR_PREFIX,
@@ -105,7 +124,17 @@ from semantic_world.corpus.world import (
 )
 from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT
 from semantic_world.world.history import History, replay
-from semantic_world.world.runtime import State, derive, legal, legal_bindings
+from semantic_world.world.runtime import (
+    Mean,
+    State,
+    above,
+    below,
+    comparison_classes,
+    derive,
+    greater,
+    legal,
+    legal_bindings,
+)
 
 CLASS = "class"
 INSTANCE = "instance"
@@ -140,7 +169,19 @@ HAS = "part"
 """The kind of a PART predicate (the old ``has`` kind)."""
 CAN = "event_type1"
 """The kind of a one-place event-type predicate (the old ``can`` kind)."""
-SCALAR = "scalar"
+COMPARISON = "comparison"
+"""The kind of a scalar pole's predicate: a relative gradable adjective, a comparison of the
+subject (or its category's mean) with a comparison class (``ABOVE`` or ``BELOW``)."""
+COMPARATIVE = "comparative"
+"""The kind of a comparative's predicate: ``GREATER``, the subject's value against the
+patient's on one dimension."""
+ABOVE = "ABOVE"
+BELOW = "BELOW"
+GREATER = "GREATER"
+OPERATORS = (ABOVE, BELOW, GREATER)
+"""The operators of the comparisons, as the propositional rendering writes them."""
+HIGH = "HIGH"
+LOW = "LOW"
 MEMBER = "member"
 PROJECTION = "patient_capacity"
 """The kind of a patient-capacity predicate (the old ``projection`` kind)."""
@@ -155,7 +196,21 @@ PRECONDITION = "precondition"
 """The kind of the predicate of a precondition statement: before every event of the subject's
 event type, the participant in the subject's role has the fluent's value (``BEFORE``)."""
 CAUSAL_KINDS = (EFFECT, PRECONDITION)
-KINDS = (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND, EFFECT, PRECONDITION)
+COMPARISON_KINDS = (COMPARISON, COMPARATIVE)
+"""The kinds judged by the world's comparisons of scalars."""
+KINDS = (
+    IS,
+    HAS,
+    CAN,
+    COMPARISON,
+    COMPARATIVE,
+    MEMBER,
+    PROJECTION,
+    VERB,
+    STATE_KIND,
+    EFFECT,
+    PRECONDITION,
+)
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
 PART feature, or a one-place event type (the capacity to be its agent)."""
@@ -180,7 +235,8 @@ OBSERVED = "observed"
 TREE = "tree"
 """Membership, read from the tree."""
 MEAN = "mean"
-"""A class-level scalar pole: the subject set's mean against its comparison class."""
+"""A class-level comparison: the subject category's mean against its comparison class, or
+against another category's mean."""
 VALUE = "value"
 """An instance's own value."""
 OCCURRED = "event"
@@ -370,21 +426,48 @@ def is_event_variable(label: str | None) -> bool:
     return label is not None and label.startswith("EVENTVAR.")
 
 
+def pole_operator(pole: str) -> str:
+    """The comparison operator of a pole concept: ``ABOVE`` for ``SCALARDIM.1.HIGH`` and
+    ``BELOW`` for ``SCALARDIM.1.LOW``."""
+    return ABOVE if pole.rsplit(".", 1)[1] == HIGH else BELOW
+
+
+def pole_dimension(pole: str) -> str:
+    """The scalar dimension of a pole concept."""
+    return pole.rsplit(".", 1)[0]
+
+
+def low_word(predicate: dict[str, Any]) -> bool:
+    """Whether a comparative's JSON predicate says the sentence used the low pole's word
+    (``"word": "SCALARDIM.1.LOW"``), so that its subject is the lesser argument."""
+    word = predicate.get("word")
+    return isinstance(word, str) and word.rsplit(".", 1)[-1] == LOW
+
+
+def comparison_class_of(category: str) -> str:
+    """The comparison class a term's category gives its poles: the category itself, or
+    ``ENTITY`` for the generic noun."""
+    return ENTITY if category == THING else category
+
+
 @dataclass(frozen=True)
 class Predicate:
     kind: str
-    """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
-    ``event_type2``, ``state``, ``effect``, or ``precondition``."""
+    """``property``, ``part``, ``event_type1``, ``comparison``, ``comparative``, ``member``,
+    ``patient_capacity``, ``event_type2``, ``state``, ``effect``, or ``precondition``."""
     label: str
     """The predicate's concept: a PROPERTY or PART feature, a one-place event type, a scalar
-    pole, a category, a patient capacity (``CANBE.<event type>``), a two-place event type or
-    a category of them, or a fluent (``BOOLFL.3``)."""
+    pole (a comparison), a scalar dimension (a comparative), a category, a patient capacity
+    (``CANBE.<event type>``), a two-place event type or a category of them, or a fluent
+    (``BOOLFL.3``)."""
     patient: CategoryTerm | str | None = None
-    """Two-place event types only: the patient category (class level) or the patient instance
-    (instance level)."""
+    """Two-place event types and comparatives only: the patient category (class level) or the
+    patient instance (instance level); for a comparative, the argument the subject exceeds."""
     comparison: str | None = None
-    """Instance-level scalar poles only: the comparison class, which is the category that the
-    subject's noun names ("big for a mouse")."""
+    """Comparisons only: the comparison class. At the instance level it is the category that
+    the subject's noun names ("big for a mouse"); at the class level an ancestor of the
+    subject's category, or ``ENTITY`` for a top-level category (CG.3,
+    ``scalar_adjectives.class_levels_up``)."""
     value: bool | None = None
     """Effects and preconditions only: the value the fluent is set to (an effect) or must have
     (a precondition)."""
@@ -393,8 +476,29 @@ class Predicate:
     def causal(self) -> bool:
         return self.kind in CAUSAL_KINDS
 
+    @property
+    def operator(self) -> str | None:
+        """The comparison operator: ``ABOVE`` or ``BELOW`` for a pole, ``GREATER`` for a
+        comparative, and None for any other predicate."""
+        if self.kind == COMPARISON:
+            return pole_operator(self.label)
+        if self.kind == COMPARATIVE:
+            return GREATER
+        return None
+
+    @property
+    def dimension(self) -> str | None:
+        """The scalar dimension of a comparison or a comparative."""
+        if self.kind == COMPARISON:
+            return pole_dimension(self.label)
+        if self.kind == COMPARATIVE:
+            return self.label
+        return None
+
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {"kind": self.kind, _JSON_KEY[self.kind]: self.label}
+        if self.operator is not None:
+            data["operator"] = self.operator
         if isinstance(self.patient, CategoryTerm):
             data["patient"] = self.patient.to_json()
         elif self.patient is not None:
@@ -428,7 +532,8 @@ class Proposition:
     predicate: Predicate
     polarity: bool = True
     quantifier: str | None = None
-    """Class level only. None for a class-level scalar pole, which has no quantifier."""
+    """Class level only. None for a class-level comparison or comparative, which have no
+    quantifier."""
     grounding: dict[str, Any] | None = field(default=None, compare=False)
     id: str | None = field(default=None, compare=False)
     rule: tuple[str, int] | None = field(default=None, compare=False)
@@ -485,13 +590,18 @@ class Proposition:
         """The concepts that a sentence needs words for, apart from function words: the subject
         category, the restrictions, the predicate, and the patient category. An instance's noun
         is chosen when the instance is mentioned, so an instance adds no concept here, apart
-        from the comparison class of a scalar pole."""
+        from the comparison class of a scalar pole (a category; ``ENTITY`` needs no word). A
+        comparative needs the two pole adjectives of its dimension, because the language says
+        it with either ("bigger than", or "smaller than" with the arguments the other way)."""
         labels: list[str] = []
         for term in (self.subject, self.predicate.patient):
             if isinstance(term, CategoryTerm | EventTerm):
                 labels += term.concepts()
-        labels.append(self.predicate.label)
-        if self.predicate.comparison is not None:
+        if self.predicate.kind == COMPARATIVE:
+            labels += [f"{self.predicate.label}.{HIGH}", f"{self.predicate.label}.{LOW}"]
+        else:
+            labels.append(self.predicate.label)
+        if self.predicate.comparison is not None and self.predicate.comparison != ENTITY:
             labels.append(self.predicate.comparison)
         return tuple(dict.fromkeys(labels))
 
@@ -529,16 +639,20 @@ class Proposition:
         subject = data["subject"]
         rule = data.get("rule")
         predicate = Predicate.from_json(data["predicate"])
-        if data["level"] == CLASS and predicate.comparison is not None:
-            # a sentence's logical form writes the comparison class of a class-level pole for
-            # the reader. The class comes from the tree, so it is no part of the proposition.
-            predicate = dataclasses.replace(predicate, comparison=None)
         if "instance" in subject:
             read_subject: CategoryTerm | EventTerm | str = subject["instance"]
         elif "head" in subject:
             read_subject = EventTerm.from_json(subject)
         else:
             read_subject = CategoryTerm.from_json(subject)
+        if predicate.kind == COMPARATIVE and low_word(data["predicate"]):
+            # a sentence's form holds its subject and object in the sentence's order: said
+            # with the low pole's word ("smaller than"), the greater argument is the patient
+            assert predicate.patient is not None
+            read_subject, predicate = (
+                predicate.patient,
+                dataclasses.replace(predicate, patient=read_subject),
+            )
         return cls(
             level=data["level"],
             subject=read_subject,
@@ -601,7 +715,10 @@ class Truth:
         self.quantifiers = config.quantifiers
         self.event_tense = config.propositions.event_tense
         self.z = config.scalar_z
+        """The language's threshold for its pole adjectives, in standard deviations of the
+        comparison class (``scalar_adjectives.z``)."""
         self.cone_limit = cone_limit
+        self._masks: dict[tuple[str, str], tuple[np.ndarray, float, float]] = {}
         self.count = world.count
         self.instance_index = world.instance_index
         self.paths = world.paths
@@ -645,7 +762,7 @@ class Truth:
         the proposition is a membership fact or a rule statement with a ``nec`` quantifier."""
         quantifier = proposition.quantifier
         if quantifier is None:
-            return True  # a class-level scalar pole takes no quantifier word
+            return True  # a class-level comparison or comparative takes no quantifier word
         if quantifier in NEC_QUANTIFIERS and (
             proposition.predicate.kind == MEMBER
             or proposition.rule is not None
@@ -668,7 +785,7 @@ class Truth:
             keep = np.ones(len(below), dtype=bool)
             for literal in term.restriction:
                 if literal.pole:
-                    keep &= self.pole_mask(literal.feature, below)[0][below]
+                    keep &= self.pole_mask(literal.feature, term.category)[0][below]
                 else:
                     keep &= world.column(literal.feature)[below] == int(literal.positive)
             for clause in term.clauses:
@@ -684,20 +801,53 @@ class Truth:
             self._members[term] = below[keep]
         return self._members[term]
 
-    def pole_mask(self, pole: str, comparison: np.ndarray) -> tuple[np.ndarray, float, float]:
-        """Which instances count as a scalar pole against a comparison class, with the class's
-        mean and standard deviation. An instance is ``HIGH`` when its value is at least ``z``
-        standard deviations above the class's mean, and ``LOW`` when at least that far below.
-        A class with no spread has no poles."""
-        scalar, side = self.world.pole_parts(pole)
-        column = self.world.scalar_column(scalar)
-        mean = float(column[comparison].mean())
-        sd = float(column[comparison].std())
-        if sd == 0:
-            return np.zeros(self.count, dtype=bool), mean, sd
-        if side == "HIGH":
-            return column >= mean + self.z * sd, mean, sd
-        return column <= mean - self.z * sd, mean, sd
+    def comparison_class(self, category: str, scalar: str) -> tuple[int, float, float]:
+        """A comparison class as the world holds it: the number of instances below the category
+        (every entity for ``ENTITY``, and for the generic noun), the mean of the scalar over
+        them, and its population standard deviation, from the runtime's ``comparison_classes``
+        (the figures of ``derived/comparison_classes.csv``). The corpus computes none of its
+        own (stage b3a)."""
+        return comparison_classes(self.world.definition)[(comparison_class_of(category), scalar)]
+
+    def pole_mask(self, pole: str, comparison: str) -> tuple[np.ndarray, float, float]:
+        """Which instances count as a scalar pole against a comparison class (a category, or
+        ``ENTITY``), with the class's mean and standard deviation, at the language's ``z``. The
+        mask is the runtime's ``above`` (``HIGH``) or ``below`` (``LOW``) judged for every
+        instance at once, from the same class statistics: an instance is ``HIGH`` when its value
+        is at least ``z`` standard deviations above the class's mean, ``LOW`` when at least that
+        far below, and a class with no spread has no poles. Cached per pole and class."""
+        key = (pole, comparison)
+        if key not in self._masks:
+            scalar, side = self.world.pole_parts(pole)
+            column = self.world.scalar_column(scalar)
+            _, mean, sd = self.comparison_class(comparison, scalar)
+            if sd == 0:
+                mask = np.zeros(self.count, dtype=bool)
+            elif side == HIGH:
+                mask = column >= mean + self.z * sd
+            else:
+                mask = column <= mean - self.z * sd
+            self._masks[key] = (mask, mean, sd)
+        return self._masks[key]
+
+    def compare(
+        self,
+        operator: str,
+        dimension: str,
+        x: int | Mean,
+        y: int | Mean | None = None,
+        standard: str | None = None,
+    ) -> bool:
+        """One comparison, judged by the world's runtime: ``GREATER`` of ``x`` over ``y``, or
+        ``ABOVE`` or ``BELOW`` of ``x`` against the comparison class ``standard`` at the
+        language's ``z``. The arguments are entity indices or category means."""
+        definition = self.world.definition
+        if operator == GREATER:
+            assert y is not None
+            return greater(definition, dimension, x, y)
+        assert standard is not None
+        judge = above if operator == ABOVE else below
+        return judge(definition, dimension, x, comparison_class_of(standard), self.z)
 
     def is_pole(self, label: str) -> bool:
         return self.world.is_pole(label)
@@ -816,9 +966,21 @@ class Truth:
                     CAN: "a one-place event type",
                 }
                 return f"{label!r} is not {what[kind]}"
-        elif kind == SCALAR:
+        elif kind == COMPARISON:
             if not self.is_pole(label):
                 return f"unknown scalar pole {label!r}"
+            comparison = predicate.comparison
+            if comparison is None:
+                return "a comparison names its comparison class"
+            if comparison != ENTITY and comparison not in self.categories:
+                return f"unknown comparison class {comparison!r}: a category, or ENTITY"
+        elif kind == COMPARATIVE:
+            if label not in world.scalars:
+                return f"{label!r} is not a scalar dimension: a comparative is about one"
+            if predicate.patient is None:
+                return "a comparative has a patient: the argument the subject exceeds"
+            if predicate.comparison is not None:
+                return "a comparative has no comparison class: it compares two values"
         elif kind == MEMBER:
             if label not in self.categories:
                 return f"unknown category {label!r}"
@@ -843,8 +1005,10 @@ class Truth:
             return f"unknown predicate kind {kind!r}"
         if kind not in CAUSAL_KINDS and predicate.value is not None:
             return "only an effect or a precondition has a value"
-        if (kind == VERB) != (predicate.patient is not None):
-            return "a two-place event type, and only one, has a patient"
+        if (kind in (VERB, COMPARATIVE)) != (predicate.patient is not None):
+            return "a two-place event type or a comparative, and only one, has a patient"
+        if kind != COMPARISON and predicate.comparison is not None:
+            return "only a comparison (a scalar pole) has a comparison class"
         return ""
 
     def _evaluate_class(self, proposition: Proposition) -> Evaluation:
@@ -855,11 +1019,9 @@ class Truth:
         if problem:
             return _invalid(problem)
         assert isinstance(subject, CategoryTerm)
-        if predicate.comparison is not None:
-            return _invalid("a class-level scalar pole takes its comparison class from the tree")
-        if kind == SCALAR:
+        if kind in COMPARISON_KINDS:
             if quantifier is not None:
-                return _invalid("a class-level scalar pole has no quantifier")
+                return _invalid(f"a class-level {kind} has no quantifier")
         elif quantifier not in QUANTIFIERS:
             return _invalid(f"unknown quantifier {quantifier!r}")
         if quantifier in UNIVERSALS and not polarity:
@@ -879,13 +1041,15 @@ class Truth:
         if len(members) == 0:
             return _invalid("the subject set is empty")
 
-        if kind == SCALAR:
+        if kind in COMPARISON_KINDS:
             if subject.restriction or subject.clauses:
                 return _invalid(
-                    "a class-level scalar pole is a statement about the category, not about a "
-                    "restricted set"
+                    f"a class-level {kind} is a statement about the category's mean, not about "
+                    "a restricted set"
                 )
-            return self._class_scalar(subject, members, predicate.label, polarity)
+            if kind == COMPARISON:
+                return self._class_comparison(subject, members, predicate, polarity)
+            return self._class_comparative(subject, members, predicate, polarity)
         if kind == MEMBER:
             if quantifier not in UNIVERSALS:
                 return _invalid("a membership sentence takes all, nec_all, no, or nec_no")
@@ -942,30 +1106,63 @@ class Truth:
             felicitous = not universal_true
         return Evaluation(True, true, felicitous, grounding)
 
-    def _class_scalar(
-        self, subject: CategoryTerm, members: np.ndarray, pole: str, polarity: bool
+    def _class_comparison(
+        self, subject: CategoryTerm, members: np.ndarray, predicate: Predicate, polarity: bool
     ) -> Evaluation:
-        if subject.category == THING:
+        """A class-level pole: the category's mean against its comparison class, an ancestor
+        of the category or ``ENTITY``, judged by the runtime's ``above`` or ``below``."""
+        category = subject.category
+        if category == THING:
             return _invalid("the generic noun has no comparison class")
-        parent = self.categories[subject.category].parent
-        comparison = self.world.below(THING if parent is None else parent)
-        scalar, side = self.world.pole_parts(pole)
-        column = self.world.scalar_column(scalar)
-        value = float(column[members].mean())
-        mean, sd = float(column[comparison].mean()), float(column[comparison].std())
-        if sd == 0:
-            has_pole = False
-        elif side == "HIGH":
-            has_pole = value >= mean + self.z * sd
-        else:
-            has_pole = value <= mean - self.z * sd
-        true = has_pole == polarity
+        comparison = predicate.comparison
+        assert comparison is not None and predicate.operator is not None
+        if comparison != ENTITY and comparison not in self.ancestors(category):
+            return _invalid(
+                f"the comparison class of {category} is one of its ancestors, or ENTITY, not "
+                f"{comparison!r}"
+            )
+        scalar = pole_dimension(predicate.label)
+        has_pole = self.compare(predicate.operator, scalar, Mean(category), standard=comparison)
+        _, mean, sd = self.comparison_class(comparison, scalar)
         grounding = {
-            "value": _number(value),
-            "comparison": THING if parent is None else parent,
+            "value": _number(self.world.scalar_column(scalar)[members].mean()),
+            "comparison": comparison,
             "mean": _number(mean),
             "sd": _number(sd),
             "instances": len(members),
+            "z": self.z,
+            "test": MEAN,
+        }
+        true = has_pole == polarity
+        return Evaluation(True, true, true, grounding)
+
+    def _class_comparative(
+        self, subject: CategoryTerm, members: np.ndarray, predicate: Predicate, polarity: bool
+    ) -> Evaluation:
+        """A class-level comparative: the subject category's mean exceeds the patient
+        category's, by the runtime's ``greater``. Never negated."""
+        if not polarity:
+            return _invalid("a comparative is never negated: say it the other way round")
+        patient = predicate.patient
+        problem = self._term_problem(patient, "patient")
+        if problem:
+            return _invalid(problem)
+        assert isinstance(patient, CategoryTerm)
+        if THING in (subject.category, patient.category):
+            return _invalid("a comparative compares the means of two categories, not of things")
+        if patient.restriction or patient.clauses:
+            return _invalid("a class-level comparative compares the means of plain categories")
+        if patient.category == subject.category:
+            return _invalid("a category is not compared with itself")
+        others = self.members(patient)
+        scalar = predicate.label
+        true = self.compare(GREATER, scalar, Mean(subject.category), Mean(patient.category))
+        column = self.world.scalar_column(scalar)
+        grounding = {
+            "value": _number(column[members].mean()),
+            "other": _number(column[others].mean()),
+            "instances": len(members),
+            "other_instances": len(others),
             "test": MEAN,
         }
         return Evaluation(True, true, true, grounding)
@@ -1010,8 +1207,6 @@ class Truth:
             return _invalid("a fluent is stated at a time point of a scene, never timelessly")
         index = self.instance_index[subject]
         kind, label = predicate.kind, predicate.label
-        if (kind == SCALAR) != (predicate.comparison is not None):
-            return _invalid("a scalar pole, and only a scalar pole, has a comparison class")
         grounding: dict[str, Any]
         if kind in FEATURE_KINDS:
             value = bool(world.column(label)[index])
@@ -1022,16 +1217,35 @@ class Truth:
         elif kind == MEMBER:
             value = label in self.paths[index]
             grounding = {"value": int(value), "test": TREE}
-        elif kind == SCALAR:
+        elif kind == COMPARISON:
             comparison = predicate.comparison
+            assert comparison is not None and predicate.operator is not None
             if comparison not in self.paths[index]:
                 return _invalid(f"{subject} is not below the comparison class {comparison!r}")
-            mask, mean, sd = self.pole_mask(label, world.below(comparison))
-            value = bool(mask[index])
+            scalar = pole_dimension(label)
+            value = self.compare(predicate.operator, scalar, index, standard=comparison)
+            _, mean, sd = self.comparison_class(comparison, scalar)
             grounding = {
-                "value": _number(world.scalar_column(world.pole_parts(label)[0])[index]),
+                "value": _number(world.scalar_column(scalar)[index]),
                 "mean": _number(mean),
                 "sd": _number(sd),
+                "z": self.z,
+                "test": VALUE,
+            }
+        elif kind == COMPARATIVE:
+            if not proposition.polarity:
+                return _invalid("a comparative is never negated: say it the other way round")
+            patient = predicate.patient
+            if not isinstance(patient, str) or patient not in self.instance_index:
+                return _invalid(f"unknown patient instance {patient!r}")
+            if patient == subject:
+                return _invalid("an instance is never compared with itself")
+            other = self.instance_index[patient]
+            value = self.compare(GREATER, label, index, other)
+            column = world.scalar_column(label)
+            grounding = {
+                "value": _number(column[index]),
+                "other": _number(column[other]),
                 "test": VALUE,
             }
         else:
@@ -1432,13 +1646,18 @@ class Truth:
 
 __all__ = [
     "ABLE_NOW",
+    "ABOVE",
     "AGENT",
     "ALL",
     "ASPECTS",
+    "BELOW",
     "CAN",
     "CAUSAL_KINDS",
     "CHANGE",
     "CLASS",
+    "COMPARATIVE",
+    "COMPARISON",
+    "COMPARISON_KINDS",
     "COUNTERPART",
     "DEFINITION",
     "EFFECT",
@@ -1446,13 +1665,16 @@ __all__ = [
     "EVENT_VARIABLE",
     "EXACT",
     "FEATURE_KINDS",
+    "GREATER",
     "HAS",
+    "HIGH",
     "HISTORY",
     "INSTANCE",
     "IS",
     "KINDS",
     "LEVELS",
     "LOCAL",
+    "LOW",
     "MEAN",
     "MEMBER",
     "MOST",
@@ -1464,6 +1686,7 @@ __all__ = [
     "NO",
     "OBSERVED",
     "OCCURRED",
+    "OPERATORS",
     "PAST",
     "PATIENT",
     "POSITIVE_ORDER",
@@ -1473,7 +1696,6 @@ __all__ = [
     "PROJECTION",
     "QUANTIFIERS",
     "ROLES",
-    "SCALAR",
     "SIMPLE",
     "SOME",
     "STATE",
@@ -1492,7 +1714,11 @@ __all__ = [
     "Predicate",
     "Proposition",
     "Truth",
+    "comparison_class_of",
     "event_of",
     "is_event_variable",
+    "low_word",
+    "pole_dimension",
+    "pole_operator",
     "scene_of",
 ]

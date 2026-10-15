@@ -49,6 +49,13 @@ the verb, always with the auxiliary, and ``not`` for a blocked event. The tense 
 sentence is marked on its auxiliary when the morphology realizes the tense as a separate word;
 an affix never attaches to a function word, so with an affixal tense the auxiliary stays bare.
 
+**Comparatives** (stage b3a). "The owl is bigger than the mouse" is the copula with the
+comparative form of the pole adjective and the standard of comparison: the function word
+``than`` and the object noun phrase, as a ``PP`` placed where a verb's object stands. The
+comparative form is an affix joined to the adjective (``LEXEME.39-COMPARATIVE``) or a separate
+function word before or after it (``grammar.morphology.comparative``), and ``than`` stands
+before the object or after it by ``word_order.adposition``.
+
 **Causal statements.** The subject is the generic noun with a relative clause that names the
 event ("things that catch things", "things that things catch", "things that sleep"): the verb
 is bound to the event variable, in the present tense, so it carries no marker and never
@@ -80,7 +87,14 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
     check_plan,
 )
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, ADJECTIVE, BEFORE_WORD, Lexeme, Lexicon
+from semantic_world.corpus.lexicon import (
+    ABLE_NOW_WORD,
+    ADJECTIVE,
+    BEFORE_WORD,
+    THAN_WORD,
+    Lexeme,
+    Lexicon,
+)
 from semantic_world.corpus.propositions import (
     CAN,
     EFFECT,
@@ -93,6 +107,7 @@ from semantic_world.corpus.propositions import (
     STATE_KIND,
     VERB,
 )
+from semantic_world.corpus.propositions import COMPARATIVE as COMPARATIVE_KIND
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
 from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
@@ -100,7 +115,10 @@ from semantic_world.corpus.streams import Streams
 PLURAL = "PLURAL"
 PAST = "PAST"
 PROGRESSIVE = "PROGRESSIVE"
-MARKERS = (PLURAL, PAST, PROGRESSIVE)
+COMPARATIVE = "COMPARATIVE"
+"""The comparative inflection of a pole adjective (stage b3a): an affix or a word, like the
+other markers, and always available."""
+MARKERS = (PLURAL, PAST, PROGRESSIVE, COMPARATIVE)
 NP_LABELS = ("NP-SBJ", "NP-OBJ")
 WORD_LABELS = ("N", "V", "A", "Det", "Pro", "P", "Conj", "Rel", "AUX", "Neg", "Adv")
 
@@ -175,6 +193,7 @@ class Realizer:
             PLURAL: self.morphology.number,
             PAST: self.morphology.tense,
             PROGRESSIVE: self.morphology.aspect,
+            COMPARATIVE: self.morphology.comparative,
         }
         # The fixed adjective order: a random ordering of the adjective concepts, drawn once.
         adjectives = [c.label for c in lexicon.concepts if c.pos == ADJECTIVE]
@@ -324,6 +343,16 @@ class _Builder:
     def place(parts: list[Tree], added: list[Tree], side: str) -> list[Tree]:
         return added + parts if side == "before" else parts + added
 
+    def standard(self, phrase: NounPhrase) -> Tree:
+        """The standard of a comparative: the function word ``than`` and the object noun
+        phrase, as a ``PP``, with ``than`` before the noun phrase (``adposition: preposition``)
+        or after it (``postposition``)."""
+        than = self.function("P", THAN_WORD)
+        target = self.noun_phrase(phrase, "NP-OBJ")
+        if self.order.adposition == "preposition":
+            return ["PP", than, target]
+        return ["PP", target, than]
+
     def relative_clause(self, phrase: NounPhrase) -> Tree | None:
         clause = phrase.clause
         negated = [Predication(IS, x.feature, False) for x in phrase.negated]
@@ -447,6 +476,12 @@ class _Builder:
             if not plural:
                 noun = self.place(noun, [self.function("Det", "a")], self.order.determiner)
             head = ["NP-PRD", *noun]
+        elif kind == COMPARATIVE_KIND:
+            # the copula, the comparative form of the pole adjective, and "than" the object
+            auxiliary = "are" if plural and agree else "is"
+            head = self.word("A", predication.label, (COMPARATIVE,))
+            assert predication.object is not None
+            target = self.standard(predication.object)
         else:  # a property, a scalar pole, or an exposed patient projection
             auxiliary = "are" if plural and agree else "is"
             negated = not polarity
