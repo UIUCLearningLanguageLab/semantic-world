@@ -14,6 +14,9 @@ They hold:
   negative;
 - ``causal``: the causal statements of the feature documents, by kind (effect and
   precondition);
+- ``comparisons`` (stage b3a): the sentences whose main clause is a comparison (a scalar pole)
+  or a comparative, by level, and the pole adjectives used as modifiers of mentions and as
+  restrictions of class-level subjects;
 - ``quantifiers``: the quantifier mix of the class-level sentences, by the quantifier of each
   fact (the strongest true one the language can state, which ``quantifiers.weights``
   reweights), and how many are said with a bare plural;
@@ -69,6 +72,8 @@ from semantic_world.corpus.grammar import INSTANCE_NP
 from semantic_world.corpus.planner import (
     BLOCKED,
     CAUSAL,
+    COMPARATIVE_SECTION,
+    COMPARATIVE_STRENGTH,
     EVENT_SECTION,
     INITIAL_STATE,
     POLE,
@@ -80,6 +85,8 @@ from semantic_world.corpus.planner import (
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EFFECT,
     EVENT,
     INSTANCE,
@@ -88,6 +95,7 @@ from semantic_world.corpus.propositions import (
     PROGRESSIVE,
     QUANTIFIERS,
     STATE,
+    CategoryTerm,
 )
 from semantic_world.corpus.realize import token_parts
 from semantic_world.corpus.testsets import ItemSet
@@ -323,6 +331,37 @@ def _causal(documents: Sequence[Document]) -> dict[str, Any]:
     }
 
 
+def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
+    """The comparison and comparative sentences, by level, and the pole adjectives used as
+    modifiers of mentions and as restrictions of class-level subjects."""
+    sentences = [s for d in documents for s in d.sentences]
+    comparison = Counter(
+        s.proposition.level for s in sentences if s.proposition.predicate.kind == COMPARISON
+    )
+    comparative = Counter(
+        s.proposition.level for s in sentences if s.proposition.predicate.kind == COMPARATIVE
+    )
+    modifiers = sum(
+        1
+        for s in sentences
+        for phrase in s.plan.noun_phrases()
+        if phrase.kind == INSTANCE_NP and any(literal.pole for literal in phrase.restriction)
+    )
+    restrictions = sum(
+        1
+        for s in sentences
+        if isinstance(s.proposition.subject, CategoryTerm)
+        and any(literal.pole for literal in s.proposition.subject.restriction)
+    )
+    return {
+        "comparison_sentences": {CLASS: comparison[CLASS], INSTANCE: comparison[INSTANCE]},
+        "comparative_sentences": {CLASS: comparative[CLASS], INSTANCE: comparative[INSTANCE]},
+        "comparative_descriptions": sum(s.section == COMPARATIVE_SECTION for s in sentences),
+        "pole_modifiers": modifiers,
+        "pole_restrictions": restrictions,
+    }
+
+
 def _quantifiers(documents: Sequence[Document]) -> dict[str, Any]:
     sentences = [s for d in documents for s in d.sentences if s.proposition.level == CLASS]
     stated = Counter(str(s.strength) for s in sentences)
@@ -331,7 +370,7 @@ def _quantifiers(documents: Sequence[Document]) -> dict[str, Any]:
         "class_level_sentences": len(sentences),
         "stated": {
             key: {"count": stated[key], "share": _share(stated[key], len(sentences))}
-            for key in (*QUANTIFIERS, POLE)
+            for key in (*QUANTIFIERS, POLE, COMPARATIVE_STRENGTH)
         },
         "bare_plural": {"count": bare, "share": _share(bare, len(sentences))},
     }
@@ -403,6 +442,7 @@ def corpus_stats(
         "sentences": _sentences(documents),
         "states": _states(documents),
         "causal": _causal(documents),
+        "comparisons": _comparisons(documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,
         "ambiguity": ambiguity,

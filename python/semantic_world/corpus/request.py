@@ -8,8 +8,10 @@ that the word-form pipeline reads (``request:`` in its configuration). The reque
 - ``takes``: for each part of speech, the affixes that its lexemes' words must be able to take.
   The list comes from the grammar settings alone: with number realized as an affix, every noun
   takes ``PLURAL``, and so does every verb when verbs agree; with tense as an affix, every verb
-  takes ``PAST``; with aspect as an affix, every verb takes ``PROGRESSIVE``. So the word that a
-  lexeme gets never depends on which inflected forms the documents or the test items happen to
+  takes ``PAST``; with aspect as an affix, every verb takes ``PROGRESSIVE``; with the comparative
+  as an affix (the default), every adjective takes ``COMPARATIVE``, because the pole adjectives
+  take it and share their part of speech with the other adjectives (stage b3a). So the word that
+  a lexeme gets never depends on which inflected forms the documents or the test items happen to
   use;
 - ``function_words``: the glosses of the language's function words, most frequent first, by
   their counts in the documents. Function words with the same count keep the lexicon's order;
@@ -30,8 +32,8 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from semantic_world.corpus.config import Config
-from semantic_world.corpus.lexicon import INTRANSITIVE_VERB, NOUN, TRANSITIVE_VERB
-from semantic_world.corpus.realize import PAST, PLURAL, PROGRESSIVE, token_parts
+from semantic_world.corpus.lexicon import ADJECTIVE, INTRANSITIVE_VERB, NOUN, TRANSITIVE_VERB
+from semantic_world.corpus.realize import COMPARATIVE, PAST, PLURAL, PROGRESSIVE, token_parts
 from semantic_world.corpus.world import World
 
 if TYPE_CHECKING:
@@ -50,6 +52,7 @@ def affix_items(config: Config) -> list[dict[str, str]]:
         (PLURAL, morphology.number),
         (PAST, morphology.tense),
         (PROGRESSIVE, morphology.aspect),
+        (COMPARATIVE, morphology.comparative),
     )
     return [
         {"gloss": gloss, "position": "suffix" if part.position == "after" else "prefix"}
@@ -60,14 +63,15 @@ def affix_items(config: Config) -> list[dict[str, str]]:
 
 def takes(config: Config) -> dict[str, list[str]]:
     """For each part of speech, the affixes that its lexemes' words must be able to take, by the
-    grammar settings alone. A part of speech that takes no affix is left out. Part nouns and
-    adjectives are never inflected."""
+    grammar settings alone. A part of speech that takes no affix is left out. Part nouns are
+    never inflected; an adjective takes the comparative affix, when the comparative is one."""
     morphology = config.grammar.morphology
     affixes = {item["gloss"] for item in affix_items(config)}
     noun = [PLURAL] if PLURAL in affixes else []
     verb = [PLURAL] if PLURAL in affixes and morphology.agreement else []
     verb += [gloss for gloss in (PAST, PROGRESSIVE) if gloss in affixes]
-    wanted = {NOUN: noun, **{pos: list(verb) for pos in VERBS}}
+    adjective = [COMPARATIVE] if COMPARATIVE in affixes else []
+    wanted = {NOUN: noun, **{pos: list(verb) for pos in VERBS}, ADJECTIVE: adjective}
     return {pos: glosses for pos, glosses in wanted.items() if glosses}
 
 

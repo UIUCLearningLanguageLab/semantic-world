@@ -24,6 +24,8 @@ from semantic_world.corpus.logical import logical_form
 from semantic_world.corpus.propositions import (
     ALL,
     CAN,
+    COMPARATIVE,
+    COMPARISON,
     HAS,
     IS,
     MEMBER,
@@ -31,7 +33,6 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     PROJECTION,
-    SCALAR,
     SOME,
     VERB,
     Literal,
@@ -42,6 +43,7 @@ from semantic_world.corpus.propositions import (
 from semantic_world.corpus.renderings import (
     Able,
     Atom,
+    Comparison,
     Exists,
     Not,
     Quantified,
@@ -125,7 +127,7 @@ def render(plan: SentencePlan, grounding=None, mode: str = "local") -> str:
             proposition.quantifier,
             grounding=grounding,
         )
-    form = json.loads(json.dumps(logical_form(plan, proposition, REFERENTS)))
+    form = json.loads(json.dumps(logical_form(plan, proposition, REFERENTS, 1.0)))
     text = propositional(form, mode)
     # the rendering reads back as the formula it writes, and as the proposition it says
     parsed = parse_propositional(text)
@@ -138,7 +140,6 @@ def render(plan: SentencePlan, grounding=None, mode: str = "local") -> str:
 
 EATS_MICE = RelativeClause((Predication(VERB, "EVENTTYPE2.2.1", True, kind_of("CATEGORY.1.5")),))
 OWLS_EAT = RelativeClause((Predication(VERB, "EVENTTYPE2.2.1"),), kind_of("CATEGORY.1.2"))
-PARENT = {"comparison": "CATEGORY.1"}
 
 SENTENCES = {
     # the furry dog has legs
@@ -206,13 +207,29 @@ SENTENCES = {
         ),
         "{CATEGORY.1.2(REF.3)} ABLE(EVENTTYPE2.2.1(REF.3, REF.2))",
     ),
-    # the big mouse without fins is small for an animal: a pole names its comparison class
+    # the big mouse without fins is small for an animal: a pole is a comparison with its class
+    # and the language's threshold (CG.65)
     "poles": (
         SentencePlan(
             the(CAT, "CATEGORY.1", Literal("SCALARDIM.1.HIGH"), Literal("PART.2", False)),
-            Predication(SCALAR, "SCALARDIM.2.LOW", False),
+            Predication(COMPARISON, "SCALARDIM.2.LOW", False),
         ),
-        "{CATEGORY.1(REF.2) AND NOT PART.2(REF.2) AND SCALARDIM.1.HIGH(REF.2, CATEGORY.1)} NOT SCALARDIM.2.LOW(REF.2, CATEGORY.1)",
+        "{CATEGORY.1(REF.2) AND NOT PART.2(REF.2) AND ABOVE(SCALARDIM.1, REF.2, CATEGORY.1, 1.0)} NOT BELOW(SCALARDIM.2, REF.2, CATEGORY.1, 1.0)",
+    ),
+    # the owl is bigger than the mouse, and the mouse is smaller than the owl: one proposition
+    "bigger": (
+        SentencePlan(
+            the(OWL, "CATEGORY.1.2"),
+            Predication(COMPARATIVE, "SCALARDIM.1.HIGH", True, the(CAT, "CATEGORY.1.5")),
+        ),
+        "{CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2)} GREATER(SCALARDIM.1, REF.3, REF.2)",
+    ),
+    "smaller": (
+        SentencePlan(
+            the(CAT, "CATEGORY.1.5"),
+            Predication(COMPARATIVE, "SCALARDIM.1.LOW", True, the(OWL, "CATEGORY.1.2")),
+        ),
+        "{CATEGORY.1.5(REF.2) AND CATEGORY.1.2(REF.3)} GREATER(SCALARDIM.1, REF.3, REF.2)",
     ),
     # the bird that is not red is a penguin, and it is edible
     "member": (
@@ -247,10 +264,10 @@ SENTENCES = {
                     )
                 ),
             ),
-            Predication(SCALAR, "SCALARDIM.1.HIGH"),
+            Predication(COMPARISON, "SCALARDIM.1.HIGH"),
         ),
         "{CATEGORY.1.2(REF.3) AND CATEGORY.1.5(REF.2) AND ABLE(EVENTTYPE1.3(REF.2)) AND ABLE(EVENTTYPE2.2.1(REF.3, REF.2))} "
-        "SCALARDIM.1.HIGH(REF.3, CATEGORY.1.2)",
+        "ABOVE(SCALARDIM.1, REF.3, CATEGORY.1.2, 1.0)",
     ),
     # most red penguins can swim, and no penguins have fur: the quantifier of the plan is
     # written, whether or not a word states it
@@ -317,14 +334,43 @@ SENTENCES = {
         SentencePlan(kind_of("CATEGORY.1.3.2"), Predication(MEMBER, "CATEGORY.2", False), NEC_ALL),
         "NEC(ALL(CATEGORY.1.3.2(VAR.1), NOT CATEGORY.2(VAR.1)))",
     ),
-    # owls are big: a class-level scalar pole has no quantifier, and names the comparison class
+    # owls are big: a class-level scalar pole has no quantifier, and compares the category's
+    # mean with its comparison class, which the plan carries (CG.65)
     "owls are big": (
-        SentencePlan(kind_of("CATEGORY.1.2"), Predication(SCALAR, "SCALARDIM.1.HIGH")),
-        "SCALARDIM.1.HIGH(CATEGORY.1.2, CATEGORY.1)",
+        SentencePlan(
+            kind_of("CATEGORY.1.2"),
+            Predication(COMPARISON, "SCALARDIM.1.HIGH", standard="CATEGORY.1"),
+        ),
+        "ABOVE(SCALARDIM.1, MEAN(CATEGORY.1.2), CATEGORY.1, 1.0)",
     ),
     "owls are not big": (
-        SentencePlan(kind_of("CATEGORY.1.2"), Predication(SCALAR, "SCALARDIM.1.HIGH", False)),
-        "NOT SCALARDIM.1.HIGH(CATEGORY.1.2, CATEGORY.1)",
+        SentencePlan(
+            kind_of("CATEGORY.1.2"),
+            Predication(COMPARISON, "SCALARDIM.1.HIGH", False, standard="CATEGORY.1"),
+        ),
+        "NOT ABOVE(SCALARDIM.1, MEAN(CATEGORY.1.2), CATEGORY.1, 1.0)",
+    ),
+    # elephants are big: a top-level category is compared with every entity
+    "elephants are big": (
+        SentencePlan(
+            kind_of("CATEGORY.1"), Predication(COMPARISON, "SCALARDIM.1.HIGH", standard="ENTITY")
+        ),
+        "ABOVE(SCALARDIM.1, MEAN(CATEGORY.1), ENTITY, 1.0)",
+    ),
+    # owls are bigger than mice: two means (CG.66)
+    "owls are bigger": (
+        SentencePlan(
+            kind_of("CATEGORY.1.2"),
+            Predication(COMPARATIVE, "SCALARDIM.1.HIGH", True, kind_of("CATEGORY.1.5")),
+        ),
+        "GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2), MEAN(CATEGORY.1.5))",
+    ),
+    "mice are smaller": (
+        SentencePlan(
+            kind_of("CATEGORY.1.5"),
+            Predication(COMPARATIVE, "SCALARDIM.1.LOW", True, kind_of("CATEGORY.1.2")),
+        ),
+        "GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2), MEAN(CATEGORY.1.5))",
     ),
     # owls that eat mice have wings: at least one mouse, and an extensional quantifier
     "owls that eat mice": (
@@ -351,7 +397,7 @@ SENTENCES = {
             Predication(VERB, "EVENTTYPE2.1.2", True, kind_of("CATEGORY.2.1", clause=OWLS_EAT)),
             ALL,
         ),
-        "ALL(CATEGORY.1.3(VAR.1) AND SCALARDIM.1.HIGH(VAR.1, CATEGORY.1.3) AND ABLE(EVENTTYPE1.3(VAR.1)) AND CATEGORY.2.1(VAR.2) AND "
+        "ALL(CATEGORY.1.3(VAR.1) AND ABOVE(SCALARDIM.1, VAR.1, CATEGORY.1.3, 1.0) AND ABLE(EVENTTYPE1.3(VAR.1)) AND CATEGORY.2.1(VAR.2) AND "
         "EXISTS(VAR.3, CATEGORY.1.2(VAR.3) AND ABLE(EVENTTYPE2.2.1(VAR.3, VAR.2))), ABLE(EVENTTYPE2.1.2(VAR.1, VAR.2)))",
     ),
     # owls that eat mice that can swim have wings: a clause inside a clause
@@ -386,8 +432,7 @@ SENTENCES = {
 @pytest.mark.parametrize("name", list(SENTENCES))
 def test_the_propositional_rendering(name) -> None:
     plan, expected = SENTENCES[name]
-    grounding = PARENT if plan.predication.kind == SCALAR else None
-    assert render(plan, grounding) == expected
+    assert render(plan) == expected
 
 
 def test_referents_can_be_named_by_their_instances() -> None:
@@ -441,20 +486,55 @@ def test_the_formula_of_a_logical_form() -> None:
             NEC_ALL, (Atom("CATEGORY.1.3.2", ("VAR.1",)),), Not(Atom("CATEGORY.2", ("VAR.1",)))
         ),
     )
-    # a class-level scalar pole is one atom of the category and its comparison class
+    # a class-level scalar pole is a comparison of the category's mean with its comparison
+    # class, at the recorded threshold
     plan, _ = SENTENCES["owls are big"]
     proposition = plan.proposition()
-    grounded = Proposition(
-        proposition.level, proposition.subject, proposition.predicate, True, None, grounding=PARENT
-    )
-    form = logical_form(plan, grounded)
-    assert form["quantifier"] is None
+    form = logical_form(plan, proposition, z=1.0)
+    assert form["quantifier"] is None and form["z"] == 1.0
     assert form["predicate"] == {
-        "kind": "scalar",
+        "kind": "comparison",
         "label": "SCALARDIM.1.HIGH",
+        "operator": "ABOVE",
         "class": "CATEGORY.1",
     }
-    assert formula(form) == (Atom("SCALARDIM.1.HIGH", ("CATEGORY.1.2", "CATEGORY.1")),)
+    assert formula(form) == (
+        Comparison("ABOVE", "SCALARDIM.1", ("MEAN(CATEGORY.1.2)",), "CATEGORY.1", 1.0),
+    )
+    assert list(form) == [
+        "id",
+        "level",
+        "quantifier",
+        "polarity",
+        "subject",
+        "predicate",
+        "z",
+        "grounding",
+    ]
+    # a comparative: two means, with no class and no threshold, and no z on the form
+    plan, _ = SENTENCES["owls are bigger"]
+    form = logical_form(plan, plan.proposition(), z=1.0)
+    assert "z" not in form
+    assert form["predicate"] == {
+        "kind": "comparative",
+        "label": "SCALARDIM.1",
+        "operator": "GREATER",
+        "patient": {"category": "CATEGORY.1.5", "restriction": []},
+        "word": "SCALARDIM.1.HIGH",
+    }
+    # said with the low pole's word, the form holds the sentence's subject and object, and the
+    # rendering puts the arguments in the proposition's order
+    plan, _ = SENTENCES["mice are smaller"]
+    form = logical_form(plan, plan.proposition(), z=1.0)
+    assert form["subject"] == {"category": "CATEGORY.1.5", "restriction": []}
+    assert form["predicate"]["patient"] == {"category": "CATEGORY.1.2", "restriction": []}
+    assert form["predicate"]["word"] == "SCALARDIM.1.LOW"
+    assert Proposition.from_json(form) == plan.proposition()
+    assert propositional(form) == "GREATER(SCALARDIM.1, MEAN(CATEGORY.1.2), MEAN(CATEGORY.1.5))"
+
+    assert formula(form) == (
+        Comparison("GREATER", "SCALARDIM.1", ("MEAN(CATEGORY.1.2)", "MEAN(CATEGORY.1.5)")),
+    )
     plan, _ = SENTENCES["was chased"]
     form = logical_form(plan, plan.proposition(), REFERENTS)
     assert form["subject"] == {
@@ -534,10 +614,18 @@ def test_renderings_that_cannot_be_read() -> None:
             parse_propositional(text)
     with pytest.raises(RenderingError, match="unknown kind of concept"):
         proposition_of(parse_propositional("LEXEME.5(REF.1)"))
-    # a pole without its comparison class has no rendering
+    # a pole without the language's threshold has no rendering
     plan, _ = SENTENCES["owls are big"]
-    with pytest.raises(RenderingError, match="no comparison class"):
+    with pytest.raises(RenderingError, match="no threshold"):
         propositional(plan.proposition().to_json())
+    # the old atom of a pole is no rendering, and a comparison takes two or four arguments
+    for text in (
+        "SCALARDIM.1.HIGH(REF.1, CATEGORY.1.3)",
+        "ABOVE(SCALARDIM.1, REF.1, CATEGORY.1.3, big)",
+        "GREATER(SCALARDIM.1, REF.1)",
+    ):
+        with pytest.raises(RenderingError):
+            proposition_of(parse_propositional(text))
 
 
 def test_a_test_item_names_only_its_scene() -> None:

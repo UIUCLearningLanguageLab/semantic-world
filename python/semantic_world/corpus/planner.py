@@ -4,14 +4,16 @@ and decides how each referent is mentioned.
 There are four document types (``documents.mix``):
 
 - **encyclopedic, about a category.** The topic is a category. Each sentence draws a kind of
-  content: a membership fact, a fact about the topic, a fact about one of its subcategories, or
-  a relation fact with the topic as agent or as patient. By default
-  (``documents.content_kind_weights: proportional``) a kind is drawn in proportion to the
-  number of facts of that kind the document can still state, so the mix follows the world;
-  with ``equal``, each kind has the same chance. With ``documents.relation_fact_share``, a
-  sentence draws a relation fact with that probability instead, and the other kinds share the
-  rest. A fact about the topic can be followed by the matching fact about a sibling category, at
-  ``documents.sibling_contrast_rate``, when the sibling differs;
+  content: a membership fact, a fact about the topic, a fact about one of its subcategories, a
+  relation fact with the topic as agent or as patient, or, since stage b3a, a comparison fact:
+  the topic compared with a sibling or a thematic partner on one scalar ("owls are bigger than
+  mice"; ``Facts.comparison_partners``). By default (``documents.content_kind_weights: equal``)
+  each kind has the same chance; with ``proportional`` a kind is drawn in proportion to the
+  number of facts of that kind the document can still state, so the mix follows the world. With
+  ``documents.relation_fact_share``, a sentence draws a relation fact with that probability
+  instead, and the other kinds share the rest. A fact about the topic can be followed by the
+  matching fact about a sibling category, at ``documents.sibling_contrast_rate``, when the
+  sibling differs;
 - **encyclopedic, about a feature.** The topic is a PROPERTY or PART feature, a one-place event
   type, a two-place event type or category, or a base fluent. A sentence states a rule, at
   ``propositions.rule_statement_rate``, or says which categories have the feature and which lack
@@ -24,7 +26,7 @@ There are four document types (``documents.mix``):
   ``entity.scenes`` scenes that involve the instance, in time order, scene by scene;
 - **situational narrative.** One scene. The document narrates its events in time order.
 
-In a narrative, an event sentence can be followed by four kinds of sentence, each at its rate,
+In a narrative, an event sentence can be followed by five kinds of sentence, each at its rate,
 in this order: an initial-state sentence about each participant the event sentence first
 mentioned, stating one of its fluents at the time point before its first reported event
 (``documents.initial_state_rate``, negative at ``propositions.negation_rate.state``); a result
@@ -32,9 +34,13 @@ sentence, stating one change that the event's own effects made in its step to a 
 the event, a base fluent or a derived fluent (``documents.result_rate``); a blocked sentence,
 saying what a participant of the event could not do at that time point, a binding that is able
 and not legal (``documents.blocked_rate``), or, at one minus
-``propositions.negation_rate.able_now``, could do and did not; and an instance-level description
-(``documents.instance_description_rate``): of the topic in an entity narrative, and of a
-participant of the event in a situational narrative, a newly introduced one first. Each report
+``propositions.negation_rate.able_now``, could do and did not; a comparative description of the
+two participants of a two-place event, on a scalar where their values differ, with the agent as
+its subject ("the owl is bigger than the mouse", or "smaller than" when the agent is the lesser;
+``documents.comparative_rate``, drawn from the document's part of ``corpus:comparatives``); and
+an instance-level description (``documents.instance_description_rate``): of the topic in an
+entity narrative, and of a participant of the event in a situational narrative, a newly
+introduced one first. Each report
 of an event chooses its aspect at ``documents.progressive_rate`` (CG.64); with
 ``documents.one_aspect_per_event`` every report of one event in one document uses the aspect of
 its first report. Modifiers stay static: a mention never states a fluent.
@@ -95,6 +101,7 @@ from semantic_world.corpus.mentions import (
     MentionRules,
     Mentions,
     RelativeClauses,
+    comparative_plan,
     happened,
     plan_for,
 )
@@ -103,6 +110,8 @@ from semantic_world.corpus.propositions import (
     CAN,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EVENT,
     HAS,
     INSTANCE,
@@ -110,7 +119,6 @@ from semantic_world.corpus.propositions import (
     MEMBER,
     MOST,
     PROGRESSIVE,
-    SCALAR,
     SIMPLE,
     STATE,
     STATE_KIND,
@@ -145,9 +153,12 @@ TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE, CAUSAL)
 """The sections of an encyclopedic document, in the order of the template."""
 TOPIC = "topic"
 SUBCATEGORY = "subcategory"
-CONTENT_KINDS = (MEMBERSHIP, TOPIC, SUBCATEGORY, RELATION, RULE)
+COMPARISON_KIND = "comparison"
+"""A comparison fact: the topic compared with a sibling or a thematic partner on one scalar
+(stage b3a)."""
+CONTENT_KINDS = (MEMBERSHIP, TOPIC, SUBCATEGORY, RELATION, COMPARISON_KIND, RULE)
 """The kinds of content of a class-level sentence: a membership fact, a fact about the topic, a
-fact about one of its subcategories, a relation fact, and a rule statement."""
+fact about one of its subcategories, a relation fact, a comparison fact, and a rule statement."""
 CONTRAST = "contrast"
 """A sibling contrast: it stays right after the fact it matches."""
 EVENT_SECTION = "event"
@@ -155,12 +166,23 @@ DESCRIPTION = "description"
 INITIAL_STATE = "initial_state"
 RESULT = "result"
 BLOCKED = "blocked"
-NARRATIVE_SECTIONS = (EVENT_SECTION, INITIAL_STATE, RESULT, BLOCKED, DESCRIPTION)
+COMPARATIVE_SECTION = "comparative"
+"""A comparative description of the two participants of an event (stage b3a)."""
+NARRATIVE_SECTIONS = (
+    EVENT_SECTION,
+    INITIAL_STATE,
+    RESULT,
+    BLOCKED,
+    COMPARATIVE_SECTION,
+    DESCRIPTION,
+)
 """What a sentence of a narrative does: reports an event, states a participant's initial
-state, states a result of an event, says what a participant could or could not do then, or
-describes a participant."""
+state, states a result of an event, says what a participant could or could not do then,
+compares the event's two participants, or describes a participant."""
 POLE = "pole"
 """The strength of a scalar-pole fact, which takes no quantifier word."""
+COMPARATIVE_STRENGTH = "comparative"
+"""The strength of a comparison fact, which takes no quantifier word either."""
 
 _STRONG = UNIVERSALS + (MOST,)
 _MAX_REDRAWS = 100
@@ -265,9 +287,12 @@ class _Item:
     follows: bool = False
     """Whether the sentence stays right after the one before it (a sibling contrast)."""
     strength: str | None = None
-    """The quantifier of a class-level fact, or ``pole``."""
+    """The quantifier of a class-level fact, ``pole``, or ``comparative``."""
     bare: bool = False
     """Whether a class-level fact is said with a bare plural."""
+    low: bool = False
+    """Whether a comparison fact is said with the low pole's word ("smaller than"): the topic
+    is the lesser argument, and stays the subject."""
 
 
 @dataclass
@@ -415,7 +440,7 @@ class Planner:
         label = f"{DOCUMENT_PREFIX}{number}"
         rngs = {
             name: self.streams.substream(name, label)
-            for name in ("documents", "propositions", "mentions", "grammar")
+            for name in ("documents", "propositions", "mentions", "grammar", "comparatives")
         }
         mix = self.config.documents.mix
         weights = np.array([mix[kind] for kind in DOCUMENT_TYPES], dtype=float)
@@ -446,14 +471,14 @@ class Planner:
         descriptions = self.config.propositional_descriptions
         sentences = []
         for number, item in enumerate(draft.items, start=1):
-            plan = item.plan or plan_for(self.facts, item.proposition, bare=item.bare)
+            plan = item.plan or plan_for(self.facts, item.proposition, bare=item.bare, low=item.low)
             proposition = item.proposition
             identifier = self._proposition_ids.setdefault(
                 proposition, f"{PROPOSITION_PREFIX}{len(self._proposition_ids) + 1}"
             )
             proposition = dataclasses.replace(proposition, id=identifier)
             sentence = self.realizer.realize(plan, rng)
-            form = logical_form(plan, proposition, referents)
+            form = logical_form(plan, proposition, referents, self.config.scalar_z)
             sentences.append(
                 DocumentSentence(
                     label=f"{label}{SENTENCE_INFIX}{number}",
@@ -502,7 +527,7 @@ class Planner:
             return MEMBERSHIP
         if kind == VERB:
             return RELATION
-        if kind == SCALAR or fact.quantifier == MOST:
+        if kind in (COMPARISON, COMPARATIVE) or fact.quantifier == MOST:
             return CHARACTERISTIC
         return DEFINING if fact.quantifier in UNIVERSALS else RARER
 
@@ -542,11 +567,20 @@ class Planner:
         fact: Proposition,
         section: str | None = None,
         follows: bool = False,
+        low: bool = False,
     ) -> _Item:
-        """The planned sentence of a class-level fact, with its quantifier word or bare."""
-        strength = POLE if fact.predicate.kind == SCALAR else fact.quantifier
+        """The planned sentence of a class-level fact, with its quantifier word or bare. ``low``
+        says a comparison fact with the low pole's word."""
+        kind = fact.predicate.kind
+        strength = {COMPARISON: POLE, COMPARATIVE: COMPARATIVE_STRENGTH}.get(kind, fact.quantifier)
         return _Item(
-            section or self._section(fact), fact, None, follows, strength, self._bare(rng, fact)
+            section or self._section(fact),
+            fact,
+            None,
+            follows,
+            strength,
+            self._bare(rng, fact),
+            low,
         )
 
     def _first_fact(
@@ -622,7 +656,7 @@ class Planner:
             predicate
             for predicate in self.facts.class_predicates(term.category, patients=())
             if predicate.kind != MEMBER
-            and not (predicate.kind == SCALAR and (term.restriction or term.clauses))
+            and not (predicate.kind == COMPARISON and (term.restriction or term.clauses))
         ]
 
     def _membership_candidates(
@@ -678,8 +712,8 @@ class Planner:
         scalar pole) about the plain topic, and the sibling's fact is strong too."""
         subject, predicate = fact.subject, fact.predicate
         plain = CategoryTerm(topic)
-        strong = predicate.kind == SCALAR or fact.quantifier in _STRONG
-        if not strong or predicate.kind == MEMBER:
+        strong = predicate.kind == COMPARISON or fact.quantifier in _STRONG
+        if not strong or predicate.kind in (MEMBER, COMPARATIVE):
             return None
         as_subject = subject == plain
         as_patient = predicate.patient == plain
@@ -696,8 +730,33 @@ class Planner:
                 )
             if other is None or self._key(other) in stated or self._weight(other) == 0:
                 continue
-            if predicate.kind == SCALAR or other.quantifier in _STRONG:
+            if predicate.kind == COMPARISON or other.quantifier in _STRONG:
                 return other
+        return None
+
+    # Comparison facts ------------------------------------------------------------------------
+
+    def _comparison_candidates(self, topic: str) -> list[tuple[str, str]]:
+        """The partner and the scalar of every comparison fact a document about a category
+        could state."""
+        partners = self.facts.comparison_partners(topic)
+        return [(partner, scalar) for partner in partners for scalar in self.facts.scalars]
+
+    def _comparison_fact(
+        self, rng: np.random.Generator, topic: str, stated: set
+    ) -> tuple[Proposition, bool] | None:
+        """A comparison fact about the topic that the document has not stated: a partner and a
+        scalar in a random order, the first pair whose means differ. With it, whether the fact
+        is said with the low pole's word: the topic stays the subject, so the word follows the
+        direction of the comparison."""
+        candidates = self._comparison_candidates(topic)
+        for index in rng.permutation(len(candidates)):
+            partner, scalar = candidates[int(index)]
+            fact = self.facts.comparison_fact(topic, partner, scalar)
+            if fact is None or self._key(fact) in stated or not self._fits(fact):
+                continue
+            assert isinstance(fact.subject, CategoryTerm)
+            return fact, fact.subject.category != topic
         return None
 
     def _order(self, rng: np.random.Generator, items: list[_Item]) -> list[_Item]:
@@ -748,6 +807,10 @@ class Planner:
                     )
                 for as_agent in (True, False):
                     found[RELATION] += keys(self._relation_candidates(term, as_agent), negative)
+            for partner, scalar in self._comparison_candidates(topic):
+                fact = facts.comparison_fact(topic, partner, scalar)
+                if fact is not None and self._fits(fact):
+                    found[COMPARISON_KIND].append(self._key(fact))
             self._available[topic] = {kind: tuple(found[kind]) for kind in CONTENT_KINDS}
         return self._available[topic]
 
@@ -794,6 +857,8 @@ class Planner:
             kinds.append(SUBCATEGORY)
         if self.facts.verbs:
             kinds.append(RELATION)
+        if self._comparison_candidates(topic):
+            kinds.append(COMPARISON_KIND)
         rate = self.config.documents.sibling_contrast_rate
         items: list[_Item] = []
         stated: set = set()
@@ -804,11 +869,15 @@ class Planner:
             if content is None:
                 break
             negative = self._negative(facts_rng)
+            low = False
             if content == MEMBERSHIP:
                 fact = self._membership_fact(facts_rng, topic, negative, stated)
             elif content == RELATION:
                 term = self._restricted(facts_rng, CategoryTerm(topic))
                 fact = self._relation_fact(facts_rng, term, negative, stated)
+            elif content == COMPARISON_KIND:
+                compared = self._comparison_fact(facts_rng, topic, stated)
+                fact, low = (None, False) if compared is None else compared
             else:
                 category = topic
                 if content == SUBCATEGORY:
@@ -819,7 +888,7 @@ class Planner:
             if fact is None:
                 continue
             stated.add(self._key(fact))
-            items.append(self._stated(facts_rng, fact))
+            items.append(self._stated(facts_rng, fact, low=low))
             if len(items) < length and facts_rng.random() < rate:
                 contrast = self._contrast(facts_rng, topic, fact, stated)
                 if contrast is not None:
@@ -909,9 +978,9 @@ class Planner:
         sentence, for the test sets, with whether it is said with a bare plural. The topic is a
         category, drawn by ``documents.topic_level_weights``. The kind of content is drawn among
         ``kinds``, each with the same chance: a membership fact, a fact about the topic, a fact
-        about a subcategory, a relation fact, or a rule statement. The polarity, the
-        restriction, and the bare plural are drawn at their rates. None when the draw gives no
-        fact."""
+        about a subcategory, a relation fact, a comparison fact, or a rule statement. The
+        polarity, the restriction, and the bare plural are drawn at their rates. None when the
+        draw gives no fact."""
         weights = np.array(
             [
                 weight if level in self._by_level else 0.0
@@ -936,6 +1005,9 @@ class Planner:
                 return None
             term = self._restricted(rng, CategoryTerm(topic))
             fact = self._relation_fact(rng, term, negative, stated)
+        elif content == COMPARISON_KIND:
+            compared = self._comparison_fact(rng, topic, stated)
+            fact = None if compared is None else compared[0]
         else:
             category = topic
             if content == SUBCATEGORY:
@@ -952,6 +1024,7 @@ class Planner:
 
     def _narrative(self, kind: str, rngs: dict[str, np.random.Generator]) -> _Draft:
         rng, facts_rng, mention_rng = rngs["documents"], rngs["propositions"], rngs["mentions"]
+        comparative_rng = rngs["comparatives"]
         seed = self._instances[int(rng.integers(len(self._instances)))]
         count = 1
         if kind == ENTITY:
@@ -1004,6 +1077,14 @@ class Planner:
                     blocked = self._blocked(facts_rng, mention_rng, event, scene, mentions)
                     if blocked is not None:
                         items.append(blocked)
+                if (
+                    event.patient is not None
+                    and len(items) < length
+                    and comparative_rng.random() < settings.comparative_rate
+                ):
+                    compared = self._comparative(comparative_rng, mention_rng, event, mentions)
+                    if compared is not None:
+                        items.append(compared)
                 if len(items) < length and facts_rng.random() < rate:
                     if kind == ENTITY:
                         about = seed
@@ -1261,6 +1342,37 @@ class Planner:
             ABLE_NOW, agent, Predicate(kind, label, patient), not negative, scene, step
         )
         return _Item(BLOCKED, proposition, self._timed_plan(rng, proposition, mentions))
+
+    def _comparative(
+        self,
+        comparative_rng: np.random.Generator,
+        rng: np.random.Generator,
+        event: SceneEvent,
+        mentions: Mentions,
+    ) -> _Item | None:
+        """A comparative description of the two participants of a two-place event, on a scalar
+        with a word where their values differ, drawn uniformly among such scalars. The agent is
+        the subject: "the owl is bigger than the mouse", or "smaller than" when the agent is the
+        lesser. None when no scalar tells the two apart."""
+        facts = self.facts
+        agent, patient = event.agent, event.patient
+        assert patient is not None
+        options = [
+            (scalar, fact)
+            for scalar in facts.scalars
+            if (fact := facts.instance_comparison(agent, patient, scalar)) is not None
+        ]
+        if not options:
+            return None
+        scalar, fact = options[int(comparative_rng.integers(len(options)))]
+        low = fact.subject != agent
+        greater_phrase = mentions.noun_phrase(rng, agent)
+        lesser_phrase = mentions.noun_phrase(rng, patient)
+        if low:
+            greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
+        plan = comparative_plan(greater_phrase, lesser_phrase, scalar, low)
+        mentions.end_sentence(agent)
+        return _Item(COMPARATIVE_SECTION, fact, plan)
 
     def _description(
         self,

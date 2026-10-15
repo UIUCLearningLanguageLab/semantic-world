@@ -28,6 +28,7 @@ from semantic_world.corpus.mentions import (
 )
 from semantic_world.corpus.propositions import (
     CLASS,
+    COMPARISON,
     EVENT,
     HAS,
     INSTANCE,
@@ -35,7 +36,6 @@ from semantic_world.corpus.propositions import (
     MEMBER,
     MOST,
     NEC_ALL,
-    SCALAR,
     VERB,
     CategoryTerm,
     Literal,
@@ -123,9 +123,16 @@ def test_class_level_plans(cases) -> None:
     nec_no = Proposition(CLASS, subject, Predicate(MEMBER, "CATEGORY.2"), True, "nec_no")
     assert plan_for(facts, nec_no).subject.determiner == "no"
     # a class-level scalar pole has no quantifier word
-    pole = Proposition(CLASS, CategoryTerm("CATEGORY.1.1"), Predicate(SCALAR, "SCALARDIM.1.HIGH"))
+    pole = Proposition(
+        CLASS,
+        CategoryTerm("CATEGORY.1.1"),
+        Predicate(COMPARISON, "SCALARDIM.1.HIGH", comparison="CATEGORY.1"),
+    )
     assert plan_for(facts, pole).subject.determiner is None
     assert plan_for(facts, pole).quantifier is None and plan_for(facts, pole).bare_plural
+    # the plan carries the comparison class, which the words do not say
+    assert plan_for(facts, pole).predication.standard == "CATEGORY.1"
+    assert plan_for(facts, pole).proposition() == pole
 
 
 @pytest.mark.slow
@@ -149,7 +156,7 @@ def test_instances_are_mentioned_by_their_leaf_unless_told_otherwise(cases) -> N
     # a scalar pole's subject is named by the comparison class
     for comparison in ("CATEGORY.1", "CATEGORY.1.2", "CATEGORY.1.2.1"):
         pole = Proposition(
-            INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=comparison)
+            INSTANCE, instance, Predicate(COMPARISON, "SCALARDIM.1.HIGH", comparison=comparison)
         )
         plan = plan_for(facts, pole)
         assert plan.subject.noun == comparison and plan.proposition() == pole

@@ -126,6 +126,22 @@ def plans_of(case, limit: int = 2):
             report = facts.draw_event(rng, event, "progressive" if rng.random() < 0.3 else "simple")
             if report is not None:
                 plans.append(clauses.attach(rng, plan_for(facts, report)))
+    # comparatives (stage b3a): two instances, and two categories, on each dimension with words,
+    # said with both words
+    for scalar in facts.scalars:
+        for x, y in ((others[0], others[1]), (others[2], others[3])):
+            fact = facts.instance_comparison(x, y, scalar)
+            if fact is not None:
+                plans.append(plan_for(facts, fact))
+                plans.append(plan_for(facts, fact, low=True))
+        for a, b in (
+            (facts.categories[0], facts.categories[1]),
+            (facts.categories[-1], facts.categories[-2]),
+        ):
+            fact = facts.comparison_fact(a, b, scalar)
+            if fact is not None:
+                plans.append(plan_for(facts, fact))
+                plans.append(plan_for(facts, fact, low=True))
     for plan in plans:
         check_plan(plan)
     return plans
@@ -274,9 +290,15 @@ def test_generated_sentences(cases, plans, name, grammar) -> None:
         )
         # interpret(tree) recovers the plan exactly
         read = interpret(
-            sentence.tree, lexicon, sentence.referents, sentence.events, plan.quantifier
+            sentence.tree,
+            lexicon,
+            sentence.referents,
+            sentence.events,
+            plan.quantifier,
+            plan.predication.standard,
         )
         assert read == plan
+
         # every verb and auxiliary agrees with its subject
         agreement.sentence(sentence.tree)
         # the tree is as deep as the plan, and no deeper than the limit
@@ -349,4 +371,4 @@ def test_the_generated_sentences_cover_the_grammar(cases, plans) -> None:
         "become",
         "before",
     }
-    assert affixes == {None, "PLURAL", "PAST"}
+    assert affixes == {None, "PLURAL", "PAST", "COMPARATIVE"}

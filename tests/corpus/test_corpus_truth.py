@@ -22,6 +22,8 @@ from semantic_world.corpus.propositions import (
     ALL,
     CAN,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EXACT,
     HAS,
     INSTANCE,
@@ -36,7 +38,6 @@ from semantic_world.corpus.propositions import (
     OBSERVED,
     PROJECTION,
     QUANTIFIERS,
-    SCALAR,
     SOME,
     TREE,
     VALUE,
@@ -48,6 +49,7 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
 )
+from semantic_world.corpus.world import ENTITY
 
 SMALL = ("tiny", "deep", "still")
 SETTINGS = {
@@ -78,7 +80,7 @@ def agree(case, settings: dict, propositions) -> int:
 
 
 def quantifiers_of(predicate: Predicate) -> tuple:
-    return (None,) if predicate.kind == SCALAR else QUANTIFIERS
+    return (None,) if predicate.kind == COMPARISON else QUANTIFIERS
 
 
 def class_grid(facts, restrictions=((),)):
@@ -614,7 +616,7 @@ def test_the_bare_plural_expresses_what_the_setting_says(tiny) -> None:
     assert truth.bare_plural_expresses(membership)
     assert truth.bare_plural_expresses(proposition(NEC_ALL, rule=(feature, 1)))
     # a class-level scalar pole has no quantifier word
-    pole = Proposition(CLASS, CategoryTerm(category), Predicate(SCALAR, "SCALARDIM.1.HIGH"))
+    pole = Proposition(CLASS, CategoryTerm(category), Predicate(COMPARISON, "SCALARDIM.1.HIGH"))
     assert truth.bare_plural_expresses(pole)
 
 
@@ -638,7 +640,7 @@ def test_a_vacuous_proposition_is_never_valid(tiny) -> None:
     assert len(truth.members(empty)) == 0
     for quantifier, polarity in itertools.product(QUANTIFIERS, (True, False)):
         for predicate in facts.class_predicates(category):
-            if predicate.kind == SCALAR:
+            if predicate.kind == COMPARISON:
                 continue
             vacuous = Proposition(CLASS, empty, predicate, polarity, quantifier)
             evaluation = truth.evaluate(vacuous)
@@ -707,10 +709,12 @@ def test_class_level_scalar_poles(cases) -> None:
     scalars = world.scalar_values
 
     def pole(category, label, quantifier=None, polarity=True, restriction=(), **settings):
+        # the comparison class of CG.3: the parent, or ENTITY for a top-level category
+        comparison = facts.comparison_class(category) if category != THING else ENTITY
         proposition = Proposition(
             CLASS,
             CategoryTerm(category, restriction),
-            Predicate(SCALAR, label),
+            Predicate(COMPARISON, label, comparison=comparison),
             polarity,
             quantifier,
         )
@@ -737,7 +741,7 @@ def test_class_level_scalar_poles(cases) -> None:
             assert high.true == (value >= mean + sd) and low.true == (value <= mean - sd)
             assert not (high.true and low.true)
             assert high.grounding["test"] == MEAN
-            assert high.grounding["comparison"] == (THING if parent is None else parent)
+            assert high.grounding["comparison"] == (ENTITY if parent is None else parent)
             assert pole(category, f"{scalar}.HIGH", polarity=False).true == (not high.true)
 
     # a smaller z makes more categories big or small
@@ -764,7 +768,7 @@ def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> N
         verdicts = []
         for comparison in path:
             proposition = Proposition(
-                INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=comparison)
+                INSTANCE, instance, Predicate(COMPARISON, "SCALARDIM.1.HIGH", comparison=comparison)
             )
             evaluation = truth.evaluate(proposition)
             members = truth.members(CategoryTerm(comparison))
@@ -776,11 +780,11 @@ def test_instance_level_scalar_poles_compare_with_the_nouns_category(cases) -> N
         # the comparison class must be a category the instance is below
         other = next(c for c in truth.categories if c not in path)
         outside = Proposition(
-            INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison=other)
+            INSTANCE, instance, Predicate(COMPARISON, "SCALARDIM.1.HIGH", comparison=other)
         )
         assert not truth.evaluate(outside).valid
         assert not truth.evaluate(
-            Proposition(INSTANCE, instance, Predicate(SCALAR, "SCALARDIM.1.HIGH"))
+            Proposition(INSTANCE, instance, Predicate(COMPARISON, "SCALARDIM.1.HIGH"))
         ).valid
     assert differ > 0  # "the big mouse" can be "the small animal"
 
@@ -941,9 +945,9 @@ def test_logical_forms_that_cannot_be_judged(tiny) -> None:
         Proposition(CLASS, subject, Predicate(IS, "PROPERTY.99"), True, NEC_ALL),
         Proposition(CLASS, subject, Predicate(IS, "PART.1"), True, NEC_ALL),
         Proposition(CLASS, subject, Predicate(CAN, "EVENTTYPE2.1.1"), True, NEC_ALL),
-        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.2.HIGH")),
-        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.MIDDLE")),
-        Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.HIGH"), True, MOST),
+        Proposition(CLASS, subject, Predicate(COMPARISON, "SCALARDIM.2.HIGH")),
+        Proposition(CLASS, subject, Predicate(COMPARISON, "SCALARDIM.1.MIDDLE")),
+        Proposition(CLASS, subject, Predicate(COMPARISON, "SCALARDIM.1.HIGH"), True, MOST),
         Proposition(CLASS, subject, Predicate(MEMBER, "CATEGORY.7"), True, NEC_ALL),
         Proposition(CLASS, subject, Predicate(PROJECTION, "CANBE.EVENTTYPE2.9"), True, MOST),
         Proposition(
@@ -1028,10 +1032,30 @@ def test_json_forms_of_every_predicate_kind() -> None:
         proposition = Proposition(CLASS, subject, predicate, False, SOME)
         assert proposition.to_json()["predicate"] == form
         assert Proposition.from_json(proposition.to_json()) == proposition
-    pole = Proposition(CLASS, subject, Predicate(SCALAR, "SCALARDIM.1.LOW"))
-    assert pole.to_json()["predicate"] == {"kind": "scalar", "label": "SCALARDIM.1.LOW"}
+    # a class-level pole: a comparison of the category's mean with its class (ENTITY for a
+    # top-level category), with its operator written for the reader
+    pole = Proposition(
+        CLASS, subject, Predicate(COMPARISON, "SCALARDIM.1.LOW", comparison="ENTITY")
+    )
+    assert pole.to_json()["predicate"] == {
+        "kind": "comparison",
+        "label": "SCALARDIM.1.LOW",
+        "operator": "BELOW",
+        "class": "ENTITY",
+    }
     assert pole.to_json()["quantifier"] is None
     assert Proposition.from_json(pole.to_json()) == pole
+    # a comparative: the dimension, and the other category as the patient
+    bigger = Proposition(
+        CLASS, subject, Predicate(COMPARATIVE, "SCALARDIM.1", CategoryTerm("CATEGORY.2"))
+    )
+    assert bigger.to_json()["predicate"] == {
+        "kind": "comparative",
+        "label": "SCALARDIM.1",
+        "operator": "GREATER",
+        "patient": {"category": "CATEGORY.2", "restriction": []},
+    }
+    assert Proposition.from_json(bigger.to_json()) == bigger
     instance = Proposition(
         INSTANCE, "INSTANCE.1.1.1", Predicate(VERB, "EVENTTYPE2.1.1", "INSTANCE.2.1.2"), False
     )
@@ -1049,11 +1073,14 @@ def test_json_forms_of_every_predicate_kind() -> None:
     }
     assert Proposition.from_json(instance.to_json()) == instance
     scalar = Proposition(
-        INSTANCE, "INSTANCE.1.1.1", Predicate(SCALAR, "SCALARDIM.1.HIGH", comparison="CATEGORY.1")
+        INSTANCE,
+        "INSTANCE.1.1.1",
+        Predicate(COMPARISON, "SCALARDIM.1.HIGH", comparison="CATEGORY.1"),
     )
     assert scalar.to_json()["predicate"] == {
-        "kind": "scalar",
+        "kind": "comparison",
         "label": "SCALARDIM.1.HIGH",
+        "operator": "ABOVE",
         "class": "CATEGORY.1",
     }
     assert Proposition.from_json(scalar.to_json()) == scalar
@@ -1141,6 +1168,8 @@ def test_concepts_a_sentence_needs_words_for() -> None:
         "PROPERTY.3",
     )
     scalar = Proposition(
-        INSTANCE, "INSTANCE.1.1.1", Predicate(SCALAR, "SCALARDIM.1.LOW", comparison="CATEGORY.1")
+        INSTANCE,
+        "INSTANCE.1.1.1",
+        Predicate(COMPARISON, "SCALARDIM.1.LOW", comparison="CATEGORY.1"),
     )
     assert scalar.concepts() == ("SCALARDIM.1.LOW", "CATEGORY.1")

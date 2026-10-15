@@ -26,6 +26,7 @@ from semantic_world.corpus.propositions import (
     ABLE_NOW,
     CAN,
     CLASS,
+    COMPARATIVE,
     EVENT,
     FEATURE_KINDS,
     INSTANCE,
@@ -45,6 +46,7 @@ from semantic_world.corpus.testsets import (
     EVENT_SWAP,
     IMPOSSIBLE,
     INPUT_FIELDS,
+    INSTANCE_COMPARISON,
     LAWLIKE,
     POLARITY,
     POSSIBLE,
@@ -77,6 +79,8 @@ ALL_SETS = (
     "instance_predicate",
     "instance_subject",
     "instance_role",
+    "instance_comparison_predicate",
+    "instance_comparison_role",
     "event_predicate_possible",
     "event_predicate_blocked",
     "event_predicate_impossible",
@@ -188,7 +192,10 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 assert list(item.to_json()) == ["input", "meta"]
                 assert list(item.input) == list(INPUT_FIELDS)
                 # a causal item is a class-level proposition; its set is named by its kind
-                assert item.proposition.level == (CLASS if level in CAUSAL_LEVELS else level)
+                expected = CLASS if level in CAUSAL_LEVELS else level
+                if level == INSTANCE_COMPARISON:
+                    expected = INSTANCE  # an instance-level comparative, in a set of its own
+                assert item.proposition.level == expected
     # the default world fills every set but some of the law-like ones (since the retune of
     # stage a7a, the possible and blocked role swaps of events fill too) and some of the causal
     # sets, which hold every pair of a true statement and a valid false item, capped at the size
@@ -325,7 +332,8 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
         elif test_set.change == QUANTIFIER:
             assert changed == {"quantifier"} and test_set.level == CLASS
         else:
-            assert changed == {"subject", "predicate"} and a.predicate.kind == VERB
+            assert changed == {"subject", "predicate"}
+            assert a.predicate.kind in (VERB, COMPARATIVE)
             assert (b.subject, b.predicate.patient) == (a.predicate.patient, a.subject)
             assert b.predicate.label == a.predicate.label
     assert sum(made.values()) > 150, made
@@ -345,16 +353,21 @@ def shape(value, key: str = ""):
     of every mapping, the type of every value, and the notation of every label. The indices of
     a label are taken out, except those of a scene or an event, which are counted."""
     if isinstance(value, dict):
-        return {k: shape(v, k) for k, v in value.items() if k != "clauses"}
+        # a term holds clauses when it has them, and a form holds z when it has a pole
+        return {k: shape(v, k) for k, v in value.items() if k not in ("clauses", "z")}
+
     if isinstance(value, list):
         if key in ("tokens", "restriction", "readings", "distinguished") or key in _FREE:
             return "list"
         return ["list", sorted({json.dumps(shape(v, key), sort_keys=True) for v in value})]
     if value is None or isinstance(value, bool):
         return type(value).__name__
+    if isinstance(value, int | float):
+        return "number"  # the threshold z of a form with a pole adjective
     assert isinstance(value, str)
     if key in _FREE:
         return "text"
+
     if not re.search(r"\d", value):
         return "word"
     if value.startswith("SCENE."):
@@ -799,6 +812,11 @@ def stated_form(proposition: Proposition) -> Proposition:
 def plain(form: dict) -> str:
     """What the main clause of a form says, without the way its referents are mentioned."""
     kept = json.loads(json.dumps(bare(form)))
+    predicate = kept["predicate"]
+    if predicate.get("kind") == "comparative":
+        # "smaller than" says the proposition with its arguments the other way round
+        if predicate.pop("word", "").endswith(".LOW"):
+            kept["subject"], predicate["patient"] = predicate["patient"], kept["subject"]
     if kept["level"] != CLASS:
         kept["subject"] = kept["subject"]["instance"]
         if "patient" in kept["predicate"]:
@@ -881,7 +899,7 @@ def test_what_the_documents_state(runs) -> None:
                     positive = not literal.startswith("not ")
                     feature = literal.removeprefix("not ")
                     if feature.startswith("SCALARDIM."):
-                        predicate = Predicate("scalar", feature, comparison=mention["noun"])
+                        predicate = Predicate("comparison", feature, comparison=mention["noun"])
                     else:
                         predicate = Predicate(world.feature_kind[feature], feature)
                     assert Proposition(INSTANCE, instance, predicate, positive) in stated

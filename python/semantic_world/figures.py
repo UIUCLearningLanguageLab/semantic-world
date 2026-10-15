@@ -304,6 +304,7 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
             key: stats["rule_statements"][key] for key in ("rules", "terms", "stated")
         },
         "causal": dict(stats["causal"]),
+        "comparisons": json.loads(json.dumps(stats.get("comparisons", {}))),
         "effect_statements": sets.get("causal_effect_polarity", {}).get("true_statements"),
         "precondition_statements": sets.get("causal_precondition_polarity", {}).get(
             "true_statements"

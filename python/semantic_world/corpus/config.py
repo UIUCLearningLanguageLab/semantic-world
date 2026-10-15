@@ -198,6 +198,9 @@ class DocumentsConfig:
     blocked_rate: float
     """The probability that an event sentence is followed by a sentence saying what a
     participant could, or could not, do at that time point (``ABLE_NOW``)."""
+    comparative_rate: float
+    """The probability that an event sentence of a two-place event is followed by a comparative
+    description of its two participants, on a scalar where their values differ (stage b3a)."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -215,6 +218,7 @@ class DocumentsConfig:
             "initial_state_rate": self.initial_state_rate,
             "result_rate": self.result_rate,
             "blocked_rate": self.blocked_rate,
+            "comparative_rate": self.comparative_rate,
         }
 
 
@@ -411,10 +415,28 @@ class AspectConfig:
 
 
 @dataclass(frozen=True)
+class ComparativeConfig:
+    """How the comparative form of a pole adjective is realized (stage b3a): as an affix joined
+    to the adjective ("bigger") or as a separate function word ("more big"), before or after it.
+    The comparative is always available; it has no ``enabled`` flag."""
+
+    realization: str
+    position: str
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    def resolved(self) -> dict[str, Any]:
+        return {"realization": self.realization, "position": self.position}
+
+
+@dataclass(frozen=True)
 class MorphologyConfig:
     number: NumberConfig
     tense: TenseConfig
     aspect: AspectConfig
+    comparative: ComparativeConfig
 
     @property
     def agreement(self) -> bool:
@@ -427,6 +449,7 @@ class MorphologyConfig:
             ("PLURAL", self.number),
             ("PAST", self.tense),
             ("PROGRESSIVE", self.aspect),
+            ("COMPARATIVE", self.comparative),
         )
         return tuple(g for g, part in marked if part.enabled and part.realization == "word")
 
@@ -435,6 +458,7 @@ class MorphologyConfig:
             "number": self.number.resolved(),
             "tense": self.tense.resolved(),
             "aspect": self.aspect.resolved(),
+            "comparative": self.comparative.resolved(),
         }
 
 
@@ -493,6 +517,10 @@ class Config:
     mention: MentionConfig
     grammar: GrammarConfig
     scalar_z: float
+    class_levels_up: int
+    """How many levels above the subject's category the comparison class of a class-level pole
+    is taken (``scalar_adjectives.class_levels_up``, default 1: the parent); ``ENTITY`` when the
+    tree runs out (CG.3, stage b3a)."""
     propositional_referents: str
     propositional_descriptions: str
     """``marked``: the propositional rendering writes the descriptions in braces before the
@@ -518,7 +546,7 @@ class Config:
             "entity": {"scenes": [self.entity_scenes.min, self.entity_scenes.max]},
             "mention": self.mention.resolved(),
             "grammar": self.grammar.resolved(),
-            "scalar_adjectives": {"z": self.scalar_z},
+            "scalar_adjectives": {"z": self.scalar_z, "class_levels_up": self.class_levels_up},
             "renderings": {
                 "propositional": {
                     "referents": self.propositional_referents,
@@ -652,6 +680,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         initial_state_rate=node.probability("initial_state_rate", 0.2),
         result_rate=node.probability("result_rate", 0.5),
         blocked_rate=node.probability("blocked_rate", 0.1),
+        comparative_rate=node.probability("comparative_rate", 0.1),
     )
     node.finish()
     return config
@@ -857,6 +886,16 @@ def _read_morphology(node: _Node, event_tense: str) -> MorphologyConfig:
         position=aspect_node.choice("position", "after", SIDES),
     )
     aspect_node.finish()
+    comparative_node = node.mapping("comparative")
+    if "enabled" in comparative_node.data:
+        raise comparative_node.error(
+            "enabled", "is not a setting: the comparative form is always available"
+        )
+    comparative = ComparativeConfig(
+        realization=comparative_node.choice("realization", "affix", REALIZATIONS),
+        position=comparative_node.choice("position", "after", SIDES),
+    )
+    comparative_node.finish()
     node.finish()
     if (
         tense.enabled
@@ -869,7 +908,7 @@ def _read_morphology(node: _Node, event_tense: str) -> MorphologyConfig:
             "a word takes one affix, and a past progressive verb would need two: make tense or "
             "aspect a word",
         )
-    return MorphologyConfig(number, tense, aspect)
+    return MorphologyConfig(number, tense, aspect, comparative)
 
 
 def _read_grammar(node: _Node, event_tense: str) -> GrammarConfig:
@@ -983,6 +1022,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     z = scalar.get("z", 1.0)
     if not _is_number(z) or z <= 0:
         raise scalar.error("z", f"expected a number above 0, found {_describe(z)}")
+    class_levels_up = scalar.int("class_levels_up", 1, min=1)
     scalar.finish()
     renderings = root.mapping("renderings")
     propositional = renderings.mapping("propositional")
@@ -1005,6 +1045,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         mention=mention,
         grammar=grammar,
         scalar_z=float(z),
+        class_levels_up=class_levels_up,
         propositional_referents=referents,
         propositional_descriptions=descriptions,
         test_sets=test_sets,

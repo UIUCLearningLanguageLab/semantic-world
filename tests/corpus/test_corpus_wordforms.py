@@ -139,11 +139,13 @@ def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
     assert request["affixes"] == [
         {"gloss": "PLURAL", "position": "suffix"},
         {"gloss": "PAST", "position": "suffix"},
+        {"gloss": "COMPARATIVE", "position": "suffix"},
     ]
     assert request["takes"] == {
         "noun": ["PLURAL"],
         "intransitive_verb": ["PLURAL", "PAST"],
         "transitive_verb": ["PLURAL", "PAST"],
+        "adjective": ["COMPARATIVE"],
     }
     # inflect: the lexemes that appear inflected, in a document or in a test item
     found: dict[str, set[str]] = {}
@@ -157,7 +159,11 @@ def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
             if "-" in token:
                 label, gloss = token.split("-")
                 found.setdefault(gloss, set()).add(label)
-    assert [entry["affixes"] for entry in request["inflect"]] == [["PLURAL"], ["PAST"]]
+    assert [entry["affixes"] for entry in request["inflect"]] == [
+        [gloss] for gloss in ("PLURAL", "PAST", "COMPARATIVE") if gloss in found
+    ]
+    assert "COMPARATIVE" in found  # the corpus states comparatives
+
     pos = {x.label: x.pos for x in lexicon.lexemes}
     for entry in request["inflect"]:
         (gloss,) = entry["affixes"]
@@ -171,35 +177,57 @@ def test_the_request_lists_what_the_corpus_needs(cases, chains, name) -> None:
 
 
 def test_the_request_of_a_language_without_inflection(chains) -> None:
+    # the default language has no number, tense, or aspect; its one affix is the comparative of
+    # the pole adjectives (stage b3a), which every adjective's word must be able to take
     corpus, before, _, _, _ = chains("tiny")
     request = yaml.safe_load(before[REQUEST_FILE])
-    assert request["takes"] == {} and request["affixes"] == [] and request["inflect"] == []
+    assert request["takes"] == {"adjective": ["COMPARATIVE"]}
+    assert request["affixes"] == [{"gloss": "COMPARATIVE", "position": "suffix"}]
+    poles = {x.label for x in corpus.planner.lexicon.lexemes if x.concept.startswith("SCALARDIM.")}
+    for entry in request["inflect"]:
+        assert entry["affixes"] == ["COMPARATIVE"] and set(entry["lexemes"]) <= poles
     assert len(request["function_words"]) == len(FUNCTION_WORDS)
     assert "become" in request["function_words"]
     assert "before" in request["function_words"]
+    assert "than" in request["function_words"]
     assert len(request["lexemes"]) == len(corpus.planner.lexicon.content_lexemes)
+    # with the comparative as a word, the language has no affix at all
+    corpus, before, _, _, _ = chains(
+        "tiny", grammar={"morphology": {"comparative": {"realization": "word"}}}
+    )
+    request = yaml.safe_load(before[REQUEST_FILE])
+    assert request["takes"] == {} and request["affixes"] == [] and request["inflect"] == []
+    assert "COMPARATIVE" in request["function_words"]
+
+
+WORD = {"comparative": {"realization": "word"}}
+"""The comparative as a separate word: the language then has no comparative affix."""
 
 
 @pytest.mark.parametrize(
     ("morphology", "affixes", "expected"),
     [
-        ({}, [], {}),
-        ({"number": {"enabled": True}}, [("PLURAL", "suffix")], {"noun": ["PLURAL"], "verb": ["PLURAL"]}),
-        ({"number": {"enabled": True, "agreement": False}}, [("PLURAL", "suffix")], {"noun": ["PLURAL"]}),
-        ({"number": {"enabled": True, "realization": "word"}}, [], {}),
-        ({"number": {"enabled": True, "position": "before"}}, [("PLURAL", "prefix")], {"noun": ["PLURAL"], "verb": ["PLURAL"]}),
-        ({"tense": {"enabled": True}}, [("PAST", "suffix")], {"verb": ["PAST"]}),
-        ({"aspect": {"enabled": True, "realization": "affix", "position": "before"}}, [("PROGRESSIVE", "prefix")], {"verb": ["PROGRESSIVE"]}),
+        ({}, [("COMPARATIVE", "suffix")], {"adjective": ["COMPARATIVE"]}),
+        (WORD, [], {}),
+        ({"comparative": {"position": "before"}}, [("COMPARATIVE", "prefix")], {"adjective": ["COMPARATIVE"]}),
+        ({"number": {"enabled": True}, **WORD}, [("PLURAL", "suffix")], {"noun": ["PLURAL"], "verb": ["PLURAL"]}),
+        ({"number": {"enabled": True, "agreement": False}, **WORD}, [("PLURAL", "suffix")], {"noun": ["PLURAL"]}),
+        ({"number": {"enabled": True, "realization": "word"}, **WORD}, [], {}),
+        ({"number": {"enabled": True, "position": "before"}, **WORD}, [("PLURAL", "prefix")], {"noun": ["PLURAL"], "verb": ["PLURAL"]}),
+        ({"tense": {"enabled": True}, **WORD}, [("PAST", "suffix")], {"verb": ["PAST"]}),
+        ({"tense": {"enabled": True}}, [("PAST", "suffix"), ("COMPARATIVE", "suffix")], {"verb": ["PAST"], "adjective": ["COMPARATIVE"]}),
+        ({"aspect": {"enabled": True, "realization": "affix", "position": "before"}, **WORD}, [("PROGRESSIVE", "prefix")], {"verb": ["PROGRESSIVE"]}),
         (
             {"number": {"enabled": True}, "tense": {"enabled": True, "realization": "word"}, "aspect": {"enabled": True, "realization": "affix"}},
-            [("PLURAL", "suffix"), ("PROGRESSIVE", "suffix")],
-            {"noun": ["PLURAL"], "verb": ["PLURAL", "PROGRESSIVE"]},
+            [("PLURAL", "suffix"), ("PROGRESSIVE", "suffix"), ("COMPARATIVE", "suffix")],
+            {"noun": ["PLURAL"], "verb": ["PLURAL", "PROGRESSIVE"], "adjective": ["COMPARATIVE"]},
         ),
     ],
 )  # fmt: skip
 def test_takes_and_affixes_come_from_the_grammar_settings(cases, morphology, affixes, expected):
     """Which lexemes must take which affixes comes from the grammar settings alone, by part of
-    speech: nouns with number as an affix, and verbs with agreement, tense, or aspect."""
+    speech: nouns with number as an affix, verbs with agreement, tense, or aspect, and
+    adjectives with the comparative as an affix (the default since stage b3a)."""
     config = cases("tiny").config(grammar={"morphology": morphology})
     assert affix_items(config) == [{"gloss": g, "position": p} for g, p in affixes]
     wanted = {}
@@ -208,6 +236,8 @@ def test_takes_and_affixes_come_from_the_grammar_settings(cases, morphology, aff
     for pos in ("intransitive_verb", "transitive_verb"):
         if "verb" in expected:
             wanted[pos] = expected["verb"]
+    if "adjective" in expected:
+        wanted["adjective"] = expected["adjective"]
     assert takes(config) == wanted
 
 
@@ -289,7 +319,10 @@ def test_generate_make_word_forms_and_render(chains, name, mode, sections) -> No
         for gloss in entry["affixes"]
     }
     assert {label for label, row in words.items() if row["kind"] == "inflected"} == wanted
-    assert bool(wanted) == bool(sections)
+    # the comparative affix is on by default (stage b3a), so the pole adjectives the corpus
+    # compares with are inflected even without number, tense, or aspect
+    assert wanted
+    assert bool(sections) == any(gloss != "COMPARATIVE" for gloss in affix)
 
     # the sentences: word labels, and the spelled rendering
     documents = lines(folder / "documents.jsonl")

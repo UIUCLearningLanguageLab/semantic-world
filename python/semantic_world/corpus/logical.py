@@ -9,8 +9,24 @@ terms, each with its restriction and, when it has them, its relative clauses (``
 clause is written like a predicate: ``{"kind": "event_type1", "label": "EVENTTYPE1.3"}``, or a
 two-place event type with the other category, as ``patient`` when the head is the agent ("owls
 that eat mice") and as ``agent`` when the head is the patient ("mice that owls eat"). The
-predicate of a scalar pole also holds its comparison class (``class``): the subject category's
-parent, or ``THING`` for a top-level category.
+predicate of a scalar pole (kind ``comparison``) holds its operator (``ABOVE`` or ``BELOW``) and
+its comparison class (``class``): an ancestor of the subject category, or ``ENTITY`` for a
+top-level category (stage b3a). A comparative (kind ``comparative``, operator ``GREATER``) holds
+the other category as its ``patient``.
+
+**Comparatives.** The subject and the patient of a comparative are the sentence's subject and
+object, in the sentence's order, and the predicate records the pole adjective the sentence uses
+under ``word`` (``SCALARDIM.1.HIGH`` for "bigger than", ``SCALARDIM.1.LOW`` for "smaller
+than"), as it records whether a mention is descriptive: the word is no part of the proposition,
+which is ``GREATER`` with the greater argument first, so a form whose word is the low pole's
+names the greater argument as its patient. ``Proposition.from_json`` and the propositional
+rendering read the word and put the arguments in the proposition's order.
+
+**The threshold of the poles.** A logical form that holds a pole adjective anywhere, in its
+predicate, in the restriction of a category term, or among the modifiers of a mention, records
+the language's threshold under ``z`` (``scalar_adjectives.z``, in standard deviations of the
+comparison class), so that every proposition with a pole records the z it used (CG.65). A form
+without a pole has no ``z``.
 
 **Instance, event, state, change, and able_now levels.** The subject, and the patient of a
 verb, are mentions:
@@ -43,8 +59,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan
-from semantic_world.corpus.propositions import _JSON_KEY, CLASS, SCALAR, Proposition
+from semantic_world.corpus.grammar import NounPhrase, Predication, SentencePlan, term_of
+from semantic_world.corpus.propositions import (
+    _JSON_KEY,
+    CLASS,
+    COMPARATIVE,
+    COMPARISON,
+    Proposition,
+)
+from semantic_world.corpus.world import SCALAR_PREFIX
 
 
 def is_descriptive(phrase: NounPhrase) -> bool:
@@ -53,17 +76,56 @@ def is_descriptive(phrase: NounPhrase) -> bool:
     return phrase.determiner == "the"
 
 
+def has_pole(data: Any) -> bool:
+    """Whether a JSON logical form (or a part of one) holds a pole adjective: a predicate of kind
+    ``comparison``, or a pole literal in a restriction."""
+    if isinstance(data, dict):
+        if data.get("kind") == COMPARISON:
+            return True
+        return any(has_pole(value) for key, value in data.items() if key != "grounding")
+    if isinstance(data, list):
+        return any(
+            (isinstance(item, str) and item.removeprefix("not ").startswith(SCALAR_PREFIX))
+            or has_pole(item)
+            for item in data
+        )
+    return False
+
+
+def with_z(form: dict[str, Any], z: float | None) -> dict[str, Any]:
+    """The form with the language's threshold recorded under ``z``, after the predicate, when
+    the form holds a pole and ``z`` is given; otherwise the form as it is."""
+    if z is None or not has_pole(form):
+        return form
+    ordered: dict[str, Any] = {}
+    for key, value in form.items():
+        ordered[key] = value
+        if key == "predicate":
+            ordered["z"] = float(z)
+    if "z" not in ordered:
+        ordered["z"] = float(z)
+    return ordered
+
+
 def logical_form(
-    plan: SentencePlan, proposition: Proposition, referents: Mapping[str, str] | None = None
+    plan: SentencePlan,
+    proposition: Proposition,
+    referents: Mapping[str, str] | None = None,
+    z: float | None = None,
 ) -> dict[str, Any]:
     """The JSON logical form of a sentence: its main proposition, with its grounding, and the
     mentions of its plan. ``referents`` gives the referent label of every instance mentioned in
-    the document."""
+    the document. ``z`` is the language's threshold for its pole adjectives, recorded when the
+    form holds one."""
     form = proposition.to_json()
     if proposition.level == CLASS:
-        if proposition.predicate.kind == SCALAR and proposition.grounding is not None:
-            form["predicate"]["class"] = proposition.grounding["comparison"]
-        return form
+        if plan.predication.kind == COMPARATIVE:
+            # the sentence's subject and object, and the adjective it uses
+            assert isinstance(plan.subject.referent, str) and plan.predication.object is not None
+            form["subject"] = term_of(plan.subject).to_json()
+            form["predicate"]["patient"] = term_of(plan.predication.object).to_json()
+            form["predicate"]["word"] = plan.predication.label
+        return with_z(form, z)
     labels = referents or {}
 
     def mention(phrase: NounPhrase) -> dict[str, Any]:
@@ -94,4 +156,6 @@ def logical_form(
     form["subject"] = mention(plan.subject)
     if plan.predication.object is not None:
         form["predicate"]["patient"] = mention(plan.predication.object)
-    return form
+    if plan.predication.kind == COMPARATIVE:
+        form["predicate"]["word"] = plan.predication.label
+    return with_z(form, z)

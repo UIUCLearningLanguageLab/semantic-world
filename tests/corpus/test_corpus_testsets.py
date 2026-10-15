@@ -15,6 +15,7 @@ from semantic_world.corpus.lexicon import THING
 from semantic_world.corpus.propositions import (
     ALL,
     CLASS,
+    COMPARISON,
     HAS,
     INSTANCE,
     IS,
@@ -25,7 +26,6 @@ from semantic_world.corpus.propositions import (
     NEC_NO,
     NO,
     QUANTIFIERS,
-    SCALAR,
     SOME,
     VERB,
     CategoryTerm,
@@ -110,9 +110,13 @@ def test_every_false_item_fails_and_differs_by_exactly_one_change(cases, name) -
             changed = differences(true_form, false_form)
             if change == PREDICATE:
                 assert changed == {"predicate"}
+                # the kind, the patient, and the comparison class stay (a pole's operator
+                # follows its label)
                 kept = {k: v for k, v in true_form["predicate"].items() if k != LABEL_KEY}
                 new = {k: v for k, v in false_form["predicate"].items() if k != LABEL_KEY}
-                assert kept == new  # the kind, the patient, and the comparison class stay
+                kept.pop("operator", None), new.pop("operator", None)
+                assert kept == new
+
             elif change == SUBJECT:
                 assert changed == {"subject"}
                 if item.level == CLASS:
@@ -201,7 +205,7 @@ def test_quantifier_swaps(cases) -> None:
                 quantifiers = {c.quantifier for c in options}
                 assert fact.quantifier not in quantifiers
                 assert all(c.polarity == fact.polarity for c in options)
-                if fact.predicate.kind == SCALAR:
+                if fact.predicate.kind == COMPARISON:
                     assert options == []  # a scalar pole has no quantifier
                     continue
                 if fact.polarity:
@@ -219,7 +223,7 @@ def test_quantifier_swaps(cases) -> None:
     assert not any(false in (ALL, NO) for _, _, false in seen)
     # a scalar pole has no quantifier, and membership is true or false of the whole category,
     # so neither has a false quantifier swap
-    assert not any(kind == SCALAR for kind, _, _ in seen)
+    assert not any(kind == COMPARISON for kind, _, _ in seen)
 
 
 @pytest.mark.slow
@@ -230,7 +234,7 @@ def test_a_false_item_about_a_scalar_pole_keeps_its_comparison_class(cases) -> N
     made = 0
     for instance in case.world.instances[::9]:
         for fact in facts.instance_facts(instance):
-            if fact.predicate.kind != SCALAR:
+            if fact.predicate.kind != COMPARISON:
                 continue
             for change in (PREDICATE, SUBJECT):
                 false = falsify(facts, fact, change, rng)
@@ -295,7 +299,8 @@ def test_false_items_are_reproducible(cases) -> None:
     assert run(1) == run(1)
     assert run(1) != run(2)
     kinds = {item.predicate.kind for item in items}
-    assert {MEMBER, VERB, SCALAR} <= kinds and {INSTANCE, CLASS} == {item.level for item in items}
+    assert {MEMBER, VERB, COMPARISON} <= kinds
+    assert {INSTANCE, CLASS} == {item.level for item in items}
     assert any(item.quantifier == SOME for item in items) and any(
         item.quantifier == MOST for item in items
     )

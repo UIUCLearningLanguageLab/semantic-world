@@ -218,3 +218,13 @@ All on Jon's laptop on October 12 and 13, 2026, on the final code.
 - **The full check list** of `CLAUDE.md`: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (the Rust crates are untouched by the stage), `maturin develop --release`, `ruff check python tests` (and `ruff format --check`), and both tiers of pytest pass.
 - **The tiers, each alone on every core:** the fast tier, `pytest -n auto`, 1,744 tests in 1 minute 32 seconds (follow-up 3: the eleven world tests and the three corpus tests returned to it; the cleanup's fast tier took 4 minutes 53 seconds on one core); the slow tier, `pytest --slow -n auto`, 273 tests in 6 minutes 1 second (6 minutes 25 seconds in the cleanup). Two tests of the slow tier failed on the first run and were fixed as findings (above): the independent satisfiability check had no case for a numeric condition literal, and the policy-direction test's sample of 300 episodes was too small on the new world.
 - **Two full suites at once** (`pytest --all -n auto`, twice, started together): 2,018 tests passed in each, 11 minutes 6 seconds each, side by side; none failed, none was skipped. The two warnings are a `log10` of zero in a word-form augmentation test, which the stage did not touch. The language-model example (follow-up 4) passed in both.
+
+## Jon's rulings on the open questions
+
+Jon ruled on the five open questions on October 13, 2026, in the prompt for stage b3a. WM.E191 to WM.E206 are decided.
+
+1. **The numeric kind of a condition literal** stays on by default, at its weight of 0.2. The default world should use what the world can do, and the specification includes numeric literals in conditions.
+2. **A numeric condition may name its own effect's fluent** ("when low, add"), and a Boolean one may not: the asymmetry is kept. The numeric pattern is how needs work; the Boolean one would be empty or redundant.
+3. **The two-place share is not retuned.** The target is the default world's share (stage a7a), which is now 0.347, closer to a third than before. The spread over seeds is the world's own variation, which the guide reports.
+4. **`numeric_fluents.rule_weight` is raised** so that the default world has at least one derived Boolean fluent over a numeric threshold (the pattern of "hungry" as `NUMFL.1 > 0.75`). Stage b3a does this as its first item, choosing the smallest weight that does so on seed 1, and records the weight in its proposal file.
+5. **Drift reaches every entity of the state**, participants or not: accepted. In a running world everyone's needs change, scene or no scene, and the histories still record the participants' changes alone.

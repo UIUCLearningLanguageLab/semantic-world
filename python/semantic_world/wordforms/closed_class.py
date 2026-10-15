@@ -14,7 +14,9 @@ forms").
 - An **affix** is a bound form of shape C, VC, or V, with an unstressed vowel. A suffix is drawn
   from the ends of the pattern words, and a prefix from their beginnings. An affix that more than
   ``max_skipped`` of the content words cannot take is rejected. With ``source: english``, the
-  glosses PLURAL, PAST, and PROGRESSIVE become the English suffixes, with English allomorphy.
+  glosses PLURAL, PAST, PROGRESSIVE, and COMPARATIVE become the English suffixes (*-s*, *-ed*,
+  *-ing*, *-er*), with English allomorphy; the corpus generator asks for COMPARATIVE since the
+  comparatives of stage b3a.
 - An **inflected form** is a stem joined to an affix. When the plain join fails the phonotactic
   check, a glide (``Y`` after a front vowel, ``W`` after a back or rounded vowel) goes between
   a vowel and a vowel, and otherwise an unstressed schwa goes between the two. A pair that fails
@@ -67,8 +69,10 @@ ENGLISH_AFFIXES: dict[str, tuple[tuple[str, ...], ...]] = {
     "PLURAL": (("Z",), ("S",), ("IH0", "Z")),
     "PAST": (("D",), ("T",), ("IH0", "D")),
     "PROGRESSIVE": (("IH0", "NG"),),
+    "COMPARATIVE": (("ER0",),),
 }
-"""The English suffixes and their allomorphs, the most general first."""
+"""The English suffixes and their allomorphs, the most general first. ``COMPARATIVE`` is the
+*-er* of "bigger", one form (stage b3a)."""
 
 
 def english_allomorph(gloss: str, stem: tuple[str, ...]) -> tuple[str, ...]:
@@ -509,7 +513,8 @@ def generate_affixes(
 def english_affixes(
     settings: ClosedClassConfig, ipa: PhonemeTable
 ) -> tuple[list[Affix], dict[str, Any]]:
-    """The English suffixes for the glosses PLURAL, PAST, and PROGRESSIVE."""
+    """The English suffixes for the glosses PLURAL, PAST, PROGRESSIVE, and COMPARATIVE."""
+
     affixes = []
     for index, item in enumerate(settings.affixes):
         allomorphs = ENGLISH_AFFIXES.get(item.gloss)

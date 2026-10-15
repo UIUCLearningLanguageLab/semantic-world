@@ -117,10 +117,15 @@ def test_replay_reproduces_every_recorded_change_and_nothing_else(tiny: WorldRes
                 for j, f in enumerate(definition.base_fluents)
                 if before.values[i, j] != after.values[i, j]
             }
-            recorded = {(c.entity, c.fluent) for e in step.events for c in e.changes}
+            # the Boolean changes; the numeric ones are replayed in test_world_numeric.py
+            recorded = {
+                (c.entity, c.fluent) for e in step.events for c in e.changes if not c.numeric
+            }
             assert changed == recorded
             for e in step.events:
                 for c in e.changes:
+                    if c.numeric:
+                        continue
                     assert after.values[
                         definition.entity_index(c.entity), definition.base_fluent_index(c.fluent)
                     ] == int(c.to)

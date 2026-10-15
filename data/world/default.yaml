@@ -28,7 +28,7 @@ numeric_fluents:                              # the numeric fluents (stage b2); 
   range: [0.0, 1.0]                           # the range of every numeric fluent, unless `fluents` gives one its own
   initial: {kind: uniform}                    # the initial distribution: uniform over the range, {kind: fixed, value: v}, or {kind: beta, mean: m, concentration: c}
   drift: {share: 0.5, amounts: [-0.1, 0.1]}   # a share of the numeric fluents drifts at every step, by an amount drawn from this interval
-  rule_weight: 1.0                            # the weight of a numeric threshold literal in the input pool of a derived fluent's rule (a Boolean fluent weighs 1)
+  rule_weight: 21.0                           # the weight of a numeric threshold literal in the input pool of a derived fluent's rule (a Boolean fluent weighs 1); 21 is the smallest whole weight at which the default world (seed 1) has a derived Boolean fluent over a numeric threshold (stage b3a)
   fluents: {}                                 # per-fluent overrides, NUMFL.<n>: {range, initial, drift}
 
 event_types:

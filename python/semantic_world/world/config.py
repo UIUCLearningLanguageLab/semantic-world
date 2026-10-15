@@ -518,7 +518,7 @@ def _read_numeric_fluents(node: _Node) -> NumericFluentsConfig:
     share = drift.probability("share", 0.5)
     amounts = _read_pair(drift, "amounts", [-0.1, 0.1])
     drift.finish()
-    rule_weight = float(node.number("rule_weight", 1.0, min=0))
+    rule_weight = float(node.number("rule_weight", 21.0, min=0))
     fluents: dict[str, NumericFluentSetting] = {}
     entries = node.mapping("fluents")
     for label in list(entries.data):

@@ -10,7 +10,10 @@ predication. It holds everything that the planner decides, and nothing that the 
 - a :class:`Predication` is the content of one verb phrase: a predicate, a polarity, an object
   noun phrase for a verb, and, at the event level, the event it reports with its tense and
   aspect. At the state, change, and able_now levels it holds the time point it is about
-  (``SCENE.8.TIME.2``) and the tense, and a change says ``become``;
+  (``SCENE.8.TIME.2``) and the tense, and a change says ``become``. A comparative ("bigger
+  than") is a predication whose label is the pole adjective the sentence uses and whose object
+  is the standard of comparison; a class-level pole holds its comparison class (``standard``),
+  which the words do not say (stage b3a);
 - a :class:`RelativeClause` is a subject relative, with one or more predications about the head
   joined by "and", or an object relative, with the clause's own subject (``agent``) and one verb.
 
@@ -33,6 +36,12 @@ none for a bare plural), because what a word expresses is a setting of the langu
 A relative clause on a class-level noun phrase is restrictive, and holds one-place and two-place
 event types only: "penguins that can swim", "owls that eat mice", and "mice that owls eat". It is
 part of the category term that the truth tests judge (:func:`term_of`).
+
+**A comparative** ("the owl is bigger than the mouse") is the copula with the comparative form of
+a pole adjective and the function word ``than`` before (or after) the object. Its proposition is
+``GREATER`` over the dimension, with the subject first for the high pole's adjective ("bigger")
+and the object first for the low pole's ("smaller"): the language chooses the word, and the
+proposition stays one form. A comparative is never negated and never in a relative clause.
 
 How a restriction is realized is fixed, so that a tree has one reading:
 
@@ -57,11 +66,16 @@ from semantic_world.corpus.propositions import (
     CAUSAL_KINDS,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
+    COMPARISON_KINDS,
     EVENT,
     EVENT_VARIABLE,
     HAS,
+    HIGH,
     INSTANCE,
     IS,
+    LOW,
     MEMBER,
     MOST,
     NEC_ALL,
@@ -71,7 +85,6 @@ from semantic_world.corpus.propositions import (
     PRESENT,
     PROJECTION,
     QUANTIFIERS,
-    SCALAR,
     SOME,
     STATE,
     STATE_KIND,
@@ -85,9 +98,10 @@ from semantic_world.corpus.propositions import (
     Proposition,
     event_of,
     is_event_variable,
+    pole_dimension,
     scene_of,
 )
-from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, THING
+from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX, THING
 
 CLASS_NP = "class"
 INSTANCE_NP = "instance"
@@ -152,14 +166,16 @@ class NounPhrase:
 @dataclass(frozen=True)
 class Predication:
     kind: str
-    """``property``, ``part``, ``event_type1``, ``scalar``, ``member``, ``patient_capacity``,
-    ``event_type2``, ``state``, ``effect``, or ``precondition``."""
+    """``property``, ``part``, ``event_type1``, ``comparison``, ``comparative``, ``member``,
+    ``patient_capacity``, ``event_type2``, ``state``, ``effect``, or ``precondition``."""
     label: str
+    """The predicate word's concept. For a comparative, the pole adjective the sentence uses
+    (``SCALARDIM.1.HIGH`` for "bigger than", ``SCALARDIM.1.LOW`` for "smaller than")."""
     polarity: bool = True
     """For an effect or a precondition, the fluent's value."""
     object: NounPhrase | None = None
-    """Verbs only: the patient. None in an object relative, where the head noun is the
-    patient."""
+    """Verbs and comparatives only: the patient, or the standard of a comparison ("than the
+    mouse"). None in an object relative, where the head noun is the patient."""
     event: str | None = None
     """Event level only: the label of the event that the verb phrase reports
     (``SCENE.8.EVENTINSTANCE.5``). In a test item it is the label of the scene (``SCENE.8``):
@@ -175,10 +191,20 @@ class Predication:
     become: bool = False
     """A change: the fluent came to have the value at the time point (``become``), rather than
     held it (the copula)."""
+    standard: str | None = None
+    """A class-level pole only: its comparison class, an ancestor of the subject's category or
+    ``ENTITY``, which the words do not say ("owls are big" compares owls with their parent
+    category, or with every entity)."""
 
     @property
     def timed(self) -> bool:
         return self.time is not None
+
+    @property
+    def low(self) -> bool:
+        """For a comparative: whether the sentence uses the low pole's adjective ("smaller
+        than"), so that the object is the greater argument."""
+        return self.kind == COMPARATIVE and self.label.rsplit(".", 1)[1] == LOW
 
     @property
     def bound(self) -> bool:
@@ -213,9 +239,9 @@ class SentencePlan:
     subject: NounPhrase
     predication: Predication
     quantifier: str | None = None
-    """Class level only: the proposition's quantifier. None for a class-level scalar pole, and
-    for a sentence about instances. The subject's determiner is the word that states it, or
-    None for a bare plural."""
+    """Class level only: the proposition's quantifier. None for a class-level comparison or
+    comparative, and for a sentence about instances. The subject's determiner is the word that
+    states it, or None for a bare plural."""
 
     @property
     def level(self) -> str:
@@ -249,12 +275,15 @@ class SentencePlan:
                 True,
                 NEC_ALL,
             )
+        if predication.kind == COMPARATIVE:
+            return self._comparative()
         if self.subject.kind == CLASS_NP:
             patient = None if target is None else term_of(target)
+            comparison = predication.standard if predication.kind == COMPARISON else None
             return Proposition(
                 CLASS,
                 term_of(self.subject),
-                Predicate(predication.kind, predication.label, patient),
+                Predicate(predication.kind, predication.label, patient, comparison),
                 predication.polarity,
                 self.quantifier,
             )
@@ -280,13 +309,31 @@ class SentencePlan:
                 time=time,
                 tense=predication.tense,
             )
-        comparison = self.subject.noun if predication.kind == SCALAR else None
+        comparison = self.subject.noun if predication.kind == COMPARISON else None
         return Proposition(
             INSTANCE,
             self.subject.referent,
             Predicate(predication.kind, predication.label, patient, comparison),
             predication.polarity,
         )
+
+    def _comparative(self) -> Proposition:
+        """The proposition of a comparative: ``GREATER`` over the dimension, with the subject
+        first for the high pole's word and the object first for the low pole's."""
+        predication = self.predication
+        target = predication.object
+        if target is None:
+            raise GrammarError("a comparative has an object: the standard of comparison")
+        dimension = pole_dimension(predication.label)
+        if self.subject.kind == CLASS_NP:
+            first: CategoryTerm | str = term_of(self.subject)
+            second: CategoryTerm | str = term_of(target)
+        else:
+            first, second = self.subject.referent, target.referent
+        if predication.low:
+            first, second = second, first
+        level = CLASS if self.subject.kind == CLASS_NP else INSTANCE
+        return Proposition(level, first, Predicate(COMPARATIVE, dimension, second), True, None)
 
     def noun_phrases(self) -> list[NounPhrase]:
         """Every noun phrase of the sentence, relative clauses included."""
@@ -417,9 +464,11 @@ def check_plan(plan: SentencePlan) -> None:
         return
     if subject.kind == CLASS_NP:
         quantifier = plan.quantifier
-        if predication.kind == SCALAR:
+        if predication.kind in COMPARISON_KINDS:
             if quantifier is not None or subject.determiner is not None:
-                raise GrammarError("a class-level scalar pole takes no quantifier")
+                raise GrammarError(f"a class-level {predication.kind} takes no quantifier")
+            if predication.kind == COMPARISON and predication.standard is None:
+                raise GrammarError("a class-level pole names its comparison class (standard)")
         elif quantifier not in QUANTIFIERS:
             raise GrammarError(f"a class-level sentence has a quantifier, not {quantifier!r}")
         elif subject.determiner is not None and subject.determiner != WORD_OF[quantifier]:
@@ -434,11 +483,45 @@ def check_plan(plan: SentencePlan) -> None:
         raise GrammarError(
             f"the subject is already named as a {subject.noun}: name it by another category"
         )
-    if predication.kind == SCALAR and subject.pronoun:
+    if predication.kind == COMPARISON and subject.pronoun:
         raise GrammarError(
             "a pronoun names no category, so a scalar pole has no comparison class: mention the "
             "subject with a noun"
         )
+    if predication.kind == COMPARISON and subject.kind == INSTANCE_NP and predication.standard:
+        raise GrammarError("an instance-level pole takes its comparison class from the noun")
+    if predication.kind == COMPARATIVE:
+        _check_comparative(plan)
+
+
+def _check_comparative(plan: SentencePlan) -> None:
+    """A comparative: the comparative form of a pole adjective, a positive polarity, an object
+    of the subject's kind (an instance with an instance, a plain category with a plain
+    category), and no time point."""
+    subject, predication = plan.subject, plan.predication
+    target = predication.object
+    if not predication.label.startswith(SCALAR_PREFIX) or predication.label.rsplit(".", 1)[
+        1
+    ] not in (HIGH, LOW):
+        raise GrammarError("a comparative is the comparative form of a pole adjective")
+    if not predication.polarity:
+        raise GrammarError("a comparative is never negated: say it the other way round")
+    if target is None or target.kind != subject.kind:
+        raise GrammarError(
+            "a comparative compares an instance with an instance, or a category with a category"
+        )
+    if predication.time is not None or predication.event is not None or predication.standard:
+        raise GrammarError("a comparative is timeless and has no comparison class")
+    if target.kind == CLASS_NP and (
+        target.restriction
+        or target.clause is not None
+        or subject.restriction
+        or subject.clause is not None
+    ):
+        raise GrammarError("a class-level comparative compares the means of plain categories")
+
+    if target.referent == subject.referent:
+        raise GrammarError("a thing is not compared with itself")
 
 
 def _check_causal(plan: SentencePlan) -> None:
@@ -551,7 +634,18 @@ def _check_predication(
             f"a relative clause does not hold a predicate of kind {kind!r}: an IS literal, a "
             "scalar pole, and a HAS literal belong in the restriction"
         )
-    if kind not in (IS, HAS, CAN, SCALAR, MEMBER, PROJECTION, VERB, STATE_KIND, *CAUSAL_KINDS):
+    if kind not in (
+        IS,
+        HAS,
+        CAN,
+        COMPARISON,
+        COMPARATIVE,
+        MEMBER,
+        PROJECTION,
+        VERB,
+        STATE_KIND,
+        *CAUSAL_KINDS,
+    ):
         raise GrammarError(f"unknown predicate kind {kind!r}")
     if kind in CAUSAL_KINDS:
         raise GrammarError("an effect or a precondition is the predicate of a causal statement")
@@ -585,8 +679,8 @@ def _check_predication(
             "a class-level relative clause holds a one-place or a two-place event type, and is "
             "never negated"
         )
-    if (kind == VERB) != (predication.object is not None or gap):
-        raise GrammarError("a verb, and only a verb, has an object")
+    if (kind in (VERB, COMPARATIVE)) != (predication.object is not None or gap):
+        raise GrammarError("a verb or a comparative, and only one, has an object")
     if (predication.event is not None) != (level == EVENT):
         raise GrammarError(
             "every verb phrase of an event-level sentence reports an event, and no other does"
@@ -610,3 +704,5 @@ def _check_predication(
         )
     if predication.object is not None:
         _check_phrase(predication.object, level)
+    if kind != COMPARISON and predication.standard is not None:
+        raise GrammarError("only a class-level pole names a comparison class")
