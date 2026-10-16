@@ -1,7 +1,7 @@
 {
  "version": 1,
  "name": "hand_22_numeric_drift",
- "description": "Drift (stage b2): with no event at all, NUMFL.2 of every entity rises by 0.25 at each step, 0.25 after the first and 0.5 after the second, and NUMFL.1 stays at 0. Against RANGE, a value is ABOVE at a fraction q when it is at least q of the way through [0, 1], and BELOW when at most: after the first step NUMFL.2 (0.25) is below at 0.25 and not above at 0.5; after the second (0.5) it is above at 0.5.",
+ "description": "Drift (stage b2): with no event at all, NUMFL.2 of every entity rises by 0.25 at each step, 0.25 after the first and 0.5 after the second, and NUMFL.1 stays at 0. Against RANGE, a value is ABOVE at a fraction q when it is strictly more than q of the way through [0, 1], and BELOW when at most (WM.35): after the first step NUMFL.2 (0.25) is below at 0.25 and not above at 0.5; after the second (0.5) it is not above at 0.5 either, being exactly there, and no longer below at 0.25.",
  "rule_set_id": "300cebf58433fd185f3c9abd7faf907f16cde874feaa291759978eaa25587a21",
  "definition": {
   "version": 1,
@@ -421,7 +421,7 @@
  "comparisons": [
   {"kind": "below", "dimension": "NUMFL.2", "x": "INSTANCE.1.1.1", "class": "RANGE", "z": 0.25, "expected": true, "time": 2},
   {"kind": "above", "dimension": "NUMFL.2", "x": "INSTANCE.1.1.1", "class": "RANGE", "z": 0.5, "expected": false, "time": 2},
-  {"kind": "above", "dimension": "NUMFL.2", "x": "INSTANCE.1.1.1", "class": "RANGE", "z": 0.5, "expected": true, "time": 3},
+  {"kind": "above", "dimension": "NUMFL.2", "x": "INSTANCE.1.1.1", "class": "RANGE", "z": 0.5, "expected": false, "time": 3},
   {"kind": "below", "dimension": "NUMFL.2", "x": "INSTANCE.1.1.1", "class": "RANGE", "z": 0.25, "expected": false, "time": 3},
   {"kind": "increase", "dimension": "NUMFL.2", "x": "INSTANCE.1.2.1", "time": 1, "expected": true},
   {"kind": "increase", "dimension": "NUMFL.1", "x": "INSTANCE.1.2.1", "time": 1, "expected": false}

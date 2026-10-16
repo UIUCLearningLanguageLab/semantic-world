@@ -285,7 +285,8 @@ def test_numeric_comparisons_at_a_time_agree_with_direct_arithmetic(
     tiny: WorldResult, runtime: RuntimeDefinition
 ) -> None:
     """``GREATER`` between entities at a time point, ``ABOVE`` and ``BELOW`` against ``RANGE``
-    (the fraction of the way through the range), and ``INCREASE`` and ``DECREASE`` over a step,
+    (strictly more than, and at most, the point at the fraction of the way through the range),
+    and ``INCREASE`` and ``DECREASE`` over a step,
     on states of the tiny world and the states after random steps."""
     from semantic_world.world.runtime import legal_bindings
 
@@ -315,7 +316,8 @@ def test_numeric_comparisons_at_a_time_agree_with_direct_arithmetic(
                 )
                 q = float(rng.choice([0.0, 0.25, 0.5, 0.75, 1.0]))
                 point = low + q * (high - low)
-                assert above(runtime, fluent, x, RANGE, q, state) == (state.numeric[x, j] >= point)
+                # ABOVE against RANGE is strict and BELOW inclusive (WM.35)
+                assert above(runtime, fluent, x, RANGE, q, state) == (state.numeric[x, j] > point)
                 assert below(runtime, fluent, x, RANGE, q, state) == (state.numeric[x, j] <= point)
                 seen_above += above(runtime, fluent, x, RANGE, q, state)
                 seen_below += below(runtime, fluent, x, RANGE, q, state)

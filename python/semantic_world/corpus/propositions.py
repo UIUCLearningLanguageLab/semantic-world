@@ -54,7 +54,10 @@ next time point exceeds the value at the time point, whatever moved it. A numeri
 statement is a predicate of kind ``effect`` whose label is the fluent and whose ``direction`` is
 ``raises`` or ``lowers``: ``NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.2(VAR.1, VAR.2)),
 LOWERS(EVENTVAR.1, NUMFL.1(VAR.1))))`` says that the event type's effect subtracts from the
-fluent (decision 28). A numeric threshold is never stated (decision 23).
+fluent (decision 28). A numeric threshold is never stated (decision 23), except as the
+condition of a conditional statement when it is exactly the language's cut, ``> cut_high`` or
+``<= cut_low``, which the numeric adjective says (WM.35): ``BEFORE(EVENTVAR.1, ABOVE(NUMFL.1,
+VAR.1, RANGE, 0.75))`` in the restrictor.
 
 **Conditional causal statements** (stage b3b). The condition of a conditional effect joins the
 event term: ``EventTerm(event_type, role, condition)``, with the condition a tuple of
@@ -125,6 +128,7 @@ proposition is true, and whether a document can state it (``felicitous``).
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -296,7 +300,13 @@ ROLES = (AGENT, PATIENT)
 EVENT_VARIABLE = "EVENTVAR.1"
 """The event variable of a causal statement, which binds the events of the subject's event
 type. A statement has one event, so the variable is always the first."""
-_LITERAL_ORDER = {PROPERTY_PREFIX: 0, PART_PREFIX: 1, SCALAR_PREFIX: 2, FLUENT_PREFIX: 3}
+_LITERAL_ORDER = {
+    PROPERTY_PREFIX: 0,
+    PART_PREFIX: 1,
+    SCALAR_PREFIX: 2,
+    FLUENT_PREFIX: 3,
+    NUMERIC_PREFIX: 4,
+}
 
 
 def _number(value: float) -> float:
@@ -435,8 +445,12 @@ class CategoryTerm:
 class Condition:
     """One literal of the condition of a conditional causal statement (stage b3b): a static
     feature (PROPERTY or PART) or a Boolean fluent (base or derived) of one role of the event,
-    with the value it must have at the event's time point. In the JSON logical form it is
-    ``{"role": "patient", "label": "PROPERTY.4", "value": true}``."""
+    with the value it must have at the event's time point, or (WM.35, October 15, 2026) a
+    numeric pole, ``NUMFL.1.HIGH``, always positive: the world's numeric threshold literal
+    whose threshold is the language's cut for that adjective (``> cut_high`` for the high
+    pole, ``<= cut_low`` for the low one). In the JSON logical form it is ``{"role":
+    "patient", "label": "PROPERTY.4", "value": true}``; a numeric literal records its ``cut``
+    after its value, as a numeric pole predicate does."""
 
     role: str
     label: str
@@ -449,12 +463,25 @@ class Condition:
         return self.label.startswith(FLUENT_PREFIX)
 
     @property
+    def numeric(self) -> bool:
+        """Whether the literal is a numeric pole (``NUMFL.1.HIGH``), said with ``before`` as a
+        Boolean fluent is ("that are hungry before"; WM.35)."""
+        return self.label.startswith(NUMERIC_PREFIX)
+
+    @property
+    def timed(self) -> bool:
+        """Whether the literal is about the state at the event's time point, a Boolean fluent
+        or a numeric pole, so that the sentence says it with ``before``; a static feature is a
+        modifier."""
+        return self.fluent or self.numeric
+
+    @property
     def sort_key(self) -> tuple:
         prefix, _, rest = self.label.partition(".")
         number = rest.split(".")[0]
         return (
             ROLES.index(self.role),
-            _LITERAL_ORDER.get(prefix + ".", 4),
+            _LITERAL_ORDER.get(prefix + ".", 5),
             int(number) if number.isdecimal() else 0,
             self.label,
             not self.value,
@@ -858,15 +885,44 @@ def unconditional_effects(record: Any) -> tuple:
     return tuple(e for e in record.effects if not e.condition and not e.numeric)
 
 
-def condition_of(effect: Any) -> tuple[Condition, ...] | None:
+CutPoints = Mapping[str, tuple[float, float]]
+"""For each numeric fluent, the points of its range at the language's two cuts, ``(the point
+at cut_high, the point at cut_low)``, computed as the runtime computes them (``low + cut *
+(high - low)``)."""
+
+
+def numeric_pole_of(literal: Any, cut_points: CutPoints | None) -> str | None:
+    """The numeric pole that says a numeric threshold literal of the world (a condition
+    literal), when its threshold is exactly the language's cut for that adjective: ``> t``
+    with ``t`` the point at ``cut_high`` is the high pole, and ``<= t`` with ``t`` the point at
+    ``cut_low`` the low pole (Jon's ruling WM.35, October 15, 2026). None for every other
+    threshold, which no word of the language states (decision 23), and when no cut points are
+    given."""
+    if cut_points is None or literal.symbol not in cut_points:
+        return None
+    high_point, low_point = cut_points[literal.symbol]
+    if literal.value and literal.threshold == high_point:
+        return f"{literal.symbol}.{HIGH}"
+    if not literal.value and literal.threshold == low_point:
+        return f"{literal.symbol}.{LOW}"
+    return None
+
+
+def condition_of(effect: Any, cut_points: CutPoints | None = None) -> tuple[Condition, ...] | None:
     """The condition of an effect record of the world, as the corpus states it: its literals
-    as :class:`Condition` literals, in one order. A numeric threshold literal has no
-    :class:`Condition` (decision 23), so an effect with one gives None."""
+    as :class:`Condition` literals, in one order. A numeric threshold literal is the positive
+    numeric pole whose cut it is at (:func:`numeric_pole_of`, WM.35); any other numeric
+    threshold literal has no :class:`Condition` (decision 23), so an effect with one gives
+    None."""
     found = []
     for literal in effect.condition:
         if literal.numeric:
-            return None
-        found.append(Condition(literal.role, literal.symbol, bool(literal.value)))
+            pole = numeric_pole_of(literal, cut_points)
+            if pole is None:
+                return None
+            found.append(Condition(literal.role, pole, True))
+        else:
+            found.append(Condition(literal.role, literal.symbol, bool(literal.value)))
     return tuple(sorted(set(found), key=lambda c: c.sort_key))
 
 
@@ -877,11 +933,13 @@ def effect_matches(
     value: bool | None,
     direction: str | None,
     condition: tuple[Condition, ...],
+    cut_points: CutPoints | None = None,
 ) -> bool:
     """Whether an effect record of the world is the entry of an effect statement: the same role
     and fluent, the value (a Boolean effect) or the sign (a numeric effect: ``raises`` for an
     addition, ``lowers`` for a subtraction), and the same condition (none for an unconditional
-    statement). An effect under a numeric threshold condition is no entry of any statement."""
+    statement; a numeric threshold literal at the language's cut is its numeric pole, WM.35).
+    An effect under any other numeric threshold condition is no entry of any statement."""
     if effect.role != role or effect.fluent != fluent:
         return False
     if effect.numeric:
@@ -889,7 +947,7 @@ def effect_matches(
             return False
     elif direction is not None or effect.value != value:
         return False
-    return condition_of(effect) == condition
+    return condition_of(effect, cut_points) == condition
 
 
 class Truth:
@@ -907,6 +965,13 @@ class Truth:
         self.cuts = {HIGH: config.cut_high, LOW: config.cut_low}
         """The language's cuts for the two absolute adjectives of a numeric fluent, as
         fractions of its range (``numeric_adjectives``, stage b3b)."""
+        self.cut_points: CutPoints = {
+            fluent: (low + config.cut_high * (high - low), low + config.cut_low * (high - low))
+            for fluent, (low, high) in world.definition.numeric_ranges.items()
+        }
+        """For each numeric fluent, the points of its range at the two cuts, in the runtime's
+        arithmetic: a numeric condition literal of the world whose threshold is exactly one of
+        them is stated with the numeric adjective (WM.35)."""
         self.cone_limit = cone_limit
         self._masks: dict[tuple[str, str], tuple[np.ndarray, float, float]] = {}
         self.count = world.count
@@ -1024,6 +1089,12 @@ class Truth:
         """The language's cut for a numeric pole: ``cut_high`` for the high adjective and
         ``cut_low`` for the low one."""
         return self.cuts[pole.rsplit(".", 1)[1]]
+
+    def condition_of(self, effect: Any) -> tuple[Condition, ...] | None:
+        """The condition of an effect record as the corpus states it (:func:`condition_of`
+        with this language's cut points): None when a numeric threshold literal of the
+        condition is not at a cut."""
+        return condition_of(effect, self.cut_points)
 
     def compare(
         self,
@@ -1511,7 +1582,8 @@ class Truth:
         """Whether an event type's definition has the effect (``kind`` ``effect``) or the
         precondition literal (``precondition``) that sets, or requires, the fluent of the role
         to the value; for a numeric effect (stage b3b), the effect of the ``direction``'s sign;
-        for a conditional effect statement, the effect under exactly that ``condition``. A
+        for a conditional effect statement, the effect under exactly that ``condition`` (a
+        numeric threshold literal at the language's cut being its numeric pole, WM.35). A
         category of event types has it when every event type below it does. An unconditional
         statement needs an unconditional effect (stage b1): an effect with a condition
         guarantees nothing after every event."""
@@ -1520,7 +1592,7 @@ class Truth:
             record = definition.event_type(label)
             if kind == EFFECT:
                 found = any(
-                    effect_matches(e, role, fluent, value, direction, condition)
+                    effect_matches(e, role, fluent, value, direction, condition, self.cut_points)
                     for e in record.effects
                 )
             else:
@@ -1547,10 +1619,13 @@ class Truth:
                 continue
             if world.feature_kind.get(literal.label) in (IS, HAS):
                 continue
+            if world.is_numeric_pole(literal.label) and literal.value:
+                continue  # the numeric adjective, at the language's cut (WM.35)
             if is_numeric(literal.label):
                 return (
-                    f"a condition on the numeric fluent {literal.label} is a threshold, which no "
-                    "word of the language states (decision 23)"
+                    f"a condition on the numeric fluent {literal.label} is a threshold, which the "
+                    "language states only at its cut, as the positive numeric adjective (decision "
+                    "23 and WM.35)"
                 )
             return f"{literal.label!r} is not a PROPERTY or PART feature or a Boolean fluent"
         return ""
@@ -1648,12 +1723,22 @@ class Truth:
     ) -> bool:
         """Whether the condition of a conditional statement held of an event's participants at
         the event's time point: a static feature by the entity's value, a Boolean fluent by the
-        replayed state."""
+        replayed state, a numeric pole by the replayed value against the range at the
+        language's cut (WM.35)."""
         for literal in condition:
             entity = event.agent if literal.role == AGENT else event.patient
             if entity is None:
                 return False
-            if literal.fluent:
+            if literal.numeric:
+                held = self.compare(
+                    pole_operator(literal.label),
+                    pole_dimension(literal.label),
+                    self.instance_index[entity],
+                    standard=RANGE,
+                    state=self.states_of(scene)[event.step - 1],
+                    threshold=self.cut(literal.label),
+                )
+            elif literal.fluent:
                 held = self.fluent_value(scene, event.step, entity, literal.label)
             else:
                 held = bool(self.world.column(literal.label)[self.instance_index[entity]])

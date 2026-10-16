@@ -506,15 +506,11 @@ def bare_things() -> NounPhrase:
 
 def _things_under(condition: tuple[Condition, ...], role: str) -> NounPhrase:
     """The bare generic noun with the condition literals of one role on it (stage b3b): the
-    static literals as its restriction, and the fluent literals as ``before`` predications of
-    a relative clause."""
-    literals = tuple(
-        Literal(c.label, c.value) for c in condition if c.role == role and not c.fluent
-    )
+    static literals as its restriction, and the timed literals, Boolean fluents and numeric
+    poles (WM.35), as ``before`` predications of a relative clause."""
+    literals = tuple(Literal(c.label, c.value) for c in condition if c.role == role and not c.timed)
     before = tuple(
-        Predication(PRECONDITION, c.label, c.value)
-        for c in condition
-        if c.role == role and c.fluent
+        Predication(PRECONDITION, c.label, c.value) for c in condition if c.role == role and c.timed
     )
     clause = RelativeClause(before) if before else None
     return NounPhrase(CLASS_NP, THING, THING, None, literals, clause)
@@ -534,8 +530,8 @@ def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhras
         bound = Predication(VERB, term.event_type, True, None, EVENT_VARIABLE, PRESENT)
         if head.clause is not None:
             raise GrammarError(
-                "an object relative holds one verb: a fluent condition of the patient has no "
-                "place in a statement about the patient"
+                "an object relative holds one verb: a fluent or numeric condition of the patient "
+                "has no place in a statement about the patient"
             )
         clause = RelativeClause((bound,), _things_under(term.condition, other_role))
     else:
@@ -549,13 +545,22 @@ def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhras
 def realizable_condition(term: EventTerm) -> bool:
     """Whether the grammar can realize a causal statement's condition (stage b3b): a statement
     about the patient is an object relative, which holds one verb and joins no negated
-    PROPERTY literal, so a fluent literal or a negated PROPERTY literal of the patient's role
-    has no place in it. Every other condition has a place."""
+    PROPERTY literal, so a fluent literal, a numeric pole literal (WM.35), or a negated
+    PROPERTY literal of the patient's role has no place in it. Every other condition has a
+    place."""
     if term.role != PATIENT:
         return True
     return not any(
-        c.role == PATIENT and (c.fluent or (not c.value and c.label.startswith(PROPERTY_PREFIX)))
+        c.role == PATIENT and (c.timed or (not c.value and c.label.startswith(PROPERTY_PREFIX)))
         for c in term.condition
+    )
+
+
+def condition_adjective(label: str) -> bool:
+    """Whether a label is one a ``before`` predication of a condition may state: a Boolean
+    fluent, or a numeric pole (``NUMFL.1.HIGH``, WM.35)."""
+    return label.startswith(FLUENT_PREFIX) or (
+        is_numeric(label) and label.rsplit(".", 1)[1] in (HIGH, LOW)
     )
 
 
@@ -748,18 +753,16 @@ def _check_causal(plan: SentencePlan) -> None:
                 )
         if phrase.clause is not None:
             for part in phrase.clause.predications:
-                if part is bound or (
-                    part.kind == PRECONDITION and part.label.startswith(FLUENT_PREFIX)
-                ):
+                if part is bound or (part.kind == PRECONDITION and condition_adjective(part.label)):
                     continue
                 raise GrammarError(
                     "the relative clause of a causal statement holds the bound verb and the "
-                    "before predications of its fluent condition"
+                    "before predications of its fluent or numeric condition"
                 )
     if subject != event_phrase_of(term, subject.determiner):
         raise GrammarError(
             "the condition of a causal statement is said in one way: static literals as "
-            "modifiers, fluent literals with before, each on its role's noun phrase"
+            "modifiers, fluent and numeric literals with before, each on its role's noun phrase"
         )
 
 
@@ -833,15 +836,18 @@ def _check_predication(
             _check_phrase(predication.object, level, causal=True)
         return
     if in_clause and causal and kind == PRECONDITION:
-        # a fluent condition of a conditional causal statement, "that are asleep before"
+        # a fluent or numeric condition of a conditional causal statement, "that are asleep
+        # before", "that are hungry before" (WM.35)
         if (
             predication.object is not None
             or predication.time is not None
             or predication.event is not None
             or predication.become
-            or not predication.label.startswith(FLUENT_PREFIX)
+            or not condition_adjective(predication.label)
         ):
-            raise GrammarError("a before predication of a condition is a bare state adjective")
+            raise GrammarError(
+                "a before predication of a condition is a bare state or numeric adjective"
+            )
         return
     if in_clause and kind not in CLAUSE_KINDS:
         raise GrammarError(

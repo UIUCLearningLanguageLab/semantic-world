@@ -120,10 +120,31 @@ def with_z(form: dict[str, Any], z: float | None) -> dict[str, Any]:
     return ordered
 
 
+def _literals_with_cuts(
+    literals: list[dict[str, Any]], cuts: Mapping[str, float]
+) -> list[dict[str, Any]]:
+    """Condition literals with the language's cut recorded under ``cut``, after the value, on
+    each literal that is a numeric pole (``NUMFL.1.HIGH``; WM.35)."""
+    found = []
+    for literal in literals:
+        label = str(literal.get("label", ""))
+        if is_numeric(label) and "cut" not in literal:
+            literal = {**literal, "cut": float(cuts[label.rsplit(".", 1)[1]])}
+        found.append(literal)
+    return found
+
+
 def with_cut(form: dict[str, Any], cuts: Mapping[str, float] | None) -> dict[str, Any]:
     """The form with the language's cut for its numeric pole recorded under ``cut`` in the
     predicate, after the comparison class, when the predicate is a numeric pole and the cuts
-    are given (``{"HIGH": 0.75, "LOW": 0.25}``); otherwise the form as it is."""
+    are given (``{"HIGH": 0.75, "LOW": 0.25}``); otherwise the form as it is. A conditional
+    causal statement's numeric condition literals record their cut too, in the subject and
+    in the ``causal`` record (WM.35)."""
+    if cuts is not None:
+        for key in ("subject", "causal"):
+            block = form.get(key)
+            if isinstance(block, dict) and block.get("condition"):
+                block["condition"] = _literals_with_cuts(block["condition"], cuts)
     predicate = form.get("predicate", {})
     label = str(predicate.get("label", ""))
     if cuts is None or predicate.get("kind") != COMPARISON or not is_numeric(label):

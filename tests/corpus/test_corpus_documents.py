@@ -31,6 +31,7 @@ from semantic_world.corpus import (
 from semantic_world.corpus.config import CONCEPT_TYPES
 from semantic_world.corpus.grammar import CLASS_NP, INSTANCE_NP, check_plan
 from semantic_world.corpus.histories import scene_events
+from semantic_world.corpus.logical import with_cut
 from semantic_world.corpus.mentions import clause_propositions
 from semantic_world.corpus.planner import (
     BLOCKED,
@@ -169,11 +170,10 @@ def test_every_sentence_is_true_and_reads_back(cases, corpora, name) -> None:
             assert proposition.grounding is not None and proposition.id.startswith("PROP.")
             if proposition.level != EVENT:
                 # by the independent recomputation from the world run's files too (a numeric
-                # pole's form records the language's cut, which the oracle judges at)
+                # pole's form, and a numeric condition literal's (WM.35), records the
+                # language's cut, which the oracle judges at)
                 scene = None if proposition.scene is None else scenes[proposition.scene]
-                form = proposition.to_json()
-                if "cut" in sentence.logical_form["predicate"]:
-                    form["predicate"]["cut"] = sentence.logical_form["predicate"]["cut"]
+                form = with_cut(proposition.to_json(), planner.truth.cuts)
                 assert oracle.truth(form, scene) is True, form
             else:
                 assert proposition.grounding["able"] and proposition.grounding["legal"]
