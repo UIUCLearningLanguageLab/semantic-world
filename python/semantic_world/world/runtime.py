@@ -977,13 +977,16 @@ def above(
     """``ABOVE(dimension, x, K, z)``: on a scalar, the value is at least ``z`` standard
     deviations above the mean of the comparison class ``K`` (a category, or ``ENTITY``); a class
     with no spread has nothing above it. On a numeric fluent, with ``RANGE`` as the standard,
-    the value is at least the fraction ``z`` of the way through the fluent's range."""
+    the value is strictly greater than the point at the fraction ``z`` of the way through the
+    fluent's range: ``above`` at ``z`` is the numeric literal ``> point`` and ``below`` at ``z``
+    its negation ``<= point`` (Jon's ruling WM.35, October 15, 2026), so a value exactly at the
+    point is not above and is below."""
     value = value_of(definition, dimension, x, state)
     if definition.is_numeric_fluent(dimension):
         if standard != RANGE:
             raise WorldError(f"a comparison of {dimension} takes RANGE as its standard")
         low, high = definition.numeric_ranges[dimension]
-        return value >= low + z * (high - low)
+        return value > low + z * (high - low)
     if standard == RANGE:
         raise WorldError(f"a comparison of the scalar {dimension} takes a comparison class")
     _, mean, sd = comparison_classes(definition)[(standard, dimension)]
@@ -999,8 +1002,8 @@ def below(
     state: State | None = None,
 ) -> bool:
     """``BELOW(dimension, x, K, z)``: at least ``z`` standard deviations below the mean of the
-    comparison class, or, on a numeric fluent with ``RANGE``, at most the fraction ``z`` of the
-    way through the range."""
+    comparison class, or, on a numeric fluent with ``RANGE``, at most the point at the fraction
+    ``z`` of the way through the range (inclusive: the negation of ``above`` at ``z``)."""
     value = value_of(definition, dimension, x, state)
     if definition.is_numeric_fluent(dimension):
         if standard != RANGE:

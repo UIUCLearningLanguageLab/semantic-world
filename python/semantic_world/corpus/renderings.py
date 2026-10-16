@@ -537,8 +537,10 @@ def _causal(form: dict[str, Any]) -> Formula:
     """The formula of a causal statement: ``NEC(ALL(EVENT(EVENTVAR.1, <event type>(VAR.1[,
     VAR.2])) [AND <condition>], AFTER|BEFORE(EVENTVAR.1, [NOT] <fluent>(<the role's
     variable>))))``, or with ``RAISES`` or ``LOWERS`` for a numeric effect statement (stage
-    b3b). A condition's static literal is an atom of the role's variable, and a fluent literal
-    ``BEFORE(EVENTVAR.1, <fluent>(<variable>))``."""
+    b3b). A condition's static literal is an atom of the role's variable, a fluent literal
+    ``BEFORE(EVENTVAR.1, <fluent>(<variable>))``, and a numeric pole literal (WM.35) the pole's
+    comparison with the range at the literal's cut, ``BEFORE(EVENTVAR.1, ABOVE(NUMFL.1, VAR.1,
+    RANGE, 0.75))``."""
     subject, predicate = form["subject"], form["predicate"]
     event_type, role = subject["event"], subject["role"]
     variables = {AGENT: "VAR.1"}
@@ -551,9 +553,25 @@ def _causal(form: dict[str, Any]) -> Formula:
     for literal in subject.get("condition", ()):
         if literal["role"] not in variables:
             raise RenderingError(f"{event_type} has no {literal['role']} for a condition")
-        atom = Atom(literal["label"], (variables[literal["role"]],))
+        label = literal["label"]
+        if is_numeric(label):
+            # a numeric pole at the language's cut (WM.35): always positive
+            if not literal["value"] or "cut" not in literal:
+                raise RenderingError(
+                    f"a numeric condition ({label}) is the positive pole, and records its cut"
+                )
+            comparison = Comparison(
+                pole_operator(label),
+                pole_dimension(label),
+                (variables[literal["role"]],),
+                RANGE,
+                float(literal["cut"]),
+            )
+            restrictor.append(Temporal(CAUSAL_OPERATORS[PRECONDITION], "EVENTVAR.1", comparison))
+            continue
+        atom = Atom(label, (variables[literal["role"]],))
         body = atom if literal["value"] else Not(atom)
-        if literal["label"].startswith(FLUENT_PREFIX):
+        if label.startswith(FLUENT_PREFIX):
             restrictor.append(Temporal(CAUSAL_OPERATORS[PRECONDITION], "EVENTVAR.1", body))
         else:
             restrictor.append(body)
@@ -759,6 +777,13 @@ class _Parser:
             body = self.item()
             self.take(")")
             inner = body.body if isinstance(body, Not) else body
+            if (
+                word == CAUSAL_OPERATORS[PRECONDITION]
+                and isinstance(body, Comparison)
+                and body.standard == RANGE
+            ):
+                # a numeric condition at the language's cut (WM.35)
+                return Temporal(word, variable, body)
             if not is_event_variable(variable) or not isinstance(inner, Atom):
                 raise RenderingError(
                     f"{word} holds an atom about an event variable in {self.text!r}"
@@ -957,10 +982,22 @@ def _causal_proposition(main: Quantified) -> Proposition:
     for part in main.restrictor[1:]:
         if isinstance(part, Temporal):
             if part.operator != CAUSAL_OPERATORS[PRECONDITION] or part.variable != scope.variable:
-                raise RenderingError("a fluent condition holds BEFORE the event")
+                raise RenderingError("a fluent or numeric condition holds BEFORE the event")
             literal = part.body
         else:
             literal = part
+        if isinstance(literal, Comparison):
+            # a numeric pole at the language's cut (WM.35): ABOVE or BELOW against RANGE
+            if (
+                not isinstance(part, Temporal)
+                or literal.standard != RANGE
+                or len(literal.arguments) != 1
+            ):
+                raise RenderingError(
+                    "a numeric condition is a pole against RANGE, held BEFORE the event"
+                )
+            condition.append(Condition(role_of(literal.arguments[0]), literal.pole, True))
+            continue
         positive = not isinstance(literal, Not)
         atom = literal if positive else literal.body
         if not isinstance(atom, Atom) or len(atom.arguments) != 1:

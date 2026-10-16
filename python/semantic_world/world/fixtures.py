@@ -444,8 +444,9 @@ class BruteForce:
         before: BruteNumeric | None = None,
     ) -> bool:
         """Judge a comparison entry of a fixture: ``greater`` (strict), ``above`` and ``below``
-        (against a class's mean and standard deviation, or the fraction ``z`` of a numeric
-        fluent's range with ``RANGE``), ``increase`` and ``decrease`` (from ``before`` to
+        (against a class's mean and standard deviation, or the point at the fraction ``z`` of
+        a numeric fluent's range with ``RANGE``: ``above`` strictly greater than the point,
+        ``below`` at most it, WM.35), ``increase`` and ``decrease`` (from ``before`` to
         ``numeric``)."""
         kind = entry["kind"]
         dimension = entry["dimension"]
@@ -462,7 +463,7 @@ class BruteForce:
         if entry["class"] == RANGE:
             low, high = self.numeric_range[dimension]
             point = low + z * (high - low)
-            return value >= point if kind == "above" else value <= point
+            return value > point if kind == "above" else value <= point
         mean, sd = self.class_mean_sd(entry["class"], dimension)
         if sd == 0:
             return False

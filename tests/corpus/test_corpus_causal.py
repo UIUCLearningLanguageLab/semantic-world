@@ -39,7 +39,7 @@ from semantic_world.corpus.grammar import (
     event_phrase_of,
 )
 from semantic_world.corpus.lexicon import BEFORE_WORD, FUNCTION_WORDS
-from semantic_world.corpus.logical import is_descriptive, logical_form
+from semantic_world.corpus.logical import is_descriptive, logical_form, with_cut
 from semantic_world.corpus.planner import CAUSAL, TEMPLATE
 from semantic_world.corpus.propositions import (
     AGENT,
@@ -139,7 +139,7 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
             "event": proposition.subject.event_type,
             "role": proposition.subject.role,
         }
-        condition = [c.to_json() for c in proposition.subject.condition]
+        condition = [literal_json(c, corpus.config) for c in proposition.subject.condition]
         if condition:
             subject["condition"] = condition
         assert form["subject"] == subject
@@ -183,14 +183,11 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
                     if "amount" in e
                     else e["value"] == proposition.predicate.value
                 )
-                and [
-                    {"role": c["role"], "label": c["symbol"], "value": c["value"]}
-                    for c in sorted(
-                        (e.get("condition") or {}).get("literals", []),
-                        key=lambda c: (c["role"], c["symbol"]),
-                    )
-                ]
-                == sorted(condition, key=lambda c: (c["role"], c["label"]))
+                and sorted(
+                    stated_literal(c, record, corpus.config) or ("",)
+                    for c in (e.get("condition") or {}).get("literals", [])
+                )
+                == sorted((c["role"], c["label"], c["value"]) for c in condition)
                 for e in entries
             ), (leaf, form)
         kinds[proposition.predicate.kind] += 1
@@ -223,11 +220,11 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
             found = None
             for leaf in oracle.leaves_below(label):
                 entries = (
-                    record_entries(record, leaf, "effects")
+                    record_entries(record, leaf, "effects", corpus.config)
                     if kind == EFFECT
-                    else record_entries(record, leaf, "literals")
+                    else record_entries(record, leaf, "literals", corpus.config)
                 )
-                keys = {entry_key(e) for e in entries}
+                keys = {entry_key(e, record, corpus.config) for e in entries}
                 found = keys if found is None else found & keys
             for role, fluent, value, condition in found or ():
                 named = fluent in facts.base_fluents or fluent in facts.numeric_fluents
@@ -251,47 +248,82 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
         facts.causal_statements(kind=PRECONDITION)
     ) == len(listed)
     for statement in facts.causal_statements():
-        assert oracle.causal(statement.to_json()) is True
+        # a bare form carries no cut; the documents write it through logical_form (WM.35)
+        assert oracle.causal(with_cut(statement.to_json(), corpus.planner.truth.cuts)) is True
 
 
-def record_entries(record: dict, label: str, key: str) -> list[dict]:
+def stated_literal(literal: dict, record: dict, config) -> tuple | None:
+    """A condition literal of the record as the corpus states it, ``(role, label, value)``: a
+    feature or fluent literal as it is, and a numeric threshold literal as the positive numeric
+    pole whose cut it is at (``> t`` at the point of the range at ``cut_high`` is the high pole,
+    ``<= t`` at ``cut_low`` the low one; Jon's ruling WM.35). None for a numeric threshold
+    that is not at a cut, which no word states (decision 23). The points are computed here from
+    the record's ranges and the configuration's cuts, apart from the corpus."""
+    if literal["kind"] != "numeric":
+        return (literal["role"], literal["symbol"], literal["value"])
+    low, high = next(s["range"] for s in record["symbols"] if s["label"] == literal["symbol"])
+    if literal["operator"] == ">" and literal["threshold"] == low + config.cut_high * (high - low):
+        return (literal["role"], literal["symbol"] + ".HIGH", True)
+    if literal["operator"] == "<=" and literal["threshold"] == low + config.cut_low * (high - low):
+        return (literal["role"], literal["symbol"] + ".LOW", True)
+    return None
+
+
+def literal_json(condition, config) -> dict:
+    """A condition literal of a proposition as the JSON form writes it: a numeric pole records
+    the language's cut for its side (WM.35)."""
+    data = condition.to_json()
+    if condition.numeric:
+        side = condition.label.rsplit(".", 1)[1]
+        data["cut"] = config.cut_high if side == "HIGH" else config.cut_low
+    return data
+
+
+def record_entries(record: dict, label: str, key: str, config) -> list[dict]:
     """The effects, or the Boolean precondition literals, of an event type's record that make
-    causal statements: every effect but one under a numeric threshold condition (decision 23;
-    since stage b3b a conditional effect makes a conditional statement and a numeric effect a
-    ``RAISES`` or ``LOWERS`` statement), and every literal but a numeric one."""
+    causal statements: every effect but one under a numeric threshold condition that is not at
+    the language's cut (decision 23 and WM.35; since stage b3b a conditional effect makes a
+    conditional statement and a numeric effect a ``RAISES`` or ``LOWERS`` statement), and every
+    literal but a numeric one."""
     entry = next(e for e in record["event_types"] if e["label"] == label)
     if key == "effects":
         return [
             e
             for e in entry["effects"]
-            if not any(
-                lit["kind"] == "numeric" for lit in (e.get("condition") or {}).get("literals", [])
+            if all(
+                stated_literal(lit, record, config) is not None
+                for lit in (e.get("condition") or {}).get("literals", [])
             )
         ]
     return [lit for lit in entry["precondition"]["literals"] if "threshold" not in lit]
 
 
-def entry_key(entry: dict) -> tuple:
+def entry_key(entry: dict, record: dict, config) -> tuple:
     """What an effect or literal record states: its role, its fluent, its value (the direction
-    of a numeric effect), and its condition as sorted literals."""
+    of a numeric effect), and its condition as sorted literals, as the corpus states them."""
     if "amount" in entry:
         value = "raises" if entry["operator"] == "+=" else "lowers"
     else:
         value = entry["value"]
     literals = (entry.get("condition") or {}).get("literals", [])
-    condition = tuple(sorted((lit["role"], lit["symbol"], lit["value"]) for lit in literals))
+    condition = tuple(sorted(stated_literal(lit, record, config) for lit in literals))
     return (entry["role"], entry["fluent"], value, condition)
 
 
 def realizable(role: str, condition: tuple) -> bool:
     """Whether the grammar can say the condition in a statement about the role: a statement
-    about the patient is an object relative, which holds one verb, so a fluent literal or a
-    negated PROPERTY literal of the patient's role has no place in it (stage b3b)."""
+    about the patient is an object relative, which holds one verb, so a fluent literal, a
+    numeric pole literal, or a negated PROPERTY literal of the patient's role has no place in
+    it (stage b3b, WM.35)."""
     if role != "patient":
         return True
     return not any(
         r == "patient"
-        and (label.startswith("BOOLFL.") or (not value and label.startswith("PROPERTY.")))
+        and (
+            label.startswith("BOOLFL.")
+            or label.startswith("NUMFL.")
+            or (not value and label.startswith("PROPERTY."))
+        )
         for r, label, value in condition
     )
 
@@ -908,7 +940,8 @@ def test_readings_and_renderings_of_causal_sentences(runs) -> None:
         glosses = [lexicon.lexeme(token_parts(t)[0]).gloss for t in record.tokens]
         assert glosses.count("THING") >= 1 and "that" in glosses
         assert "can" not in glosses
-        fluent_condition = any(c.fluent for c in sentence.proposition.subject.condition)
+        # a fluent or a numeric condition (WM.35) is said with "before"
+        fluent_condition = any(c.timed for c in sentence.proposition.subject.condition)
         if sentence.proposition.predicate.kind == EFFECT:
             # "before" stands in the subject's relative clause with a fluent condition (b3b)
             assert "become" in glosses and (BEFORE_WORD in glosses) == fluent_condition

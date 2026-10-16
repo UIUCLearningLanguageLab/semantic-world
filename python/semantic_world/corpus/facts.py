@@ -103,7 +103,6 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
     Truth,
-    condition_of,
     pole_dimension,
 )
 from semantic_world.corpus.world import ENTITY, PROPERTY_PREFIX, THING, World
@@ -650,7 +649,8 @@ class Facts:
         """The distinct conditions under which the effects of the given event-type records set
         the fluent of the role to the value (or move it in the direction), the empty condition
         first when some effect is unconditional, then in one order. An effect under a numeric
-        threshold condition gives none (decision 23)."""
+        threshold condition gives none (decision 23), unless the threshold is the language's
+        cut, when the condition is the numeric pole (WM.35)."""
         found: list[tuple[Condition, ...]] = []
         for record in records:
             for effect in record.effects:
@@ -661,7 +661,7 @@ class Facts:
                         continue
                 elif direction is not None or effect.value != value:
                     continue
-                condition = condition_of(effect)
+                condition = self.truth.condition_of(effect)
                 if condition is not None and condition not in found:
                     found.append(condition)
         return sorted(found, key=lambda c: (len(c), [x.sort_key for x in c]))
@@ -724,9 +724,9 @@ class Facts:
                 if not effect.condition:
                     continue
                 total += 1
-                condition = condition_of(effect)
+                condition = self.truth.condition_of(effect)
                 if condition is None:
-                    reasons["numeric_condition"] += 1
+                    reasons["numeric_condition"] += 1  # a threshold not at a cut (WM.35)
                     continue
                 term = EventTerm(label, effect.role, condition)
                 if not realizable_condition(term):

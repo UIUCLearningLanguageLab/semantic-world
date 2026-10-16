@@ -133,7 +133,7 @@ from semantic_world.corpus.histories import (
     time_key,
 )
 from semantic_world.corpus.lexicon import THING
-from semantic_world.corpus.logical import is_descriptive, logical_form
+from semantic_world.corpus.logical import is_descriptive, logical_form, with_cut
 from semantic_world.corpus.mentions import (
     Mentions,
     clause_propositions,
@@ -633,6 +633,10 @@ mention's modifier can be a pole in one item of a pair and not in the other), an
 _CONDITION_LABEL = ".condition[].label"
 """The label of a condition literal, a static feature or a Boolean fluent by the world's design:
 the literals of one condition are not in one notation."""
+_CONDITION = ".condition"
+"""The condition of a conditional causal statement, whose literals are not of one shape either:
+a numeric pole literal records its ``cut`` (WM.35), and a feature or fluent literal does not.
+The two items of a pair must hold literals of the same shapes."""
 _INDICES = re.compile(r"\d+(\.\d+)*")
 _EVENT_LABEL = re.compile(r"\bSCENE\.\d+\.EVENTINSTANCE\.\d+\b")
 _SCENE_LABEL = re.compile(r"SCENE\.\d+")
@@ -681,6 +685,14 @@ def format_differences(a: Any, b: Any, path: str = "input") -> list[str]:
         return found
     if type(a) is not type(b):
         return [f"{path}: {a!r} and {b!r} are not of one type"]
+    if isinstance(a, list) and path.endswith(_CONDITION):
+        # the literals of a condition mix features, fluents, and numeric poles by the world's
+        # design: the two items hold literals of the same shapes, whatever their order
+        shapes_a = sorted(tuple(sorted(x)) for x in a if isinstance(x, dict))
+        shapes_b = sorted(tuple(sorted(x)) for x in b if isinstance(x, dict))
+        if shapes_a != shapes_b:
+            return [f"{path}: the condition literals {a!r} and {b!r} are not of one shape"]
+        return []
     if isinstance(a, list):
         found = []
         entries = [x for x in a + b if isinstance(x, dict)]
@@ -1254,7 +1266,7 @@ class TestSetBuilder:
                 meta["rule"] = None if rule is None else {"feature": rule[0], "term": rule[1]}
             elif level in CAUSAL_LEVELS:
                 meta["observed"] = not truth and self.truth.observed(proposition)
-                meta["causal"] = proposition.causal_record()
+                meta["causal"] = self._causal_record(proposition)
             elif level in (EVENT, ABLE_NOW):
                 meta["possible"] = proposition.grounding["able"]
             elif level == STATE:
@@ -1266,11 +1278,22 @@ class TestSetBuilder:
             # the true statement that the pair tests, on both items, for grouping: its
             # propositional rendering, and its causal record with its kind (stage b1, Jon's
             # ruling 2 on stage a8)
-            record = true.causal_record()
+            record = self._causal_record(true)
             assert record is not None
             for item in items:
                 item.meta["statement"] = items[0].input["propositional"]
                 item.meta["statement_record"] = {"kind": true.predicate.kind, **record}
+        return self._checked(items, name, number)
+
+    def _causal_record(self, proposition: Proposition) -> dict[str, Any] | None:
+        """A causal statement's record as the documents write it: with the language's cut on
+        each numeric condition literal (WM.35), as the item's logical form carries it."""
+        record = proposition.causal_record()
+        if record is None:
+            return None
+        return with_cut({"causal": record}, self.truth.cuts)["causal"]
+
+    def _checked(self, items: list[Item], name: str, number: int) -> tuple[Item, Item]:
         problems = format_differences(items[0].input, items[1].input)
         for item in items:
             problems += input_problems(item.input)

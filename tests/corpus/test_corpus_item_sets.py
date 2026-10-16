@@ -119,8 +119,9 @@ ALL_SETS = (
 )
 CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
 EMPTY_IN_DEFAULT = ("causal_effect_condition_lawlike",)
-"""The sets that the default world leaves empty: its four conditional statements have no
-law-like false item, because the condition fails for some event of each type (stage b3b)."""
+"""The sets that the default world leaves empty: its ten conditional statements (four since
+stage b3b, six more with the numeric conditions at the cut, WM.35) have no law-like false item,
+because the condition fails for some event of each type."""
 """The causal sets: 14 since stage a8, which dropped the two polarity law-like sets (the
 opposite value of an effect or a literal is never observed after, or before, an event of the
 type, because the true entry guarantees the value), and 16 since stage b3b, with the condition

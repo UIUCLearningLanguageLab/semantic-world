@@ -31,6 +31,7 @@ from corpus_support import corpus_config, oracle_over
 
 from semantic_world.corpus import interpret, load_world, parse_propositional, proposition_of
 from semantic_world.corpus.generate import generate
+from semantic_world.corpus.logical import with_cut
 from semantic_world.corpus.planner import CAUSAL, COMPARATIVE_SECTION, INITIAL_STATE, RESULT
 from semantic_world.corpus.propositions import (
     CHANGE,
@@ -293,7 +294,7 @@ def test_raises_and_lowers_are_true_by_a_rereading_of_the_definition(heavy) -> N
         assert proposition.predicate.kind == EFFECT
         assert proposition.predicate.direction in (RAISES, LOWERS)
         assert proposition.predicate.value is None
-        form = proposition.to_json()
+        form = with_cut(proposition.to_json(), corpus.planner.truth.cuts)
         assert oracle.causal(form) is True, form
         for leaf in oracle.leaves_below(proposition.subject.event_type):
             matching = [
@@ -342,15 +343,45 @@ def test_raises_and_lowers_are_true_by_a_rereading_of_the_definition(heavy) -> N
 
 def test_conditional_statements_are_true_and_never_without_their_condition(heavy) -> None:
     """A conditional effect makes a conditional statement, true by the re-reading, whose
-    unconditional version is false; no numeric threshold condition is stated."""
+    unconditional version is false; a numeric threshold condition is stated exactly when its
+    threshold is the language's cut, as the positive numeric pole with its cut (WM.35)."""
     corpus, oracle = heavy["corpus"], heavy["oracle"]
     facts, truth = corpus.planner.facts, corpus.planner.truth
+    config, world = corpus.config, corpus.planner.world
+    event_types = {e["label"]: e for e in heavy["record"]["event_types"]}
     conditional = [p for p in facts.causal_statements() if p.subject.condition]
     assert conditional, "the heavy world makes conditional statements"
+    numeric_conditions = 0
     for proposition in conditional:
-        form = proposition.to_json()
+        form = with_cut(proposition.to_json(), truth.cuts)
         assert oracle.causal(form) is True, form
-        assert all(not c.label.startswith("NUMFL.") for c in proposition.subject.condition)
+        for literal in form["subject"]["condition"]:
+            if not literal["label"].startswith("NUMFL."):
+                assert "cut" not in literal
+                continue
+            # a numeric condition: the positive pole, with the language's cut, and every event
+            # type below has the literal > t (high) or <= t (low) with t exactly at the cut
+            numeric_conditions += 1
+            fluent, side = literal["label"].rsplit(".", 1)
+            assert literal["value"] is True
+            cut = config.cut_high if side == "HIGH" else config.cut_low
+            assert literal["cut"] == cut
+            low, high = world.definition.numeric_ranges[fluent]
+            for leaf in oracle.leaves_below(proposition.subject.event_type):
+                literals = [
+                    lit
+                    for e in event_types[leaf]["effects"]
+                    if e["role"] == proposition.subject.role
+                    and e["fluent"] == proposition.predicate.label
+                    for lit in (e.get("condition") or {}).get("literals", [])
+                    if lit["kind"] == "numeric" and lit["symbol"] == fluent
+                ]
+                assert literals, (leaf, form)
+                assert any(
+                    lit["operator"] == (">" if side == "HIGH" else "<=")
+                    and lit["threshold"] == low + cut * (high - low)
+                    for lit in literals
+                ), (leaf, form)
         assert form["causal"]["condition"] == form["subject"]["condition"]
         # the statement without its condition is false, by Truth and by the oracle
         bare = Proposition(
@@ -365,7 +396,9 @@ def test_conditional_statements_are_true_and_never_without_their_condition(heavy
         assert oracle.causal(bare.to_json()) is False
         assert bare not in facts.causal_statements()
     # every conditional effect with a word and a realizable condition is stated; the numeric
-    # conditions are counted among the unstated
+    # conditions at a cut are stated and the others counted among the unstated (the heavy
+    # world draws its thresholds at the quarter points, so both kinds occur)
+    assert numeric_conditions > 0, "the heavy world states a numeric condition at the cut"
     report = facts.causal_report
     assert report["conditional_effects"] > 0
     assert report["unstated"]["numeric_condition"] > 0
@@ -386,10 +419,19 @@ def test_conditional_statements_are_true_and_never_without_their_condition(heavy
         restrictor = text[:scope]
         for literal in proposition.subject.condition:
             variable = "VAR.1" if literal.role == "agent" else "VAR.2"
-            atom = f"{literal.label}({variable})"
-            expected = atom if literal.value else f"NOT {atom}"
-            if literal.fluent:
-                expected = f"BEFORE(EVENTVAR.1, {expected})"
+            if literal.numeric:
+                # the pole against RANGE at the cut, held before the event (WM.35)
+                fluent, side = literal.label.rsplit(".", 1)
+                operator = "ABOVE" if side == "HIGH" else "BELOW"
+                expected = (
+                    f"BEFORE(EVENTVAR.1, {operator}({fluent}, {variable}, RANGE, "
+                    f"{truth.cut(literal.label)!r}))"
+                )
+            else:
+                atom = f"{literal.label}({variable})"
+                expected = atom if literal.value else f"NOT {atom}"
+                if literal.fluent:
+                    expected = f"BEFORE(EVENTVAR.1, {expected})"
             assert f" AND {expected}" in restrictor, text
         assert oracle.causal(sentence.logical_form) is True
         read_back(corpus, document, sentence)

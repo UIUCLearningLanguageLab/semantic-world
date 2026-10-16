@@ -426,17 +426,24 @@ class _Reader:
         subject_kind: str,
     ) -> tuple[Predication, str | None]:
         """A numeric pole adjective (stage b3b): an effect statement with a category as the
-        subject, or, at the time point the record gives, a change (``become`` and the
-        comparative form), a comparative (the comparative form and ``than``), or a pole (the
-        copula)."""
+        subject (``become`` with the comparative form), a numeric condition of a conditional
+        causal statement with a category as the subject (the copula and ``before``, "that are
+        hungry before", WM.35), or, at the time point the record gives, a change (``become``
+        and the comparative form), a comparative (the comparative form and ``than``), or a pole
+        (the copula)."""
         adjective = self.child(node, "A")
         assert adjective is not None
         comparative = COMPARATIVE_MARK in self.marks(adjective)
         if subject_kind == CLASS_NP:
-            if auxiliary != "become" or not comparative or target is not None:
+            adverb = self.child(node, "Adv")
+            before = adverb is not None and self.gloss(adverb) == BEFORE_WORD
+            if auxiliary in ("is", "are") and before and not comparative and target is None:
+                return Predication(PRECONDITION, concept, polarity), auxiliary
+            if auxiliary != "become" or not comparative or target is not None or before:
                 raise GrammarError(
                     f"the numeric adjective {concept} with a category as the subject makes an "
-                    "effect statement: become with the comparative form"
+                    "effect statement, become with the comparative form, or a numeric condition, "
+                    f"the copula with {BEFORE_WORD}"
                 )
             return Predication(EFFECT, concept, polarity), auxiliary
         report = self.event[id(node)]

@@ -27,7 +27,8 @@ float64 and can be typed by hand. In the cases of phases (a) and (b1), every ent
 both numeric fluents at 0, so ``EVENTTYPE1.7`` is never legal there, ``NUMFL.1`` stays 0, and
 ``NUMFL.2`` is 0.25, 0.5, and 0.75 after the first, second, and third step (the drift).
 ``hand_18`` to ``hand_20`` are the comparison fixtures (ties, ``ENTITY``, a category mean), with
-their arithmetic in their descriptions; ``hand_21`` to ``hand_27`` are the numeric fixtures.
+their arithmetic in their descriptions; ``hand_21`` to ``hand_27`` are the numeric fixtures, and
+``hand_28`` the ``RANGE`` comparisons at the cut itself (``ABOVE`` strict, ``BELOW`` inclusive).
 
 Every expected value in ``CASES`` (the legal bindings before each step, and the state, the
 derived fluents, and the numeric values after it) is typed in by hand, never computed by the
@@ -848,9 +849,10 @@ NUMERIC_CASES = [
         "hand_22_numeric_drift",
         "Drift (stage b2): with no event at all, NUMFL.2 of every entity rises by 0.25 at each "
         "step, 0.25 after the first and 0.5 after the second, and NUMFL.1 stays at 0. Against "
-        "RANGE, a value is ABOVE at a fraction q when it is at least q of the way through [0, "
-        "1], and BELOW when at most: after the first step NUMFL.2 (0.25) is below at 0.25 and not "
-        "above at 0.5; after the second (0.5) it is above at 0.5.",
+        "RANGE, a value is ABOVE at a fraction q when it is strictly more than q of the way "
+        "through [0, 1], and BELOW when at most (WM.35): after the first step NUMFL.2 (0.25) is "
+        "below at 0.25 and not above at 0.5; after the second (0.5) it is not above at 0.5 either, "
+        "being exactly there, and no longer below at 0.25.",
         state([], [], []),
         ZERO,
         [quiet_step(1), quiet_step(2)],
@@ -858,10 +860,35 @@ NUMERIC_CASES = [
         [
             against("below", N2, A, "RANGE", 0.25, True, time=2),
             against("above", N2, A, "RANGE", 0.5, False, time=2),
-            against("above", N2, A, "RANGE", 0.5, True, time=3),
+            against("above", N2, A, "RANGE", 0.5, False, time=3),
             against("below", N2, A, "RANGE", 0.25, False, time=3),
             change("increase", N2, C, 1, True),
             change("increase", N1, C, 1, False),
+        ],
+    ),
+    (
+        "hand_28_comparison_at_the_cut",
+        "A RANGE comparison at its own point (WM.35, October 15, 2026): ABOVE at a fraction q is "
+        "strict (the value is more than q of the way through the range) and BELOW inclusive (at "
+        "most), as the numeric literals > t and <= t are. With no event, the drift takes NUMFL.2 "
+        "of every entity to 0.25 after the first step, 0.5 after the second, and 0.75 after the "
+        "third, in exact float64 arithmetic. At 0.25 the value is not ABOVE at 0.25 and is BELOW "
+        "at 0.25; at 0.75 it is not ABOVE at 0.75 and is BELOW at 0.75; at 0.5 it is ABOVE at "
+        "0.25 and not BELOW at 0.25, and BELOW at 0.75 and not ABOVE at 0.75.",
+        state([], [], []),
+        ZERO,
+        [quiet_step(1), quiet_step(2), quiet_step(3)],
+        None,
+        [
+            against("above", N2, A, "RANGE", 0.25, False, time=2),
+            against("below", N2, A, "RANGE", 0.25, True, time=2),
+            against("above", N2, B, "RANGE", 0.25, True, time=3),
+            against("below", N2, B, "RANGE", 0.25, False, time=3),
+            against("above", N2, B, "RANGE", 0.75, False, time=3),
+            against("below", N2, B, "RANGE", 0.75, True, time=3),
+            against("above", N2, C, "RANGE", 0.75, False, time=4),
+            against("below", N2, C, "RANGE", 0.75, True, time=4),
+            against("above", N2, C, "RANGE", 0.5, True, time=4),
         ],
     ),
     (

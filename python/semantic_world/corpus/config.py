@@ -536,11 +536,12 @@ class Config:
     tree runs out (CG.3, stage b3a)."""
     cut_high: float
     """The language's cut for the high adjective of a numeric fluent (``numeric_adjectives.
-    cut_high``, default 0.75): the fraction of the range at or above which the value counts as
-    ``ABOVE`` (stage b3b, decision 27 of ``WORLD_AND_LANGUAGE.md``)."""
+    cut_high``, default 0.75): the fraction of the range above which (strictly, WM.35) the value
+    counts as ``ABOVE`` (stage b3b, decision 27 of ``WORLD_AND_LANGUAGE.md``)."""
     cut_low: float
     """The cut for the low adjective (``numeric_adjectives.cut_low``, default 0.25): the
-    fraction of the range at or below which the value counts as ``BELOW``."""
+    fraction of the range at or below which the value counts as ``BELOW``; the two words say the
+    world's numeric literals ``> t`` and ``<= t``."""
     propositional_referents: str
     propositional_descriptions: str
     """``marked``: the propositional rendering writes the descriptions in braces before the

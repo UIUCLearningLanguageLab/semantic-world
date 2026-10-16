@@ -47,7 +47,11 @@ statements ``RAISES`` and ``LOWERS`` (an unconditional numeric effect of the sig
 A conditional causal statement (stage b3b) is true when every event type below its event type
 has the effect under exactly the condition the form's subject records, and ``observed`` counts
 only the events whose participants satisfied the condition; a numeric statement is observed
-when every event of its type recorded a change of the fluent in its direction.
+when every event of its type recorded a change of the fluent in its direction. A numeric
+condition literal of a form (``NUMFL.1.HIGH`` with its ``cut``, WM.35) matches the record's
+numeric threshold literal ``> t`` (the high pole) or ``<= t`` (the low pole) whose threshold
+is exactly the point of the range at the form's cut, and its ``observed`` judges the
+participant's replayed value against that point as ``pole_at`` does.
 
 Comparisons of scalars (stage b3a) are recomputed from the ``SCALARDIM`` columns of
 ``entities.csv`` alone: a pole (kind ``comparison``) against the mean and the population standard
@@ -479,13 +483,14 @@ class Oracle:
 
     def pole_at(self, scene: dict[str, Any], time: int, entity: str, pole: str, cut: float) -> bool:
         """Whether a numeric pole holds of a participant at ``TIME.<time>``: ``HIGH`` when the
-        value is at least the fraction ``cut`` of the way through the range, ``LOW`` when at
-        most that fraction."""
+        value is strictly greater than the point at the fraction ``cut`` of the way through the
+        range, ``LOW`` when at most that point (WM.35: the high word is the world's literal
+        ``> t`` and the low word its negation ``<= t``)."""
         fluent, side = pole.rsplit(".", 1)
         low, high = self.ranges[fluent]
         value = self.numeric_at(scene, time, entity, fluent)
         point = low + cut * (high - low)
-        return value >= point if side == "HIGH" else value <= point
+        return value > point if side == "HIGH" else value <= point
 
     def made_by(
         self,
@@ -637,16 +642,16 @@ class Oracle:
         """Whether a causal statement is true: every event type below its event type (itself,
         for an event type) has the entry: the Boolean effect or literal with the value, the
         numeric effect of the ``direction``'s sign (``raises``: ``+=``), under exactly the
-        ``condition`` the form's subject records (none for an unconditional statement; an
-        effect under a numeric threshold condition is no entry). None for a statement about a
+        ``condition`` the form's subject records (none for an unconditional statement; a
+        numeric condition literal with its ``cut`` matches the record's threshold literal at
+        exactly that point, WM.35, and any other numeric threshold condition is no entry). None
+        for a statement about a
         derived fluent, or about a role the event type lacks."""
         subject, predicate = form["subject"], form["predicate"]
         event_type, role = subject["event"], subject["role"]
         fluent, value = predicate["label"], predicate.get("value")
         direction = predicate.get("direction")
-        condition = {
-            (c["role"], c["label"], bool(c["value"])) for c in subject.get("condition", ())
-        }
+        condition = {self._literal_key(c) for c in subject.get("condition", ())}
         if form["quantifier"] != NEC_ALL or not form["polarity"]:
             return None
         if role not in self.event_types[event_type]["roles"]:
@@ -677,14 +682,37 @@ class Oracle:
                 return False
         return True
 
+    def _literal_key(self, literal: dict[str, Any]) -> tuple:
+        """What a form's condition literal says, in the record's terms: a Boolean literal as
+        ``(role, symbol, value)``, a numeric pole with its ``cut`` (WM.35) as ``(role, fluent,
+        operator, threshold)`` with ``>`` for the high pole and ``<=`` for the low one and the
+        threshold the point of the range at the cut. A numeric pole without a cut, or a negated
+        one, matches nothing."""
+        label = literal["label"]
+        if not label.startswith("NUMFL."):
+            return (literal["role"], label, bool(literal["value"]))
+        fluent, side = label.rsplit(".", 1)
+        if "cut" not in literal or not literal["value"]:
+            return (literal["role"], label, None)
+        low, high = self.ranges[fluent]
+        point = low + float(literal["cut"]) * (high - low)
+        return (literal["role"], fluent, ">" if side == "HIGH" else "<=", point)
+
     @staticmethod
+    def _record_literal_key(literal: dict[str, Any]) -> tuple:
+        """What a record's condition literal says, in the same terms."""
+        if literal["kind"] == "numeric":
+            return (literal["role"], literal["symbol"], literal["operator"], literal["threshold"])
+        return (literal["role"], literal["symbol"], bool(literal["value"]))
+
     def _effect_matches(
+        self,
         effect: dict[str, Any],
         role: str,
         fluent: str,
         value: bool | None,
         direction: str | None,
-        condition: set[tuple[str, str, bool]],
+        condition: set[tuple],
     ) -> bool:
         if effect["role"] != role or effect["fluent"] != fluent:
             return False
@@ -694,9 +722,7 @@ class Oracle:
         elif direction is not None or effect["value"] != value:
             return False
         literals = (effect.get("condition") or {}).get("literals", [])
-        if any(lit["kind"] == "numeric" for lit in literals):
-            return False
-        return {(lit["role"], lit["symbol"], bool(lit["value"])) for lit in literals} == condition
+        return {self._record_literal_key(lit) for lit in literals} == condition
 
     def condition_held(self, scene: dict[str, Any], event: dict[str, Any], condition) -> bool:
         """Whether a conditional statement's condition held of an event's participants at the
@@ -707,6 +733,11 @@ class Oracle:
                 return False
             if literal["label"].startswith("BOOLFL."):
                 held = self.fluent_at(scene, event["step"], entity, literal["label"])
+            elif literal["label"].startswith("NUMFL."):
+                # a numeric pole at the form's cut (WM.35)
+                held = self.pole_at(
+                    scene, event["step"], entity, literal["label"], float(literal["cut"])
+                )
             else:
                 held = bool(self.column[literal["label"]][self.row[entity]] == 1)
             if held != bool(literal["value"]):
