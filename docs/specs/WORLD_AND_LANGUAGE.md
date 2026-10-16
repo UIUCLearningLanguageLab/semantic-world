@@ -10,10 +10,10 @@ The refactor is built in four phases. Each phase ends with a working corpus:
 
 - **(a)** static and fluent one-place facts, event types with preconditions and effects, inertia, and time steps;
 - **(b)** comparisons derived from scalars (CG.65 and CG.66), and numeric fluents;
-- **(c)** stored fluent relations, their profiles, and locations;
+- **(c)** pair fluents (the stored fluent relations of the first design), their profiles, and locations;
 - **(d)** sorts, derived relations, and parts.
 
-Phases (a) and (b) are specified in full. Phases (c) and (d) are specified as a design with open questions. Each of the two gets its detailed sections, reviewed by Jon, before its build starts.
+Phases (a) and (b) are specified in full. Phase (c) is specified in full in a file of its own, `docs/specs/WORLD_PHASE_C.md` (October 16, 2026). Phase (d) is specified as a design with open questions, and gets its detailed sections, reviewed by Jon, before its build starts.
 
 Every taxonomy run, world run, and corpus is regenerated. No output of the refactor needs to match an output made before the refactor.
 
@@ -148,8 +148,13 @@ Every label is a word that a human reader can read without a key: a capitalized 
 | Scalar dimension | `SCALARDIM.<n>` | `SCALARDIM.2` | `SC.2` |
 | Boolean fluent | `BOOLFL.<n>` | `BOOLFL.3` | new |
 | Numeric fluent (phase (b)) | `NUMFL.<n>` | `NUMFL.2` | new |
-| Stored relation (phase (c)) | `RELATION.<n>` | `RELATION.2` | new |
-| Place (phase (c)) | `PLACE.<n>` | `PLACE.4` | new |
+| Pair fluent, a stored fluent relation (phase (c); `RELATION.<n>` in the first design) | `PAIRFL.<n>` | `PAIRFL.2` | new |
+| Literals over a pair fluent (phase (c)) | `SOME.PAIRFL.<n>(x)`, `SOMEOF.PAIRFL.<n>(x)`, `SAME.PAIRFL.<n>(x, y)` | `SAME.PAIRFL.5(agent, patient)` | new |
+| Category of places (phase (c)) | `PLACECATEGORY.<path>` | `PLACECATEGORY.1.2` | new |
+| Place (phase (c); `PLACE.<n>` in the first design) | `PLACE.<path>.<k>` | `PLACE.1.2.1` | new |
+| Place property, place part, place scalar (phase (c)) | `PLACEPROPERTY.<n>`, `PLACEPART.<n>`, `PLACESCALARDIM.<n>` | `PLACEPROPERTY.3` | new |
+| Place event type, and its capacities (phase (c)) | `PLACEEVENTTYPE.<n>`, `CAN.PLACEEVENTTYPE.<n>`, `CANBE.PLACEEVENTTYPE.<n>` | `PLACEEVENTTYPE.2` | new |
+| Every place, as a comparison class; the generic head noun for places (phase (c)) | `EVERYPLACE`, `SOMEPLACE` | `ABOVE(PLACESCALARDIM.1, MEAN(PLACECATEGORY.1), EVERYPLACE, 1.0)` | new |
 | Sort (phase (d)) | `SORT.<name>` | `SORT.PLACE` | new |
 | One-place event type | `EVENTTYPE1.<n>` | `EVENTTYPE1.4` | `CAN.<n>`, as a feature |
 | Two-place event type, or a category of two-place event types | `EVENTTYPE2.<path>` | `EVENTTYPE2.1.2.3` | `V1.2.3` |
@@ -719,37 +724,13 @@ An effect can hold only under a condition, as a blow breaks a thing only if the 
 2. **b2. The world's comparisons and numeric fluents.** Comparisons in the runtime, comparison classes, `ENTITY`, numeric fluents (initial values, drift, numeric effects and preconditions, clamping, histories), and the fixtures. *Accept:* every comparison agrees with direct arithmetic on the values; the comparison-class statistics agree with a recomputation from `base.csv`; replaying every history through `apply` reproduces every recorded numeric value exactly; every value stays inside its range; the new fixtures pass. (As built, stage b2: also the numeric condition literals deferred from stage b1, and the four follow-ups of the process cleanup; `docs/proposals/2026-10-12-world-stage-b2-decisions.md` records every engineering choice and how each criterion was checked. The corpus says nothing about numeric fluents until stage b3: no sentence names one, a numeric effect or literal makes no causal statement true, and the corpus's truth and its oracle replay the histories with the numeric values, so that a derived Boolean fluent that reads a numeric threshold is judged correctly.)
 3. **b3. The corpus.** CG.65 and CG.66, numeric fluents, and conditional causal statements: the propositions, the comparative grammar, the numeric adjectives, the planner's new content, the test sets, and the guide. *Accept:* every comparison sentence is true by an independent recomputation; every false comparison item is false; `interpret(tree)` recovers every logical form; with the comparative realized as an affix and as a word, trees are correct for all six clause orders. (As built: Jon split the stage on October 13, 2026. Stage b3a builds CG.65 and CG.66, the corpus's comparison classes read from the world, the comparative affix in the word-form request, the two instance comparison sets, and the follow-up of stage b2 on `rule_weight`; `docs/proposals/2026-10-15-world-stage-b3a-decisions.md` records every engineering choice and how each criterion was checked. Stage b3b builds the numeric fluents in the corpus, `RAISES` and `LOWERS`, the conditional causal statements, their test sets, and the tense affixes on function words, and closes phase (b). As built, stage b3b, October 15, 2026: every item of that list, with Jon's rulings 2 and 3 on stage b3a (the comparison partners default to the siblings, `documents.comparison_partners`; a comparative test item draws its word), the setting `numeric_adjectives`, the change `condition` of the causal sets, and the pipeline's inflected function words; `docs/proposals/2026-10-15-world-stage-b3b-decisions.md` records every engineering choice, the acceptance checks, and the open questions, among them a numeric literal at the language's cut as a stated condition. Phase (b) is complete.)
 
-## Phase (c): stored fluent relations, their profiles, and locations (design)
+## Phase (c): pair fluents, their profiles, and locations
 
-This section sets the design. Its detailed specification, with configuration, outputs, and build stages, is written and reviewed before the phase's build starts.
-
-**Relations are abstract.** A stored relation is `RELATION.<n>`, as a feature is `PROPERTY.<n>`. No relation has a built-in meaning. A relation behaves like nearness, or like location, because of its profile, never because of its name. What a language calls a relation is a setting of the language.
-
-- **Stored relations.** Binary fluent relations, stored sparsely as sets of ordered pairs (REL.19). There are no static stored relations.
-- **Profiles.** Each stored relation has a profile, drawn from a configured mix or given in an event file. The profiles of phase (c):
-  - *symmetric*: the relation holds both ways or neither way. An effect on `(a, p)` writes `(p, a)` too;
-  - *asymmetric*: never both ways;
-  - *irreflexive*: never between an entity and itself (true of every relation, by REL.5);
-  - *functional*: each entity has at most one partner;
-  - *total functional*: each entity has exactly one partner. Adding a new pair replaces the entity's old pair.
-  
-  A profile is an integrity constraint that the runtime maintains. An event whose effects would break a profile is not legal, as if its precondition had failed.
-- **Effects** gain `add RELATION.2(a, p)` and `delete RELATION.2(a, p)`, between the roles of the event's binding. **Preconditions** gain relation literals over the binding: `RELATION.2(a, p)`, `NOT RELATION.2(p, a)`.
-- **Derived fluents** gain existential relation literals: `SOME.RELATION.2(x)`, true when `x` has at least one partner in `RELATION.2`, and `SOMEOF.RELATION.2(x)`, true when `x` is someone's partner. These literals are computed before the matrices, as threshold literals are.
-- **Non-interference** extends to relations: two events of one step interfere when one writes a pair that the other writes or reads. A symmetric pair counts as written in both directions.
-- **Locations.** Location is a total functional relation from entities to places: each entity is at exactly one place. An event type whose patient is a place, with an effect that adds a pair of the location relation, moves its agent. Until sorts arrive in phase (d), places are a fixed second kind of entity, labeled `PLACE.<n>`.
-- **The 3D link.** A relation may carry a `spatial` mark that names a 3D detector and its parameters. Only the 3D runtime reads the mark: in 3D, the detector computes the relation from geometry, and the relation is not stored. The disembodied runtime ignores the mark. The mark is the one place where an abstract relation is tied to a concrete meaning, and the tie exists only in the 3D mode.
-- **The corpus** gains relational states and changes, such as `HOLDS(SCENE.8, TIME.2, PAST, RELATION.2(REF.1, REF.2))` and `BECOME` over relations, words for relations and places, and location sentences. A language's word for a symmetric relation ("near", in an English gloss) is a lexicon entry like any other. The relation's concept label stays `RELATION.2` (CG.67, as reworded).
-
-Questions to settle before the detailed specification:
-
-1. Can one relation be constrained by another? For example, may a symmetric relation hold only between entities that share a location? If so, is that a kind of profile, and does a move then delete the mover's pairs of the constrained relation?
-2. Do relations start empty in each episode, or are initial pairs drawn at a rate?
-3. Are places generated with their own features, or are they bare labels?
-4. Which profiles are in the default mix, and with what weights?
-5. Which relation statements does the corpus make at the class level, if any?
+Phase (c) is specified in `docs/specs/WORLD_PHASE_C.md`, which replaces the design that stood here. Jon settled the design's five questions, and further questions and points of review, on October 15 and 16, 2026; `docs/DECISIONS.md` logs them as WM.36 to WM.59. The main changes from the design: a stored relation is a pair fluent, `PAIRFL.<n>`, because "relation" already names a two-place event type's requirement (WM.43); constraints between pair fluents move to phase (d), and phase (c) adds the literal `SAME` instead (WM.36); places come from a second run of the taxonomy generator, with labels of their own (WM.40); profiles are compiled into precondition literals (WM.46); and initial places follow the entities' capacities at places, so habitats emerge (WM.39).
 
 ## Phase (d): sorts, derived relations, and parts (design)
+
+**Note (phase (c) specification).** Since phase (c), a stored relation is a pair fluent, so "derived relations" below read as derived pair fluents (WM.43). The review of phase (c) added design inputs for phase (d), listed in `docs/specs/WORLD_PHASE_C.md`, "Notes for phase (d)": constraints between pair fluents, adjacency between places, integral parts and components, a conflict between question 3 below and REL.19, and a counting quantifier.
 
 As for phase (c), this section sets the design, and the detailed specification follows before the build.
 
@@ -815,12 +796,12 @@ Jon reviewed every decision below on October 7, 2026, in five batches. Each item
 
 ## References
 
-- Barwise, J., and Cooper, REF. (1981). Generalized quantifiers and natural language. *Linguistics and Philosophy*, 4, 159–219.
+- Barwise, J., and Cooper, R. (1981). Generalized quantifiers and natural language. *Linguistics and Philosophy*, 4, 159–219.
 - Blum, A. L., and Furst, M. L. (1997). Fast planning through planning graph analysis. *Artificial Intelligence*, 90, 281–300. (Non-interfering actions in one step.)
-- Fikes, REF. E., and Nilsson, N. J. (1971). STRIPS: a new approach to the application of theorem proving to problem solving. *Artificial Intelligence*, 2, 189–208.
+- Fikes, R. E., and Nilsson, N. J. (1971). STRIPS: a new approach to the application of theorem proving to problem solving. *Artificial Intelligence*, 2, 189–208.
 - Fox, M., and Long, D. (2003). PDDL2.1: an extension to PDDL for expressing temporal planning domains. *Journal of Artificial Intelligence Research*, 20, 61–124.
 - Kennedy, C. (2007). Vagueness and grammar: the semantics of relative and absolute gradable adjectives. *Linguistics and Philosophy*, 30, 1–45.
-- Kowalski, REF., and Sergot, M. (1986). A logic-based calculus of events. *New Generation Computing*, 4, 67–95.
+- Kowalski, R., and Sergot, M. (1986). A logic-based calculus of events. *New Generation Computing*, 4, 67–95.
 - Kratzer, A. (1977). What "must" and "can" must and can mean. *Linguistics and Philosophy*, 1, 337–355.
 - Kratzer, A. (1981). The notional category of modality. In H.-J. Eikmeyer and H. Rieser (Eds.), *Words, worlds, and contexts* (pp. 38–74). De Gruyter.
 - McCarthy, J. (1977). Epistemological problems of artificial intelligence. *Proceedings of the Fifth International Joint Conference on Artificial Intelligence*, 1038–1044. (The qualification problem.)

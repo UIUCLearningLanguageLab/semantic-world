@@ -1,0 +1,386 @@
+# Phase (c): pair fluents, their profiles, and locations
+
+Specification, October 16, 2026. Written in the planning conversation, for handoff to Claude Code. Not yet built. Part of the world-and-language refactor: read `docs/specs/WORLD_AND_LANGUAGE.md` first, whose phase (c) design section this file replaces. Phases (a) and (b) are built.
+
+## What phase (c) adds
+
+Phase (c) adds a second kind of state: pairs. A pair fluent, `PAIRFL.<n>`, holds between two things at a time point, and events add and delete its pairs. Each pair fluent has a profile, which the generator compiles into preconditions and the runtime keeps as an invariant. Places, the world's grain of interaction, come from a second run of the taxonomy generator. Location is a pair fluent from entities to places, with the total functional profile. Place event types move entities between places, or act at a place. Initial places follow the entities' capacities at places, so habitats emerge from features. The corpus gains states, changes, and events about pairs and places, causal statements with pair literals, profile statements, and facts about kinds of place.
+
+This specification replaces the phase (c) design section of `WORLD_AND_LANGUAGE.md`, and keeps that file's conventions: its terms, labels, runtime, fixtures, and principle for defaults hold here unless this file says otherwise. Nothing built is relabeled or renamed. Every new feature of the world draws from a stream of its own, created after the existing streams, so with phase (c) turned off (`places: null` and `pair_fluents: {count: 0, locations: 0}`) every world output is byte-identical to the world of stage b3b.
+
+## Terms
+
+- **Pair fluent.** A Boolean fluent of two arguments, stored as the set of ordered pairs for which it holds at a time point. A **base pair fluent** is stored and written by events. A **derived pair fluent** is computed: in phase (c), only `SAME`.
+- **Profile.** A pair fluent's structure: its symmetry (`symmetric`, `asymmetric`, or `general`), whether it is `functional`, and whether it is `total`. Every pair fluent is irreflexive (REL.5).
+- **Row and column.** The row of `x` in `PAIRFL.k` is every pair `(x, z)`. The column of `x` is every pair `(z, x)`.
+- **Place.** An instance of the place taxonomy. Places are not entities: they have place features, no fluents, and no location.
+- **Location fluent.** A pair fluent from entities to places with the total functional profile: each entity is at exactly one place at every time point.
+- **Place event type.** An event type whose agent is an entity and whose patient is a place. A **move** adds a location pair. An **act at a place** requires one.
+- **Compiled literal.** A precondition literal that the generator adds to keep a profile (origin `profile`) or to stop an empty move (origin `move`).
+- **Habitat.** The weights that make an entity's initial place depend on what it is able to do at each place.
+
+## Labels
+
+New labels, in the style of "Labels" in `WORLD_AND_LANGUAGE.md`:
+
+| Object | Label | Example |
+| --- | --- | --- |
+| Pair fluent | `PAIRFL.<n>` | `PAIRFL.2` |
+| A pair-fluent literal over two arguments | `PAIRFL.<n>(x, y)` | `PAIRFL.2(agent, patient)`, `PAIRFL.2(REF.1, REF.2)` |
+| At least one partner, as the first argument | `SOME.PAIRFL.<n>(x)` | `SOME.PAIRFL.2(agent)` |
+| At least one partner, as the second argument | `SOMEOF.PAIRFL.<n>(x)` | `SOMEOF.PAIRFL.5(patient)` |
+| The same partner, in a functional pair fluent | `SAME.PAIRFL.<n>(x, y)` | `SAME.PAIRFL.5(agent, patient)` |
+| Category of places | `PLACECATEGORY.<path>` | `PLACECATEGORY.1.2` |
+| Place | `PLACE.<path>.<k>` | `PLACE.1.2.1` |
+| Membership in a category of places | `ISA.PLACECATEGORY.<path>` | `ISA.PLACECATEGORY.1` |
+| Place property, place part, place scalar | `PLACEPROPERTY.<n>`, `PLACEPART.<n>`, `PLACESCALARDIM.<n>` | `PLACEPROPERTY.3`, `PLACESCALARDIM.1` |
+| Place event type | `PLACEEVENTTYPE.<n>` | `PLACEEVENTTYPE.2` |
+| Capacities of place event types | `CAN.PLACEEVENTTYPE.<n>`, `CANBE.PLACEEVENTTYPE.<n>` | `CANBE.PLACEEVENTTYPE.2` |
+| Every place, as a comparison class | `EVERYPLACE` | `ABOVE(PLACESCALARDIM.1, MEAN(PLACECATEGORY.1), EVERYPLACE, 1.0)` |
+| The generic head noun for places | `SOMEPLACE` | "things that `PLACEEVENTTYPE.2` places" |
+| Concept of a pole adjective of a place scalar | `<dimension>.HIGH`, `<dimension>.LOW` | `PLACESCALARDIM.1.HIGH` |
+
+`RELATION.<n>` and `PLACE.<n>` of the old design table are replaced by `PAIRFL.<n>` and `PLACE.<path>.<k>`. The operators of the logical form are unchanged. `NOT` applies to every new literal.
+
+## The world
+
+### Places
+
+- **A second taxonomy run.** `places.taxonomy` names a taxonomy configuration, `data/taxonomy/places_default.yaml` by default. The world runs the taxonomy generator on it, in memory, with the seed of the stream `world:places` when `places.taxonomy.seed` is null, so the place taxonomy never repeats the entities' draws. `places: null` turns places off, and with them location fluents and place event types.
+- **Labels of the place run.** The taxonomy configuration gains `labels.kind: entity | place` (default `entity`). With `place`, the generator writes `PLACECATEGORY`, `PLACE`, `ISA.PLACECATEGORY`, `PLACEPROPERTY`, `PLACEPART`, and `PLACESCALARDIM` in place of the entity labels, and nothing else changes. With the default, every taxonomy output is byte-identical to the output before the stage.
+- **The default place taxonomy.** 2 superordinates, depth 2, branching 3, and 2 places per kind: 12 places. 12 place properties, a quarter of them determined by rules, no place parts, and 2 place scalars. Inheritance, base rates, rules, and scalars follow the taxonomy's own settings in `places_default.yaml`. `data/taxonomy/places_tiny.yaml` gives 4 places (2 superordinates, depth 1, 2 places per kind), 4 place properties, and 1 place scalar.
+- **Places are static.** No place has a fluent, and no event writes a fact about a place. A place has no location.
+- **What makes a place a place can differ from place to place.** A kind of place can be defined by a part (a kitchen by its oven: `PLACEPART` above 0, defining at that kind) or by associations from common causes (a desert: determined place properties whose rules share free inputs, so that "dry" and "hot" go together without either causing the other, and a place with the causes of dryness but not of heat is a cold desert). Roles are assigned at each category and rules apply to every place, so one world can hold both (WM.50). A world in which every characteristic pattern is emergent, not stipulated, sets `inheritance.proportion_characteristic: 0` and `instances.characteristic_probability: 1.0` in both taxonomies; with habitats, kinds of entity then concentrate at kinds of place without any rule saying so.
+- **Comparison classes.** `derived/comparison_classes.csv` gains rows for every category of places and for `EVERYPLACE`, on every place scalar, computed as for entities. `EVERYPLACE` comes first, then the place tree in tree order, after the rows of the entities. `ENTITY` keeps meaning every entity.
+- **The runtime's comparisons** (`greater`, `above`, `below`) accept places and means of categories of places on place scalars. A comparison never mixes an entity scalar and a place scalar.
+
+### Pair fluents
+
+- **How many.** `pair_fluents.count` pair fluents between entities (default 4), numbered first, `PAIRFL.1` to `PAIRFL.n`, then `pair_fluents.locations` location fluents (default 1), so the default world's location fluent is `PAIRFL.5`. Turning places on or off leaves the labels of the pair fluents between entities unchanged (review point 6). With `places: null`, `locations` must be 0.
+- **Profiles.** A location fluent's profile is fixed: `general`, functional, and total, from entities to places. A pair fluent between entities draws its symmetry from `pair_fluents.symmetry` (default equal weights over `symmetric`, `asymmetric`, and `general`), and is functional with probability `pair_fluents.functional_rate` (default 0.25). It is never total (ruling 2a). The draws come from the stream `world:pair_fluents`.
+- **What a profile means.** Symmetric: `(x, y)` holds exactly when `(y, x)` holds. Asymmetric: never both. Functional: at most one pair in each row; for a symmetric functional pair fluent, at most one partner in each row and each column. Total: exactly one pair in each row of every entity.
+- **Initial pairs between entities.** Each pair fluent between entities gets an initial rate, drawn uniformly from `pair_fluents.initial_rates` (default `[0.0, 0.05, 0.2]`). Pairs are drawn once, when the world is generated, from the stream `world:pair_initial`, respecting the profile: a symmetric pair fluent draws each unordered pair at the rate and writes both directions; an asymmetric one draws each unordered pair at the rate and then one direction; a general one draws each ordered pair at the rate; a functional one gives each entity, at the rate, one partner drawn uniformly among the entities that still keep the profile. The pairs are written to `initial_pairs.csv`.
+- **Initial places (habitats).** Each entity's place at `TIME.1` is drawn once, when the world is generated, from the stream `world:habitats`. The weight of place `q` for entity `x` is `(1 + a(x, q)) ^ places.habitat_strength`, where `a(x, q)` is the number of place event types whose requirement holds for the binding `(x, q)`. The default strength is 1; 0 gives a uniform draw. With several location fluents, each draws its own place in label order. The places are columns of `entities.csv`, one per location fluent, named by the fluent's label.
+- **Per pair fluent overrides.** `pair_fluents.fluents.PAIRFL.<n>: {symmetry, functional, initial_rate}` replaces the draws for one pair fluent between entities.
+
+### Place event types
+
+- **How many, and their requirements.** `place_event_types.count` place event types (default 4), `PLACEEVENTTYPE.1` to `PLACEEVENTTYPE.n`, flat. Each requirement is a conjunction of constraints, their number drawn from `place_event_types.constraints` (default weights `{1: 0.6, 2: 0.4}`), each constraint drawn from `place_event_types.constraint_families` (default `{agent: 1, patient: 1, cross: 1, key_lock: 1}`; `comparison` may be given a weight, and then compares an entity scalar with a place scalar, as a cross-dimension comparison does). The patient side reads the place's features: place properties and parts, free or determined, and threshold literals on place scalars. Rule settings come from `place_event_types.rules`, overrides of the taxonomy's rule settings as for the other event types. The draws come from the stream `world:place_event_types`. A place event type whose requirement holds for no binding or for every binding of the world is redrawn, as two-place event types are by default.
+- **Moves and acts.** Each place event type is a move with probability `place_event_types.move_share` (default 0.5), and an act at a place otherwise, drawn from `world:place_dynamics`. With several location fluents, each place event type draws the location fluent it uses.
+  - A **move** has the effect `PAIRFL.k(agent, patient) := 1` on its location fluent, which replaces the agent's old pair. It gains the compiled precondition literal `NOT PAIRFL.k(agent, patient)` (origin `move`), so an entity never moves to where it is. It may have further effects on the agent's fluents and further precondition literals on the agent, drawn as for the other event types.
+  - An **act at a place** has the precondition literal `PAIRFL.k(agent, patient)` (origin `act`), and its effects write the agent's Boolean and numeric fluents, drawn by `event_types.effects.count`, with further precondition literals on the agent.
+  - Neither kind writes a fact about the place.
+- **Capacities.** `CAN.PLACEEVENTTYPE.<n>`: the entity is able to be the agent with some possible place, computed intensionally as the agent capacities of two-place event types are, with the flag for approximate capacities, then extensionally. `CANBE.PLACEEVENTTYPE.<n>`: the place is able to be the patient with some possible entity. Entity capacities join `derived/capacities.csv`. Place capacities go to `derived/place_capacities.csv`, one row per place.
+- **Relation statistics.** `relation_proportions.csv` and `event_type_stats.csv` gain the place event types, over pairs of an entity category and a place category at their own levels. Thematic relatedness stays a relation between entity leaves.
+
+### Literals over pairs
+
+| Literal | True when | Reads |
+| --- | --- | --- |
+| `PAIRFL.k(x, y)` | `(x, y)` holds | the pair `(x, y)` |
+| `SOME.PAIRFL.k(x)` | the row of `x` holds at least one pair | the row of `x` |
+| `SOMEOF.PAIRFL.k(x)` | the column of `x` holds at least one pair | the column of `x` |
+| `SAME.PAIRFL.k(x, y)` | some `z` with `(x, z)` and `(y, z)`; `k` functional | the rows of `x` and `y` |
+
+- `SOME` and `SOMEOF` of a location fluent are excluded where they are constant: `SOME` of an entity on a location fluent is always true, so it is never drawn. `SOMEOF` of a place on a location fluent ("someone is at the place") can be drawn in the precondition of a place event type.
+- `x` and `y` are roles of a binding in a precondition or a condition, and an entity in a derived fluent's rule. A literal about a symmetric pair fluent reads both directions of its pair.
+- The literals are computed before the matrices, as threshold literals are, and join the literal table of `definition.json` with the kinds `pair`, `pair_some`, `pair_someof`, and `pair_same`.
+
+### Preconditions
+
+- **Pair literals.** A share `event_types.preconditions.pair_share` (default 0.2) of precondition literals is a pair literal when the world has pair fluents. As for numeric literals (WM.E193), each literal is drawn as before and then replaced at the share, from the stream `world:pair_preconditions`, so with the share at 0 the preconditions are those of the world without pair fluents. The kind of pair literal is drawn from `pair_fluents.literal_kinds` (default `{pair: 0.6, same: 0.1, some: 0.3}`, where `some` covers `SOME` and `SOMEOF`), its pair fluent uniformly among those the kind allows, its direction or role uniformly, and its polarity uniformly. A quota comes first: `pair_fluents.same_rules` two-place event types (default 2) gain the precondition literal `SAME.PAIRFL.k(agent, patient)` on a location fluent, drawn from their own part of `world:pair_preconditions` among two-place event types for which some able binding can satisfy the rest of the precondition; with no location fluents, the quota does nothing (review point 4). One-place event types draw only `some` literals on the agent. Place event types draw `pair` and `same` literals only on location fluents, and `some` literals on the agent's pair fluents between entities or as `SOMEOF` of the place.
+- **Achievable.** A positive pair literal is achievable when its pair fluent has a positive initial rate or some effect adds the pair; a negative one, when some initial state lacks it or some effect deletes it. `SAME` on a location fluent is always achievable, because entities can share a place. The generator redraws a literal that is not achievable.
+- **Compiled literals (F4).** After the preconditions and effects are drawn, the generator adds, for each add effect: `NOT PAIRFL.k(patient, agent)` for an asymmetric pair fluent (or the same with the roles exchanged for an add in the other direction); `NOT SOME.PAIRFL.k(first)` for a functional one, and also `NOT SOME.PAIRFL.k(second)` for a symmetric functional one; and `NOT PAIRFL.k(agent, patient)` for a move. A compiled literal already present is not added twice. An event type whose compiled literals contradict its own precondition can never happen: its effect is redrawn. Compiled literals are written in `definition.json` with their origin, and are part of the rule-set identity.
+- **Redraws of never-legal event types** (WM.E111) include place event types.
+
+### Effects
+
+- **Pair effects.** An effect can add or delete a pair between the roles of a two-place event type: `PAIRFL.k(agent, patient) := 1` or `PAIRFL.k(patient, agent) := 0`. A share `event_types.effects.pair_share` (default 0.2) of the effects of two-place event types is a pair effect when the world has pair fluents between entities, drawn as before and then replaced at the share, from the stream `world:pair_effects`. The pair fluent, direction, and value are drawn uniformly. Pair effects attach to event-type features and to event types, as other effects do.
+- **No delete on a total functional pair fluent.** The generator never draws one, and an event file that writes one is a validation error.
+- **No contradictions, no empty effects.** Two effects on the same pair (counting both directions of a symmetric pair fluent) with different values are a contradiction, resolved as in phase (a). An add whose precondition already requires the pair, or a delete whose precondition already requires its absence, is redrawn.
+
+### Conditions (F5)
+
+The kind `pair` joins `event_types.effects.condition_kinds`, default `{feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0.2}`. A pair condition literal is a `pair`, `same`, or `some` literal over the binding, drawn as for preconditions, from the stream `world:pair_conditions`. It must be achievable, and it names no pair or row that the precondition names. A conditional add on an asymmetric or functional pair fluent is redrawn, because its compiled literals would not be a plain precondition (F4). With the `pair` weight at 0, or no pair fluents, the conditions are drawn as in stage b3b.
+
+### Derived fluents
+
+A derived Boolean fluent's rule may read `SOME.PAIRFL.k(x)` and `SOMEOF.PAIRFL.k(x)` of its own entity, on pair fluents between entities. The first `pair_fluents.derived_rules` derived fluents (default 1) must read at least one of them: their rules are drawn first, each with at least one such literal among its inputs. The other derived fluents draw from the input pool as before, where the literals weigh `pair_fluents.rule_weight` (default 1). With `pair_fluents.count: 0`, the quota does nothing, and the pool and the rules are unchanged (review point 3). A derived fluent's cone holds the rows and columns its literals read.
+
+### The runtime
+
+- **State.** The state at a time point holds the Boolean fluents, the numeric values, and, for each pair fluent, the set of its pairs among the entities and places of the state.
+- **`derive`** computes the pair literals before the matrices, and the derived fluents from them.
+- **`able`** is unchanged. For a place event type, a binding is an entity and a place, and the requirement reads both.
+- **`legal`** is unchanged: the requirement and the precondition, compiled literals included.
+- **`apply`.** Each effect whose condition holds is applied to the state at `TIME.k`. An add or delete of a symmetric pair writes both directions. An add in a total functional pair fluent deletes the old pair of the row, in the same step. After the step, every profile must hold: a violation raises `ProfileViolationError` (kind `profile`), naming the pair fluent, the pairs, and the events. With a correct definition, the error never happens, because the compiled literals make it impossible.
+- **Non-interference.** An event reads the pairs, rows, and columns its precondition and conditions read, through the cones of derived fluents. It writes the pairs its effects write: both directions of a symmetric pair, and, for an add in a total functional pair fluent, the whole row. Two events interfere when one writes a pair that the other writes or reads, counting a row or a column as every pair in it. The rule of phase (a) is otherwise unchanged, so applying a step's events together equals applying them one at a time in any order.
+- **Places in the runtime.** Places are indexed apart from entities. A binding of a place event type is an entity index and a place index. `legal_bindings` lists them by agent, then place, in index order.
+
+### The `spatial` block (F6)
+
+`definition.json` may hold a `spatial` block: for a pair fluent, a detector name and its parameters, as `{"PAIRFL.2": {"detector": "within", "parameters": {"distance": 1.0}}}`. `spatial_id` is the SHA-256 hash of the block's canonical JSON. Neither is part of the rule-set identity. The Python runtime checks the block's form only, and otherwise ignores it. Generated worlds have no block. An event file may give one. When the block is absent, `definition.json` has neither key.
+
+### Episodes
+
+- **Places of an episode (F2).** After the participants are drawn, the episode's places are the distinct places of its participants at `TIME.1`, plus `scene.extra_places` (default 1) places drawn uniformly from the others. `scene.places: all` puts every place in every episode. A place event type's bindings range over the episode's places.
+- **Initial state.** Each participant's place comes from `entities.csv`, and the pairs among the participants from `initial_pairs.csv`. With `scene.initial: redraw`, the episode also redraws its participants' places with the habitat weights and their pairs at each pair fluent's rate, from the episode's own part of the stream. With `scene.initial_location: seed`, every participant starts at the seed entity's place, and the episode's places are that place and the extra places.
+- **Order of draws.** The new draws of an episode (redrawn places and pairs, then extra places) come after every existing draw of the episode's part, so episodes of a world without pair fluents and places are unchanged.
+- **Selection.** `uniform_event` and `uniform_event_type` treat place event types as two-place event types: under `uniform_event_type`, `scene.transitive_share` covers both, and the event type is drawn among all event types with a patient.
+
+### Histories
+
+```json
+{"label": "SCENE.8", "participants": ["INSTANCE.1.3.2.5", "INSTANCE.1.5.1.2"], "places": ["PLACE.1.2.1", "PLACE.2.1.2"],
+ "initial": {"INSTANCE.1.3.2.5": ["BOOLFL.1"], "INSTANCE.1.5.1.2": []},
+ "initial_places": {"INSTANCE.1.3.2.5": {"PAIRFL.5": "PLACE.1.2.1"}, "INSTANCE.1.5.1.2": {"PAIRFL.5": "PLACE.2.1.2"}},
+ "initial_pairs": [["PAIRFL.3", "INSTANCE.1.3.2.5", "INSTANCE.1.5.1.2"]],
+ "steps": [
+   {"step": 1, "events": [
+     {"label": "SCENE.8.EVENTINSTANCE.1", "type": "PLACEEVENTTYPE.2", "agent": "INSTANCE.1.3.2.5", "patient": "PLACE.2.1.2",
+      "changes": [{"pair": "PAIRFL.5", "first": "INSTANCE.1.3.2.5", "second": "PLACE.1.2.1", "to": false},
+                  {"pair": "PAIRFL.5", "first": "INSTANCE.1.3.2.5", "second": "PLACE.2.1.2", "to": true}]}]}],
+ "final": "TIME.2", "quiescent": false}
+```
+
+- `places`, `initial_places`, and `initial_pairs` appear only in a world with places or pair fluents.
+- A pair change records the pair fluent, its two arguments, and the new value. A move records the deletion of the old place and the add of the new one, both as changes of the event. A symmetric pair is recorded once, in the direction the effect names, and replay writes both directions.
+- `replay` reproduces every recorded pair change, and checks every profile at every time point.
+
+### World statistics
+
+`world_stats.yaml` gains:
+
+- a `places` block: places, categories, place features by kind, place event types by kind (moves and acts), and the concentration of habitats (for each place category, the share of each entity superordinate's entities that start there, and the mean entropy of entities' initial places by entity category);
+- a `pair_fluents` block: pair fluents by profile, their initial rates and initial pairs, pair literals by kind and role, compiled literals by origin, pair effects by value, and pair condition literals;
+- from the statistics episodes: changes of pairs per event, the share of events that are moves, the share that are acts at a place, and the two-place share counting place event types apart.
+
+### Explicit event files
+
+An event file can define pair fluents, place event types, and the `spatial` block:
+
+```yaml
+pair_fluents:
+  PAIRFL.2: {symmetry: symmetric, functional: false, initial_rate: 0.0}     # say, near
+event_types:
+  EVENTTYPE2.1.1:                                                             # say, approach
+    precondition: "SAME.PAIRFL.5(agent, patient) AND NOT PAIRFL.2(agent, patient)"
+    effects: ["PAIRFL.2(agent, patient) := 1"]
+  EVENTTYPE2.1.2:                                                             # say, eat
+    precondition: "PAIRFL.2(agent, patient)"
+    effects: ["patient.BOOLFL.1 := 0"]
+place_event_types:
+  PLACEEVENTTYPE.1:                                                           # say, go to
+    kind: move
+    requirement: "agent.PROPERTY.3"
+spatial:
+  PAIRFL.2: {detector: within, parameters: {distance: 1.0}}
+```
+
+Compiled literals are added to explicit entries too. An entry that breaks a rule (a delete on a total functional pair fluent, a `SAME` on a pair fluent that is not functional, a literal that is not achievable, an act without its location literal) is an error that names the file and the entry. `data/world/events/place_chain_example.yaml` builds the chain of go, approach, and eat.
+
+### Configuration
+
+Additions to `data/world/default.yaml`:
+
+```yaml
+places:
+  taxonomy: {config: data/taxonomy/places_default.yaml, seed: null}   # null: the seed of the stream world:places; places: null turns places off
+  habitat_strength: 1.0                                               # 0: initial places uniform
+
+pair_fluents:
+  count: 4                                   # pair fluents between entities
+  locations: 1                               # location fluents; 0 without places
+  symmetry: {symmetric: 1, asymmetric: 1, general: 1}
+  functional_rate: 0.25
+  initial_rates: [0.0, 0.05, 0.2]
+  literal_kinds: {pair: 0.6, same: 0.1, some: 0.3}
+  same_rules: 2                              # two-place event types that must require SAME on a location fluent (review point 4)
+  derived_rules: 1                           # derived fluents whose rule must read a SOME or SOMEOF literal (review point 3)
+  rule_weight: 1.0                           # the weight of SOME and SOMEOF literals in the other derived fluents' input pool
+  fluents: {}                                # PAIRFL.<n>: {symmetry, functional, initial_rate}
+
+place_event_types:
+  count: 4
+  move_share: 0.5
+  constraints: {1: 0.6, 2: 0.4}
+  constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}
+  rules: {}
+
+event_types:
+  preconditions:
+    pair_share: 0.2
+  effects:
+    pair_share: 0.2
+    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0.2}
+```
+
+Corpus configuration, under `scene`: `extra_places` (default 1), `places: episode | all` (default `episode`), and `initial_location: world | seed` (default `world`).
+
+`data/world/tiny.yaml` gains `places_tiny.yaml`, 1 location fluent, 2 pair fluents between entities, and 2 place event types. Validation follows the base conventions.
+
+## Determinism
+
+- New world streams, created after the existing ones: `world:places`, `world:pair_fluents`, `world:pair_initial`, `world:place_event_types`, `world:place_dynamics`, `world:habitats`, `world:pair_preconditions`, `world:pair_effects`, and `world:pair_conditions`.
+- **Off settings, each tested against an identity in the snapshot (PR.2):** with `places: null` and `pair_fluents: {count: 0, locations: 0}`, the world run is byte-identical to the world of stage b3b; with pair fluents but `pair_share: 0` for preconditions and effects and the `pair` condition weight at 0, the preconditions, effects, and conditions of the existing event types are those of the world without pair fluents; with `labels.kind: entity`, every taxonomy run is byte-identical to the run before the stage.
+- The rules of derived fluents may differ when pair fluents are present, because the input pool is larger, as with numeric fluents (stage b2).
+- The corpus makes no promise of byte identity (PR.2). Its new content draws from streams of its own where that is easy.
+
+## Conformance fixtures
+
+The fixture format gains `pair_fluents` and `places` in the definition, `initial_pairs` and `initial_places` beside `initial`, and, in each step, `pairs` (the pairs that hold after the step). The format's version stays 1, because the keys are absent from a world without them. `tests/fixtures/world/README.md` gives the semantics of pair literals, compiled literals, the total functional replacement, and the read and write sets for non-interference, operation by operation, for the Rust runtime.
+
+Hand-written fixtures, over the hand world extended with two places, a location fluent, and three pair fluents between entities (symmetric, asymmetric, symmetric functional):
+
+1. a symmetric add writes both directions;
+2. a symmetric delete clears both directions;
+3. an asymmetric add blocked by its compiled literal;
+4. a functional add blocked because the row already holds a pair;
+5. a move replaces the old place;
+6. a move to the agent's own place blocked by its compiled literal;
+7. an act at a place legal at the place and not elsewhere;
+8. `SAME` holds, and the event is legal;
+9. `SAME` fails after a move, and the event is not legal;
+10. a derived fluent over `SOME` changes when a pair is added;
+11. `SOMEOF` of a place in a precondition;
+12. interference: two events add the same pair;
+13. interference: two events add pairs to one functional row;
+14. interference: `(a, p)` and `(p, a)` added together to an asymmetric pair fluent;
+15. interference: a move and an event whose precondition reads the mover's place through `SAME`;
+16. a conditional effect whose `pair` condition holds, and one whose condition fails.
+
+Generated fixtures from the tiny world include pair fluents and places. The brute-force evaluator reads the pair sets directly and never the matrices.
+
+## The corpus
+
+### Lexicon
+
+| Concept | Part of speech | Concept label | Configuration key |
+| --- | --- | --- | --- |
+| Pair fluent (between entities, or a location fluent) | preposition | `PAIRFL.2` | `pair` |
+| `SAME` over a functional pair fluent | preposition | `SAME.PAIRFL.5` | `same` |
+| Category of places | noun | `PLACECATEGORY.1.2` | `place_category` |
+| Place property, place part | adjective, part noun | `PLACEPROPERTY.3`, `PLACEPART.1` | `place_is`, `place_has` |
+| Place scalar | two pole adjectives | `PLACESCALARDIM.1.HIGH`, `.LOW` | `place_scalar` |
+| Place event type | transitive verb | `PLACEEVENTTYPE.2` | `place_event` |
+| Patient capacity of a place event type | adjective | `CANBE.PLACEEVENTTYPE.2` | `place_patient_projection` |
+| The generic head noun for places | noun | `SOMEPLACE` | — |
+
+- Every pair fluent and every `SAME` literal that some precondition or condition reads gets a word by default (`named_proportion.pair: 1.0`, `same: 1.0`). Every category of places gets a noun. A quarter of the place patient capacities get words, as for patient capacities.
+- The words for pair fluents and for `SAME` are content lexemes, so the word-form pipeline needs no change for them (note 5 of stage b3b).
+- The bound pronoun `them` is a new base function word, appended at the end of `FUNCTION_WORDS`, so the function words before it keep their order.
+
+### Grammar
+
+- **Prepositional predicates.** A pair fluent is said with the copula and a prepositional phrase: the preposition and a noun phrase, the preposition before or after the noun phrase by `word_order.adposition`, as `than` is placed. "The owl was near the mouse", "the owl was at the `PLACECATEGORY.1.2`".
+- **Changes.** `become` with the prepositional phrase: "the owl became near the mouse".
+- **Place event types** are transitive verbs with a place as the object: "the owl `PLACEEVENTTYPE.2` the `PLACECATEGORY.1.2`".
+- **The bound pronoun.** In a class-level statement, `them` refers back to the other participant of the restrictor: "things that approach things become near them".
+- **Relative clauses with a prepositional predicate** (stage c5a, for profile statements). A relative clause whose predicate is the copula and a prepositional phrase, with the preposition's object as the gap: "things that things are near". Where the preposition stands is `grammar.word_order.stranding: strand | pied_pipe` (default `strand`): stranded in its place, with the gap after it, or moved with the relative word to the front of the clause (review point 10).
+- **A quantified object of a preposition** (stage c5a, for `SOME`). The pair fluent's preposition takes a noun phrase of the generic noun with `some` or `no`: "near some things", "near no things" (review point 7).
+- **Limits kept** (note 4 of stage b3b). One relative clause per noun phrase, an object relative with one verb, a comparative never in a relative clause. Modifiers stay static: a pair fluent or a location is never a modifier of a mention, because it would need a time point.
+- **Places as referents.** A place is introduced with "a", mentioned later with "the", named at a level of the place tree (`mention.place_level_weights`, with the leaf heaviest, as for categories), and told apart from other places of the scene by static place features. Pronouns never refer to places in phase (c).
+
+### Instance level
+
+| Sentence | Propositional rendering |
+| --- | --- |
+| the owl was near the mouse | `{CATEGORY.1.2(REF.1) AND CATEGORY.1.5(REF.2)} HOLDS(SCENE.8, TIME.2, PAST, PAIRFL.2(REF.1, REF.2))` |
+| the owl became near the mouse | `{...} BECOME(SCENE.8, TIME.2, PAST, PAIRFL.2(REF.1, REF.2))` |
+| a mouse was at a dry place | `CATEGORY.1.5(REF.2) AND PLACECATEGORY.1.2(REF.3) AND PLACEPROPERTY.3(REF.3) AND HOLDS(SCENE.8, TIME.1, PAST, PAIRFL.5(REF.2, REF.3))` |
+| the owl went to the dry place | `{...} EVENT(SCENE.8.EVENTINSTANCE.4, PAST, SIMPLE, PLACEEVENTTYPE.2(REF.1, REF.3))` |
+
+- **The predicate kind** of a pair state, between entities or toward a place, is `pair_state`, with the pair fluent as its `label` and the second argument as its `patient`, as the timed comparative of stage b3b carries its patient (notes 1 and 2 of stage b3b). With `become`, it is a change. The truth tests read it from the replayed state, as `fluent_value` reads a Boolean fluent.
+- **Initial states.** The candidates of an initial-state sentence gain the participant's place, and the pair fluents between the participant and referents already mentioned.
+- **Results.** A result sentence can state a pair change of the event's own effects, the new place of a move, or the loss of the old place.
+- **Blocked events.** `ABLE_NOW` covers place event types, so "the owl could not go to the wet place" follows when a precondition fails. A blocked sentence skips a binding that only the compiled `move` literal blocks: the agent is already at the place (review point 5).
+- **Comparative descriptions** can compare two places of a scene on a place scalar, at `documents.comparative_rate`, after a sentence that introduces the second of them.
+
+### Class level
+
+- **Causal statements with pair literals** (ruling 5a). Effects that add or delete a pair, and preconditions that require a pair, its absence, or `SAME`, are stated as `NEC` statements, with `AFTER` and `BEFORE` as in phase (a): `NEC(ALL(EVENT(EVENTVAR.1, EVENTTYPE2.1.1(VAR.1, VAR.2)), AFTER(EVENTVAR.1, PAIRFL.2(VAR.1, VAR.2))))`, "things that approach things become near them". Place event types join, with the generic noun `SOMEPLACE`: "things that go to places become at them". Compiled literals of asymmetric pair fluents, and the compiled `move` literal of every move ("things that go to places are not at them before"), are stated, because they are base pair literals. A precondition literal `SOME.PAIRFL.k(x)`, or its negation, is stated with a quantified object of the pair fluent's preposition: `BEFORE(EVENTVAR.1, NOT SOME.PAIRFL.2(VAR.1))`, "things that grab things are near no things before" (review point 7). `SOMEOF` literals are not stated.
+- **Conditional statements with pair conditions.** A conditional effect whose condition holds a `pair` literal makes no causal statement in phase (c), and its unconditional form is never stated as true (review point 11). Conditional effects with other conditions are stated as stage b3b states them.
+- **Profile statements** (ruling 5b). For a symmetric pair fluent, `NEC(ALL(PAIRFL.2(VAR.2, VAR.1), PAIRFL.2(VAR.1, VAR.2)))`, "things that things are near are near them". For an asymmetric one, `NEC(ALL(PAIRFL.3(VAR.2, VAR.1), NOT PAIRFL.3(VAR.1, VAR.2)))`, "things that things are above are not above them". JSON predicate kind `profile`, with `"form": "symmetric"` or `"asymmetric"`. Functional and total profiles are not stated.
+- **Feature documents about a pair fluent.** A new topic, drawn uniformly with the others, as fluent documents are: its profile statement, if it has one, then causal statements about the event types that add it, delete it, and need it, one per sentence, until the document reaches its drawn length or runs out.
+- **Places in documents** (ruling 5c). Categories of places are topics of category documents, drawn uniformly with the categories of entities, with the existing kinds of content: membership, facts about the topic, facts about a subcategory, relation facts (capacity facts with the place category as the patient, "`CATEGORY.1.3` can `PLACEEVENTTYPE.2` `PLACECATEGORY.1`"), and comparison facts with a sibling. Place features and place event types are topics of feature documents. `NEC` applies to place properties, place parts, and membership in place categories, by the fixed test of the place taxonomy.
+
+### Readings
+
+A sentence with a prepositional predicate about a time point has the reading `state`. A profile statement has the reading `profile`.
+
+### Test sets
+
+- **State sets** gain pair and location items at the scene's final time point, with the changes `predicate` (another pair fluent with a word), `subject` (another participant), `role` (the arguments exchanged, skipped for symmetric pair fluents and for locations), and the new `object` (another referent, or another place of the scene, as the second argument). The `_changed` and `_unchanged` split holds as before.
+- **Event, `able_now`, and false-event sets** include place event types, with the three kinds of false event. The event sets of place event types take the change `object` (another place of the scene) in place of `role`, which a place cannot fill (review point 8).
+- **Causal sets** include statements with pair literals; the role swap skips symmetric pair fluents.
+- **Profile sets** (new): `profile_predicate` (the same form, about another pair fluent that lacks the profile) and `profile_form` (the other form: the asymmetric statement for a symmetric pair fluent, and the reverse). A false item that held at every time point of every scene of the corpus, of which at least one had a pair of the fluent, is marked `observed` and goes into the `_lawlike` twin of its set.
+- **Class sets** include facts about categories of places.
+
+### Outputs
+
+- `documents.jsonl` gains the new predicate kinds (`pair_state` and `profile`), place referents, and place event types.
+- `stats.yaml` gains counts of pair states, pair changes, location sentences, moves and acts, profile statements, documents about places and about pair fluents, and the new test sets.
+- `scenes.jsonl` holds the histories of "Histories".
+
+## Build stages
+
+Each stage is one Claude Code session on a branch of its own (`world-c1`, and so on), on the staged track: a proposal file, WM.E rows, reference runs, the full check list, run times in the guides with growth of more than half flagged, figures through the snapshot and `python -m semantic_world.figures guides`, and the guides updated where the stage changes what they describe. Every acceptance criterion checks a property, never a count.
+
+1. **c1. Places.** The taxonomy's `labels.kind`, the place taxonomy configurations, the second taxonomy run in the world, `places/` in the world run, `places.csv`, place comparison classes and `EVERYPLACE`, place event types with their requirements, capacities (`CAN.` and `CANBE.PLACEEVENTTYPE`), relation statistics, views with place columns (`view --places`), the `places` block of the statistics, and `WORLD.md`. No dynamics yet: place event types have no preconditions or effects in this stage, and episodes do not use places. *Accept:* with `places: null` the world is byte-identical to stage b3b (the snapshot identity); the place run is byte-identical to the taxonomy run alone with `labels.kind: place`; the matrices agree with the truth tables for every place rule and every place event type's requirement over every entity and place; capacities agree with a brute-force check; comparison classes of places agree with a recomputation from `places.csv`.
+2. **c2a. Pair fluents: the definition, the runtime, and the fixtures.** Pair fluents between entities as given by an event file: symbols and profiles in `definition.json`, `initial_pairs.csv`, pair literals (`pair`, `SOME`, `SOMEOF`, `SAME`) in the literal table, `derive`, pair preconditions, pair effects, and `pair` conditions as written in an event file, compiled literals for explicit entries, `apply` with symmetric writes and the invariant, non-interference over pairs, rows, and columns, the `spatial` block and `spatial_id`, episodes and histories with pair changes, `replay`, the brute-force evaluator over pairs, `tests/fixtures/world/README.md`, and hand-written fixtures 1 to 4, 10, 12 to 14, and 16. Nothing is generated yet: with no event file, a world has no pair fluents. *Accept:* every fixture passes; on a world with pair fluents from an event file, `legal` and `derive` agree with the brute-force evaluator in 1,000 random states, and applying a step's events together equals applying them one at a time in every order, on 1,000 random non-interfering sets; no profile is broken in 1,000 episodes of that world; replay reproduces every pair change; a broken event file fails with an error that names the file and the entry; every world without an event file is byte-identical to stage c1.
+3. **c2b. Pair fluents: generation.** Drawn profiles and initial rates, initial pairs, pair literals in preconditions, pair effects, and `pair` conditions at their shares, from their streams; compiled literals in generation; the redraws of contradictions, empty effects, and never-legal event types; derived fluents over `SOME` and `SOMEOF`, with the quota `derived_rules` (review point 3); the `pair_fluents` statistics; generated fixtures; and the tiny and default configurations. *Accept:* on the default and tiny worlds, every pair literal is achievable, no event type has contradicting effects, every add on an asymmetric or functional pair fluent carries its compiled literals, and initial pairs keep every profile; on every seed from 1 to 5 of the default world, at least `derived_rules` derived fluents read a `SOME` or `SOMEOF` literal; `legal` and `derive` agree with the brute-force evaluator in 1,000 random states of the tiny world; no profile is broken in 1,000 statistics episodes; the off settings of "Determinism" give their identities.
+4. **c3. Locations.** Location fluents, habitats, the dynamics of place event types (moves and acts, their compiled literals), `SAME` and `SOMEOF` on location fluents, the quota `same_rules`, places in episodes (`scene.extra_places`, `scene.places`, `scene.initial_location`, redraws), histories with places, `uniform_event_type` with place event types, the location statistics, `place_chain_example.yaml`, and hand-written fixtures 5 to 9, 11, and 15. *Accept:* every entity is at exactly one place at every time point of every episode; every move changes the agent's place to the bound place and nothing else of the location fluent; no move goes to the agent's own place; every act happens at the agent's place; with `habitat_strength: 0` the initial places are uniform within a sampling margin stated from the configuration, and with the default, an entity's chance of a place rises with the number of place event types it is able to do there (checked against the weights, within the same kind of margin); the default habitats are not flat (review point 2); on every seed from 1 to 5 of the default world, at least `same_rules` two-place event types require `SAME` on a location fluent (review point 4); the chain example's events occur in the order its preconditions force. The stage records the default world's two-place share, move share, and act share (ruling 4).
+5. **c4. The corpus at the instance level.** First, the oracle's replay (`tests/corpus/truth_oracle.py`) of pair fluents and places (note 6 of stage b3b). Then the lexicon of places, pair fluents, and `SAME`; prepositional predicates and their word order; places as referents with mentions; pair states and changes (`pair_state`), initial states, results, and blocked events; moves and acts in narratives; comparative descriptions of places; the state, event, and `able_now` sets with the change `object`; and `CORPUS.md`. *Accept:* every pair state, location, and change sentence is true of its scene's history by the oracle; every false item is false; `interpret(tree)` recovers every logical form; with the preposition before and after its noun phrase, trees are correct for all six clause orders; the propositional rendering parses back.
+6. **c5a. The corpus at the class level: grammar and statements.** `them`; relative clauses with a prepositional predicate and `grammar.word_order.stranding`; quantified objects of prepositions; causal statements with pair literals, with `SOMEPLACE`, and with `SOME`; no statement for a conditional effect with a `pair` condition (review point 11); profile statements; their JSON forms, renderings, readings, and truth tests. Causal statements appear where documents already call for them (feature documents about event types); profile statements are enumerated and checked here, and enter documents in c5b. *Accept:* every causal and profile statement is true by a re-reading of `definition.json`; the unconditional form of a conditional effect is never stated as true, and no conditional effect with a `pair` condition is stated; with stranding and pied-piping, trees are correct for all six clause orders and `interpret(tree)` recovers every logical form; the propositional rendering parses back.
+7. **c5b. Documents, test sets, and the end of the phase.** Documents about pair fluents; places in category and feature documents; capacity facts about places; the causal, profile, and class sets; the regenerated default and tiny runs end to end (world, corpus, word forms, render); the as-built notes in this specification; and the guides. *Accept:* every false causal, profile, and class item is false; every `observed` mark agrees with the corpus's scenes; the role swap never produces a pair for a symmetric pair fluent; the full chain runs on the tiny configuration from the guides' commands alone.
+
+## Notes from stage b3b, and what they changed
+
+The proposal file of stage b3b (`docs/proposals/2026-10-15-world-stage-b3b-decisions.md`) has a section "Notes for phase (c)". Its six notes, and what each changed in this specification:
+
+1. **No predicate kind of the corpus covers a pair.** The kinds after phase (b) are `property`, `part`, `event_type1`, `member`, `patient_capacity`, `event_type2`, `comparison`, `comparative`, `state`, `effect`, and `precondition`. A state of a pair at a time point is a new kind beside `state`, with its own change, causal statements, and test sets, and the truth tests read it from the replayed state, as `fluent_value` reads a Boolean fluent. *Change:* one new kind, `pair_state`, covers pair fluents between entities and locations alike (a location is a pair state whose second argument is a place); with `become` it is a change.
+2. **Timed propositions with two participants already exist.** A comparative at a time point (stage b3b) has a patient who is a participant of the scene, the plan carries the time on the predication, and the rendering puts the two-place comparison inside `HOLDS`. *Change:* pair states follow that pattern exactly.
+3. **The restrictor of a causal statement** holds the bound event and, since stage b3b, the condition's literals, on the event term and in the restrictor. *Change:* none in kind. Pair literals add literals with two variables to the restrictor.
+4. **The grammar's limits:** one relative clause per noun phrase, an object relative with one verb, a comparative never in a relative clause, and static modifiers. A pair fluent as a modifier of a mention would need a time point (decision 20). *Changes:* a pair fluent is never a modifier; profile statements need a relative clause whose predicate is a prepositional phrase with its object gapped ("things that things are near"), which is new grammar, built in stage c5; and a conditional causal statement whose `pair` condition the grammar cannot say is not stated, as stage b3b leaves unsayable conditions unstated (Jon's ruling on b3b's third question keeps the second relative clause on the language to-do list).
+5. **The word-form pipeline needs no change for new content words.** New function words join the end of `FUNCTION_WORDS`, so the words before them keep their order. *Change:* the words for pair fluents and for `SAME` are content lexemes (prepositions), so the pipeline needs no change for them; `them` is a function word, appended at the end of `FUNCTION_WORDS`.
+6. **The oracle** (`tests/corpus/truth_oracle.py`) re-reads `definition.json` and replays the scenes with the brute-force evaluator, so a new kind of fluent needs its replay there before the corpus states it. *Change:* stage c4 begins by extending the oracle's replay to pair fluents and places.
+
+## Notes for phase (d)
+
+Design inputs that the review of phase (c) moved to phase (d), or found for it:
+
+- **Constraints between pair fluents.** A scope (a pair fluent that holds only between entities at the same place, with cascade deletion when one of them moves, so that nearness ends when something moves away), and general inclusion and exclusion constraints, come with derived pair fluents (WM.36). `SAME` is phase (c)'s one derived pair fluent, and phase (d) can name it as such.
+- **"Derived relations"** in the phase (d) design read as derived pair fluents (WM.43).
+- **Adjacency between places** needs a join (the agent's current place and its features), and comes as a derived pair fluent computed from place features (WM.40).
+- **Parts.** Integral parts, which exist only attached and are generated with their whole (a leg), versus components, ordinary entities that events attach and detach (a stick and a stone that become a spear); whether an assembly's features, or its kind, can be derived from its components, which would make kind a derived fluent and touches REL.1. Places now come from a second taxonomy run (WM.40), so parts from a third run are a natural answer to phase (d)'s first question.
+- **A conflict in phase (d)'s third question.** A static part relation would be a static stored relation, which REL.19 rules out: parthood is a pair fluent that events rarely change, or REL.19 changes.
+- **A counting quantifier** ("at most one", numbers) would state functional profiles ("things hold only one thing") and counts of parts ("four legs") (WM.42).
+
+## Decisions
+
+Jon settled the design of phase (c) on October 15 and 16, 2026, in the planning conversation that wrote this specification: the five questions of the phase (c) design section of `WORLD_AND_LANGUAGE.md`, six further questions (F1 to F6), and eleven points of review. `docs/DECISIONS.md` logs them as WM.36 to WM.59. References in the text name them as below ("ruling 4", "F4", "review point 3").
+
+1. **WM.36 (ruling 1). Can one pair fluent be constrained by another?** No, not in phase (c). Every profile is about one pair fluent only. Constraints between pair fluents (a scope, with cascade deletion, and general inclusion and exclusion constraints) move to phase (d), with derived pair fluents. Phase (c) adds one literal instead: `SAME.PAIRFL.k(agent, patient)`, true when the two roles have the same partner in a functional pair fluent `PAIRFL.k` (for location: at the same place). Preconditions and conditions can read the literal, so location matters for what is legal. Phase (d) can name the literal as its first derived pair fluent without rewriting anything. (Option A+, Jon, October 15, 2026.)
+2. **WM.37 (the world and the language). What the world holds, and what the language carves.** The world holds primitives (features, scalars, fluents, event types) and spatial facts at the grain its dynamics use. How words carve those primitives is a setting of the language, for nouns, verbs, and adjectives alike. A place, `PLACE.<n>`, is the disembodied world's grain of interaction (two things at one place can interact), not a region a speaker names, such as a desert. The default lexicon names the world's own concepts, one word each, so it carves at the world's joints; this is an assumption of the default, stated as such. Words defined over primitives (lumping, splitting, or cutting across the world's concepts, and partitions of a scalar), with crisp or graded meanings, are a later feature of the language, not part of phase (c). Three things are kept apart: whether a primitive is discrete or continuous (the world), where the world's rules draw boundaries (the world), and where a language's words draw boundaries (the language). Individuals, events, and time steps stay discrete in every world. (Jon, October 15, 2026, after a discussion of "desert", "supermarket", "present", cups and bowls, color terms, and verbs of placing.)
+3. **WM.38 (ruling 2a). Do pair fluents between entities start empty?** No: initial pairs are drawn once, when the world is generated, at a rate for each pair fluent drawn from `pair_fluents.initial_rates` (for example `[0.0, 0.05, 0.2]`; the list includes 0, so some pair fluents start empty, and `[0.0]` gives empty pair fluents everywhere). The draw respects the pair fluent's profile: unordered pairs for a symmetric pair fluent, one direction of each drawn pair for an asymmetric one, at most one partner per entity for a functional one. An episode keeps the pairs among its participants, and `scene.initial: redraw` redraws them among the participants, as for fluents. A total functional pair fluent between entities cannot survive the restriction to an episode, so in phase (c) a total functional pair fluent goes only toward places (see question 4). (Jon, October 15, 2026.)
+4. **WM.39 (rulings 2b and 2b revised). Where does each entity start?** Habitats are the default, and they are emergent, not stipulated: each entity's initial place is drawn with weights over places, a place's weight being (1 + the number of place event types the entity is able to do at that place) raised to the power `places.habitat_strength` (default 1; 0 gives the uniform draw of the earlier ruling, kept as the balanced option). The draw happens once, when the world is generated (a column of `entities.csv`), and `scene.initial: redraw` redraws with the same weights. `scene.initial_location: seed` stays an option. Reason: uniform places are the balanced form, and places that follow the entities' capacities at places are what the world's own constraints make uneven ("A principle for defaults"). Nothing states that a kind lives at a kind of place; "snakes are characteristic of deserts" emerges from entity features, place features, and the requirements of place event types. Depends on F3. (Jon, October 16, 2026.)
+5. **WM.40 (ruling 3). Are places generated with features?** Yes. Places come from a second run of the taxonomy generator, with a configuration of its own and a stream of its own: kinds of place with features, inheritance, scalars, and rules, whose instances are the places. Kinds of place are the world's own joints, with the status of kinds of entity, and the default language names them with nouns and refers to places as it refers to entities. Requirements of moves read the place's features through the existing constraint families. Places are not entities: `ENTITY` keeps meaning every instance, and comparison classes of places' scalars get a root of their own. Places as instances of the entities' taxonomy wait for the sorts of phase (d). Adjacency between places needs a join (the agent's current place and its features), so in phase (c) a move goes to any place in one step; adjacency comes with derived pair fluents in phase (d), computed from features (REL.19). Labels, for now: `PLACECATEGORY.<path>`, `PLACE.<path>.<k>` (in place of the design's `PLACE.<n>`), `PLACEPROPERTY.<n>`, `PLACEPART.<n>` (none by default), and `PLACESCALARDIM.<n>`. (Option C, Jon, October 15, 2026.)
+6. **WM.41 (ruling 4). Which profiles are in the default mix?** A profile is two attributes: symmetry (`symmetric`, `asymmetric`, or `general`) and `functional` (true or false; at most one partner as the first argument, in both directions for a symmetric pair fluent). Irreflexive holds of every pair fluent (REL.5). Total functional (exactly one partner) is location's profile alone, toward places. Runtime rules: an add that would break a profile is not legal (the reverse pair of an asymmetric pair fluent, a second partner in a functional one); an add in a total functional pair fluent replaces the old pair, which is what a move is; the generator never draws a delete on a total functional pair fluent; a symmetric add or delete writes both directions. Defaults: `pair_fluents.count: 4` (pair fluents between entities), `pair_fluents.symmetry: {symmetric: 1, asymmetric: 1, general: 1}` (equal: profiles are structure, not frequencies that the world's constraints make uneven), `pair_fluents.functional_rate: 0.25`, `pair_fluents.locations: 1` (one total functional pair fluent toward places whenever the world has places; 0 turns places off; more are allowed), and a default place taxonomy of 12 places (2 superordinates, depth 2, branching 3, 2 places per kind). How often generated preconditions read `SAME` on location starts low, and the stage that builds it records the default world's two-place share, which is expected to fall (a frequency of the world, measured rather than retuned in advance). A symmetric pair fluent's role swap is true, so role-swap test sets skip symmetric pair fluents. (Jon, October 15, 2026.)
+7. **WM.42 (ruling 5). Which statements about pair fluents does the corpus make at the class level?** Pair fluents change over time, so no class-level statement says which categories stand in them; class-level statements state what the definition guarantees. (a) Causal statements about pair fluents, `NEC` by the definition: effects and preconditions with pair-fluent literals ("things that approach things become near them", "things that eat things are near them before") and with `SAME` ("things that eat things are at the same place as them before"), with a new bound pronoun ("them") for the other participant. (b) Profile statements for symmetric and asymmetric pair fluents ("things that things are near are near them", "things that things are above are not above them"), in a new kind of feature document about a pair fluent; the functional statement ("things hold only one thing") waits for a counting quantifier, tied to phase (d)'s question about counts of parts. (c) Facts about places: kinds of place as topics of category documents, with the existing machinery, and capacity facts with a place as the patient ("swimmers can go to wet places"). (d) Habitual statements ("owls are often near mice") stay on the language to-do list, and (e) statements of where kinds live ("owls are in forests") wait for habitats. Test sets: causal and profile sets for pair fluents with the usual swaps; the role swap skips symmetric pair fluents. Instance level, as the design sets it: `HOLDS` and `BECOME` over pair fluents, location as a pair fluent toward a place ("the owl was at the `PLACECATEGORY.1.2`"), a pair fluent's word taking a noun phrase, and a move as a two-place event type with a place as its object ("the owl went to the `PLACECATEGORY.1.2`"). (Jon, October 15, 2026.)
+8. **WM.43 (F1). "Relation" in two senses.** Rename the new sense (option C). "Relation" keeps one meaning across the project: a static set of pairs fixed by features, as a two-place event type's requirement is (the base relation, `relation_proportions.csv`, relation facts, REL.19's static relations); nothing built is renamed. A stored relation of the design is a **pair fluent**, `PAIRFL.<n>`, the two-place counterpart of `BOOLFL` and `NUMFL`, in place of the design's `RELATION.<n>`. Pairs then fill the grid of the four kinds of fact: static base pairs do not exist (REL.19); static derived pairs are relations (requirements); base pair fluents are stored and changed by events; derived pair fluents (`SAME`, and phase (d)'s converses and closures) are computed. Literals: `PAIRFL.2(agent, patient)`, `SOME.PAIRFL.2(x)`, `SOMEOF.PAIRFL.2(x)`, `SAME.PAIRFL.1(agent, patient)`. The configuration block is `pair_fluents`. The phase is "Pair fluents, their profiles, and locations". On the language side, a pair fluent's word is a preposition ("near", "at", "above", in English glosses). Old decision rows (WM.4, WM.28, CG.67, REL.19) stay as written, and a new row records the rename when the specification moves into the repository. (Jon, October 15, 2026.)
+9. **WM.44 (F2). Which places are in an episode?** A local slice, as episodes already take of entities: the distinct initial places of the episode's participants, plus `scene.extra_places` (default 1) drawn uniformly from the other places; `scene.places: all` is an option. A move goes only to a place of the episode. Places are not drawn as participants are, but they are referents: a narrative introduces a place with "a" and refers to it later with "the", modifiers, and the levels of the place tree. A history lists the episode's places under `places`, beside `participants`, and each participant's place at `TIME.1` under `initial`. The stage that builds it measures how frequent moves are, with `scene.event_type_weights` as the lever. (Jon, October 15, 2026.)
+10. **WM.45 (F3). Event types whose patient is a place.** A flat set of place event types, `PLACEEVENTTYPE.<n>` (option C), `place_event_types.count: 4` by default. A requirement is a conjunction of one or two constraints from the families that make sense across the two kinds of feature: agent, patient (the place), cross-role, and key-lock; the comparison family is off by default, because an entity's scalar and a place's scalar are different dimensions. Two kinds, by their effects and preconditions: moves (an effect adds the location pair, `PAIRFL.1(agent, patient) := 1`, which replaces the agent's old place) and acts at a place (a precondition requires `PAIRFL.1(agent, patient)`, and the effects write the agent's fluents); `place_event_types.move_share: 0.5`. Capacities: `CAN.PLACEEVENTTYPE.<n>` (able to do the event type at some place) and `CANBE.PLACEEVENTTYPE.<n>` (a capacity of places). Places are static in phase (c): no place fluents, and no event changes a place. A second tree of place event types, with categories and more general verbs, is a later option (option B). (Jon, October 16, 2026.)
+11. **WM.46 (F4). How profiles make events illegal.** The generator compiles each profile into precondition literals, marked with the origin `profile` (option B): an add of `PAIRFL.k(agent, patient)` in an asymmetric pair fluent gains `NOT PAIRFL.k(patient, agent)`, and in a functional one `NOT SOME.PAIRFL.k(agent)` (and, for a symmetric functional one, `NOT SOME.PAIRFL.k(patient)` too). Preconditions may read `SOME` and `SOMEOF` literals. Legality stays the requirement and the precondition, as since phase (a); the runtime keeps each profile only as an invariant, whose violation is an error, and still writes a symmetric pair both ways and replaces the old pair in a total functional pair fluent. Events of one step never jointly break a profile, because the compiled literals are reads under the existing non-interference rule. A conditional add on an asymmetric or functional pair fluent cannot be compiled into a plain precondition, so the generator redraws such a condition. Explicit event files get the compiled literals too. Refines the runtime rules of question 4. (Jon, October 16, 2026.)
+12. **WM.47 (F5). Can conditions read pair fluents?** Yes: a fourth kind of condition literal, `pair`, reads a pair-fluent literal over the binding, `SAME`, or `SOME` and `SOMEOF` of a role. Default `event_types.effects.condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0.2}`. With the `pair` weight at 0, or no pair fluents, the conditions are drawn as in stage b3b (the pattern of WM.E194). A conditional add on an asymmetric or functional pair fluent is redrawn (F4). (Jon, October 16, 2026.)
+13. **WM.48 (F6). Is the `spatial` mark part of the rule-set identity?** No. The marks live in a separate `spatial` block of `definition.json`, with an identity of their own, `spatial_id`, the SHA-256 hash of the block's canonical JSON (option C). Disembodied files carry only the `rule_set_id`; 3D histories will carry both, and the Rust runtime checks both. Generated worlds carry no marks by default; marks come from an event file, or from a 3D world's configuration when the 3D link is built. (Jon, October 16, 2026.)
+14. **WM.49 (review point 1). Bare symbols for places.** `EVERYPLACE` is the comparison class of every place, as `ENTITY` is of every entity. `SOMEPLACE` is the generic head noun for places, as `THING` is for entities ("things that go to places"), in place of the draft's bare `PLACE`, which would share a word with the indexed labels `PLACE.<path>.<k>`. The word a language uses is a lexicon entry either way. (Jon, October 16, 2026.)
+15. **WM.50 (review point 2). The number of place features.** The default place taxonomy has 12 `PLACEPROPERTY` features (a quarter of them determined by rules, the taxonomy's default share), no `PLACEPART` features, and 2 `PLACESCALARDIM` features, over 12 places in 8 categories. Stage c3 checks that the default habitats are not flat: some place category's share of some entity superordinate's entities differs from uniform beyond a sampling margin stated from the configuration; the figure is recorded, not tuned. Jon's note: what makes a place a place can differ from place to place. A kitchen is a kitchen because it has an oven (a defining part); a desert's features are associations from common causes (determined properties whose rules share inputs). The settings must let a study specify and test different kinds of feature distribution, without requiring every place in a world to be the same in this respect. The taxonomy already allows both in one world, because roles are assigned at each category (a part can be defining for one kind of place and undiagnostic for another) while rules apply to every place; a study that wants defining parts sets `PLACEPART` above 0. Rules that apply to one branch of the tree only are not supported, and go on the taxonomy's to-do list. Whether an oven is a part of a kitchen or an entity located there is phase (d)'s question of integral parts and components. (Jon, October 16, 2026.)
+16. **WM.51 (review point 3). Derived fluents over pairs.** A quota, not a fitted weight: `pair_fluents.derived_rules` (default 1) is the number of derived Boolean fluents whose rule must read at least one `SOME` or `SOMEOF` literal of a pair fluent between entities. Those rules are drawn first, and the other derived fluents draw from the input pool as before, where `SOME` and `SOMEOF` literals weigh `pair_fluents.rule_weight` (default 1). The quota applies only when the world has pair fluents between entities, so with them off the world is unchanged. Every seed of the default world then has a derived fluent over a pair, not only seed 1. `numeric_fluents.rule_weight` keeps its weight of 21 (ruling 4 on stage b2); replacing it with a quota of the same kind is a possible change-track item, not required. (Jon, October 16, 2026.)
+17. **WM.52 (review point 4). `SAME` in preconditions.** The kinds of pair literal keep the drafted weights, `pair_fluents.literal_kinds: {pair: 0.6, same: 0.1, some: 0.3}`, and a quota is added: `pair_fluents.same_rules` (default 2) is the number of two-place event types whose precondition must require `SAME` on a location fluent (being at the same place). The quota's literals are drawn first, from their own part of `world:pair_preconditions`, among two-place event types for which some able binding can satisfy the rest of the precondition; the other literals are drawn as before. With the weights alone, the default world would have about one `SAME` literal, and some seeds none, so location would rarely bear on interactions and the emergent habitats would go mostly unused. The quota keeps `SAME` low, as ruling 4 asks, and bounds its effect on the two-place share, which stage c3 measures. It applies only when the world has location fluents. (Jon, October 16, 2026.)
+18. **WM.53 (review point 5). No move to where the agent already is.** Every move gains the compiled precondition literal `NOT PAIRFL.k(agent, patient)`, with the origin `move`, by the mechanism of F4 (option a). The rule is visible in `definition.json`, both runtimes evaluate it as an ordinary literal, and it follows phase (a)'s rule against empty effects. It is a base pair literal, so it makes a true precondition statement ("things that go to places are not at them before"). Blocked sentences skip a binding that only this literal blocks, because "the owl could not go to the wet place" is pragmatically odd when the owl is already there. Rejected: empty moves as legal events (they would inflate moves with non-events), and leaving such bindings out in the runtime (a rule hidden in code, which the Rust runtime would have to copy and the corpus could not state). (Jon, October 16, 2026.)
+19. **WM.54 (review point 6). The numbering of location fluents.** The pair fluents between entities come first, `PAIRFL.1` to `PAIRFL.n`, and the location fluents follow (option b); in the default world, with 4 pair fluents between entities, the location fluent is `PAIRFL.5`. Turning places on or off then leaves the label of every pair fluent between entities unchanged, so a paired study of the same world with and without places matches its pair fluents by label. Changing `pair_fluents.count` shifts the location labels, but that change already changes the world. A label of location's own (`LOCATIONFL`) is rejected, because location is a pair fluent that behaves like location by its profile (WM.28). The examples of the specification use `PAIRFL.5` for location; the rows of earlier rulings keep their wording (`PAIRFL.1`) as the record. (Jon, October 16, 2026.)
+20. **WM.55 (review point 7). Statements about `SOME` and `SOMEOF`.** Causal precondition statements whose literal is `SOME.PAIRFL.k(x)` or its negation are stated with the existing quantifiers on the generic noun, as the object of the pair fluent's preposition (option c): `BEFORE(EVENTVAR.1, NOT SOME.PAIRFL.2(VAR.1))` is "things that grab things are near no things before", and `SOME` is "near some things". The words `some`, `no`, and the generic noun exist already; the new grammar is a quantified noun phrase as the object of a preposition, within the limits of note 4 of stage b3b. This makes the commonest compiled literal, `NOT SOME` on a functional pair fluent, statable, so the corpus states the law behind a profile block. `SOMEOF` ("is someone's partner", including `SOMEOF` of a place, "someone is at the place") stays unstated, because it needs the pair fluent read backwards, a passive or a second relative clause, which waits on the language to-do list with stage b3b's second relative clause. Derived fluents need nothing new: each has its own state adjective. Rejected: leaving `SOME` unstated, and new function words `something` and `nothing`. Built in stage c5. (Jon, October 16, 2026.)
+21. **WM.56 (review point 8). The test change `object`.** A new change, `object`, swaps the second argument of an item: another referent, or another place of the scene (option a). It applies to pair and location items in the state sets ("the owl was at the dry place" for "the owl was at the wet place") and to the event sets of place event types ("the owl went to the dry place"), whose false items keep the three kinds of false event (possible, blocked, impossible) for the swapped place. A location item asks where an entity is: `predicate` would need a second location fluent, `subject` asks who is at a place, and `role` does not apply, so only `object` tests whether a model tracked where the entity went. Rejected: folding the swap into `subject`, which would mix "who" with "where" in analyses by change, and no object swap. (Jon, October 16, 2026.)
+22. **WM.57 (review point 9). The build stages.** Seven stages, in this order: c1 (places, static), c2a (pair fluents: the definition, the runtime, and the fixtures), c2b (pair fluents: generation), c3 (locations), c4 (the corpus at the instance level), c5a (grammar and class-level statements), and c5b (documents, test sets, and the end of the phase). Places come first because c1 is static and low-risk, and habitats in c3 need the requirements of place event types that c1 builds. Stage c5 of the draft is split in two, because the rulings of the review added to it (`them`, relative clauses with a prepositional predicate and `stranding`, quantified objects of prepositions, and the statements), as stages a5, a7, and b3 were split; a reference to "stage c5" in an earlier ruling means c5a for grammar and statements, and c5b for documents and test sets. Stage c2 was split first, and c5 after the review. This specification is a file of its own, because `WORLD_AND_LANGUAGE.md` was already long. (Jon, October 16, 2026.)
+23. **WM.58 (review point 10). Where a preposition goes when its object is the gap.** A setting, `grammar.word_order.stranding: strand | pied_pipe`, default `strand` (option a). Profile statements need a relative clause whose gap is the object of a preposition ("things that things are near"). With `strand`, the preposition stays in place before the gap, as in English; with `pied_pipe`, it moves to the front of the clause with the relative word, as many languages require. The default is English-like, as every grammar default is; both settings must give correct trees for all six clause orders, combined with `word_order.adposition`, and `interpret(tree)` must recover every logical form. Rejected: `pied_pipe` as the default (the only grammar default that would not be English-like), and stranding only (it would fix one answer to a point of variation between languages). Built in stage c5a. (Jon, October 16, 2026.)
+24. **WM.59 (review point 11). Conditional statements with pair conditions.** In phase (c), a conditional effect whose condition holds a `pair` literal makes no causal statement, and its unconditional form is never stated as true (option b). A pair condition links the statement's subject to the other participant, which needs a second relative clause on the subject, or a relative clause nested in the subject's relative clause with a bound pronoun as its subject ("things that strike things that they are near"); both lie beyond the grammar's limits (note 4 of stage b3b), and the relative clause of review point 10 does not help, because it is a subject of its own, not a condition on another clause. The default world has about 3 pair condition literals, so little is lost. The grammar needed joins stage b3b's second relative clause on the language to-do list. Rejected: "stated where the grammar can say it" (in practice almost never, and not definable in advance), and building the nested relative clause now. (Jon, October 16, 2026.)
