@@ -361,16 +361,23 @@ def test_relation_files_load_with_the_expected_columns(
             CAPACITIES_FILE,
             CAPACITY_ROLES_FILE,
             "comparison_classes.csv",
+            "place_capacities.csv",
             *RELATION_FILES,
         }
     )
     assert set(RELATION_FILES) == set(EXPECTED_COLUMNS)
     frames = tiny.statics.relation_stats.frames()
     assert list(frames) == list(RELATION_FILES)
+    assert tiny.places is not None
+    place_rows = len(tiny.places.event_types)
     for name, columns in EXPECTED_COLUMNS.items():
         frame = pl.read_csv(derived / name)
         assert frame.columns == columns, name
         assert frames[name].columns == columns
+        if name in ("relation_proportions.csv", "event_type_stats.csv"):
+            # the place event types' rows follow the static side's (stage c1)
+            frame = frame.filter(~pl.col("event_type").str.starts_with("PLACEEVENTTYPE."))
+            assert pl.read_csv(derived / name).height > frame.height or not place_rows
         assert frame.height == frames[name].height
     manifest = yaml.safe_load((derived / MANIFEST_FILE).read_text())
     for name in RELATION_FILES:
@@ -384,7 +391,9 @@ def test_relation_files_load_with_the_expected_columns(
         assert not (taxonomy_folder / name).exists(), name
         assert not (derived / name).exists(), name
     stats = pl.read_csv(derived / "event_type_stats.csv")
-    assert stats["event_type"].to_list() == [v.label for v in tiny.statics.event_tree.event_types]
+    assert stats["event_type"].to_list() == [
+        v.label for v in tiny.statics.event_tree.event_types
+    ] + list(tiny.places.event_type_labels)
     assert "verb" not in stats.columns
 
 
@@ -395,6 +404,7 @@ def test_no_relation_files_without_binary(tmp_path: Path) -> None:
             "seed": 1,
             "taxonomy": {"config": str(TAXONOMY_DATA / "tiny_relations.yaml")},
             "event_types": {"unary": {"count": 4}, "binary": None},
+            "places": None,
         },
         source="<test>",
     )
@@ -405,6 +415,33 @@ def test_no_relation_files_without_binary(tmp_path: Path) -> None:
     folder = world.write(tmp_path / "run")
     assert not any((folder / DERIVED_DIR / name).exists() for name in RELATION_FILES)
     assert (folder / DERIVED_DIR / CAPACITIES_FILE).is_file()
+    # with places but no two-place event types, the proportions and the event-type statistics
+    # hold the place event types' rows alone (stage c1)
+    config = config_from_mapping(
+        {
+            "name": "tiny",
+            "seed": 1,
+            "taxonomy": {"config": str(TAXONOMY_DATA / "tiny_relations.yaml")},
+            "event_types": {"unary": {"count": 4}, "binary": None},
+            "places": {"taxonomy": {"config": str(TAXONOMY_DATA / "places_tiny.yaml")}},
+            "place_event_types": {"count": 2},
+        },
+        source="<test>",
+    )
+    world = define(config)
+    frames = world.derived_frames()
+    assert set(frames) & set(RELATION_FILES) == {
+        "relation_proportions.csv",
+        "event_type_stats.csv",
+    }
+    assert frames["event_type_stats.csv"]["event_type"].to_list() == [
+        "PLACEEVENTTYPE.1",
+        "PLACEEVENTTYPE.2",
+    ]
+    assert set(frames["relation_proportions.csv"]["event_type"].to_list()) <= {
+        "PLACEEVENTTYPE.1",
+        "PLACEEVENTTYPE.2",
+    }
 
 
 # ---------------------------------------------------------------------------------------------

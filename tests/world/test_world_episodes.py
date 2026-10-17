@@ -72,7 +72,7 @@ def _generator(result: WorldResult, **settings) -> EpisodeGenerator:
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
-    return [et.label for et in definition.event_types if not et.is_category]
+    return [et.label for et in definition.event_types if et.performable]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -203,7 +203,7 @@ def _catch_before_eat(result: WorldResult, silence: bool) -> int:
     setters = {
         et.label
         for et in definition.event_types
-        if not et.is_category and any(e.fluent == "BOOLFL.2" and e.value for e in et.effects)
+        if et.performable and any(e.fluent == "BOOLFL.2" and e.value for e in et.effects)
     }
     weights = {label: 0.0 for label in setters - {"EVENTTYPE2.1.1"}} if silence else {}
     generator = _generator(result, size=(3, 6), steps=(6, 10), event_type_weights=weights)

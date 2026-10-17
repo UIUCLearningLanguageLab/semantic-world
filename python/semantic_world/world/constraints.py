@@ -108,13 +108,21 @@ class ScalarComparison:
     patient_scalar: int
     low: float
     high: float | None
+    patient_prefix: str = "SCALARDIM"
+    """The patient scalar's label prefix: ``SCALARDIM``, or ``PLACESCALARDIM`` when the patient
+    is a place (stage c1); the agent is always an entity."""
+
+    @property
+    def agent_label(self) -> str:
+        return f"SCALARDIM.{self.agent_scalar}"
+
+    @property
+    def patient_label(self) -> str:
+        return f"{self.patient_prefix}.{self.patient_scalar}"
 
     def atom(self) -> Cmp:
         return Cmp(
-            f"agent.SCALARDIM.{self.agent_scalar}",
-            f"patient.SCALARDIM.{self.patient_scalar}",
-            self.low,
-            self.high,
+            f"agent.{self.agent_label}", f"patient.{self.patient_label}", self.low, self.high
         )
 
     @property
@@ -220,27 +228,40 @@ class Constraint:
         )
         return self.table.evaluate(stacked).astype(bool)
 
-    def matrix(self, values: np.ndarray, scalars: np.ndarray, agents: np.ndarray) -> np.ndarray:
+    def matrix(
+        self,
+        values: np.ndarray,
+        scalars: np.ndarray,
+        agents: np.ndarray,
+        patient_values: np.ndarray | None = None,
+        patient_scalars: np.ndarray | None = None,
+    ) -> np.ndarray:
         """The constraint for every pair of an agent in ``agents`` and any instance as patient:
         shape ``(len(agents), instances)``. Each literal is evaluated once per instance and the
-        agent and patient columns are combined by broadcasting."""
+        agent and patient columns are combined by broadcasting. The patients are the rows of
+        ``patient_values`` and ``patient_scalars`` when given (the places, stage c1), and the
+        agents' own table otherwise."""
         agents = np.asarray(agents, dtype=np.intp)
-        n = values.shape[0]
+        if patient_values is None:
+            patient_values = values
+        if patient_scalars is None:
+            patient_scalars = scalars
+        n = patient_values.shape[0]
         index = np.zeros((len(agents), n), dtype=np.int64)
         for k, item in enumerate(self.literals):
             bit = 1 << (self.arity - 1 - k)
             if isinstance(item, ScalarComparison):
                 difference = (
                     scalars[agents, item.agent_scalar - 1][:, None]
-                    - scalars[:, item.patient_scalar - 1][None, :]
+                    - patient_scalars[:, item.patient_scalar - 1][None, :]
                 )
                 index += bit * item.of_difference(difference).astype(np.int64)
-            else:
+            elif item.role == "agent":
                 column = item.instance_values(values, scalars).astype(np.int64)
-                if item.role == "agent":
-                    index += bit * column[agents][:, None]
-                else:
-                    index += bit * column[None, :]
+                index += bit * column[agents][:, None]
+            else:
+                column = item.instance_values(patient_values, patient_scalars).astype(np.int64)
+                index += bit * column[None, :]
         return np.asarray(self.table.bits, dtype=np.uint8)[index].astype(bool)
 
     def record(self) -> dict[str, Any]:
@@ -252,8 +273,8 @@ class Constraint:
             "patient_literals": [_literal_record(item) for item in self.patient_literals],
             "comparisons": [
                 {
-                    "agent": f"SCALARDIM.{c.agent_scalar}",
-                    "patient": f"SCALARDIM.{c.patient_scalar}",
+                    "agent": c.agent_label,
+                    "patient": c.patient_label,
                     "low": c.low,
                     "high": c.high,
                 }
@@ -687,28 +708,48 @@ class _DensityTuner:
 
 
 class _ConstraintSampler:
+    """Samples constraints over an agent pool and a patient pool. For two-place event types
+    both pools are the entity taxonomy's features and scalars; for place event types (stage c1)
+    the patient pool is the place taxonomy's (``patient_scalars`` and ``patient_features``
+    given), its thresholds carry the place scalar prefix, and a comparison compares an entity
+    scalar with a place scalar, as a cross-dimension comparison does. ``binary`` supplies
+    ``rules``, ``constraint_families``, ``key_lock_pairs``, and ``comparison``."""
+
     def __init__(
         self,
-        binary: BinaryConfig,
+        binary: Any,
         scalars: ScalarsConfig,
         features: FeatureSet,
         rng: np.random.Generator,
+        patient_scalars: ScalarsConfig | None = None,
+        patient_features: FeatureSet | None = None,
     ) -> None:
         self.binary = binary
         self.scalars = scalars
         self.features = features
         self.rng = rng
+        self.cross_taxonomy = patient_features is not None
+        self.patient_scalars = scalars if patient_scalars is None else patient_scalars
+        self.patient_features = features if patient_features is None else patient_features
         self.sampling: RuleSampling = binary.rules
+        comparison_possible = scalars.count > 0 and self.patient_scalars.count > 0
         self.families = {
             f: w
             for f, w in binary.constraint_families.items()
-            if w > 0 and (f != "comparison" or scalars.count > 0)
+            if w > 0 and (f != "comparison" or comparison_possible)
         }
         types = self.sampling.input_types
         self.pool: list[Feature | int] = [f for f in features.features if f.type in types]
         if scalars.count and self.sampling.scalar_weight > 0:
             self.pool.extend(range(1, scalars.count + 1))
-        self.difference = NormalDist(0.0, math.sqrt(2.0) * scalars.model_std)
+        self.patient_pool: list[Feature | int] = [
+            f for f in self.patient_features.features if f.type in types
+        ]
+        if self.patient_scalars.count and self.sampling.scalar_weight > 0:
+            self.patient_pool.extend(range(1, self.patient_scalars.count + 1))
+        self.difference = NormalDist(
+            0.0, math.sqrt(scalars.model_std**2 + self.patient_scalars.model_std**2)
+        )
 
     # Entry point -----------------------------------------------------------------------------
 
@@ -770,13 +811,20 @@ class _ConstraintSampler:
         scalars = sorted(e for e in entries if isinstance(e, int))
         result: list[ConstraintLiteral] = [RoleFeature(role, f) for f in binary]
         for scalar in scalars:
-            result.append(RoleThreshold(role, self._draw_threshold(scalar)))
+            result.append(RoleThreshold(role, self._draw_threshold(scalar, role)))
         return result
 
-    def _draw_threshold(self, scalar: int) -> Threshold:
-        low, high = self.scalars.threshold_quantiles
+    def _draw_threshold(self, scalar: int, role: str = "agent") -> Threshold:
+        settings = self.patient_scalars if role == "patient" else self.scalars
+        features = self.patient_features if role == "patient" else self.features
+        low, high = settings.threshold_quantiles
         quantile = float(self.rng.uniform(low, high))
-        return Threshold(scalar, model_quantile_threshold(self.scalars, quantile), quantile)
+        return Threshold(
+            scalar, model_quantile_threshold(settings, quantile), quantile, features.scalar_prefix
+        )
+
+    def _pool_of(self, role: str) -> list[Feature | int]:
+        return self.patient_pool if role == "patient" else self.pool
 
     def _function(self, family: str, literals: Sequence[ConstraintLiteral]) -> Constraint:
         atoms = [item.atom() for item in literals]
@@ -790,7 +838,7 @@ class _ConstraintSampler:
 
     def _role_rule(self, role: str, family: str) -> Constraint:
         arity = _draw(self.rng, self.sampling.arity)
-        literals = self._literals(role, self._pick(self.pool, arity))
+        literals = self._literals(role, self._pick(self._pool_of(role), arity))
         return self._function(family, literals)
 
     def _cross(self) -> Constraint:
@@ -802,9 +850,9 @@ class _ConstraintSampler:
             )
         arity = _draw(self.rng, weights)
         agent_entry = self._pick(self.pool, 1)[0]
-        patient_entry = self._pick(self.pool, 1)[0]
+        patient_entry = self._pick(self.patient_pool, 1)[0]
         rest = [("agent", e) for e in self.pool if e != agent_entry] + [
-            ("patient", e) for e in self.pool if e != patient_entry
+            ("patient", e) for e in self.patient_pool if e != patient_entry
         ]
         more = self._pick(rest, arity - 2)
         agent_entries = [agent_entry] + [e for role, e in more if role == "agent"]
@@ -817,7 +865,7 @@ class _ConstraintSampler:
     def _key_lock(self) -> Constraint:
         pairs = _draw(self.rng, self.binary.key_lock_pairs)
         agent_entries = self._pick(self.pool, pairs)
-        patient_entries = self._pick(self.pool, pairs)
+        patient_entries = self._pick(self.patient_pool, pairs)
         agent_literals = self._literals("agent", agent_entries)
         patient_literals = self._literals("patient", patient_entries)
         negated = [bool(v) for v in self.rng.random(2 * pairs) < self.sampling.negation_probability]
@@ -841,11 +889,19 @@ class _ConstraintSampler:
     def _comparison(self) -> Constraint:
         count = self.scalars.count
         i = int(self.rng.integers(1, count + 1))
-        j = i
-        if count >= 2 and self.rng.random() < self.binary.comparison.cross_dimension_probability:
-            others = [s for s in range(1, count + 1) if s != i]
-            j = others[int(self.rng.integers(len(others)))]
+        if self.cross_taxonomy:
+            # an entity scalar against a place scalar: always across dimensions
+            j = int(self.rng.integers(1, self.patient_scalars.count + 1))
+        else:
+            j = i
+            if (
+                count >= 2
+                and self.rng.random() < self.binary.comparison.cross_dimension_probability
+            ):
+                others = [s for s in range(1, count + 1) if s != i]
+                j = others[int(self.rng.integers(len(others)))]
         window = bool(self.rng.random() < self.binary.comparison.window_probability)
+        prefix = self.patient_features.scalar_prefix
         low_q, high_q = self.binary.comparison.margin_quantiles
         if window:
             for _ in range(MAX_TRIES):
@@ -858,9 +914,9 @@ class _ConstraintSampler:
                 raise GenerationError(
                     "could not draw two distinct window margins; widen margin_quantiles"
                 )
-            comparison = ScalarComparison(i, j, m1, m2)
+            comparison = ScalarComparison(i, j, m1, m2, prefix)
         else:
             margin = round(self.difference.inv_cdf(float(self.rng.uniform(low_q, high_q))), 4)
-            comparison = ScalarComparison(i, j, margin, None)
+            comparison = ScalarComparison(i, j, margin, None, prefix)
         table = TruthTable(1, (0, 1))
         return Constraint("", "comparison", (comparison,), table, comparison.atom(), 1)

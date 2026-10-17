@@ -7,6 +7,14 @@ fluents) read literals of one entity, with ``role: null``. Binding rules (constr
 requirement that ANDs an event type's constraints) read literals of a binding: a feature or a
 threshold of the agent or the patient, a comparison between the two, or a constraint's output.
 Both scopes share the literal table; each has its own layers, written with a ``scope`` tag.
+Since stage c1 a world with places has two more scopes: ``place`` rules (the determined place
+features) read literals of one place, and ``place_binding`` rules (the constraints and
+requirements of the place event types) read literals of a binding of an entity and a place: a
+feature or a threshold of the agent (shared with the binding scope), a place feature or a place
+threshold of the patient, a comparison of an entity scalar with a place scalar, or a constraint's
+output. Place symbols, literals, rules, layers, and event types appear only when the world has
+places, so with ``places: null`` the definition and its identity are those of the world before
+places.
 
 The rule-set identity is the SHA-256 of the canonical JSON of ``symbols``, ``literals``,
 ``rules``, and ``event_types``. The agreement test checks every entity rule on every entity and
@@ -59,6 +67,14 @@ from semantic_world.world.numeric import (
     NumericFluents,
     NumericThreshold,
     empty_numeric,
+)
+from semantic_world.world.places import (
+    PLACE_EVENT_TYPE_KIND,
+    PLACE_KIND_OF_TYPE,
+    PLACE_SCALAR_KIND,
+    PLACES_FILE,
+    Places,
+    places_frame,
 )
 from semantic_world.world.statics import StaticWorld
 
@@ -125,8 +141,8 @@ def comparison_literal(item: ScalarComparison) -> LiteralSpec:
         {
             "kind": "comparison",
             "role": "binding",
-            "agent_scalar": f"SCALARDIM.{item.agent_scalar}",
-            "patient_scalar": f"SCALARDIM.{item.patient_scalar}",
+            "agent_scalar": item.agent_label,
+            "patient_scalar": item.patient_label,
             "operator": ">",
             "low": float(item.low),
             "high": None if item.high is None else float(item.high),
@@ -169,6 +185,25 @@ def constraint_literals(spec: ConstraintSpec) -> list[LiteralSpec]:
     return _constraint_input_literals(spec.source)
 
 
+PLACE_CONSTRAINT_PREFIX = "CONSTRAINT.PLACEEVENTTYPE."
+
+
+def _is_place_literal(reads: Mapping[str, Any], place_features: Mapping[str, int]) -> bool:
+    """Whether a literal belongs to the place or the place-binding scope alone: it reads a
+    place feature, a place scalar, or a place event type's constraint. A literal of the agent
+    (``agent.PROPERTY.3``) is shared with the binding scope and is not a place literal."""
+    kind = reads["kind"]
+    if kind == "feature":
+        return reads["feature"] in place_features
+    if kind == "threshold":
+        return reads["scalar"].startswith("PLACE")
+    if kind == "comparison":
+        return reads["patient_scalar"].startswith("PLACE")
+    if kind == "constraint":
+        return reads["constraint"].startswith(PLACE_CONSTRAINT_PREFIX)
+    return False
+
+
 _GROUP_ORDER = {
     (None, "feature"): 0,
     (None, "threshold"): 1,
@@ -183,9 +218,19 @@ _GROUP_ORDER = {
 }
 
 
-def _literal_sort_key(spec: LiteralSpec, position_of: dict[str, int]) -> tuple:
+def _literal_sort_key(
+    spec: LiteralSpec, position_of: dict[str, int], place_position_of: dict[str, int] | None = None
+) -> tuple:
+    """The order of the literal table: the entity groups of ``_GROUP_ORDER``, then the same
+    groups for the place literals (stage c1), so that a world without places orders its
+    literals as before."""
     reads = spec.reads
+    place_position_of = place_position_of or {}
     group = _GROUP_ORDER[(reads["role"], reads["kind"])]
+    if _is_place_literal(reads, place_position_of):
+        group += len(_GROUP_ORDER)
+        if reads["kind"] == "feature":
+            return (group, place_position_of[reads["feature"]], 0.0)
     if reads["kind"] == "feature":
         return (group, position_of[reads["feature"]], 0.0)
     if reads["kind"] == "threshold":
@@ -225,11 +270,23 @@ class Definition:
     rule_set_id: str
     numeric: NumericFluents = None  # type: ignore[assignment]
     """The numeric fluents (stage b2); none when the world has none."""
+    places: Places | None = None
+    """The places (stage c1); None without them."""
+    place_rules: tuple[RuleSpec, ...] = ()
+    """The rules of the determined place features (scope ``place``)."""
+    place_binding_rules: tuple[RuleSpec, ...] = ()
+    """The constraints and requirements of the place event types (scope ``place_binding``)."""
+    place_matrices: RuleMatrices | None = None
+    place_binding_matrices: RuleMatrices | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_index", {lit.key: i for i, lit in enumerate(self.literals)})
         if self.numeric is None:
             object.__setattr__(self, "numeric", empty_numeric(len(self.statics.instances)))
+        if self.places is not None and (
+            self.place_matrices is None or self.place_binding_matrices is None
+        ):
+            raise WorldError("a definition with places needs the place matrices")
 
     @property
     def literal_count(self) -> int:
@@ -244,7 +301,12 @@ class Definition:
     def rules_record(self) -> list[dict[str, Any]]:
         index = self._index  # type: ignore[attr-defined]
         records = []
-        for scope, rules in (("entity", self.entity_rules), ("binding", self.binding_rules)):
+        for scope, rules in (
+            ("entity", self.entity_rules),
+            ("binding", self.binding_rules),
+            ("place", self.place_rules),
+            ("place_binding", self.place_binding_rules),
+        ):
             for rule in rules:
                 entry = rule.record(index)
                 records.append(
@@ -261,16 +323,24 @@ class Definition:
 
     def layers_record(self) -> list[dict[str, Any]]:
         records = []
-        for scope, matrices in (
+        scopes: list[tuple[str, RuleMatrices | None]] = [
             ("entity", self.entity_matrices),
             ("binding", self.binding_matrices),
-        ):
+            ("place", self.place_matrices),
+            ("place_binding", self.place_binding_matrices),
+        ]
+        for scope, matrices in scopes:
+            if matrices is None:
+                continue
             for layer in matrices.layers_record():
                 records.append({"scope": scope, **layer})
         return records
 
     def event_types_record(self) -> list[dict[str, Any]]:
-        return [et.record() for et in self.event_types.event_types]
+        records = [et.record() for et in self.event_types.event_types]
+        if self.places is not None:
+            records += [et.record() for et in self.places.event_types]
+        return records
 
     def record(self) -> dict[str, Any]:
         """The contents of ``definition.json``."""
@@ -289,7 +359,12 @@ class Definition:
         entities table through their JSON form, exactly as a reader of the files sees them."""
         record = json.loads(to_json(self.record(), indent=1, sort_keys=False))
         entities = json.loads(to_json(entities_frame(self).to_dicts(), indent=1, sort_keys=False))
-        return runtime_definition(record, entities)
+        places = None
+        if self.places is not None:
+            places = json.loads(
+                to_json(places_frame(self.places).to_dicts(), indent=1, sort_keys=False)
+            )
+        return runtime_definition(record, entities, places)
 
     # Literal values ---------------------------------------------------------------------------
 
@@ -319,7 +394,7 @@ class Definition:
             numeric = self.numeric.initial_values
         for i, spec in enumerate(self.literals):
             reads = spec.reads
-            if reads["role"] is not None:
+            if reads["role"] is not None or _is_place_literal(reads, self._place_positions()):
                 continue
             if reads["kind"] == "feature":
                 feature = self.statics.features[reads["feature"]]
@@ -344,10 +419,13 @@ class Definition:
         patients = np.asarray(patients, dtype=np.intp)
         matrix = self.binding_matrices.literal_matrix(agents.shape[0])
         rows = {"agent": agents, "patient": patients}
+        place_positions = self._place_positions()
         for i, spec in enumerate(self.literals):
             reads = spec.reads
             role = reads["role"]
             if role is None or reads["kind"] == "constraint":
+                continue
+            if _is_place_literal(reads, place_positions):
                 continue
             if reads["kind"] == "feature":
                 matrix[:, i] = values[rows[role], self._position(reads["feature"])]
@@ -366,10 +444,121 @@ class Definition:
                 matrix[:, i] = holds.astype(np.uint8)
         return matrix
 
+    # Places (stage c1) ----------------------------------------------------------------------
+
+    def _place_positions(self) -> dict[str, int]:
+        if self.places is None:
+            return {}
+        return {f.label: f.position for f in self.places.taxonomy.features.features}
+
+    def place_literal_values(self, values: np.ndarray, scalars: np.ndarray) -> np.ndarray:
+        """The base literal matrix of places: free place features from ``values`` (the place
+        feature matrix, by position) and place thresholds from ``scalars``; 0 elsewhere."""
+        assert self.places is not None and self.place_matrices is not None
+        matrix = self.place_matrices.literal_matrix(values.shape[0])
+        features = self.places.taxonomy.features
+        for i, spec in enumerate(self.literals):
+            reads = spec.reads
+            if reads["role"] is not None or reads["kind"] not in ("feature", "threshold"):
+                continue
+            if reads["kind"] == "feature":
+                if reads["feature"] in features:
+                    feature = features[reads["feature"]]
+                    if feature.free:
+                        matrix[:, i] = values[:, feature.position]
+            elif reads["scalar"].startswith("PLACE"):
+                scalar = int(reads["scalar"].split(".")[1])
+                matrix[:, i] = (scalars[:, scalar - 1] > reads["threshold"]).astype(np.uint8)
+        return matrix
+
+    def place_binding_literal_values(
+        self,
+        values: np.ndarray,
+        scalars: np.ndarray,
+        place_values: np.ndarray,
+        place_scalars: np.ndarray,
+        agents: np.ndarray,
+        places: np.ndarray,
+    ) -> np.ndarray:
+        """The base literal matrix of aligned bindings ``(agents[k], places[k])`` of an entity
+        and a place, from the entities' full static values and scalars and the places' full
+        static values and scalars. Constraint outputs are 0."""
+        assert self.places is not None and self.place_binding_matrices is not None
+        agents = np.asarray(agents, dtype=np.intp)
+        places = np.asarray(places, dtype=np.intp)
+        matrix = self.place_binding_matrices.literal_matrix(agents.shape[0])
+        place_positions = self._place_positions()
+        for i, spec in enumerate(self.literals):
+            reads = spec.reads
+            role = reads["role"]
+            if role is None or reads["kind"] == "constraint":
+                continue
+            place = _is_place_literal(reads, place_positions)
+            if reads["kind"] == "feature":
+                if role == "agent":
+                    matrix[:, i] = values[agents, self._position(reads["feature"])]
+                elif place:
+                    matrix[:, i] = place_values[places, place_positions[reads["feature"]]]
+            elif reads["kind"] == "threshold":
+                scalar = int(reads["scalar"].split(".")[1])
+                if role == "agent":
+                    column = scalars[agents, scalar - 1]
+                elif place:
+                    column = place_scalars[places, scalar - 1]
+                else:
+                    continue
+                matrix[:, i] = (column > reads["threshold"]).astype(np.uint8)
+            elif place:
+                a = int(reads["agent_scalar"].split(".")[1])
+                p = int(reads["patient_scalar"].split(".")[1])
+                difference = scalars[agents, a - 1] - place_scalars[places, p - 1]
+                holds = difference > reads["low"]
+                if reads["high"] is not None:
+                    holds &= difference < reads["high"]
+                matrix[:, i] = holds.astype(np.uint8)
+        return matrix
+
 
 # ---------------------------------------------------------------------------------------------
 # Building
 # ---------------------------------------------------------------------------------------------
+
+
+def _place_symbols(places: Places) -> list[dict[str, Any]]:
+    """The place symbols (stage c1): the place features, the place scalars, and the place event
+    types, after every entity symbol."""
+    symbols: list[dict[str, Any]] = []
+    for feature in places.taxonomy.features.features:
+        symbols.append(
+            {
+                "label": feature.label,
+                "kind": PLACE_KIND_OF_TYPE[feature.type],
+                "derived": not feature.free,
+                "fluent": False,
+                "arity": 1,
+            }
+        )
+    for label in places.taxonomy.features.scalar_labels:
+        symbols.append(
+            {
+                "label": label,
+                "kind": PLACE_SCALAR_KIND,
+                "derived": False,
+                "fluent": False,
+                "arity": 1,
+            }
+        )
+    for et in places.event_types:
+        symbols.append(
+            {
+                "label": et.label,
+                "kind": PLACE_EVENT_TYPE_KIND,
+                "derived": False,
+                "fluent": False,
+                "arity": 2,
+            }
+        )
+    return symbols
 
 
 def _symbols(
@@ -428,13 +617,19 @@ def build_definition(
     fluents: Fluents,
     event_types: EventTypes,
     numeric: NumericFluents | None = None,
+    places: Places | None = None,
 ) -> Definition:
-    """Assemble the definition: the literal table, both rule scopes, the matrices, and the
-    identity."""
+    """Assemble the definition: the literal table, the rule scopes (entity and binding, and
+    with places the place and place-binding scopes), the matrices, and the identity."""
     taxonomy = statics.taxonomy
     if numeric is None:
         numeric = empty_numeric(len(taxonomy.instances))
     position_of = {f.label: f.position for f in statics.features.features}
+    place_position_of = (
+        {f.label: f.position for f in places.taxonomy.features.features}
+        if places is not None
+        else {}
+    )
     literal_specs: dict[str, LiteralSpec] = {}
 
     def add(spec: LiteralSpec) -> None:
@@ -482,43 +677,81 @@ def build_definition(
             RuleSpec(et.requirement_label, et.constraints, table, et.requirement_expression)
         )
         families[et.requirement_label] = "requirement"
+    place_rules: list[RuleSpec] = []
+    place_binding_rules: list[RuleSpec] = []
+    if places is not None:
+        for rule in places.taxonomy.rules.rules:
+            for spec in _rule_input_literals(rule, None):
+                add(spec)
+            inputs = tuple(input_key(item) for item in rule.inputs)
+            place_rules.append(
+                RuleSpec(rule.output.label, inputs, rule.table, str(rule.expression))
+            )
+            families[rule.output.label] = rule.family
+        for constraint in places.constraints:
+            for spec in _constraint_input_literals(constraint):
+                add(spec)
+            place_binding_rules.append(
+                RuleSpec(
+                    constraint.label,
+                    tuple(item.key for item in constraint.literals),
+                    constraint.table,
+                    str(constraint.expression),
+                )
+            )
+            families[constraint.label] = constraint.family
+        for pet in places.event_types:
+            labels = tuple(c.label for c in pet.constraints)
+            for label in labels:
+                add(constraint_literal(label))
+            table = TruthTable.from_function(len(labels), lambda x: all(x))
+            place_binding_rules.append(
+                RuleSpec(pet.requirement_label, labels, table, " AND ".join(labels) or "TRUE")
+            )
+            families[pet.requirement_label] = "requirement"
     literals = tuple(
-        sorted(literal_specs.values(), key=lambda s: _literal_sort_key(s, position_of))
+        sorted(
+            literal_specs.values(),
+            key=lambda s: _literal_sort_key(s, position_of, place_position_of),
+        )
     )
     entity_matrices = build_matrices(literals, entity_rules)
     binding_matrices = build_matrices(literals, binding_rules)
-    symbols = tuple(_symbols(statics, fluents, event_types, numeric))
-    draft = Definition(
-        statics,
-        fluents,
-        event_types,
-        symbols,
-        literals,
-        tuple(entity_rules),
-        tuple(binding_rules),
-        families,
-        entity_matrices,
-        binding_matrices,
-        "",
-        numeric,
+    place_matrices = build_matrices(literals, place_rules) if places is not None else None
+    place_binding_matrices = (
+        build_matrices(literals, place_binding_rules) if places is not None else None
     )
+    symbols = tuple(
+        _symbols(statics, fluents, event_types, numeric)
+        + (_place_symbols(places) if places is not None else [])
+    )
+
+    def assemble(identity: str) -> Definition:
+        return Definition(
+            statics,
+            fluents,
+            event_types,
+            symbols,
+            literals,
+            tuple(entity_rules),
+            tuple(binding_rules),
+            families,
+            entity_matrices,
+            binding_matrices,
+            identity,
+            numeric,
+            places,
+            tuple(place_rules),
+            tuple(place_binding_rules),
+            place_matrices,
+            place_binding_matrices,
+        )
+
+    draft = assemble("")
     identity = rule_set_id(
         symbols, draft.literals_record(), draft.rules_record(), draft.event_types_record()
     )
-    return Definition(
-        statics,
-        fluents,
-        event_types,
-        symbols,
-        literals,
-        tuple(entity_rules),
-        tuple(binding_rules),
-        families,
-        entity_matrices,
-        binding_matrices,
-        identity,
-        numeric,
-    )
+    return assemble(identity)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -530,6 +763,10 @@ def build_definition(
 class DefinitionReport:
     entity: AgreementReport
     binding: AgreementReport
+    place: AgreementReport | None = None
+    """The place rules (stage c1); None without places."""
+    place_binding: AgreementReport | None = None
+    """The place event types' constraints and requirements over every entity and place."""
 
 
 def check_definition(definition: Definition) -> DefinitionReport:
@@ -591,7 +828,69 @@ def check_definition(definition: Definition) -> DefinitionReport:
             max(total.settings, report.settings),
         )
         first = False
-    return DefinitionReport(entity_report, total)
+    if definition.places is None:
+        return DefinitionReport(entity_report, total)
+    return DefinitionReport(entity_report, total, *_check_places(definition))
+
+
+def _check_places(definition: Definition) -> tuple[AgreementReport, AgreementReport]:
+    """The agreement test of the place scopes: every place rule on every place against the
+    place taxonomy's instances, and every place constraint and requirement on every binding of
+    an entity and a place against the constraints' own evaluation."""
+    places = definition.places
+    assert places is not None
+    assert definition.place_matrices is not None
+    assert definition.place_binding_matrices is not None
+    place_instances = places.taxonomy.instances
+    place_values, place_scalars = place_instances.values, place_instances.scalars
+    base = definition.place_literal_values(place_values, place_scalars)
+    expected: dict[str, np.ndarray] = {}
+    for rule in places.taxonomy.rules.rules:
+        expected[rule.output.label] = place_values[:, rule.output.position]
+    place_report = check_agreement(
+        definition.place_matrices, definition.place_rules, base, expected
+    )
+    instances = definition.statics.taxonomy.instances
+    values, scalars = definition.statics.values, instances.scalars
+    n, m = len(instances), len(place_instances)
+    chunk = max(1, BINDING_CHUNK_ROWS // max(m, 1))
+    rules = definition.place_binding_rules
+    total = AgreementReport(len(rules), 0, 0, 0)
+    first = True
+    for start in range(0, n, chunk):
+        agent_rows = np.arange(start, min(start + chunk, n))
+        agents = np.repeat(agent_rows, m)
+        patients = np.tile(np.arange(m), len(agent_rows))
+        literal_values = definition.place_binding_literal_values(
+            values, scalars, place_values, place_scalars, agents, patients
+        )
+        expected_binding: dict[str, np.ndarray] = {}
+        for constraint in places.constraints:
+            expected_binding[constraint.label] = (
+                constraint.matrix(values, scalars, agent_rows, place_values, place_scalars)
+                .reshape(-1)
+                .astype(np.uint8)
+            )
+        for pet in places.event_types:
+            out = np.ones(len(agents), dtype=np.uint8)
+            for constraint in pet.constraints:
+                out &= expected_binding[constraint.label]
+            expected_binding[pet.requirement_label] = out
+        report = check_agreement(
+            definition.place_binding_matrices,
+            rules,
+            literal_values,
+            expected_binding,
+            max_exhaustive_inputs=12 if first else -1,
+        )
+        total = AgreementReport(
+            len(rules),
+            total.entities + report.entities,
+            max(total.exhaustive_rules, report.exhaustive_rules),
+            max(total.settings, report.settings),
+        )
+        first = False
+    return place_report, total
 
 
 # ---------------------------------------------------------------------------------------------
@@ -623,6 +922,8 @@ def write_definition(definition: Definition, folder: str | Path) -> None:
     folder = Path(folder)
     write_json(folder / DEFINITION_FILE, definition.record())
     entities_frame(definition).write_csv(folder / ENTITIES_FILE)
+    if definition.places is not None:
+        places_frame(definition.places).write_csv(folder / PLACES_FILE)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -630,15 +931,20 @@ def write_definition(definition: Definition, folder: str | Path) -> None:
 # ---------------------------------------------------------------------------------------------
 
 STATIC_KINDS = ("property", "part")
+PLACE_STATIC_KINDS = ("place_property", "place_part")
 SYMBOL_KINDS = STATIC_KINDS + (
     "scalar",
     "fluent",
     NUMERIC_KIND,
     "event_type",
     "event_type_category",
+    *PLACE_STATIC_KINDS,
+    PLACE_SCALAR_KIND,
+    PLACE_EVENT_TYPE_KIND,
 )
+EVENT_TYPE_KINDS = ("event_type", "event_type_category", PLACE_EVENT_TYPE_KIND)
 LITERAL_KINDS = ("feature", "threshold", "fluent", "numeric_threshold", "comparison", "constraint")
-SCOPES = ("entity", "binding")
+SCOPES = ("entity", "binding", "place", "place_binding")
 ENTITY_COLUMNS = ("label", "leaf")
 
 
@@ -662,6 +968,17 @@ class EventTypeRecord:
     @property
     def is_category(self) -> bool:
         return self.kind == "event_type_category"
+
+    @property
+    def place(self) -> bool:
+        """Whether the patient is a place (a place event type, stage c1)."""
+        return self.kind == PLACE_EVENT_TYPE_KIND
+
+    @property
+    def performable(self) -> bool:
+        """Whether the event type has events in an episode: an event type proper, never a
+        category, and in stage c1 never a place event type (they get their dynamics in c3)."""
+        return self.kind == "event_type"
 
 
 @dataclass(frozen=True)
@@ -710,6 +1027,20 @@ class RuntimeDefinition:
     initial_numeric: np.ndarray | None = None
     """Shape ``(entities, numeric fluents)``, float64: the initial values of ``entities.csv``;
     None when the table carries no numeric columns (a fixture gives them apart)."""
+    place_labels: tuple[str, ...] = ()
+    """The places (stage c1), in the order of ``places.csv``; empty without places."""
+    place_leaves: tuple[str, ...] = ()
+    place_free_features: tuple[str, ...] = ()
+    place_derived_features: tuple[str, ...] = ()
+    place_scalars: tuple[str, ...] = ()
+    place_free_values: np.ndarray | None = None
+    """Shape ``(places, free place features)``, uint8."""
+    place_scalar_values: np.ndarray | None = None
+    """Shape ``(places, place scalars)``, float64."""
+    place_rules: tuple[RuleSpec, ...] = ()
+    place_binding_rules: tuple[RuleSpec, ...] = ()
+    place_matrices: RuleMatrices | None = None
+    place_binding_matrices: RuleMatrices | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_entity_index", {v: i for i, v in enumerate(self.entity_labels)})
@@ -724,6 +1055,7 @@ class RuntimeDefinition:
         for name in ("numeric_ranges", "numeric_initial", "numeric_drift"):
             if getattr(self, name) is None:
                 object.__setattr__(self, name, {})
+        object.__setattr__(self, "_place_index", {v: i for i, v in enumerate(self.place_labels)})
         object.__setattr__(self, "_cones", _fluent_cones(self))
         object.__setattr__(self, "cache", {})
         for arr in (
@@ -731,6 +1063,8 @@ class RuntimeDefinition:
             self.scalar_values,
             self.initial_values,
             self.initial_numeric,
+            self.place_free_values,
+            self.place_scalar_values,
         ):
             if arr is not None:
                 arr.setflags(write=False)
@@ -738,6 +1072,23 @@ class RuntimeDefinition:
     @property
     def entity_count(self) -> int:
         return len(self.entity_labels)
+
+    @property
+    def has_places(self) -> bool:
+        return self.place_matrices is not None
+
+    @property
+    def place_count(self) -> int:
+        return len(self.place_labels)
+
+    def place_index(self, label: str) -> int:
+        try:
+            return self._place_index[label]  # type: ignore[attr-defined]
+        except KeyError:
+            raise WorldError(f"{label} is not a place of the definition") from None
+
+    def is_place_scalar(self, label: str) -> bool:
+        return label in self.place_scalars
 
     def entity_index(self, label: str) -> int:
         try:
@@ -829,20 +1180,24 @@ def _rule_spec(entry: Mapping[str, Any], literals: Sequence[LiteralSpec]) -> Rul
 
 
 def runtime_definition(
-    record: Mapping[str, Any], entities: Sequence[Mapping[str, Any]] | pl.DataFrame
+    record: Mapping[str, Any],
+    entities: Sequence[Mapping[str, Any]] | pl.DataFrame,
+    places: Sequence[Mapping[str, Any]] | pl.DataFrame | None = None,
 ) -> RuntimeDefinition:
     """Build the runtime's definition from a definition record (the contents of
-    ``definition.json``) and an entities table (the rows of ``entities.csv``, or the same rows
-    without the fluent columns). Checks the identity and every reference between the tables."""
+    ``definition.json``), an entities table (the rows of ``entities.csv``, or the same rows
+    without the fluent columns), and, for a world with places, the places table (the rows of
+    ``places.csv``). Checks the identity and every reference between the tables."""
     rows = entities.to_dicts() if isinstance(entities, pl.DataFrame) else list(entities)
+    place_rows = places.to_dicts() if isinstance(places, pl.DataFrame) else list(places or [])
     try:
-        return _runtime_definition(record, rows)
+        return _runtime_definition(record, rows, place_rows)
     except (KeyError, TypeError) as error:
         raise DefinitionError(f"the definition record is malformed: {error!r}") from None
 
 
 def _runtime_definition(
-    record: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
+    record: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], place_rows: Sequence
 ) -> RuntimeDefinition:
     _expect(
         record["version"] == DEFINITION_VERSION,
@@ -870,6 +1225,10 @@ def _runtime_definition(
     numeric_ranges: dict[str, tuple[float, float]] = {}
     numeric_initial: dict[str, InitialDistribution] = {}
     numeric_drift: dict[str, float] = {}
+    place_free: list[str] = []
+    place_derived: list[str] = []
+    place_scalars: list[str] = []
+    place_event_types: list[str] = []
     for symbol in record["symbols"]:
         label, kind = str(symbol["label"]), str(symbol["kind"])
         _expect(kind in SYMBOL_KINDS, f"the symbol {label} has the unknown kind {kind!r}")
@@ -879,6 +1238,12 @@ def _runtime_definition(
             (derived_features if symbol["derived"] else free_features).append(label)
         elif kind == "scalar":
             scalars.append(label)
+        elif kind in PLACE_STATIC_KINDS:
+            (place_derived if symbol["derived"] else place_free).append(label)
+        elif kind == PLACE_SCALAR_KIND:
+            place_scalars.append(label)
+        elif kind == PLACE_EVENT_TYPE_KIND:
+            place_event_types.append(label)
         elif kind == "fluent":
             rate = symbol.get("initial_rate")
             if symbol["derived"]:
@@ -918,6 +1283,12 @@ def _runtime_definition(
             numeric_initial[label] = initial
             numeric_drift[label] = float(drift)
 
+    has_places = bool(place_free or place_derived or place_scalars or place_event_types)
+    _expect(
+        not has_places or place_rows is not None,
+        "the definition has places, but no places table was given",
+    )
+
     # Literals.
     literals: list[LiteralSpec] = []
     for i, entry in enumerate(record["literals"]):
@@ -928,15 +1299,25 @@ def _runtime_definition(
         if kind == "feature":
             _expect(role in (None, *ROLES), f"the literal {key} has the role {role!r}")
             feature = entry["feature"]
+            feature_kind = symbols.get(feature, {}).get("kind")
             _expect(
-                symbols.get(feature, {}).get("kind") in STATIC_KINDS,
+                feature_kind in STATIC_KINDS + PLACE_STATIC_KINDS,
                 f"the literal {key} reads {feature}, which is not a static feature",
+            )
+            _expect(
+                role != "agent" or feature_kind in STATIC_KINDS,
+                f"the literal {key} reads a place feature of the agent, which is an entity",
             )
         elif kind == "threshold":
             _expect(role in (None, *ROLES), f"the literal {key} has the role {role!r}")
+            scalar_kind = symbols.get(entry["scalar"], {}).get("kind")
             _expect(
-                symbols.get(entry["scalar"], {}).get("kind") == "scalar",
+                scalar_kind in ("scalar", PLACE_SCALAR_KIND),
                 f"the literal {key} reads {entry['scalar']}, which is not a scalar",
+            )
+            _expect(
+                role != "agent" or scalar_kind == "scalar",
+                f"the literal {key} reads a place scalar of the agent, which is an entity",
             )
             _expect(
                 entry["operator"] == ">",
@@ -970,11 +1351,15 @@ def _runtime_definition(
             float(entry["threshold"])
         elif kind == "comparison":
             _expect(role == "binding", f"the literal {key} is a comparison with the role {role!r}")
-            for side in ("agent_scalar", "patient_scalar"):
-                _expect(
-                    symbols.get(entry[side], {}).get("kind") == "scalar",
-                    f"the literal {key} compares {entry[side]}, which is not a scalar",
-                )
+            _expect(
+                symbols.get(entry["agent_scalar"], {}).get("kind") == "scalar",
+                f"the literal {key} compares {entry['agent_scalar']}, which is not a scalar",
+            )
+            _expect(
+                symbols.get(entry["patient_scalar"], {}).get("kind")
+                in ("scalar", PLACE_SCALAR_KIND),
+                f"the literal {key} compares {entry['patient_scalar']}, which is not a scalar",
+            )
             _expect(
                 entry["operator"] == ">",
                 f"the literal {key} has the operator {entry['operator']!r}; only > is defined",
@@ -993,8 +1378,7 @@ def _runtime_definition(
     _expect(len(literal_keys) == len(literals), "the literal table has a duplicate key")
 
     # Rules.
-    entity_rules: list[RuleSpec] = []
-    binding_rules: list[RuleSpec] = []
+    rules_by_scope: dict[str, list[RuleSpec]] = {scope: [] for scope in SCOPES}
     outputs: set[str] = set()
     for entry in record["rules"]:
         scope = entry["scope"]
@@ -1007,21 +1391,30 @@ def _runtime_definition(
                 rule.output in derived_features or rule.output in derived_fluents,
                 f"the entity rule for {rule.output} does not compute a derived symbol",
             )
-            entity_rules.append(rule)
+        elif scope == "place":
+            _expect(
+                rule.output in place_derived,
+                f"the place rule for {rule.output} does not compute a derived place feature",
+            )
         else:
             _expect(
                 rule.output not in symbols,
-                f"the binding rule for {rule.output} computes a symbol; constraints and "
+                f"the {scope} rule for {rule.output} computes a symbol; constraints and "
                 f"requirements are not symbols",
             )
-            binding_rules.append(rule)
-    for label in (*derived_features, *derived_fluents):
+        rules_by_scope[scope].append(rule)
+    entity_rules = rules_by_scope["entity"]
+    binding_rules = rules_by_scope["binding"]
+    place_rules = rules_by_scope["place"]
+    place_binding_rules = rules_by_scope["place_binding"]
+    for label in (*derived_features, *derived_fluents, *place_derived):
         _expect(label in outputs, f"the derived symbol {label} has no rule")
     constraint_outputs = {rule.output for rule in binding_rules}
+    place_constraint_outputs = {rule.output for rule in place_binding_rules}
     for spec in literals:
         if spec.reads["kind"] == "constraint":
             _expect(
-                spec.reads["constraint"] in constraint_outputs,
+                spec.reads["constraint"] in constraint_outputs | place_constraint_outputs,
                 f"the literal {spec.key} reads {spec.reads['constraint']}, which no binding rule "
                 f"computes",
             )
@@ -1030,11 +1423,14 @@ def _runtime_definition(
     matrices = {}
     for scope in SCOPES:
         layers = [layer for layer in record["layers"] if layer.get("scope") == scope]
+        if scope in ("place", "place_binding") and not has_places and not layers:
+            matrices[scope] = None
+            continue
         try:
             built = RuleMatrices.from_record(record["literals"], layers)
         except WorldError as error:
             raise DefinitionError(f"the {scope} layers are malformed: {error}") from None
-        rules = entity_rules if scope == "entity" else binding_rules
+        rules = rules_by_scope[scope]
         _expect(
             sorted(built.outputs) == sorted(rule.output for rule in rules),
             f"the {scope} layers and the {scope} rules do not compute the same outputs",
@@ -1051,7 +1447,7 @@ def _runtime_definition(
     for entry in record["event_types"]:
         label = str(entry["label"])
         _expect(
-            symbols.get(label, {}).get("kind") in ("event_type", "event_type_category"),
+            symbols.get(label, {}).get("kind") in EVENT_TYPE_KINDS,
             f"the event type {label} is not an event-type symbol",
         )
         _expect(label not in seen, f"the event type {label} is listed twice")
@@ -1062,10 +1458,22 @@ def _runtime_definition(
             f"the event type {label} has arity {arity} and roles {entry['roles']}",
         )
         requirement = str(entry["requirement"]["output"])
-        _expect(
-            requirement in constraint_outputs,
-            f"the requirement {requirement} of {label} has no binding rule",
-        )
+        if entry["kind"] == PLACE_EVENT_TYPE_KIND:
+            _expect(
+                arity == 2 and requirement in place_constraint_outputs,
+                f"the requirement {requirement} of the place event type {label} has no "
+                f"place-binding rule",
+            )
+            _expect(
+                not entry["precondition"]["literals"] and not entry["effects"],
+                f"the place event type {label} has a precondition or effects, which stage c1 "
+                f"does not define",
+            )
+        else:
+            _expect(
+                requirement in constraint_outputs,
+                f"the requirement {requirement} of {label} has no binding rule",
+            )
         precondition = []
         for lit in entry["precondition"]["literals"]:
             _expect(
@@ -1225,6 +1633,45 @@ def _runtime_definition(
                 f"the entities table has a value of {f} outside its range [{low}, {high}]",
             )
 
+    # Places.
+    place_free_values = None
+    place_scalar_values = None
+    place_labels: list[str] = []
+    place_leaves: list[str] = []
+    if has_places:
+        _expect(len(place_rows) > 0, "the definition has places, but the places table is empty")
+        place_columns = list(place_rows[0].keys())
+        allowed_place = set(ENTITY_COLUMNS) | set(place_free) | set(place_scalars)
+        for column in place_columns:
+            _expect(
+                column in allowed_place,
+                f"the places table has the column {column}, which is not a label, a leaf, a "
+                f"free place feature, or a place scalar",
+            )
+        for needed in ("label", *place_free, *place_scalars):
+            _expect(needed in place_columns, f"the places table has no column {needed}")
+        for row in place_rows:
+            _expect(
+                set(row.keys()) == set(place_columns),
+                "the places table has rows with different columns",
+            )
+            place_labels.append(str(row["label"]))
+        _expect(
+            len(set(place_labels)) == len(place_labels), "the places table has a duplicate label"
+        )
+        _expect(
+            not set(place_labels) & set(labels_so_far := [str(r["label"]) for r in rows]),
+            "a place has the label of an entity",
+        )
+        del labels_so_far
+        place_leaves = [str(row.get("leaf", "")) for row in place_rows]
+        place_free_values = _bit_matrix(place_rows, place_free)
+        place_scalar_values = np.array(
+            [[float(row[s]) for s in place_scalars] for row in place_rows], dtype=np.float64
+        ).reshape(len(place_rows), len(place_scalars))
+    else:
+        _expect(not place_rows, "a places table was given, but the definition has no places")
+
     definition = RuntimeDefinition(
         record=dict(record),
         rule_set_id=identity,
@@ -1250,6 +1697,17 @@ def _runtime_definition(
         numeric_initial=numeric_initial,
         numeric_drift=numeric_drift,
         initial_numeric=initial_numeric,
+        place_labels=tuple(place_labels),
+        place_leaves=tuple(place_leaves),
+        place_free_features=tuple(place_free),
+        place_derived_features=tuple(place_derived),
+        place_scalars=tuple(place_scalars),
+        place_free_values=place_free_values,
+        place_scalar_values=place_scalar_values,
+        place_rules=tuple(place_rules),
+        place_binding_rules=tuple(place_binding_rules),
+        place_matrices=matrices["place"],
+        place_binding_matrices=matrices["place_binding"],
     )
     return definition
 
@@ -1269,7 +1727,8 @@ def _bit_matrix(rows: Sequence[Mapping[str, Any]], columns: Sequence[str]) -> np
 
 
 def load_definition(folder: str | Path) -> RuntimeDefinition:
-    """Read ``definition.json`` and ``entities.csv`` from a world run folder."""
+    """Read ``definition.json``, ``entities.csv``, and, in a world with places, ``places.csv``
+    from a world run folder."""
     folder = Path(folder)
     path = folder / DEFINITION_FILE
     if not path.is_file():
@@ -1278,7 +1737,18 @@ def load_definition(folder: str | Path) -> RuntimeDefinition:
     entities = pl.read_csv(
         folder / ENTITIES_FILE, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8}
     )
-    return runtime_definition(record, entities)
+    places = None
+    if any(
+        s.get("kind") == PLACE_EVENT_TYPE_KIND
+        or s.get("kind") in PLACE_STATIC_KINDS
+        or s.get("kind") == PLACE_SCALAR_KIND
+        for s in record.get("symbols", ())
+    ):
+        places_path = folder / PLACES_FILE
+        if not places_path.is_file():
+            raise DefinitionError(f"{places_path} is missing: the definition has places")
+        places = pl.read_csv(places_path, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
+    return runtime_definition(record, entities, places)
 
 
 __all__ = [

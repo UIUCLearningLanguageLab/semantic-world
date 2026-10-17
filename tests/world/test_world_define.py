@@ -672,11 +672,20 @@ def test_definition_json_has_the_spec_keys_and_a_recomputable_identity(
         "numeric_fluent",
         "event_type",
         "event_type_category",
+        # stage c1: the place symbols, present only when the world has places
+        "place_property",
+        "place_scalar",
+        "place_event_type",
     }
     assert all(lit["index"] == i for i, lit in enumerate(data["literals"]))
     for et in data["event_types"]:
         assert et["roles"] == ["agent"][: et["arity"]] + (["patient"] if et["arity"] == 2 else [])
-    assert {layer["scope"] for layer in data["layers"]} == {"entity", "binding"}
+    assert {layer["scope"] for layer in data["layers"]} == {
+        "entity",
+        "binding",
+        "place",
+        "place_binding",
+    }
     rates = {s["label"]: s["initial_rate"] for s in data["symbols"] if s["kind"] == "fluent"}
     assert rates == {f.label: None if f.derived else f.initial_rate for f in tiny.fluents.fluents}
     assert rates["BOOLFL.4"] is None and all(
@@ -787,10 +796,16 @@ def test_capacities_equal_the_static_sides(tiny: WorldResult, tiny_folder: Path)
     statics = tiny.statics
     assert statics.projections is not None
     two_place = statics.projections.all_columns()
+    assert tiny.places is not None
+    place_labels = tiny.places.event_type_labels
     assert capacities.columns == [
         "label",
         *(f"CAN.{label}" for label in statics.unary.labels),
-        *two_place,
+        *(c for c in two_place if not c.startswith("ACTUAL_") and c != "approximate"),
+        *(f"CAN.{label}" for label in place_labels),
+        "approximate",
+        *(c for c in two_place if c.startswith("ACTUAL_")),
+        *(f"ACTUAL_CAN.{label}" for label in place_labels),
     ]
     assert capacities["label"].to_list() == list(statics.instances.labels)
     for label in statics.unary.labels:
@@ -828,7 +843,10 @@ def test_relation_statistics_are_the_static_sides(tiny: WorldResult, tiny_folder
     stats = pl.read_csv(tiny_folder / "derived" / "event_type_stats.csv")
     # The default density check is on, so the density columns follow the fixed ones.
     assert stats.columns == [*EVENT_TYPE_STAT_COLUMNS, "leaf_pair_density", "tries"]
-    assert stats["event_type"].to_list() == event_types
+    # the place event types' rows follow the two-place ones (stage c1)
+    assert tiny.places is not None
+    assert stats["event_type"].to_list() == event_types + list(tiny.places.event_type_labels)
+    stats = stats.filter(pl.col("event_type").is_in(event_types))
     assert statics.relations.event_type_density is not None
     assert np.allclose(
         stats["leaf_pair_density"].to_numpy(),
@@ -1060,6 +1078,8 @@ def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> N
         "world:numeric_conditions",
         "world:stats",
         "world:episodes",
+        "world:places",
+        "world:place_event_types",
     ]
     assert "taxonomy:rules" in seeds
     assert not any(name in seeds for name in ("taxonomy:verb_tree", "taxonomy:constraints"))

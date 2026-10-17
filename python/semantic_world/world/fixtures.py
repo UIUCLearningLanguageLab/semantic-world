@@ -36,6 +36,7 @@ from semantic_world.world.definition import (
 from semantic_world.world.errors import StepError, WorldError
 from semantic_world.world.identity import read_json, rule_set_id, to_json, write_json
 from semantic_world.world.numeric import clamp
+from semantic_world.world.places import places_frame
 from semantic_world.world.runtime import (
     ENTITY,
     RANGE,
@@ -86,7 +87,12 @@ class BruteForce:
     constraints are evaluated by their definitions, recursively, with no caching across states.
     """
 
-    def __init__(self, record: Mapping[str, Any], entities: Sequence[Mapping[str, Any]]) -> None:
+    def __init__(
+        self,
+        record: Mapping[str, Any],
+        entities: Sequence[Mapping[str, Any]],
+        places: Sequence[Mapping[str, Any]] = (),
+    ) -> None:
         self.record = record
         self.symbols = {s["label"]: s for s in record["symbols"]}
         self.literals = list(record["literals"])
@@ -94,6 +100,10 @@ class BruteForce:
         self.event_types = {e["label"]: e for e in record["event_types"]}
         self.entities = {str(row["label"]): row for row in entities}
         self.entity_labels = [str(row["label"]) for row in entities]
+        self.places = {str(row["label"]): row for row in places}
+        """The places' static facts (stage c1), by label; a place event type's patient is one
+        of them."""
+        self.place_labels = [str(row["label"]) for row in places]
         self.base_fluents = [
             s["label"] for s in record["symbols"] if s["kind"] == "fluent" and not s["derived"]
         ]
@@ -141,8 +151,8 @@ class BruteForce:
     ) -> int:
         kind = literal["kind"]
         if kind == "comparison":
-            agent = float(self.entities[roles["agent"]][literal["agent_scalar"]])
-            patient = float(self.entities[roles["patient"]][literal["patient_scalar"]])
+            agent = float(self._row(roles["agent"])[literal["agent_scalar"]])
+            patient = float(self._row(roles["patient"])[literal["patient_scalar"]])
             difference = agent - patient
             holds = difference > literal["low"]
             if literal["high"] is not None:
@@ -154,7 +164,7 @@ class BruteForce:
         if kind == "feature":
             return self.feature(literal["feature"], entity)
         if kind == "threshold":
-            return int(float(self.entities[entity][literal["scalar"]]) > literal["threshold"])
+            return int(float(self._row(entity)[literal["scalar"]]) > literal["threshold"])
         if kind == "fluent":
             assert state is not None
             return self.fluent(literal["fluent"], entity, state)
@@ -162,10 +172,17 @@ class BruteForce:
             return int(self._value(entity, literal["fluent"]) > literal["threshold"])
         raise WorldError(f"unknown literal kind {kind!r}")
 
+    def _row(self, label: str) -> Mapping[str, Any]:
+        """The static facts of an entity, or of a place."""
+        row = self.entities.get(label)
+        if row is None:
+            row = self.places[label]
+        return row
+
     def feature(self, label: str, entity: str) -> int:
         if self.symbols[label]["derived"]:
             return self.rule(label, {"entity": entity}, None)
-        return int(self.entities[entity][label])
+        return int(self._row(entity)[label])
 
     def fluent(self, label: str, entity: str, state: BruteState) -> int:
         if self.symbols[label]["derived"]:
@@ -230,6 +247,8 @@ class BruteForce:
         pool = [e for e in self.entity_labels if entities is None or e in set(entities)]
         if et["arity"] == 1:
             return [{"agent": e} for e in pool]
+        if et["kind"] == "place_event_type":
+            return [{"agent": a, "patient": p} for a in pool for p in self.place_labels]
         return [{"agent": a, "patient": p} for a in pool for p in pool if a != p]
 
     def legal_bindings(
@@ -485,9 +504,11 @@ def fixture_record(
     error: Mapping[str, Any] | None,
     initial_numeric: Mapping[str, Mapping[str, float]] | None = None,
     comparisons: Sequence[Mapping[str, Any]] = (),
+    places: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Assemble a fixture, with the rule-set identity recomputed from the inline definition.
-    ``initial_numeric`` and ``comparisons`` (stage b2) are written only when given."""
+    ``initial_numeric`` and ``comparisons`` (stage b2) and ``places`` (stage c1) are written
+    only when given."""
     identity = rule_set_id(
         record["symbols"], record["literals"], record["rules"], record["event_types"]
     )
@@ -498,8 +519,10 @@ def fixture_record(
         "rule_set_id": identity,
         "definition": {**dict(record), "rule_set_id": identity},
         "entities": list(entities),
-        "initial": dict(initial),
     }
+    if places is not None:
+        fixture["places"] = list(places)
+    fixture["initial"] = dict(initial)
     if initial_numeric is not None:
         fixture["initial_numeric"] = {e: dict(v) for e, v in initial_numeric.items()}
     fixture["steps"] = list(steps)
@@ -565,7 +588,7 @@ def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
             f"{identity}",
         )
     try:
-        definition = runtime_definition(record, fixture["entities"])
+        definition = runtime_definition(record, fixture["entities"], fixture.get("places"))
         check_definition_agreement(definition)
     except WorldError as error:
         raise _fail(name, f"cannot load its definition: {error}") from None
@@ -585,7 +608,7 @@ def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
         )
     except WorldError as err:
         raise _fail(name, f"has a malformed initial state: {err}") from None
-    performable = [et.label for et in definition.event_types if not et.is_category]
+    performable = [et.label for et in definition.event_types if et.performable]
     states = [state]
     for k, step in enumerate(fixture["steps"], start=1):
         is_error_step = error is not None and error["step"] == k
@@ -758,7 +781,7 @@ def check_fixture_brute(fixture: Mapping[str, Any]) -> FixtureReport:
     fluents, and the numeric values after each step, and the comparisons. Raises
     :class:`FixtureError` on the first disagreement."""
     name = str(fixture.get("name", "?"))
-    brute = BruteForce(fixture["definition"], fixture["entities"])
+    brute = BruteForce(fixture["definition"], fixture["entities"], fixture.get("places", ()))
     state: BruteState = {e: frozenset(fixture["initial"].get(e, ())) for e in brute.entity_labels}
     numeric = _brute_initial_numeric(brute, fixture)
     numerics: list[BruteNumeric | None] = [numeric]
@@ -885,13 +908,15 @@ def generate_fixture(
     max_events: int = 3,
     error: str | None = None,
     initial_numeric: Mapping[str, Mapping[str, float]] | None = None,
+    places: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """A fixture whose expected values come from the brute-force evaluator. Each step draws a
     random set of up to ``max_events`` non-interfering legal events. With ``error``, the last
     step instead holds an illegal event (``illegal``) or two interfering legal events
     (``interference``), found among the events of that state; the search fails with
-    :class:`WorldError` when the state offers none."""
-    brute = BruteForce(record, entities)
+    :class:`WorldError` when the state offers none. ``places`` (stage c1) is the places table
+    of a world with places."""
+    brute = BruteForce(record, entities, places or ())
     rng = np.random.default_rng(seed)
     state: BruteState = {e: frozenset(initial.get(e, ())) for e in brute.entity_labels}
     numeric: BruteNumeric | None = (
@@ -926,7 +951,15 @@ def generate_fixture(
             entry["numeric"] = brute.numeric_record(numeric)
         out_steps.append(entry)
     return fixture_record(
-        name, description, record, entities, initial, out_steps, error_entry, initial_numeric
+        name,
+        description,
+        record,
+        entities,
+        initial,
+        out_steps,
+        error_entry,
+        initial_numeric,
+        places=places,
     )
 
 
@@ -973,6 +1006,16 @@ def fixture_inputs(
     return record, entities, initial
 
 
+def fixture_places(definition: Definition) -> list[dict[str, Any]] | None:
+    """A built definition's places table as a fixture gives it (the rows of ``places.csv``,
+    through their JSON form), or None without places (stage c1)."""
+    if definition.places is None:
+        return None
+    return json.loads(
+        to_json(places_frame(definition.places).to_dicts(), indent=1, sort_keys=False)
+    )
+
+
 def fixture_initial_numeric(definition: Definition) -> dict[str, dict[str, float]] | None:
     """A built definition's initial numeric values as a fixture gives them, or None without
     numeric fluents."""
@@ -990,6 +1033,7 @@ def world_fixtures(
     interfering events. Every expected value comes from the brute-force evaluator."""
     record, entities, initial = fixture_inputs(definition)
     initial_numeric = fixture_initial_numeric(definition)
+    places = fixture_places(definition)
     fixtures = []
     for seed in range(1, count + 1):
         fixtures.append(
@@ -1003,6 +1047,7 @@ def world_fixtures(
                 seed,
                 steps,
                 initial_numeric=initial_numeric,
+                places=places,
             )
         )
     for kind, text in (
@@ -1021,6 +1066,7 @@ def world_fixtures(
                 steps,
                 error=kind,
                 initial_numeric=initial_numeric,
+                places=places,
             )
         )
     return fixtures

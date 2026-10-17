@@ -84,13 +84,15 @@ class Threshold:
     quantile: float
     """The threshold's quantile in the scalar's model distribution: the literal is true with
     probability ``1 - quantile`` for an independent instance."""
+    prefix: str = SCALAR_PREFIX
+    """The scalar's label prefix: ``SCALARDIM``, or ``PLACESCALARDIM`` in a place taxonomy."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "threshold", round(float(self.threshold), 4))
 
     @property
     def label(self) -> str:
-        return f"{SCALAR_PREFIX}.{self.scalar}"
+        return f"{self.prefix}.{self.scalar}"
 
     @property
     def key(self) -> str:
@@ -590,7 +592,7 @@ class _Builder:
             name = atom.name
             if name.startswith("ISA."):
                 raise error("expression", f"reads {name}; no rule may read an ISA feature")
-            if name.startswith(f"{SCALAR_PREFIX}."):
+            if name.startswith(f"{self.features.scalar_prefix}."):
                 raise error(
                     "expression",
                     f"reads the scalar {name} without a threshold; write {name} > x or {name} <= x",
@@ -630,7 +632,7 @@ class _Builder:
     def _explicit_threshold(self, atom: Gt, error) -> Threshold:
         prefix, _, number = atom.scalar.partition(".")
         if (
-            prefix != SCALAR_PREFIX
+            prefix != self.features.scalar_prefix
             or not number.isdigit()
             or not 1 <= int(number) <= self.scalars.count
         ):
@@ -639,7 +641,10 @@ class _Builder:
                 f"reads unknown scalar {atom.scalar}; the run has {self.scalars.count} scalars",
             )
         return Threshold(
-            int(number), atom.threshold, model_quantile_of(self.scalars, atom.threshold)
+            int(number),
+            atom.threshold,
+            model_quantile_of(self.scalars, atom.threshold),
+            self.features.scalar_prefix,
         )
 
     # Templates -----------------------------------------------------------------------------------
@@ -750,7 +755,12 @@ class _Builder:
     def _draw_threshold(self, scalar: int) -> Threshold:
         low, high = self.scalars.threshold_quantiles
         quantile = float(self.rng.uniform(low, high))
-        return Threshold(scalar, model_quantile_threshold(self.scalars, quantile), quantile)
+        return Threshold(
+            scalar,
+            model_quantile_threshold(self.scalars, quantile),
+            quantile,
+            self.features.scalar_prefix,
+        )
 
     def _weighted_pick(
         self, candidates: list[Feature | int], sampling: RuleSampling, count: int

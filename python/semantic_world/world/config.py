@@ -42,6 +42,7 @@ from semantic_world.taxonomy.config import (
 )
 from semantic_world.taxonomy.config import Config as TaxonomyRunConfig
 from semantic_world.taxonomy.config import config_from_mapping as taxonomy_from_mapping
+from semantic_world.taxonomy.streams import stream_seed
 
 ROLES = ("agent", "patient")
 REMOVED_BINARY_KEYS = ("projections",)
@@ -50,6 +51,15 @@ CONSTRAINT_FAMILIES = ("agent", "patient", "cross", "key_lock", "comparison")
 EVENT_FEATURE_PREFIX = "EVENTFEAT"
 TWO_PLACE_PREFIX = "EVENTTYPE2."
 DEFAULT_UNARY_COUNT = 20
+DEFAULT_PLACES_CONFIG = "data/taxonomy/places_default.yaml"
+"""The default place taxonomy (stage c1 of ``docs/specs/WORLD_PHASE_C.md``): the code's default
+follows ``data/world/default.yaml``, as the entity taxonomy's does (WM.E41)."""
+PLACES_STREAM = "world:places"
+"""The stream whose seed the place taxonomy takes when ``places.taxonomy.seed`` is null."""
+PLACE_CONSTRAINT_FAMILIES = CONSTRAINT_FAMILIES
+DEFAULT_PLACE_CONSTRAINT_FAMILIES = {"agent": 1, "patient": 1, "cross": 1, "key_lock": 1}
+"""The comparison family is off by default for place event types: an entity's scalar and a
+place's scalar are different dimensions (WM.45)."""
 
 
 @dataclass(frozen=True)
@@ -326,6 +336,57 @@ class BinaryConfig:
 
 
 @dataclass(frozen=True)
+class PlacesConfig:
+    """The ``places`` block (stage c1): the place taxonomy, and the habitat strength that stage
+    c3 uses."""
+
+    taxonomy: TaxonomySetting
+    habitat_strength: float
+    taxonomy_run: TaxonomyRunConfig
+    """The validated place taxonomy configuration, with its seed resolved."""
+
+    @property
+    def seed(self) -> int:
+        return self.taxonomy_run.seed
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "taxonomy": {
+                "config": self.taxonomy.config,
+                "seed": self.taxonomy.seed,
+                "resolved": self.taxonomy_run.resolved(),
+            },
+            "habitat_strength": self.habitat_strength,
+        }
+
+
+@dataclass(frozen=True)
+class PlaceEventTypesConfig:
+    """The ``place_event_types`` block (stage c1): how many, the move share that stage c3 uses,
+    the number of constraints of a requirement, the constraint families, and the rule settings
+    of the constraints (the taxonomy's ``rules`` settings with the overrides applied)."""
+
+    count: int
+    move_share: float
+    constraints: dict[int, float]
+    constraint_families: dict[str, float]
+    rules: RuleSampling
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        return tuple(f"PLACEEVENTTYPE.{i}" for i in range(1, self.count + 1))
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "count": self.count,
+            "move_share": self.move_share,
+            "constraints": dict(self.constraints),
+            "constraint_families": dict(self.constraint_families),
+            "rules": self.rules.resolved(),
+        }
+
+
+@dataclass(frozen=True)
 class EventTypesConfig:
     unary: UnaryConfig
     binary: BinaryConfig | None
@@ -357,6 +418,11 @@ class Config:
     taxonomy_run: TaxonomyRunConfig
     numeric_fluents: NumericFluentsConfig = None  # type: ignore[assignment]
     """The numeric fluents (stage b2); the code's defaults when the file has no block."""
+    places: PlacesConfig | None = None
+    """The places (stage c1); None turns them off. ``config_from_mapping`` gives a mapping
+    without a ``places`` key the default place taxonomy."""
+    place_event_types: PlaceEventTypesConfig | None = None
+    """The place event types; None exactly when the world has no places."""
 
     def __post_init__(self) -> None:
         if self.numeric_fluents is None:
@@ -401,6 +467,10 @@ class Config:
             "fluents": self.fluents.resolved(),
             "numeric_fluents": self.numeric_fluents.resolved(),
             "event_types": self.event_types.resolved(),
+            "places": None if self.places is None else self.places.resolved(),
+            "place_event_types": (
+                None if self.place_event_types is None else self.place_event_types.resolved()
+            ),
         }
 
 
@@ -733,6 +803,90 @@ def _read_binary(root: _Node, taxonomy: TaxonomyRunConfig) -> BinaryConfig | Non
     )
 
 
+def _read_places(root: _Node, source: str, master_seed: int) -> PlacesConfig | None:
+    """The ``places`` block: the default place taxonomy when absent, None when null."""
+    value = root.get("places", {}, nullable=True)
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise root.error("places", f"expected a mapping or null, found {_describe(value)}")
+    node = _Node(root.source, root.field("places"), value)
+    setting_node = node.mapping("taxonomy")
+    path = setting_node.string("config", DEFAULT_PLACES_CONFIG)
+    seed = (
+        setting_node.int("seed", None, min=0, max=SEED_MAX)
+        if setting_node.data.get("seed") is not None
+        else None
+    )
+    setting_node.seen.add("seed")
+    setting_node.get("resolved", None, nullable=True)  # written by a run's config.yaml; ignored
+    setting_node.finish()
+    strength = float(node.number("habitat_strength", 1.0, min=0))
+    node.finish()
+    setting = TaxonomySetting(path, seed)
+    # The seed of the stream world:places, as the taxonomy takes it (its low 64 bits), when the
+    # setting gives none, so that the place taxonomy never repeats the entities' draws.
+    place_seed = stream_seed(master_seed, PLACES_STREAM) % (SEED_MAX + 1) if seed is None else seed
+    run = taxonomy_from_mapping(
+        _taxonomy_mapping(source, setting, place_seed), source=setting.config
+    )
+    if run.labels.kind != "place":
+        raise node.error(
+            "taxonomy.config",
+            f"{path} must set labels.kind: place; a place taxonomy writes the place labels",
+        )
+    return PlacesConfig(setting, strength, run)
+
+
+def _read_place_event_types(
+    root: _Node, places: PlacesConfig | None, taxonomy: TaxonomyRunConfig
+) -> PlaceEventTypesConfig | None:
+    """The ``place_event_types`` block: the defaults when absent and the world has places; an
+    error when given without places."""
+    value = root.get("place_event_types", {}, nullable=True)
+    if places is None:
+        if value not in ({}, None):
+            raise root.error(
+                "place_event_types",
+                "needs places; the world has places: null, so leave this block out or null",
+            )
+        return None
+    if value is None:
+        value = {"count": 0}
+    if not isinstance(value, dict):
+        raise root.error(
+            "place_event_types", f"expected a mapping or null, found {_describe(value)}"
+        )
+    node = _Node(root.source, root.field("place_event_types"), value)
+    count = node.int("count", 4, min=0)
+    move_share = node.probability("move_share", 0.5)
+    constraints = _count_weights(node, "constraints", {1: 0.6, 2: 0.4})
+    if 0 in constraints and constraints[0] > 0:
+        raise node.error("constraints", "a requirement has at least one constraint")
+    families = node.weights(
+        "constraint_families",
+        dict(DEFAULT_PLACE_CONSTRAINT_FAMILIES),
+        allowed=PLACE_CONSTRAINT_FAMILIES,
+    )
+    place_scalars = places.taxonomy_run.scalars.count
+    usable = [
+        f
+        for f, w in families.items()
+        if w > 0 and (f != "comparison" or (taxonomy.scalars.count > 0 and place_scalars > 0))
+    ]
+    if count and not usable:
+        raise node.error(
+            "constraint_families",
+            "no constraint family with positive weight can be used: the comparison family needs "
+            "scalars in both the entity and the place taxonomy",
+        )
+    rules_node = node.mapping("rules")
+    sampling = _read_sampling(rules_node, taxonomy.rules.sampling)
+    rules_node.finish()
+    node.finish()
+    return PlaceEventTypesConfig(count, move_share, constraints, families, sampling)
+
+
 def _read_event_types(node: _Node, taxonomy: TaxonomyRunConfig) -> EventTypesConfig:
     unary = _read_unary(node.mapping("unary"), taxonomy)
     binary = _read_binary(node, taxonomy)
@@ -763,8 +917,21 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     fluents = _read_fluents(root.mapping("fluents"))
     numeric = _read_numeric_fluents(root.mapping("numeric_fluents"))
     event_types = _read_event_types(root.mapping("event_types"), taxonomy_run)
+    places = _read_places(root, source, master_seed)
+    place_event_types = _read_place_event_types(root, places, taxonomy_run)
     root.finish()
-    return Config(name, master_seed, taxonomy, fluents, event_types, source, taxonomy_run, numeric)
+    return Config(
+        name,
+        master_seed,
+        taxonomy,
+        fluents,
+        event_types,
+        source,
+        taxonomy_run,
+        numeric,
+        places,
+        place_event_types,
+    )
 
 
 def load_config(path: str | Path, *, seed: int | None = None) -> Config:

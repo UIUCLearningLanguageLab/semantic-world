@@ -31,7 +31,13 @@ from semantic_world.world.dynamics import ConditionLiteral, Effect, parse_condit
 from semantic_world.world.episodes import EpisodeGenerator, Relatedness
 from semantic_world.world.errors import DefinitionError, InterferenceError
 from semantic_world.world.event_types import check_dynamics
-from semantic_world.world.fixtures import BruteEvent, BruteForce, fixture_inputs, read_fixture
+from semantic_world.world.fixtures import (
+    BruteEvent,
+    BruteForce,
+    fixture_inputs,
+    fixture_places,
+    read_fixture,
+)
 from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, define
 from semantic_world.world.history import replay
@@ -78,7 +84,7 @@ def runtime(conditional: WorldResult) -> RuntimeDefinition:
 @pytest.fixture(scope="module")
 def brute(conditional: WorldResult) -> BruteForce:
     record, entities, _ = fixture_inputs(conditional.definition)
-    return BruteForce(record, entities)
+    return BruteForce(record, entities, fixture_places(conditional.definition) or ())
 
 
 @pytest.fixture(scope="module")
@@ -117,7 +123,7 @@ def _brute_state(definition: RuntimeDefinition, state: State) -> dict[str, froze
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
-    return [et.label for et in definition.event_types if not et.is_category]
+    return [et.label for et in definition.event_types if et.performable]
 
 
 def _labels(definition: RuntimeDefinition, label: str, binding: tuple[int, ...]) -> dict:
@@ -215,7 +221,9 @@ def test_the_two_settings_are_read_and_validated() -> None:
     assert any(e.condition for et in world.event_types.leaves for e in et.effects)
 
 
-def test_the_loader_reads_and_validates_conditions(runtime: RuntimeDefinition) -> None:
+def test_the_loader_reads_and_validates_conditions(
+    conditional: WorldResult, runtime: RuntimeDefinition
+) -> None:
     record = json.loads(json.dumps(runtime.record))
     entities = [
         dict(zip(["label", "leaf", *runtime.free_features, *runtime.scalars], row, strict=True))
@@ -234,7 +242,8 @@ def test_the_loader_reads_and_validates_conditions(runtime: RuntimeDefinition) -
         )
         return data
 
-    loaded = runtime_definition(rehash(json.loads(json.dumps(record))), entities)
+    places = fixture_places(conditional.definition)
+    loaded = runtime_definition(rehash(json.loads(json.dumps(record))), entities, places)
     assert loaded.rule_set_id == runtime.rule_set_id
     for a, b in zip(loaded.event_types, runtime.event_types, strict=True):
         assert a.effects == b.effects
@@ -253,12 +262,12 @@ def test_the_loader_reads_and_validates_conditions(runtime: RuntimeDefinition) -
             "expression": "x",
         }
         with pytest.raises(DefinitionError, match=message):
-            runtime_definition(rehash(broken), entities)
+            runtime_definition(rehash(broken), entities, places)
     broken = json.loads(json.dumps(record))
     target = next(e for e in broken["event_types"] if e["label"] == entry["label"])
     target["effects"][0]["condition"] = {"literals": [literal, literal], "expression": "x"}
     with pytest.raises(DefinitionError, match="twice"):
-        runtime_definition(rehash(broken), entities)
+        runtime_definition(rehash(broken), entities, places)
 
 
 def test_check_dynamics_enforces_the_condition_rules(conditional: WorldResult) -> None:
@@ -469,7 +478,9 @@ def test_the_hand_world_interference_through_a_condition_names_the_condition() -
     fixture = read_fixture(
         Path("tests/fixtures/world/hand_17_condition_read_by_another_event.json")
     )
-    definition = runtime_definition(fixture["definition"], fixture["entities"])
+    definition = runtime_definition(
+        fixture["definition"], fixture["entities"], fixture.get("places")
+    )
     state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
     reader = Event.from_labels(definition, "EVENTTYPE1.5", {"agent": "INSTANCE.1.1.1"})
     writer = Event.from_labels(definition, "EVENTTYPE1.3", {"agent": "INSTANCE.1.1.1"})
