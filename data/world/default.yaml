@@ -57,3 +57,14 @@ event_types:
     numeric_share: 0.3                        # the share of effects that are numeric (+= or -=, stage b2), when the world has numeric fluents
     numeric_amounts: [0.1, 0.5]               # the interval a numeric effect's constant is drawn from
   event_file: null                            # a file of explicit event types
+
+places:                                       # the places (stage c1): a second taxonomy run; null turns places off
+  taxonomy: {config: data/taxonomy/places_default.yaml, seed: null}   # a taxonomy configuration with labels.kind: place; null: the seed of the stream world:places
+  habitat_strength: 1.0                       # the weight of an entity's capacities at a place in its initial place (stage c3; 0: uniform)
+
+place_event_types:                            # the place event types (stage c1: requirements only; their moves and acts come in stage c3)
+  count: 4
+  move_share: 0.5                             # the share that are moves (stage c3)
+  constraints: {1: 0.6, 2: 0.4}               # weights over the number of constraints of a requirement
+  constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}   # the comparison family (an entity scalar against a place scalar) is off by default
+  rules: {}                                   # overrides of the taxonomy's rules settings for the constraints

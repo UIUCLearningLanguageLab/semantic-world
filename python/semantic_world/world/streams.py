@@ -15,7 +15,9 @@ precondition literals, and condition literals: each a stream of its own, so that
 ``numeric_fluents.count: 0``, or a numeric share of 0, every other draw is unchanged),
 ``world:stats`` (the statistics episodes), and ``world:episodes`` (``simulate``). An event type
 whose preconditions are redrawn draws from its own parts, ``world:preconditions:<label>`` and
-``world:numeric_preconditions:<label>``.
+``world:numeric_preconditions:<label>``. Stage c1 adds ``world:places`` (the seed of the place
+taxonomy run, when the configuration gives none) and ``world:place_event_types`` (the
+requirements of the place event types, and the samples of their capacities' local test).
 """
 
 from __future__ import annotations
@@ -42,7 +44,13 @@ STREAM_NAMES = (
     "numeric_conditions",
     "stats",
     "episodes",
+    "places",
+    "place_event_types",
 )
+"""The order is the order of creation: the two place streams of stage c1 (``world:places``, the
+place taxonomy's seed, and ``world:place_event_types``, the requirements of the place event types
+and the samples of their capacities' local test) come after every earlier stream, so that with
+``places: null`` every earlier draw is unchanged."""
 
 
 class WorldStreams:
@@ -64,6 +72,8 @@ class WorldStreams:
     numeric_conditions: np.random.Generator
     stats: np.random.Generator
     episodes: np.random.Generator
+    places: np.random.Generator
+    place_event_types: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

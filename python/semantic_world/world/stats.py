@@ -30,6 +30,7 @@ from semantic_world.world.event_types import EventTypes
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.history import History
 from semantic_world.world.numeric import NumericFluents
+from semantic_world.world.places import Places, places_stats
 
 if TYPE_CHECKING:
     from semantic_world.world.statics import StaticWorld
@@ -295,6 +296,7 @@ def world_stats(
     episodes: dict[str, Any] | None = None,
     statics: StaticWorld | None = None,
     numeric: NumericFluents | None = None,
+    places: Places | None = None,
 ) -> dict[str, Any]:
     leaves = event_types.leaves
     by_kind = {
@@ -382,5 +384,6 @@ def world_stats(
         "absorbing_fluents": absorbing_fluents(event_types, fluents),
         "numeric_fluents": numeric_stats(numeric, event_types, fluents),
         "relations": relation_stats(statics) if statics is not None else None,
+        "places": places_stats(places),
         "episodes": episodes,
     }

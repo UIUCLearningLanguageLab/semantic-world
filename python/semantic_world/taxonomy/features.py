@@ -20,7 +20,6 @@ import numpy as np
 from semantic_world.taxonomy.config import (
     FEATURE_TYPES,
     FREE_FEATURE_TYPES,
-    LABEL_PREFIX,
     SCALAR_PREFIX,
     Config,
 )
@@ -54,6 +53,9 @@ class FeatureSet:
     scalar_count: int = 0
     """The number of scalar dimensions ``SCALARDIM.1`` to ``SCALARDIM.<count>``. Scalars are not in
     ``features``: they are always free, have no rules, and live in separate float arrays."""
+    scalar_prefix: str = SCALAR_PREFIX
+    """The label prefix of the scalars: ``SCALARDIM``, or ``PLACESCALARDIM`` in a place
+    taxonomy (``labels.kind``, stage c1)."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_by_label", {f.label: f for f in self.features})
@@ -77,7 +79,7 @@ class FeatureSet:
 
     @property
     def scalar_labels(self) -> tuple[str, ...]:
-        return tuple(f"{SCALAR_PREFIX}.{i}" for i in range(1, self.scalar_count + 1))
+        return tuple(f"{self.scalar_prefix}.{i}" for i in range(1, self.scalar_count + 1))
 
     def of_type(self, feature_type: str) -> tuple[Feature, ...]:
         return tuple(f for f in self.features if f.type == feature_type)
@@ -168,7 +170,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
         for index in range(1, free_count + 1):
             features.append(
                 Feature(
-                    label=f"{LABEL_PREFIX[t]}.{index}",
+                    label=f"{config.labels.feature_prefix(t)}.{index}",
                     type=t,
                     index=index,
                     free=True,
@@ -182,7 +184,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
             index = free_count + offset + 1
             features.append(
                 Feature(
-                    label=f"{LABEL_PREFIX[t]}.{index}",
+                    label=f"{config.labels.feature_prefix(t)}.{index}",
                     type=t,
                     index=index,
                     free=False,
@@ -197,6 +199,7 @@ def build_features(config: Config, streams: Streams) -> FeatureSet:
         max_chain_depth=depth,
         warnings=tuple(warnings),
         scalar_count=config.scalars.count,
+        scalar_prefix=config.labels.scalar,
     )
 
 

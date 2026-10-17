@@ -20,6 +20,7 @@ from semantic_world.world.fixtures import (
     fixture_initial_numeric,
     fixture_inputs,
     fixture_paths,
+    fixture_places,
     generate_fixture,
     read_fixture,
     world_fixtures,
@@ -101,7 +102,15 @@ def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
     numeric = fixture_initial_numeric(tiny.definition)
     fixture = generate_fixture(
-        "probe", "a probe", record, entities, initial, 3, 3, initial_numeric=numeric
+        "probe",
+        "a probe",
+        record,
+        entities,
+        initial,
+        3,
+        3,
+        initial_numeric=numeric,
+        places=fixture_places(tiny.definition),
     )
     broken = json.loads(json.dumps(fixture))
     first = next(k for k, v in broken["steps"][0]["legal"].items() if v)
@@ -173,7 +182,7 @@ def test_brute_force_reads_truth_tables_only(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
     record = json.loads(json.dumps(record))
     record["layers"] = []
-    brute = BruteForce(record, entities)
+    brute = BruteForce(record, entities, fixture_places(tiny.definition) or ())
     state = {e: frozenset(initial[e]) for e in brute.entity_labels}
     numeric = fixture_initial_numeric(tiny.definition)
     derived = brute.derived_record(state, numeric)
@@ -189,7 +198,15 @@ def test_check_fixture_reports_disagreements(tiny: WorldResult) -> None:
     record, entities, initial = fixture_inputs(tiny.definition)
     numeric = fixture_initial_numeric(tiny.definition)
     fixture = generate_fixture(
-        "probe", "a probe", record, entities, initial, 1, 3, initial_numeric=numeric
+        "probe",
+        "a probe",
+        record,
+        entities,
+        initial,
+        1,
+        3,
+        initial_numeric=numeric,
+        places=fixture_places(tiny.definition),
     )
     check_fixture(fixture)
     broken = json.loads(json.dumps(fixture))
@@ -232,6 +249,7 @@ def test_error_fixtures_need_the_right_kind(tiny: WorldResult) -> None:
         4,
         error="illegal",
         initial_numeric=numeric,
+        places=fixture_places(tiny.definition),
     )
     assert fixture["error"] == {"step": 4, "kind": "illegal"}
     assert "state" not in fixture["steps"][-1]

@@ -53,11 +53,13 @@ OFF_SETTINGS: dict[str, dict[str, Any]] = {
     "fluents_off": {"fluents": {"count": 0}},
     "two_place_off": {"event_types": {"binary": None}},
     "numeric_fluents_off": {"numeric_fluents": {"count": 0}},
+    "places_off": {"places": None, "place_event_types": None},
 }
 """The features of the world with an off setting, and the setting: conditional effects (stage
 b1, promised byte-identical to the world without them), fluents (the static side is promised
 unchanged), two-place event types (the taxonomy and the one-place side are promised unchanged),
-and numeric fluents (stage b2, promised byte-identical to the b1 world)."""
+numeric fluents (stage b2, promised byte-identical to the b1 world), and places (stage c1,
+promised byte-identical to the world before places, after the rounding of drawn reals)."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -134,12 +136,20 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
         if (folder / "derived" / "event_type_stats.csv").is_file()
         else []
     )
-    two_place_rates = [float(row["proportion_true"]) for row in relation_rows]
+    # the place event types' rows (stage c1) are densities over entity and place bindings,
+    # reported under ``places``; the two-place figure stays over ordered pairs of entities
+    two_place_rates = [
+        float(row["proportion_true"])
+        for row in relation_rows
+        if not row["event_type"].startswith("PLACEEVENTTYPE.")
+    ]
     episodes = stats["episodes"]
     relations = stats.get("relations") or {}
     effects = stats["effects"]
     conditional = effects["conditional"]
     numeric = stats.get("numeric_fluents") or {}
+    places = stats.get("places") or {}
+    place_densities = list((places.get("density") or {}).values())
     figures: dict[str, Any] = {
         "name": config["name"],
         "seed": config["seed"],
@@ -196,6 +206,17 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
             "changes_per_event": episodes.get("numeric_changes_per_event"),
             "drift_changes_per_step": episodes.get("drift_changes_per_step"),
         },
+        "places": {
+            "on": bool(places),
+            "places": places.get("places", 0),
+            "categories": places.get("categories", 0),
+            "features": json.loads(json.dumps(places.get("features", {}))),
+            "place_event_types": places.get("place_event_types", 0),
+            "constraints": places.get("constraints", 0),
+            "constraint_families": dict(places.get("constraint_families", {})),
+            "density": _rate(place_densities) if place_densities else None,
+            "approximate_capacities": places.get("approximate_capacities"),
+        },
         "fix_ups": dict(stats["fix_ups"]),
         "enabling_graph": dict(stats["enabling_graph"]),
         "absorbing_fluents": list(stats["absorbing_fluents"]),
@@ -221,12 +242,18 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
     figures["categories_with_word"] = sum(
         1 for e in definition["event_types"] if e["kind"] == "event_type_category"
     )
+    place_text = (
+        f", {figures['places']['places']} places and "
+        f"{figures['places']['place_event_types']} place event types"
+        if figures["places"]["on"]
+        else ""
+    )
     figures["wrote_line"] = (
         f"{entities} entities, {figures['fluents_total']} fluents "
         f"({figures['fluents']['derived']} derived), {figures['numeric']['count']} numeric "
         f"fluents, {figures['event_types']['one_place']} "
         f"one-place and {figures['event_types']['two_place']} two-place event types, "
-        f"{figures['constraints']} constraints; rule set {figures['rule_set_short']}"
+        f"{figures['constraints']} constraints{place_text}; rule set {figures['rule_set_short']}"
     )
     figures["redraw_notes"] = "\n".join(
         f"note: the preconditions of {label} were drawn again {count} time(s)"

@@ -238,6 +238,17 @@ def compute_relation_stats(
     )
 
 
+def proportion_schema() -> dict[str, Any]:
+    """The schema of ``relation_proportions.csv``."""
+    return _proportion_schema()
+
+
+def event_type_stat_schema(with_density: bool = False) -> dict[str, Any]:
+    """The schema of ``event_type_stats.csv``, with the density columns when the density check
+    was on."""
+    return _event_type_stat_schema(with_density)
+
+
 def _proportion_schema() -> dict[str, Any]:
     return {
         "event_type": pl.Utf8,

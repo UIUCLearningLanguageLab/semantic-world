@@ -4,6 +4,8 @@
 name: default
 seed: 1                          # master seed, a 64-bit unsigned integer
 
+labels: {kind: entity}           # the labels the run writes: entity (CATEGORY, INSTANCE, PROPERTY, PART, SCALARDIM) or place (PLACECATEGORY, PLACE, PLACEPROPERTY, PLACEPART, PLACESCALARDIM; stage c1)
+
 features:
   property:  {count: 40, proportion_determined: 0.25, expected_true_free: 6}
   part: {count: 40, proportion_determined: 0.25, expected_true_free: 6}

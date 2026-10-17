@@ -4,7 +4,7 @@ The taxonomy generator builds an artificial world of categories and objects. The
 
 This guide covers running the generator, the ideas behind it, the configuration file, the output files, and the Python interface. The design is specified in `docs/specs/TAXONOMY_GENERATOR.md` and `docs/specs/TAXONOMY_RELATIONS.md`, with the changes of the world-and-language refactor (`docs/specs/WORLD_AND_LANGUAGE.md`, "Labels" and "Taxonomy outputs").
 
-**Status.** Complete: the base generator and scalar dimensions. Since stage a5b of the world-and-language refactor, the generator writes the labels of that specification (`CATEGORY.1.2`, `INSTANCE.1.2.3`, `PROPERTY.4`, `PART.5`, `SCALARDIM.1`), writes the base vector and the derived values apart (`base.csv` and `derived/`), and makes categories, instances, features, and scalars only. The actions (the old CAN features) and the verbs with their relations are made by the world package; see "Where CAN features and verbs went" below, and `WORLD.md` for the world package itself.
+**Status.** Complete: the base generator and scalar dimensions. Since stage a5b of the world-and-language refactor, the generator writes the labels of that specification (`CATEGORY.1.2`, `INSTANCE.1.2.3`, `PROPERTY.4`, `PART.5`, `SCALARDIM.1`), writes the base vector and the derived values apart (`base.csv` and `derived/`), and makes categories, instances, features, and scalars only. The actions (the old CAN features) and the verbs with their relations are made by the world package; see "Where CAN features and verbs went" below, and `WORLD.md` for the world package itself. Since stage c1 of phase (c), a run can be a taxonomy of places (`labels.kind: place`): the same generator, writing the place labels, which the world package runs as its second taxonomy; see "Place taxonomies" below.
 
 ## Quick start
 
@@ -36,6 +36,8 @@ The example configurations in `data/taxonomy/` are:
 | `rule_file.yaml` | The default world with rules drawn from a rule file (`rules/example.yaml`) instead of the automatic settings. |
 | `tiny_relations.yaml` | The tiny world with 1 scalar dimension. The tiny world of the world package (`data/world/tiny.yaml`) builds on it. |
 | `relations.yaml` | The default world with 2 scalar dimensions. The default world of the world package (`data/world/default.yaml`) builds on it. |
+| `places_default.yaml` | The default place taxonomy (`labels.kind: place`): 2 superordinates, depth 2, branching 3, 2 places per kind (12 places), 12 place properties, no place parts, 2 place scalars. The default world runs it as its second taxonomy (stage c1). |
+| `places_tiny.yaml` | The tiny place taxonomy: 2 superordinates at depth 1 with 2 places each (4 places), 4 place properties, 1 place scalar. The tiny world runs it. |
 
 ## Concepts
 
@@ -54,6 +56,18 @@ Every label is a word a reader can read without a key, a period, and an index. I
 | Scalar dimension | `SCALARDIM.<n>` | `SCALARDIM.1` |
 
 The old labels (`C1.2`, `I1.2.3`, `IS.4`, `HAS.12`, `SC.1`) appear in the two taxonomy specifications, which keep them as the record of what was built. The full table of labels, including the world's event types and the corpus's documents, is in `docs/specs/WORLD_AND_LANGUAGE.md`, "Labels".
+
+With `labels: {kind: place}` (stage c1 of phase (c), `docs/specs/WORLD_PHASE_C.md`), a run writes the labels of a taxonomy of places in place of the entity labels, and nothing else changes:
+
+| Object | Entity label | Place label |
+| --- | --- | --- |
+| Category | `CATEGORY.1.2` | `PLACECATEGORY.1.2` |
+| Instance (a place) | `INSTANCE.1.2.3` | `PLACE.1.2.3` |
+| Membership feature | `ISA.CATEGORY.1.2` | `ISA.PLACECATEGORY.1.2` |
+| Property, part | `PROPERTY.4`, `PART.12` | `PLACEPROPERTY.4`, `PLACEPART.12` |
+| Scalar dimension | `SCALARDIM.1` | `PLACESCALARDIM.1` |
+
+The `type` column of `features.csv` keeps `property`, `part`, and `scalar`, and the configuration keys keep their names (`features.property`, `features.part`), whatever the kind. A place run of the same settings and seed as an entity run is the entity run relabeled, and the rule-set identity differs only because the labels are symbols of the hashed tables.
 
 ### Feature types
 
@@ -242,6 +256,7 @@ A configuration file is YAML. Any parameter left out takes its default. An unkno
 | --- | --- | --- |
 | `name` | `default` | Names the output folder. |
 | `seed` | 1 | The master seed. |
+| `labels.kind` | `entity` | The labels the run writes: `entity` (`CATEGORY`, `INSTANCE`, `PROPERTY`, `PART`, `SCALARDIM`) or `place` (`PLACECATEGORY`, `PLACE`, `PLACEPROPERTY`, `PLACEPART`, `PLACESCALARDIM`; stage c1). Nothing else changes with the kind. |
 | `features.property.count`, `features.part.count` | 40, 40 | Number of PROPERTY and PART features. |
 | `features.<type>.proportion_determined` | 0.25 | Proportion of PROPERTY or PART features computed by rules. |
 | `features.<type>.expected_true_free` | 6 | Expected number of true free features per object. Base rate = this number ÷ the number of free features. |
@@ -305,6 +320,16 @@ explicit:
 ```
 
 The rule file's path is read relative to the configuration file's folder. A template applies to PROPERTY outputs (`property`), PART outputs (`part`), or both. The requirement of a one-place event type is given by hand in the world's event file, not in a rule file.
+
+## Place taxonomies
+
+Since stage c1 of phase (c) (`docs/specs/WORLD_PHASE_C.md`), a world has places as well as entities: the places of a world are the instances of a second taxonomy run, made by this generator with `labels.kind: place`. Kinds of place have the status of kinds of entity: a tree of place categories with defining, characteristic, and undiagnostic place properties and parts, rules for the determined ones, and place scalars, from the same settings as an entity taxonomy. `data/taxonomy/places_default.yaml` is the default world's place taxonomy (12 places in 8 categories, 12 place properties of which a quarter are determined, no place parts, 2 place scalars), and `places_tiny.yaml` the tiny world's (4 places in 2 categories, 4 place properties, 1 place scalar). Both run on their own:
+
+```
+PYTHONPATH=python python -m semantic_world.taxonomy data/taxonomy/places_default.yaml
+```
+
+A world configuration names its place taxonomy under `places.taxonomy`, and the world package runs it in memory with the seed of its stream `world:places`, writes the run unmodified to `places/` in the world's folder, and draws the place event types whose requirements read the entities' and the places' features (`WORLD.md`, "Places"). Places are not entities: they have no fluents, nothing that reads the entities' tables sees a place, and their comparison classes have a root of their own, `EVERYPLACE`.
 
 ## Where CAN features and verbs went
 

@@ -7,9 +7,9 @@ tiny:
   world:
     name: tiny
     seed: 1
-    rule_set_id: 912f1d3714605a6733162e153212d4428016c643bda50486f701c797ba2d78e3
-    rule_set_short: 912f1d371460
-    rule_set_code: '`912f1d371460...`'
+    rule_set_id: 9659a419573f5f798a8eb1995aef76a525a41e77fd11ca344646976580ffc27a
+    rule_set_short: 9659a419573f
+    rule_set_code: '`9659a419573f...`'
     entities: 12
     categories: 6
     fluents: {base: 3, derived: 1}
@@ -56,12 +56,12 @@ tiny:
         NUMFL.1:
           range: [0.0, 1.0]
           initial: {kind: uniform}
-          drift: 0.072826
+          drift: 0.0728
         NUMFL.2:
           range: [0.0, 1.0]
           initial: {kind: uniform}
-          drift: 0.005553
-      drifts: [0.072826, 0.005553]
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
       effects:
         total: 4
         by_operator: {add: 3, subtract: 1}
@@ -81,6 +81,19 @@ tiny:
       rules_reading_a_threshold: 1
       changes_per_event: 0.438962
       drift_changes_per_step: 8.447248
+    places:
+      'on': true
+      places: 4
+      categories: 2
+      features:
+        place_property: {total: 4, free: 3, determined: 1}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 1
+      place_event_types: 2
+      constraints: 2
+      constraint_families: {agent: 2}
+      density: {mean: 0.583333, min: 0.5, max: 0.666667}
+      approximate_capacities: 0.0
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
       effects_dropped_no_slot: 0, effects_redrawn: 2, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
       literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
@@ -102,14 +115,14 @@ tiny:
       never_legal: {}
     categories_with_word: 2
     wrote_line: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place and 4 two-place event
-      types, 12 constraints; rule set 912f1d371460
+      types, 12 constraints, 4 places and 2 place event types; rule set 9659a419573f
     redraw_notes: ''
     quick_start_block: '
 
       ```
 
       wrote runs/world/tiny_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
-      and 4 two-place event types, 12 constraints; rule set 912f1d371460
+      and 4 two-place event types, 12 constraints, 4 places and 2 place event types; rule set 9659a419573f
 
       ```
 
@@ -117,7 +130,7 @@ tiny:
   corpus:
     name: tiny
     seed: 1
-    world: 912f1d371460
+    world: 9659a419573f
     documents: 20
     sentences: 196
     by_level: {class: 124, instance: 9, event: 44, state: 3, change: 13, able_now: 3}
@@ -237,9 +250,9 @@ default:
   world:
     name: default
     seed: 1
-    rule_set_id: f47334502194fc8db3a1bdfca8d7031db20b13c70d766eada19f3633c8d6c7cd
-    rule_set_short: f47334502194
-    rule_set_code: '`f47334502194...`'
+    rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0
+    rule_set_short: 7677556dac8f
+    rule_set_code: '`7677556dac8f...`'
     entities: 284
     categories: 56
     fluents: {base: 6, derived: 2}
@@ -270,31 +283,29 @@ default:
         by_role: {agent: 10, patient: 6}
         from_features: 2
       inherited:
-      - {expression: when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209,
-        code: '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209`',
-        holders: 6}
+      - {expression: when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3641,
+        code: '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3641`', holders: 6}
       inherited_count: 1
       own:
-      - {expression: when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.25420163698707215, code: '`when
-          NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.25420163698707215`', event_type: EVENTTYPE1.6}
-      - {expression: when NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3230572642361696, code: '`when
-          NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3230572642361696`', event_type: EVENTTYPE1.15}
+      - {expression: when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542, code: '`when NOT agent.PROPERTY.6
+          then agent.NUMFL.1 -= 0.2542`', event_type: EVENTTYPE1.6}
+      - {expression: when NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3231, code: '`when NOT agent.PROPERTY.15
+          then agent.NUMFL.2 += 0.3231`', event_type: EVENTTYPE1.15}
       - {expression: 'when agent.PROPERTY.18 then agent.BOOLFL.2 := 0', code: '`when agent.PROPERTY.18
           then agent.BOOLFL.2 := 0`', event_type: EVENTTYPE1.17}
       - {expression: 'when agent.BOOLFL.8 then patient.BOOLFL.5 := 0', code: '`when agent.BOOLFL.8 then
           patient.BOOLFL.5 := 0`', event_type: EVENTTYPE2.2.1}
       own_count: 4
-      expressions: ['`when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.25420163698707215`, on `EVENTTYPE1.6`',
-        '`when NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3230572642361696`, on `EVENTTYPE1.15`', '`when
-          agent.PROPERTY.18 then agent.BOOLFL.2 := 0`, on `EVENTTYPE1.17`', '`when NOT patient.PART.1
-          AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209`, on `EVENTTYPE2.1.4`',
-        '`when agent.BOOLFL.8 then patient.BOOLFL.5 := 0`, on `EVENTTYPE2.2.1`', '`when NOT patient.PART.1
-          AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209`, on `EVENTTYPE2.2.3`',
-        '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209`,
-          on `EVENTTYPE2.3.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3640982468028209`, on `EVENTTYPE2.3.3`', '`when NOT patient.PART.1 AND agent.NUMFL.1 >
-          0.75 then patient.NUMFL.1 += 0.3640982468028209`, on `EVENTTYPE2.4.1`', '`when NOT patient.PART.1
-          AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3640982468028209`, on `EVENTTYPE2.5.3`']
+      expressions: ['`when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542`, on `EVENTTYPE1.6`', '`when
+          NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3231`, on `EVENTTYPE1.15`', '`when agent.PROPERTY.18
+          then agent.BOOLFL.2 := 0`, on `EVENTTYPE1.17`', '`when NOT patient.PART.1 AND agent.NUMFL.1
+          > 0.75 then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.1.4`', '`when agent.BOOLFL.8 then patient.BOOLFL.5
+          := 0`, on `EVENTTYPE2.2.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
+          += 0.3641`, on `EVENTTYPE2.2.3`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
+          += 0.3641`, on `EVENTTYPE2.3.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
+          += 0.3641`, on `EVENTTYPE2.3.3`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
+          += 0.3641`, on `EVENTTYPE2.4.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
+          += 0.3641`, on `EVENTTYPE2.5.3`']
     numeric:
       count: 2
       drifting: 2
@@ -302,12 +313,12 @@ default:
         NUMFL.1:
           range: [0.0, 1.0]
           initial: {kind: uniform}
-          drift: 0.072826
+          drift: 0.0728
         NUMFL.2:
           range: [0.0, 1.0]
           initial: {kind: uniform}
-          drift: 0.005553
-      drifts: [0.072826, 0.005553]
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
       effects:
         total: 24
         by_operator: {add: 17, subtract: 7}
@@ -325,8 +336,21 @@ default:
         by_side: {above: 6, at_or_below: 0}
         by_role: {agent: 6, patient: 0}
       rules_reading_a_threshold: 1
-      changes_per_event: 0.40818
-      drift_changes_per_step: 8.427322
+      changes_per_event: 0.4083
+      drift_changes_per_step: 8.425501
+    places:
+      'on': true
+      places: 12
+      categories: 8
+      features:
+        place_property: {total: 12, free: 9, determined: 3}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 2
+      place_event_types: 4
+      constraints: 5
+      constraint_families: {agent: 2, cross: 1, key_lock: 2}
+      density: {mean: 0.534331, min: 0.018192, max: 0.819836}
+      approximate_capacities: 0.0
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 6,
       effects_dropped_no_slot: 0, effects_redrawn: 9, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
       literals_dropped_unachievable: 17, literals_redrawn: 5, conditions_redrawn: 3, conditions_dropped: 0,
@@ -348,14 +372,14 @@ default:
       never_legal: {}
     categories_with_word: 5
     wrote_line: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place and 20 two-place
-      event types, 32 constraints; rule set f47334502194
+      event types, 32 constraints, 12 places and 4 place event types; rule set 7677556dac8f
     redraw_notes: ''
     quick_start_block: '
 
       ```
 
       wrote runs/world/default_seed1: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place
-      and 20 two-place event types, 32 constraints; rule set f47334502194
+      and 20 two-place event types, 32 constraints, 12 places and 4 place event types; rule set 7677556dac8f
 
       ```
 
@@ -363,11 +387,11 @@ default:
   corpus:
     name: default
     seed: 1
-    world: f47334502194
+    world: 7677556dac8f
     documents: 10000
-    sentences: 100917
-    by_level: {class: 49873, instance: 5814, event: 28964, state: 3993, change: 9608, able_now: 2665}
-    tokens: 483329
+    sentences: 100918
+    by_level: {class: 49873, instance: 5814, event: 28963, state: 3993, change: 9610, able_now: 2665}
+    tokens: 483322
     scenes: 10082
     events: 83075
     lexemes:
@@ -445,18 +469,18 @@ default:
       comparative_sentences: {class: 5147, instance: 542}
       comparative_descriptions: 1028
       numeric_comparative_sentences: 486
-      pole_modifiers: 2972
+      pole_modifiers: 2969
       pole_restrictions: 207
     effect_statements: 86
     precondition_statements: 29
-    states: {events_with_result_share: 0.331722, result_sentences: 9608, numeric_state_sentences: 758,
-      numeric_change_sentences: 3791}
+    states: {events_with_result_share: 0.331803, result_sentences: 9610, numeric_state_sentences: 758,
+      numeric_change_sentences: 3794}
     narratives_short: {entity: 0.417582, situational: 0.389774}
     cooccurrence:
       pairs: 741
       words:
         entity: {thematic: 0.741013, taxonomic: 0.161212}
-        situational: {thematic: 0.632423, taxonomic: 0.206033}
+        situational: {thematic: 0.63219, taxonomic: 0.206018}
         encyclopedic_category: {thematic: 0.112743, taxonomic: 0.493091}
         encyclopedic_feature: {thematic: 0.305943, taxonomic: 0.182262}
       check:
@@ -468,15 +492,15 @@ default:
           taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
     ambiguity: {ambiguous: 5895, share: 0.058414}
     changed_items_share: {state_predicate_changed: 0.543, state_subject_changed: 0.531}
-    wrote_line: 10000 documents, 100917 sentences, 483329 tokens, 10082 scenes, 46 test sets with 16457
+    wrote_line: 10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457
       pairs
-    wrote_code: '`10000 documents, 100917 sentences, 483329 tokens, 10082 scenes, 46 test sets with 16457
+    wrote_code: '`10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457
       pairs`'
     quick_start_block: '
 
       ```
 
-      wrote runs/corpus/default_seed1: 10000 documents, 100917 sentences, 483329 tokens, 10082 scenes,
+      wrote runs/corpus/default_seed1: 10000 documents, 100918 sentences, 483322 tokens, 10082 scenes,
       46 test sets with 16457 pairs
 
       ```
@@ -484,22 +508,27 @@ default:
       '
 baselines:
   conditional_effects_off:
-    tiny: {rule_set_id: f078a5e0362d5708decfdea101a51f6606c0b344d1f81c169922f3f2587c7a84, rule_set_short: f078a5e0362d,
-      rule_set_code: '`f078a5e0362d...`', documents_sha256: b2fc60e63c1364d8dcae1923b6b59defb9824c1537b51d81d2f4e20c04a7fc95}
-    default: {rule_set_id: e529bce9af3242686bd61f327787bd2d990b2af3bcc67b7b79ffdd1bbadb6e9b, rule_set_short: e529bce9af32,
-      rule_set_code: '`e529bce9af32...`'}
+    tiny: {rule_set_id: c92f1f584b905329e0fb34a2f5917a87b7a684ed8b03e0c837fa1ed2b2975446, rule_set_short: c92f1f584b90,
+      rule_set_code: '`c92f1f584b90...`', documents_sha256: ac58a46bbeb5bfbcd2ec5206adab21a98294a930d4192157aa707969f1d9ee56}
+    default: {rule_set_id: e9e38a67d89cc13ab59aa1e270b687b0e2b9cf71eeb5724be188164e90682bd3, rule_set_short: e9e38a67d89c,
+      rule_set_code: '`e9e38a67d89c...`'}
   fluents_off:
-    tiny: {rule_set_id: e06fe051fe4a61e9468a4d61b4b5adf80daf83c25f05e7be9cd3e0621b5a95f2, rule_set_short: e06fe051fe4a,
-      rule_set_code: '`e06fe051fe4a...`'}
-    default: {rule_set_id: 0b56e5ea50fdde82d922c0acc25c1595a23c079adc8e5e36453a362900065339, rule_set_short: 0b56e5ea50fd,
-      rule_set_code: '`0b56e5ea50fd...`'}
+    tiny: {rule_set_id: a3d5b81c947b0af6da2ff04b4272e729b253d4846f42454d7c7dd8d9091c57e3, rule_set_short: a3d5b81c947b,
+      rule_set_code: '`a3d5b81c947b...`'}
+    default: {rule_set_id: b78bdf87d15d40dac01bc69313e8c66acd197be6d933f957235cdedae625231c, rule_set_short: b78bdf87d15d,
+      rule_set_code: '`b78bdf87d15d...`'}
   two_place_off:
-    tiny: {rule_set_id: ead5c311eee76f30f308c3dff7a857a9464bda76b8c90c24c926e249427f0d62, rule_set_short: ead5c311eee7,
-      rule_set_code: '`ead5c311eee7...`'}
-    default: {rule_set_id: 9de1f2794db12c86b2d9ea4aa264ba548a2d3a8e2dbbb49d95d3941b33687f5d, rule_set_short: 9de1f2794db1,
-      rule_set_code: '`9de1f2794db1...`'}
+    tiny: {rule_set_id: feed342b5645bb07de5e60306e17a6157e71b14385719df7f37c3698c972480e, rule_set_short: feed342b5645,
+      rule_set_code: '`feed342b5645...`'}
+    default: {rule_set_id: 17fc009d43a5cd447a776c607482b3365f851678b9e6f086e4c477f9be1d5cf2, rule_set_short: 17fc009d43a5,
+      rule_set_code: '`17fc009d43a5...`'}
   numeric_fluents_off:
-    tiny: {rule_set_id: 6777fdc1b604932160b8a6c9a9912675d6b53f0dd440e41238f6bf8aaeb2d43f, rule_set_short: 6777fdc1b604,
-      rule_set_code: '`6777fdc1b604...`'}
-    default: {rule_set_id: 32356b8c6be93be32863a18e1524f78233764a4725bccdeb6796ad3e6ffdf6c1, rule_set_short: 32356b8c6be9,
-      rule_set_code: '`32356b8c6be9...`'}
+    tiny: {rule_set_id: 700cf0fc88a43c2cbb5ce9eb193c334dd8e097af36ad2adb4311e8b9a695f2fd, rule_set_short: 700cf0fc88a4,
+      rule_set_code: '`700cf0fc88a4...`'}
+    default: {rule_set_id: 4522d2471f881f1e4c01c4b559340dd3a2c93b9bf7890dc3819f299be4df3f80, rule_set_short: 4522d2471f88,
+      rule_set_code: '`4522d2471f88...`'}
+  places_off:
+    tiny: {rule_set_id: 6834c215f732f636019a1ff554982219a18de94d1e27224cda1e13f5abdd3682, rule_set_short: 6834c215f732,
+      rule_set_code: '`6834c215f732...`'}
+    default: {rule_set_id: cc1e27fac81953d454a038cfc0facde68353bb517ad42171862e130589d5c0db, rule_set_short: cc1e27fac819,
+      rule_set_code: '`cc1e27fac819...`'}

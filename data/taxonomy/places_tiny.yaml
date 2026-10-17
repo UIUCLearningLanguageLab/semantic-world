@@ -1,0 +1,25 @@
+# The tiny place taxonomy: 2 superordinates at depth 1 (the superordinates are the leaves) with
+# 2 places each, so 4 places; 4 place properties, 1 of them determined; no place parts; and 1
+# place scalar. The tiny world (data/world/tiny.yaml) runs it as its second taxonomy. Parameters
+# not listed keep their defaults (see default.yaml).
+
+name: places_tiny
+seed: 1
+
+labels: {kind: place}
+
+features:
+  property: {count: 4, proportion_determined: 0.25, expected_true_free: 1}   # 3 free, 1 determined
+  part: {count: 0}
+  base_rate_heterogeneity: null  # equal base rates: with 3 free features, heterogeneous rates can leave a
+                                 # superordinate with no true feature, which the similarity bound cannot place
+
+taxonomy:
+  superordinates: 2
+  depth: 1
+
+instances:
+  per_leaf: 2
+
+scalars:
+  count: 1

@@ -30,6 +30,18 @@ NUMERIC_PREFIX = "NUMFL"
 NUMERIC_KIND = "numeric_fluent"
 """The symbol kind of a numeric fluent in ``definition.json``."""
 INITIAL_KINDS = ("uniform", "fixed", "beta")
+DECIMALS = 4
+"""Every real the world draws and stores is rounded to this many decimals when drawn, as the
+scalar thresholds and the comparison margins are (Jon's ruling of October 16, 2026, WM.60): a
+numeric fluent's drift, an entity's initial value of a numeric fluent, and a numeric effect's
+constant. ``rng.uniform`` computes ``low + (high - low) * u``, which an ARM and an x86 machine
+can round differently in the last bit (a fused multiply-add), so the unrounded draws gave two
+rule-set identities for one seed."""
+
+
+def drawn(value: float) -> float:
+    """A drawn real as the world stores it: rounded to ``DECIMALS`` decimals."""
+    return round(float(value), DECIMALS)
 
 
 def numeric_label(index: int) -> str:
@@ -86,7 +98,10 @@ class InitialDistribution:
         raise ValueError(f"unknown initial distribution {kind!r}")
 
     def draw(self, rng: np.random.Generator, low: float, high: float, size: int) -> np.ndarray:
-        """``size`` initial values, in float64, inside ``[low, high]``."""
+        """``size`` initial values, in float64, inside ``[low, high]``. A drawn value is rounded
+        to ``DECIMALS`` decimals when drawn (Jon's ruling WM.60), then clamped to the range, so
+        that the same seed gives the same world on every machine; a fixed value is the
+        configuration's own."""
         if self.kind == "fixed":
             assert self.value is not None
             return np.full(size, float(self.value), dtype=np.float64)
@@ -94,8 +109,10 @@ class InitialDistribution:
             assert self.mean is not None and self.concentration is not None
             fraction = (self.mean - low) / (high - low)
             a, b = fraction * self.concentration, (1.0 - fraction) * self.concentration
-            return low + (high - low) * rng.beta(a, b, size=size)
-        return rng.uniform(low, high, size=size)
+            drawn = low + (high - low) * rng.beta(a, b, size=size)
+        else:
+            drawn = rng.uniform(low, high, size=size)
+        return np.clip(np.round(np.asarray(drawn, dtype=np.float64), DECIMALS), low, high)
 
     def can_exceed(self, low: float, high: float, threshold: float) -> bool:
         """Whether some drawn value can be above the threshold (strictly)."""
@@ -282,7 +299,7 @@ def generate_numeric_fluents(
         else:
             drift = 0.0
             if rng.random() < settings.drift_share:
-                drift = float(rng.uniform(settings.drift_amounts[0], settings.drift_amounts[1]))
+                drift = drawn(rng.uniform(settings.drift_amounts[0], settings.drift_amounts[1]))
         entry = explicit.get(label)
         if entry is not None:
             if entry.get("initial") is not None:
@@ -306,6 +323,7 @@ def numeric_points(fluent: NumericFluent, fractions: Sequence[float]) -> tuple[f
 
 
 __all__ = [
+    "DECIMALS",
     "EMPTY",
     "INITIAL_KINDS",
     "NUMERIC_KIND",
@@ -315,6 +333,7 @@ __all__ = [
     "NumericFluents",
     "NumericThreshold",
     "clamp",
+    "drawn",
     "empty_numeric",
     "generate_numeric_fluents",
     "is_numeric_label",
