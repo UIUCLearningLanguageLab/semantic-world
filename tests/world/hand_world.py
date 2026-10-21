@@ -30,6 +30,22 @@ both numeric fluents at 0, so ``EVENTTYPE1.7`` is never legal there, ``NUMFL.1``
 their arithmetic in their descriptions; ``hand_21`` to ``hand_27`` are the numeric fixtures, and
 ``hand_28`` the ``RANGE`` comparisons at the cut itself (``ABOVE`` strict, ``BELOW`` inclusive).
 
+Since stage c2a the hand world has three pair fluents between entities, every one with the
+initial rate 0 (every case gives its initial pairs): ``PAIRFL.1`` (symmetric, not functional:
+say, near), ``PAIRFL.2`` (asymmetric, not functional: say, above), and ``PAIRFL.3`` (symmetric
+and functional: say, paired with); a derived fluent ``BOOLFL.4 = SOME.PAIRFL.1`` (near
+something); and five two-place event types, every one able for every ordered pair:
+``EVENTTYPE2.2`` (always legal, ``PAIRFL.1(agent, patient) := 1``, a symmetric add),
+``EVENTTYPE2.3`` (needs ``PAIRFL.1(agent, patient)``, deletes it), ``EVENTTYPE2.4`` (adds
+``PAIRFL.2(agent, patient)``, with the compiled precondition literal ``NOT PAIRFL.2(patient,
+agent)`` of origin ``profile``), ``EVENTTYPE2.5`` (adds ``PAIRFL.3(agent, patient)``, with the
+compiled literals ``NOT SOME.PAIRFL.3(agent)`` and ``NOT SOME.PAIRFL.3(patient)``), and
+``EVENTTYPE2.6`` (always legal, ``when PAIRFL.1(agent, patient) then patient.BOOLFL.2 := 1``, a
+pair condition). ``hand_29`` to ``hand_37`` are the pair fixtures of ``docs/specs/WORLD_PHASE_C.md``
+("Conformance fixtures", items 1 to 4, 10, 12 to 14, and 16); items 5 to 9, 11, and 15 need the
+places and the location fluent of stage c3. In the cases of phases (a) and (b) no pair holds at
+any time point, so ``BOOLFL.4`` is false everywhere and the pairs after every step are none.
+
 Every expected value in ``CASES`` (the legal bindings before each step, and the state, the
 derived fluents, and the numeric values after it) is typed in by hand, never computed by the
 runtime or the brute-force evaluator. This module only assembles the JSON files and fills in the
@@ -71,6 +87,58 @@ def numsym(label, drift):
     }
 
 
+def pairsym(label, symmetry, functional):
+    """A pair fluent's symbol (stage c2a): its profile, never total, and the initial rate 0."""
+    return {
+        "label": label,
+        "kind": "pair_fluent",
+        "derived": False,
+        "fluent": True,
+        "arity": 2,
+        "symmetry": symmetry,
+        "functional": functional,
+        "total": False,
+        "initial_rate": 0.0,
+    }
+
+
+def pairlit(kind, fluent, first, second, value, origin=None):
+    """A pair literal's record (stage c2a), in a precondition or a condition: ``kind`` is
+    ``pair``, ``pair_some``, ``pair_someof``, or ``pair_same``; a one-argument kind names its
+    ``role`` (``first``) and a two-argument kind ``first`` and ``second``; a compiled literal
+    carries its ``origin``."""
+    record = {"kind": kind, "pair_fluent": fluent}
+    if second is None:
+        record["role"] = first
+    else:
+        record["first"] = first
+        record["second"] = second
+    record["value"] = value
+    if origin is not None:
+        record["origin"] = origin
+    return record
+
+
+def pairtext(kind, fluent, first, second, value):
+    prefix = {"pair": "", "pair_some": "SOME.", "pair_someof": "SOMEOF.", "pair_same": "SAME."}
+    inside = first if second is None else f"{first}, {second}"
+    text = f"{prefix[kind]}{fluent}({inside})"
+    return text if value else f"NOT {text}"
+
+
+def paireff(fluent, first, second, value, condition=None):
+    """A pair effect's record: ``PAIRFL.1(agent, patient) := 1``."""
+    record = {
+        "kind": "pair",
+        "pair_fluent": fluent,
+        "first": first,
+        "second": second,
+        "value": value,
+        "expression": f"{fluent}({first}, {second}) := {int(value)}",
+    }
+    return _with_condition(record, condition)
+
+
 def feat(i, key, role, feature):
     return {"index": i, "key": key, "kind": "feature", "role": role, "feature": feature}
 
@@ -103,8 +171,14 @@ def lit(role, fluent, value):
 
 
 def _condition_literal(item):
-    """A condition literal's record and text, from ``(role, kind, symbol, value)`` or, for a
-    numeric literal, ``(role, "numeric", symbol, operator, threshold)``."""
+    """A condition literal's record and text, from ``(role, kind, symbol, value)``, for a
+    numeric literal ``(role, "numeric", symbol, operator, threshold)``, or, for a pair literal
+    (stage c2a), ``("pair", kind, fluent, first, second, value)``."""
+    if item[0] == "pair":
+        _, kind, fluent, first, second, value = item
+        return pairlit(kind, fluent, first, second, value), pairtext(
+            kind, fluent, first, second, value
+        )
     if item[1] == "numeric":
         r, _, sym, op, threshold = item
         return {
@@ -199,6 +273,15 @@ DEFINITION = {
         sym("EVENTTYPE1.6", "event_type"),
         sym("EVENTTYPE1.7", "event_type"),
         sym("EVENTTYPE1.8", "event_type"),
+        pairsym("PAIRFL.1", "symmetric", False),
+        pairsym("PAIRFL.2", "asymmetric", False),
+        pairsym("PAIRFL.3", "symmetric", True),
+        sym("BOOLFL.4", "fluent", derived=True, fluent=True),
+        sym("EVENTTYPE2.2", "event_type", arity=2),
+        sym("EVENTTYPE2.3", "event_type", arity=2),
+        sym("EVENTTYPE2.4", "event_type", arity=2),
+        sym("EVENTTYPE2.5", "event_type", arity=2),
+        sym("EVENTTYPE2.6", "event_type", arity=2),
     ],
     "literals": [
         feat(0, "PROPERTY.1", None, "PROPERTY.1"),
@@ -221,6 +304,13 @@ DEFINITION = {
         con(7, "CONSTRAINT.EVENTTYPE1.1"),
         con(8, "CONSTRAINT.EVENTTYPE1.2"),
         con(9, "CONSTRAINT.EVENTTYPE2.1"),
+        {
+            "index": 10,
+            "key": "SOME.PAIRFL.1",
+            "kind": "pair_some",
+            "role": None,
+            "pair_fluent": "PAIRFL.1",
+        },
     ],
     "rules": [
         rule("PROPERTY.2", "entity", "hand", [0], "10", "NOT PROPERTY.1"),
@@ -266,13 +356,19 @@ DEFINITION = {
         rule("REQUIREMENT.EVENTTYPE1.6", "binding", "requirement", [], "1", "TRUE"),
         rule("REQUIREMENT.EVENTTYPE1.7", "binding", "requirement", [], "1", "TRUE"),
         rule("REQUIREMENT.EVENTTYPE1.8", "binding", "requirement", [], "1", "TRUE"),
+        rule("BOOLFL.4", "entity", "hand", [10], "01", "SOME.PAIRFL.1"),
+        rule("REQUIREMENT.EVENTTYPE2.2", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE2.3", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE2.4", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE2.5", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE2.6", "binding", "requirement", [], "1", "TRUE"),
     ],
     "layers": [
         {
             "scope": "entity",
             "layer": 1,
-            "terms": [term([0], [True]), term([1, 2], [False, False])],
-            "outputs": [out("PROPERTY.2", [0]), out("BOOLFL.3", [1])],
+            "terms": [term([0], [True]), term([1, 2], [False, False]), term([10], [False])],
+            "outputs": [out("PROPERTY.2", [0]), out("BOOLFL.3", [1]), out("BOOLFL.4", [2])],
         },
         {
             "scope": "binding",
@@ -281,6 +377,11 @@ DEFINITION = {
                 term([3], [False]),
                 term([4], [False]),
                 term([3, 5, 6], [False, True, False]),
+                term([], []),
+                term([], []),
+                term([], []),
+                term([], []),
+                term([], []),
                 term([], []),
                 term([], []),
                 term([], []),
@@ -298,6 +399,11 @@ DEFINITION = {
                 out("REQUIREMENT.EVENTTYPE1.6", [6]),
                 out("REQUIREMENT.EVENTTYPE1.7", [7]),
                 out("REQUIREMENT.EVENTTYPE1.8", [8]),
+                out("REQUIREMENT.EVENTTYPE2.2", [9]),
+                out("REQUIREMENT.EVENTTYPE2.3", [10]),
+                out("REQUIREMENT.EVENTTYPE2.4", [11]),
+                out("REQUIREMENT.EVENTTYPE2.5", [12]),
+                out("REQUIREMENT.EVENTTYPE2.6", [13]),
             ],
         },
         {
@@ -370,6 +476,49 @@ DEFINITION = {
             "TRUE",
             [eff("agent", "BOOLFL.2", True, [("agent", "numeric", "NUMFL.1", ">", 0.5)])],
         ),
+        et("EVENTTYPE2.2", 2, [], [], "TRUE", [paireff("PAIRFL.1", "agent", "patient", True)]),
+        et(
+            "EVENTTYPE2.3",
+            2,
+            [],
+            [pairlit("pair", "PAIRFL.1", "agent", "patient", True)],
+            "PAIRFL.1(agent, patient)",
+            [paireff("PAIRFL.1", "agent", "patient", False)],
+        ),
+        et(
+            "EVENTTYPE2.4",
+            2,
+            [],
+            [pairlit("pair", "PAIRFL.2", "patient", "agent", False, "profile")],
+            "NOT PAIRFL.2(patient, agent)",
+            [paireff("PAIRFL.2", "agent", "patient", True)],
+        ),
+        et(
+            "EVENTTYPE2.5",
+            2,
+            [],
+            [
+                pairlit("pair_some", "PAIRFL.3", "agent", None, False, "profile"),
+                pairlit("pair_some", "PAIRFL.3", "patient", None, False, "profile"),
+            ],
+            "NOT SOME.PAIRFL.3(agent) AND NOT SOME.PAIRFL.3(patient)",
+            [paireff("PAIRFL.3", "agent", "patient", True)],
+        ),
+        et(
+            "EVENTTYPE2.6",
+            2,
+            [],
+            [],
+            "TRUE",
+            [
+                eff(
+                    "patient",
+                    "BOOLFL.2",
+                    True,
+                    [("pair", "pair", "PAIRFL.1", "agent", "patient", True)],
+                )
+            ],
+        ),
     ],
 }
 
@@ -379,10 +528,18 @@ ENTITIES = [
     {"label": C, "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25},
 ]
 
-B1, B2, B3 = "BOOLFL.1", "BOOLFL.2", "BOOLFL.3"
+B1, B2, B3, B4 = "BOOLFL.1", "BOOLFL.2", "BOOLFL.3", "BOOLFL.4"
 N1, N2 = "NUMFL.1", "NUMFL.2"
+P1, P2, P3 = "PAIRFL.1", "PAIRFL.2", "PAIRFL.3"
 ALL = [{"agent": A}, {"agent": B}, {"agent": C}]
 AB = [{"agent": A, "patient": B}]
+PAIRS = [(A, B), (A, C), (B, A), (B, C), (C, A), (C, B)]
+"""Every ordered pair of distinct entities, by agent then patient, in entity order."""
+ALL6 = [{"agent": x, "patient": y} for x, y in PAIRS]
+
+
+def bindings(pairs):
+    return [{"agent": x, "patient": y} for x, y in pairs]
 
 
 def ev(label, agent, patient=None):
@@ -390,11 +547,15 @@ def ev(label, agent, patient=None):
     return {"event_type": label, "binding": binding}
 
 
-def legal(e11, e12, e21, e17=()):
+def legal(e11, e12, e21, e17=(), e23=(), e24=PAIRS, e25=PAIRS):
     """The legal bindings before a step. EVENTTYPE1.3, EVENTTYPE1.4, EVENTTYPE1.5, EVENTTYPE1.6,
     and EVENTTYPE1.8 are always able and have no precondition, so every entity is a legal agent
     of each; a condition never bears on legality. EVENTTYPE1.7 is legal for the entities whose
-    NUMFL.1 is above 0.5, strictly (``e17``)."""
+    NUMFL.1 is above 0.5, strictly (``e17``). The pair event types (stage c2a) are able for every
+    ordered pair: EVENTTYPE2.2 and EVENTTYPE2.6 have no precondition, so every ordered pair is
+    legal; EVENTTYPE2.3 is legal where the agent is near the patient (``e23``); EVENTTYPE2.4
+    where the patient is not above the agent (``e24``); and EVENTTYPE2.5 where neither has a
+    partner (``e25``). With no pair at all, every ordered pair is legal for the last two."""
     return {
         "EVENTTYPE1.1": [{"agent": x} for x in e11],
         "EVENTTYPE1.2": [{"agent": x} for x in e12],
@@ -405,6 +566,11 @@ def legal(e11, e12, e21, e17=()):
         "EVENTTYPE1.6": ALL,
         "EVENTTYPE1.7": [{"agent": x} for x in e17],
         "EVENTTYPE1.8": ALL,
+        "EVENTTYPE2.2": ALL6,
+        "EVENTTYPE2.3": bindings(e23),
+        "EVENTTYPE2.4": bindings(e24),
+        "EVENTTYPE2.5": bindings(e25),
+        "EVENTTYPE2.6": ALL6,
     }
 
 
@@ -997,23 +1163,247 @@ NUMERIC_CASES = [
 ]
 
 
+def pairs(*triples):
+    """Pairs as a fixture lists them: ``(fluent, first, second)`` triples."""
+    return [list(t) for t in triples]
+
+
+def pair_step(events, legal_before, derived_after, pairs_after, state_after=None):
+    return {
+        "events": events,
+        "legal": legal_before,
+        "derived": derived_after,
+        "state": state([], [], []) if state_after is None else state_after,
+        "pairs": pairs_after,
+    }
+
+
+NEAR_AB = pairs((P1, A, B), (P1, B, A))
+"""INSTANCE.1.1.1 and INSTANCE.1.1.2 near each other: both directions of the symmetric pair."""
+
+PAIR_CASES = [
+    # (name, description, initial pairs, steps, error); every entity starts with no Boolean
+    # fluent and both numeric fluents at 0
+    (
+        "hand_29_symmetric_add_writes_both_directions",
+        "A symmetric add writes both directions (stage c2a, fixture 1): EVENTTYPE2.2 "
+        "(INSTANCE.1.1.1, INSTANCE.1.1.2) adds PAIRFL.1(agent, patient), and PAIRFL.1 is "
+        "symmetric, so after the step both (INSTANCE.1.1.1, INSTANCE.1.1.2) and (INSTANCE.1.1.2, "
+        "INSTANCE.1.1.1) hold. The derived BOOLFL.4 (SOME.PAIRFL.1) becomes true of both, because "
+        "each has a pair in its row. EVENTTYPE2.3, which needs the pair, is then legal for both "
+        "orderings.",
+        [],
+        [
+            pair_step(
+                [ev("EVENTTYPE2.2", A, B)],
+                legal([A, C], [], False),
+                state([B4], [B4], []),
+                NEAR_AB,
+            ),
+            pair_step(
+                [],
+                legal([A, C], [], False, e23=[(A, B), (B, A)]),
+                state([B4], [B4], []),
+                NEAR_AB,
+            ),
+        ],
+        None,
+    ),
+    (
+        "hand_30_symmetric_delete_clears_both_directions",
+        "A symmetric delete clears both directions (stage c2a, fixture 2): INSTANCE.1.1.1 and "
+        "INSTANCE.1.1.2 start near each other, both directions held. EVENTTYPE2.3 "
+        "(INSTANCE.1.1.2, INSTANCE.1.1.1) deletes PAIRFL.1(agent, patient), named in the "
+        "direction from INSTANCE.1.1.2, and both directions go; BOOLFL.4 goes false of both.",
+        NEAR_AB,
+        [
+            pair_step(
+                [ev("EVENTTYPE2.3", B, A)],
+                legal([A, C], [], False, e23=[(A, B), (B, A)]),
+                state([], [], []),
+                [],
+            )
+        ],
+        None,
+    ),
+    (
+        "hand_31_asymmetric_add_blocked_by_compiled_literal",
+        "An asymmetric add blocked by its compiled literal (stage c2a, fixture 3): PAIRFL.2 is "
+        "asymmetric, and INSTANCE.1.1.2 is above INSTANCE.1.1.1. EVENTTYPE2.4 adds "
+        "PAIRFL.2(agent, patient) with the compiled precondition literal NOT PAIRFL.2(patient, "
+        "agent) of origin profile, so (INSTANCE.1.1.1, INSTANCE.1.1.2) is not a legal binding, "
+        "while every other ordered pair is; applying it is an illegal-event error.",
+        pairs((P2, B, A)),
+        [
+            {
+                "events": [ev("EVENTTYPE2.4", A, B)],
+                "legal": legal([A, C], [], False, e24=[(A, C), (B, A), (B, C), (C, A), (C, B)]),
+            }
+        ],
+        {"step": 1, "kind": "illegal"},
+    ),
+    (
+        "hand_32_functional_add_blocked_by_full_row",
+        "A functional add blocked because the row already holds a pair (stage c2a, fixture 4): "
+        "PAIRFL.3 is symmetric and functional, and INSTANCE.1.1.1 is paired with INSTANCE.1.2.1. "
+        "EVENTTYPE2.5 adds PAIRFL.3(agent, patient) with the compiled literals NOT "
+        "SOME.PAIRFL.3(agent) and NOT SOME.PAIRFL.3(patient): no ordered pair is legal, because "
+        "INSTANCE.1.1.1 and INSTANCE.1.2.1 have partners and INSTANCE.1.1.2 has no free partner. "
+        "Applying EVENTTYPE2.5 (INSTANCE.1.1.1, INSTANCE.1.1.2) is an illegal-event error.",
+        pairs((P3, A, C), (P3, C, A)),
+        [{"events": [ev("EVENTTYPE2.5", A, B)], "legal": legal([A, C], [], False, e25=[])}],
+        {"step": 1, "kind": "illegal"},
+    ),
+    (
+        "hand_33_derived_over_some_changes",
+        "A derived fluent over SOME changes when a pair is added (stage c2a, fixture 10): "
+        "BOOLFL.4 is SOME.PAIRFL.1. Step 1 adds PAIRFL.1 between INSTANCE.1.1.1 and "
+        "INSTANCE.1.1.2, so BOOLFL.4 becomes true of both and of nobody else; step 2 deletes the "
+        "pair from the other direction, and BOOLFL.4 goes false again.",
+        [],
+        [
+            pair_step(
+                [ev("EVENTTYPE2.2", A, B)],
+                legal([A, C], [], False),
+                state([B4], [B4], []),
+                NEAR_AB,
+            ),
+            pair_step(
+                [ev("EVENTTYPE2.3", B, A)],
+                legal([A, C], [], False, e23=[(A, B), (B, A)]),
+                state([], [], []),
+                [],
+            ),
+        ],
+        None,
+    ),
+    (
+        "hand_34_interference_same_pair",
+        "Interference: two events add the same pair (stage c2a, fixture 12): EVENTTYPE2.2 "
+        "(INSTANCE.1.1.1, INSTANCE.1.1.2) and EVENTTYPE2.2 (INSTANCE.1.1.2, INSTANCE.1.1.1) both "
+        "add PAIRFL.1 between the two, and PAIRFL.1 is symmetric, so each writes both directions "
+        "of the one pair. Both are legal; applying them together is an interference error.",
+        [],
+        [
+            {
+                "events": [ev("EVENTTYPE2.2", A, B), ev("EVENTTYPE2.2", B, A)],
+                "legal": legal([A, C], [], False),
+            }
+        ],
+        {"step": 1, "kind": "interference"},
+    ),
+    (
+        "hand_35_interference_functional_row",
+        "Interference: two events add pairs to one functional row (stage c2a, fixture 13): "
+        "EVENTTYPE2.5 (INSTANCE.1.1.1, INSTANCE.1.1.2) and EVENTTYPE2.5 (INSTANCE.1.1.1, "
+        "INSTANCE.1.2.1) write different pairs of PAIRFL.3, but each reads the whole row of "
+        "INSTANCE.1.1.1 through its compiled literal NOT SOME.PAIRFL.3(agent), and the other "
+        "writes a pair of that row. Both are legal in the empty state; applying them together is "
+        "an interference error, so the functional profile can never be broken in one step.",
+        [],
+        [
+            {
+                "events": [ev("EVENTTYPE2.5", A, B), ev("EVENTTYPE2.5", A, C)],
+                "legal": legal([A, C], [], False),
+            }
+        ],
+        {"step": 1, "kind": "interference"},
+    ),
+    (
+        "hand_36_interference_asymmetric_both_directions",
+        "Interference: (a, p) and (p, a) added together to an asymmetric pair fluent (stage c2a, "
+        "fixture 14): EVENTTYPE2.4 (INSTANCE.1.1.1, INSTANCE.1.1.2) writes PAIRFL.2 from "
+        "INSTANCE.1.1.1 to INSTANCE.1.1.2 and reads the reverse pair through its compiled literal "
+        "NOT PAIRFL.2(patient, agent); EVENTTYPE2.4 (INSTANCE.1.1.2, INSTANCE.1.1.1) writes that "
+        "reverse pair. Both are legal in the empty state; applying them together is an "
+        "interference error, so the asymmetric profile can never be broken in one step.",
+        [],
+        [
+            {
+                "events": [ev("EVENTTYPE2.4", A, B), ev("EVENTTYPE2.4", B, A)],
+                "legal": legal([A, C], [], False),
+            }
+        ],
+        {"step": 1, "kind": "interference"},
+    ),
+    (
+        "hand_37_pair_condition",
+        "A conditional effect whose pair condition holds, and one whose condition fails (stage "
+        "c2a, fixture 16): EVENTTYPE2.6 sets patient.BOOLFL.2 when PAIRFL.1(agent, patient). "
+        "INSTANCE.1.1.1 is near INSTANCE.1.1.2, so EVENTTYPE2.6 (INSTANCE.1.1.1, INSTANCE.1.1.2) "
+        "sets BOOLFL.2 of INSTANCE.1.1.2; EVENTTYPE2.6 (INSTANCE.1.1.1, INSTANCE.1.2.1) is legal "
+        "too, but its condition fails and it changes nothing. The two write different entities "
+        "and read different pairs, so they do not interfere. No pair changes.",
+        NEAR_AB,
+        [
+            pair_step(
+                [ev("EVENTTYPE2.6", A, B), ev("EVENTTYPE2.6", A, C)],
+                legal([A, C], [], False, e23=[(A, B), (B, A)]),
+                state([B4], [B4], []),
+                NEAR_AB,
+                state([], [B2], []),
+            )
+        ],
+        None,
+    ),
+]
+
+
 def hand_fixtures() -> list[dict[str, Any]]:
-    """Every hand-written fixture, assembled from the hand world and the cases."""
+    """Every hand-written fixture, assembled from the hand world and the cases. The cases of
+    phases (a) and (b) start with no pair and no event of theirs writes one, so their pairs
+    after every step are none."""
     fixtures = []
     for name, description, initial, steps, error in CASES:
+        with_numeric = [
+            dict(step, numeric=drifted(k), pairs=[]) if "state" in step else dict(step)
+            for k, step in enumerate(steps, start=1)
+        ]
+        fixtures.append(
+            fixture_record(
+                name,
+                description,
+                DEFINITION,
+                ENTITIES,
+                initial,
+                with_numeric,
+                error,
+                ZERO,
+                initial_pairs=[],
+            )
+        )
+    for name, description, initial, numbers, steps, error, comparisons in NUMERIC_CASES:
+        with_pairs = [dict(step, pairs=[]) if "state" in step else dict(step) for step in steps]
+        fixtures.append(
+            fixture_record(
+                name,
+                description,
+                DEFINITION,
+                ENTITIES,
+                initial,
+                with_pairs,
+                error,
+                numbers,
+                comparisons,
+                initial_pairs=[],
+            )
+        )
+    for name, description, initial_pairs, steps, error in PAIR_CASES:
         with_numeric = [
             dict(step, numeric=drifted(k)) if "state" in step else dict(step)
             for k, step in enumerate(steps, start=1)
         ]
         fixtures.append(
             fixture_record(
-                name, description, DEFINITION, ENTITIES, initial, with_numeric, error, ZERO
-            )
-        )
-    for name, description, initial, numbers, steps, error, comparisons in NUMERIC_CASES:
-        fixtures.append(
-            fixture_record(
-                name, description, DEFINITION, ENTITIES, initial, steps, error, numbers, comparisons
+                name,
+                description,
+                DEFINITION,
+                ENTITIES,
+                state([], [], []),
+                with_numeric,
+                error,
+                ZERO,
+                initial_pairs=initial_pairs,
             )
         )
     return fixtures

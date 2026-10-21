@@ -15,11 +15,20 @@ This module holds the dataclasses and their printed forms; their generation is i
 
 A numeric threshold is written in a text with ``repr``, the shortest form that reads back to the
 same float64; the records of ``definition.json`` write every float with 17 significant digits.
+
+Since stage c2a (``docs/specs/WORLD_PHASE_C.md``, "Literals over pairs") a precondition or a
+condition may hold a pair literal, :class:`PairLiteral`: ``PAIRFL.1(agent, patient)`` (the pair
+holds), ``SOME.PAIRFL.1(agent)`` (the row of the role holds a pair), ``SOMEOF.PAIRFL.1(patient)``
+(the column does), or ``SAME.PAIRFL.3(agent, patient)`` (the two roles share a partner, on a
+functional pair fluent), each positive or negated; a compiled literal (F4) carries its origin,
+``profile``. An effect may add or delete a pair between the roles: ``PAIRFL.1(agent, patient)
+:= 1`` or ``:= 0`` (an :class:`Effect` whose ``second`` names the second role).
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,12 +44,31 @@ _NUMERIC_EFFECT = re.compile(
     r"^\s*(agent|patient)\.(NUMFL\.\d+)\s*(\+=|-=)\s*((?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*$"
 )
 _CONDITIONAL = re.compile(r"^\s*when\s+(.+?)\s+then\s+(.+)$", re.DOTALL)
+_PAIR_LITERAL = re.compile(
+    r"^\s*(?:(SOME|SOMEOF|SAME)\.)?(PAIRFL\.\d+)\s*\(\s*(agent|patient)\s*"
+    r"(?:,\s*(agent|patient)\s*)?\)\s*$"
+)
+_PAIR_EFFECT = re.compile(
+    r"^\s*(PAIRFL\.\d+)\s*\(\s*(agent|patient)\s*,\s*(agent|patient)\s*\)\s*:=\s*([01])\s*$"
+)
 FEATURE_KIND = "feature"
 FLUENT_KIND = "fluent"
 NUMERIC_KIND = "numeric"
 NUMERIC_PREFIX = "NUMFL."
+PAIR_PREFIX = "PAIRFL."
 ABOVE = ">"
 AT_OR_BELOW = "<="
+PAIR_KIND = "pair"
+PAIR_SOME = "pair_some"
+PAIR_SOMEOF = "pair_someof"
+PAIR_SAME = "pair_same"
+PAIR_KINDS = (PAIR_KIND, PAIR_SOME, PAIR_SOMEOF, PAIR_SAME)
+"""The kinds of pair literal (stage c2a), as the literal table, the precondition records, and
+the condition records name them."""
+PAIR_KIND_OF_PREFIX = {None: PAIR_KIND, "SOME": PAIR_SOME, "SOMEOF": PAIR_SOMEOF, "SAME": PAIR_SAME}
+PAIR_PREFIX_OF_KIND = {kind: prefix for prefix, kind in PAIR_KIND_OF_PREFIX.items()}
+TWO_ARGUMENT_KINDS = (PAIR_KIND, PAIR_SAME)
+PROFILE_ORIGIN = "profile"
 
 
 def _operator(above: bool) -> str:
@@ -61,6 +89,14 @@ class Literal:
     @property
     def numeric(self) -> bool:
         return self.threshold is not None
+
+    @property
+    def pair(self) -> bool:
+        return False
+
+    @property
+    def compiled(self) -> bool:
+        return False
 
     @property
     def operator(self) -> str:
@@ -135,6 +171,10 @@ class ConditionLiteral:
         return self.kind == NUMERIC_KIND
 
     @property
+    def pair(self) -> bool:
+        return False
+
+    @property
     def operator(self) -> str:
         return _operator(self.value)
 
@@ -191,31 +231,219 @@ class ConditionLiteral:
         return cls.parse_key(part, value)
 
 
-def condition_text(literals: tuple[ConditionLiteral, ...]) -> str:
+@dataclass(frozen=True, order=True)
+class PairLiteral:
+    """One pair literal (stage c2a) of a precondition or a condition: ``kind`` is ``pair``,
+    ``pair_some``, ``pair_someof``, or ``pair_same``; ``first`` is the role of the first argument
+    (the only one of ``SOME`` and ``SOMEOF``) and ``second`` the role of the second argument, or
+    None; ``value`` is True for the positive literal and False for its negation; ``origin`` is
+    None for a literal the file or the generator gave, and ``profile`` for a compiled literal
+    (F4). ``role`` and ``fluent`` name the first role and the pair fluent, so that code that
+    counts literals by role reads a pair literal as the other kinds."""
+
+    kind: str
+    pair_fluent: str
+    first: str
+    second: str | None
+    value: bool
+    origin: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in PAIR_KINDS:
+            raise ValueError(f"unknown pair literal kind {self.kind!r}")
+        two = self.kind in TWO_ARGUMENT_KINDS
+        if two and self.second is None:
+            raise ValueError(f"a {self.kind} literal names two roles")
+        if not two and self.second is not None:
+            raise ValueError(f"a {self.kind} literal names one role")
+        if two and self.first == self.second:
+            raise ValueError(f"a {self.kind} literal names two different roles")
+
+    @property
+    def role(self) -> str:
+        return self.first
+
+    @property
+    def fluent(self) -> str:
+        return self.pair_fluent
+
+    @property
+    def symbol(self) -> str:
+        return self.pair_fluent
+
+    @property
+    def numeric(self) -> bool:
+        return False
+
+    @property
+    def pair(self) -> bool:
+        return True
+
+    @property
+    def compiled(self) -> bool:
+        return self.origin is not None
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        return (self.first,) if self.second is None else (self.first, self.second)
+
+    @property
+    def positive(self) -> str:
+        """The literal's text without a negation: ``SAME.PAIRFL.3(agent, patient)``."""
+        prefix = PAIR_PREFIX_OF_KIND[self.kind]
+        head = f"{prefix}.{self.pair_fluent}" if prefix else self.pair_fluent
+        return f"{head}({', '.join(self.roles)})"
+
+    @property
+    def key(self) -> str:
+        return self.positive
+
+    @property
+    def text(self) -> str:
+        return self.positive if self.value else f"NOT {self.positive}"
+
+    def negated(self) -> PairLiteral:
+        return PairLiteral(self.kind, self.pair_fluent, self.first, self.second, not self.value)
+
+    def plain(self) -> PairLiteral:
+        """The same literal without its origin."""
+        return PairLiteral(self.kind, self.pair_fluent, self.first, self.second, self.value)
+
+    def record(self) -> dict[str, Any]:
+        entry: dict[str, Any] = {"kind": self.kind, "pair_fluent": self.pair_fluent}
+        if self.second is None:
+            entry["role"] = self.first
+        else:
+            entry["first"] = self.first
+            entry["second"] = self.second
+        entry["value"] = bool(self.value)
+        if self.origin is not None:
+            entry["origin"] = self.origin
+        return entry
+
+    @classmethod
+    def from_record(cls, data: Mapping[str, Any]) -> PairLiteral:
+        kind = str(data["kind"])
+        if "role" in data and "first" not in data:
+            first, second = str(data["role"]), None
+        else:
+            first, second = str(data["first"]), str(data["second"])
+        origin = data.get("origin")
+        return cls(
+            kind,
+            str(data["pair_fluent"]),
+            first,
+            second,
+            bool(data["value"]),
+            None if origin is None else str(origin),
+        )
+
+    @classmethod
+    def match(cls, text: str, value: bool = True) -> PairLiteral | None:
+        """The pair literal a text names, ``SOME.PAIRFL.1(agent)`` or ``PAIRFL.2(patient,
+        agent)``, with the given value, or None when the text is not one."""
+        match = _PAIR_LITERAL.match(text)
+        if match is None:
+            return None
+        kind = PAIR_KIND_OF_PREFIX[match.group(1)]
+        first, second = match.group(3), match.group(4)
+        two = kind in TWO_ARGUMENT_KINDS
+        if two and second is None:
+            raise ValueError(f"{text.strip()!r}: a {kind} literal names two roles")
+        if not two and second is not None:
+            raise ValueError(f"{text.strip()!r}: a {kind} literal names one role")
+        if two and first == second:
+            raise ValueError(f"{text.strip()!r}: a {kind} literal names two different roles")
+        return cls(kind, match.group(2), first, second, value)
+
+    @classmethod
+    def parse(cls, text: str) -> PairLiteral:
+        """A pair literal with an optional ``NOT``."""
+        part = text.strip()
+        value = True
+        if part.upper().startswith("NOT "):
+            value = False
+            part = part[4:].strip()
+        literal = cls.match(part, value)
+        if literal is None:
+            raise ValueError(
+                f"{text!r} is not a pair literal (PAIRFL.<n>(agent, patient), "
+                f"SOME.PAIRFL.<n>(agent), SOMEOF.PAIRFL.<n>(patient), or "
+                f"SAME.PAIRFL.<n>(agent, patient), with or without NOT)"
+            )
+        return literal
+
+
+AnyLiteral = Literal | PairLiteral
+"""A precondition literal: a Boolean or numeric literal, or, since stage c2a, a pair literal."""
+AnyConditionLiteral = ConditionLiteral | PairLiteral
+
+
+def is_pair_literal(literal: Any) -> bool:
+    return isinstance(literal, PairLiteral)
+
+
+def condition_text(literals: tuple[AnyConditionLiteral, ...]) -> str:
     return " AND ".join(lit.text for lit in literals)
 
 
-def parse_condition(text: str) -> tuple[ConditionLiteral, ...]:
+def parse_condition(text: str) -> tuple[AnyConditionLiteral, ...]:
     """A conjunction of condition literals, ``agent.PROPERTY.4 AND NOT patient.BOOLFL.2 AND
-    agent.NUMFL.1 > 0.75``."""
-    return tuple(ConditionLiteral.parse(part) for part in text.split(" AND "))
+    agent.NUMFL.1 > 0.75``, or, since stage c2a, pair literals (``PAIRFL.1(agent, patient)``,
+    ``NOT SOME.PAIRFL.2(agent)``)."""
+    literals: list[AnyConditionLiteral] = []
+    for part in text.split(" AND "):
+        stripped = part.strip()
+        bare = stripped[4:].strip() if stripped.upper().startswith("NOT ") else stripped
+        if _PAIR_LITERAL.match(bare):
+            literals.append(PairLiteral.parse(stripped))
+        else:
+            literals.append(ConditionLiteral.parse(part))
+    return tuple(literals)
 
 
 @dataclass(frozen=True, order=True)
 class Effect:
     """One effect: a base Boolean fluent of one role is set to a value, or (a numeric effect,
     on a ``NUMFL`` fluent) a constant is added to a numeric fluent of one role or subtracted
-    from it, ``value`` being the signed constant; under a condition when the effect has one (an
-    empty tuple is no condition: the effect always applies)."""
+    from it, ``value`` being the signed constant; or, since stage c2a (a pair effect, on a
+    ``PAIRFL`` fluent, with ``second`` the role of the second argument), the pair from the role
+    to the second role is added (``value`` True) or deleted (False); under a condition when the
+    effect has one (an empty tuple is no condition: the effect always applies)."""
 
     role: str
     fluent: str
     value: bool | float
-    condition: tuple[ConditionLiteral, ...] = ()
+    condition: tuple[AnyConditionLiteral, ...] = ()
+    second: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.pair and self.second is None:
+            raise ValueError(f"a pair effect on {self.fluent} names a second role")
+        if self.pair and self.second == self.role:
+            raise ValueError(f"a pair effect on {self.fluent} names two different roles")
+        if not self.pair and self.second is not None:
+            raise ValueError(f"an effect on {self.fluent} names one role")
 
     @property
     def numeric(self) -> bool:
         return self.fluent.startswith(NUMERIC_PREFIX)
+
+    @property
+    def pair(self) -> bool:
+        """A pair effect (stage c2a): an add or a delete of a pair between the roles."""
+        return self.fluent.startswith(PAIR_PREFIX)
+
+    @property
+    def roles(self) -> tuple[str, ...]:
+        return (self.role,) if self.second is None else (self.role, self.second)
+
+    @property
+    def literal(self) -> PairLiteral:
+        """The pair literal a pair effect makes true: ``PAIRFL.1(agent, patient)`` for an add,
+        its negation for a delete."""
+        assert self.second is not None
+        return PairLiteral(PAIR_KIND, self.fluent, self.role, self.second, bool(self.value))
 
     @property
     def amount(self) -> float:
@@ -228,6 +456,8 @@ class Effect:
 
     @property
     def key(self) -> str:
+        if self.pair:
+            return f"{self.fluent}({self.role}, {self.second})"
         return f"{self.role}.{self.fluent}"
 
     @property
@@ -237,7 +467,7 @@ class Effect:
     @property
     def unconditional(self) -> Effect:
         """The same effect without its condition."""
-        return Effect(self.role, self.fluent, self.value)
+        return Effect(self.role, self.fluent, self.value, (), self.second)
 
     @property
     def assignment(self) -> str:
@@ -257,7 +487,16 @@ class Effect:
         conditions is unchanged; a numeric effect writes its ``operator`` and its ``amount`` in
         place of a ``value``."""
         entry: dict[str, Any]
-        if self.numeric:
+        if self.pair:
+            entry = {
+                "kind": PAIR_KIND,
+                "pair_fluent": self.fluent,
+                "first": self.role,
+                "second": self.second,
+                "value": bool(self.value),
+                "expression": self.text,
+            }
+        elif self.numeric:
             entry = {
                 "role": self.role,
                 "fluent": self.fluent,
@@ -291,6 +530,11 @@ class Effect:
         plain = _EFFECT.match(text)
         if plain is not None:
             return cls(plain.group(1), plain.group(2), plain.group(3) == "1", condition)
+        pair = _PAIR_EFFECT.match(text)
+        if pair is not None:
+            if pair.group(2) == pair.group(3):
+                raise ValueError(f"{text!r}: a pair effect names two different roles")
+            return cls(pair.group(2), pair.group(1), pair.group(4) == "1", condition, pair.group(3))
         numeric = _NUMERIC_EFFECT.match(text)
         if numeric is not None:
             amount = float(numeric.group(4))
@@ -300,9 +544,10 @@ class Effect:
             return cls(numeric.group(1), numeric.group(2), signed, condition)
         raise ValueError(
             f"{text!r} is not an effect (write agent.BOOLFL.<n> := 0 or := 1, agent.NUMFL.<n> "
-            f"+= 0.3 or -= 0.3, or when <condition> then <effect>)"
+            f"+= 0.3 or -= 0.3, PAIRFL.<n>(agent, patient) := 0 or := 1, or when <condition> "
+            f"then <effect>)"
         )
 
 
-def precondition_text(literals: tuple[Literal, ...]) -> str:
+def precondition_text(literals: tuple[AnyLiteral, ...]) -> str:
     return " AND ".join(lit.text for lit in literals) if literals else "TRUE"

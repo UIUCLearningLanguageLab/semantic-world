@@ -114,7 +114,7 @@ def absorbing_fluents(event_types: EventTypes, fluents: Fluents) -> list[str]:
     set_to: dict[str, set[bool]] = {f.label: set() for f in fluents.base}
     for et in event_types.leaves:
         for effect in et.effects:
-            if not effect.numeric:
+            if not effect.numeric and not effect.pair:
                 set_to[effect.fluent].add(effect.value)
     return [label for label, values in set_to.items() if len(values) == 1]
 
@@ -329,7 +329,12 @@ def world_stats(
                 conditional[kind] += 1
             for lit in effect.condition:
                 condition_literals["total"] += 1
-                condition_literals[lit.kind] += 1
+                # a pair condition literal (stage c2a) counts under pair, written only when
+                # the world has one, so that a world without pair fluents writes its statistics
+                # as before
+                condition_literals["pair" if lit.pair else lit.kind] = (
+                    condition_literals.get("pair" if lit.pair else lit.kind, 0) + 1
+                )
                 condition_literals[lit.role] += 1
     edges = enabling_edges(event_types)
     return {
@@ -366,6 +371,11 @@ def world_stats(
                     "feature": condition_literals["feature"],
                     "fluent": condition_literals["fluent"],
                     "numeric": condition_literals["numeric"],
+                    **(
+                        {"pair": condition_literals["pair"]}
+                        if condition_literals.get("pair")
+                        else {}
+                    ),
                 },
                 "by_role": {
                     "agent": condition_literals["agent"],

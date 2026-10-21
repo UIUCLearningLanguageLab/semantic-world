@@ -314,6 +314,11 @@ def summary_stats(
         else np.zeros((0, 0), dtype=np.uint8)
     )
     similarity = tree.superordinate_similarity
+    # The range is rounded to 6 decimals when written, as the CSVs are (Jon's ruling WM.61,
+    # October 21, 2026): it comes from a matrix product, which differs between machines in the
+    # 14th digit. The value the bound is checked against is not rounded.
+    if similarity is not None:
+        similarity = (round(float(similarity[0]), 6), round(float(similarity[1]), 6))
     return {
         "categories": len(tree.categories),
         "leaves": len(tree.leaves),

@@ -10,12 +10,19 @@ schema, which the 3D engine will write too. Phase (a) records Boolean changes (`
 drift, and each step records the drift's changes apart under ``drift`` (``"cause": "drift"``),
 so that every numeric change of a step is recorded with its cause; a history's ``initial_numeric``
 holds each participant's numeric values at ``TIME.1``. A world without numeric fluents writes
-none of these keys, so its histories are as before.
+none of these keys, so its histories are as before. Since stage c2a a world with pair fluents
+(``docs/specs/WORLD_PHASE_C.md``, "Histories") writes ``initial_pairs`` after ``initial_numeric``
+(every ordered pair that holds among the participants at ``TIME.1``, as ``[pair fluent, first,
+second]`` triples, both directions of a symmetric pair) and records a pair change as ``{"pair",
+"first", "second", "to"}``, a symmetric pair once, in the direction the effect names; a world
+without pair fluents writes neither.
 
 ``replay`` runs a history's events through the runtime from its initial state and checks that
 every step is legal and free of interference, that the recorded Boolean changes are exactly the
-base fluents that changed, and that every recorded numeric value is reproduced exactly, by the
-same operations in the same order (``clamp(clamp(v + e) + d)``, in float64).
+base fluents that changed, that every recorded numeric value is reproduced exactly, by the
+same operations in the same order (``clamp(clamp(v + e) + d)``, in float64), and that the
+recorded pair changes are exactly the pairs the events changed, both directions of a symmetric
+pair written from one recorded change.
 """
 
 from __future__ import annotations
@@ -58,6 +65,10 @@ class Change:
     def numeric(self) -> bool:
         return self.from_ is not None
 
+    @property
+    def pair(self) -> bool:
+        return False
+
     def to_json(self) -> dict[str, Any]:
         if self.numeric:
             return {
@@ -83,13 +94,58 @@ class Change:
 
 
 @dataclass(frozen=True)
+class PairChange:
+    """One pair an event added or deleted (stage c2a): the pair fluent, its two arguments in
+    the direction the effect names, and the new value. A symmetric pair is recorded once;
+    replay writes both directions."""
+
+    pair_fluent: str
+    first: str
+    second: str
+    to: bool
+
+    @property
+    def numeric(self) -> bool:
+        return False
+
+    @property
+    def pair(self) -> bool:
+        return True
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "pair": self.pair_fluent,
+            "first": self.first,
+            "second": self.second,
+            "to": bool(self.to),
+        }
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> PairChange:
+        return cls(str(data["pair"]), str(data["first"]), str(data["second"]), bool(data["to"]))
+
+
+AnyChange = Change | PairChange
+
+
+def change_from_json(data: Mapping[str, Any]) -> AnyChange:
+    if "pair" in data:
+        return PairChange.from_json(data)
+    return Change.from_json(data)
+
+
+PairTriple = tuple[str, str, str]
+"""``(pair fluent, first, second)``: one ordered pair that holds, by labels."""
+
+
+@dataclass(frozen=True)
 class HistoryEvent:
     label: str
     """``SCENE.<n>.EVENTINSTANCE.<k>``: event k of its episode, in time order."""
     type: str
     agent: str
     patient: str | None = None
-    changes: tuple[Change, ...] = ()
+    changes: tuple[AnyChange, ...] = ()
 
     @property
     def binding(self) -> dict[str, str]:
@@ -112,7 +168,7 @@ class HistoryEvent:
             str(data["type"]),
             str(data["agent"]),
             None if data.get("patient") is None else str(data["patient"]),
-            tuple(Change.from_json(c) for c in data.get("changes", [])),
+            tuple(change_from_json(c) for c in data.get("changes", [])),
         )
 
 
@@ -165,10 +221,25 @@ class History:
     initial_numeric: dict[str, dict[str, float]] = field(default_factory=dict)
     """For each participant, its numeric fluents at ``TIME.1`` (stage b2); empty in a world
     without numeric fluents, and then not written."""
+    initial_pairs: tuple[PairTriple, ...] | None = None
+    """Every ordered pair that holds among the participants at ``TIME.1`` (stage c2a), as
+    ``(pair fluent, first, second)``; None in a world without pair fluents, and then not
+    written (an empty tuple is written, as ``[]``)."""
 
     @property
     def events(self) -> tuple[HistoryEvent, ...]:
         return tuple(e for step in self.steps for e in step.events)
+
+    @property
+    def pair_changes(self) -> tuple[PairChange, ...]:
+        """Every pair change of the history, in time order."""
+        return tuple(
+            c
+            for step in self.steps
+            for e in step.events
+            for c in e.changes
+            if isinstance(c, PairChange)
+        )
 
     @property
     def numeric_changes(self) -> tuple[Change, ...]:
@@ -194,6 +265,8 @@ class History:
                 p: {f: float(v) for f, v in self.initial_numeric[p].items()}
                 for p in self.participants
             }
+        if self.initial_pairs is not None:
+            data["initial_pairs"] = [list(triple) for triple in self.initial_pairs]
         data["steps"] = [step.to_json() for step in self.steps]
         data["final"] = self.final
         data["quiescent"] = self.quiescent
@@ -215,6 +288,9 @@ class History:
                 str(p): {str(f): float(v) for f, v in values.items()}
                 for p, values in (data.get("initial_numeric") or {}).items()
             },
+            None
+            if data.get("initial_pairs") is None
+            else tuple((str(a), str(b), str(c)) for a, b, c in data["initial_pairs"]),
         )
 
 
@@ -257,8 +333,22 @@ def initial_state_of(definition: RuntimeDefinition, history: History) -> State:
         row = definition.entity_index(participant)
         for fluent, value in values.items():
             numeric[row, definition.numeric_index(fluent)] = float(value)
-    state = State.from_true(definition, true, {})
-    return State(state.values, numeric)
+    # The pairs (stage c2a): a history of a world with pair fluents lists every pair that holds
+    # among its participants, and an episode keeps no other pair (WM.38), so the history's
+    # initial pairs are the whole pair part of the state.
+    pairs: list = []
+    if definition.pair_fluents:
+        if history.initial_pairs is None:
+            raise HistoryError(
+                f"{history.label} lists no initial pairs, but the definition has pair fluents"
+            )
+        pairs = [list(triple) for triple in history.initial_pairs]
+    elif history.initial_pairs:
+        raise HistoryError(
+            f"{history.label} lists initial pairs, but the definition has no pair fluents"
+        )
+    state = State.from_true(definition, true, {}, pairs)
+    return State(state.values, numeric, state.pairs)
 
 
 def changes_of(
@@ -304,6 +394,28 @@ def numeric_changes_of(
     return found
 
 
+def pair_changes_of(
+    definition: RuntimeDefinition, before: State, after: State, event: Event
+) -> list[PairChange]:
+    """The pairs the event's pair effects changed between two states, each in the direction the
+    effect names (a symmetric pair once), in effect order."""
+    et = definition.event_type(event.event_type)
+    found: list[PairChange] = []
+    labels = definition.entity_labels
+    for effect in et.effects:
+        if not effect.pair:
+            continue
+        assert effect.second is not None
+        k = definition.pair_index(effect.fluent)
+        i = event.binding[et.roles.index(effect.role)]
+        j = event.binding[et.roles.index(effect.second)]
+        if before.pairs[k][i, j] != after.pairs[k][i, j]:
+            found.append(
+                PairChange(effect.fluent, labels[i], labels[j], bool(after.pairs[k][i, j]))
+            )
+    return found
+
+
 def replay(definition: RuntimeDefinition, history: History) -> list[State]:
     """Run the history's events through ``apply`` from its initial state. Returns the state at
     every time point. Raises :class:`HistoryError` when a step does not apply, or when an
@@ -323,7 +435,7 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
         except WorldError as error:
             raise HistoryError(f"{history.label}, step {step.step}: {error}") from None
         after = result.state
-        recorded = [c for e in step.events for c in e.changes if not c.numeric]
+        recorded = [c for e in step.events for c in e.changes if not c.numeric and not c.pair]
         found = changes_of(
             definition, state, after, sorted(set(i for e in events for i in e.binding))
         )
@@ -337,13 +449,25 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
             written = {
                 (definition.entity_labels[event.binding[et.roles.index(e.role)]], e.fluent)
                 for e in et.effects
+                if not e.pair
             }
             for change in recorded_event.changes:
+                if change.pair:
+                    continue
                 if (change.entity, change.fluent) not in written:
                     raise HistoryError(
                         f"{history.label}, step {step.step}: {recorded_event.label} records a "
                         f"change to {change.fluent} of {change.entity}, which it does not write"
                     )
+            # The pair changes of the event (stage c2a): exactly the pairs its pair effects
+            # changed, each in the effect's direction.
+            expected_pairs = pair_changes_of(definition, state, after, event)
+            got_pairs = [c for c in recorded_event.changes if c.pair]
+            if sorted(got_pairs, key=_pair_key) != sorted(expected_pairs, key=_pair_key):
+                raise HistoryError(
+                    f"{history.label}, step {step.step}: {recorded_event.label} records the "
+                    f"pair changes {got_pairs}, but its effects make {expected_pairs}"
+                )
             # The numeric changes of the event: its numeric effects, judged after the effect
             # and before the drift, reproduced exactly.
             expected = numeric_changes_of(
@@ -382,6 +506,10 @@ def _change_key(change: Change) -> tuple[str, str, bool]:
     return (change.entity, change.fluent, bool(change.to))
 
 
+def _pair_key(change: PairChange) -> tuple[str, str, str, bool]:
+    return (change.pair_fluent, change.first, change.second, bool(change.to))
+
+
 def _numeric_key(change: Change) -> tuple[str, str, float, float, str]:
     return (
         change.entity,
@@ -399,8 +527,11 @@ __all__ = [
     "History",
     "HistoryError",
     "HistoryEvent",
+    "PairChange",
     "Step",
+    "change_from_json",
     "changes_of",
+    "pair_changes_of",
     "initial_state_of",
     "numeric_changes_of",
     "read_histories",

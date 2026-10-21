@@ -150,7 +150,7 @@ def test_the_places_block_is_read_validated_and_defaulted() -> None:
 
 
 def test_the_two_place_streams_come_after_every_earlier_stream() -> None:
-    assert STREAM_NAMES[-2:] == ("places", "place_event_types")
+    assert STREAM_NAMES[-4:-2] == ("places", "place_event_types")  # then the pair streams (c2a)
 
 
 def test_the_place_run_is_byte_identical_to_the_taxonomy_run_alone(

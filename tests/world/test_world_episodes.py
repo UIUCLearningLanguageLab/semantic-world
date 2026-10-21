@@ -484,8 +484,19 @@ def test_quiescence_ends_an_episode() -> None:
     record = dict(fixture["definition"])
     # without the event types that are always legal (EVENTTYPE1.4 and EVENTTYPE1.5 since b1,
     # EVENTTYPE1.6 and EVENTTYPE1.8 since b2; EVENTTYPE1.7 needs NUMFL.1 above 0.5, which the
-    # fixed initial value 0 never gives)
-    always = {"EVENTTYPE1.3", "EVENTTYPE1.4", "EVENTTYPE1.5", "EVENTTYPE1.6", "EVENTTYPE1.8"}
+    # fixed initial value 0 never gives; EVENTTYPE2.2, 2.4, 2.5, and 2.6 since c2a, legal for
+    # every ordered pair when no pair holds, while EVENTTYPE2.3 needs a pair)
+    always = {
+        "EVENTTYPE1.3",
+        "EVENTTYPE1.4",
+        "EVENTTYPE1.5",
+        "EVENTTYPE1.6",
+        "EVENTTYPE1.8",
+        "EVENTTYPE2.2",
+        "EVENTTYPE2.4",
+        "EVENTTYPE2.5",
+        "EVENTTYPE2.6",
+    }
     record["symbols"] = [s for s in record["symbols"] if s["label"] not in always]
     record["event_types"] = [e for e in record["event_types"] if e["label"] not in always]
     entities = [{**row, "PROPERTY.1": 1} for row in fixture["entities"]]

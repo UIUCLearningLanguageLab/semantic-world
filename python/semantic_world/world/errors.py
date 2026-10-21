@@ -23,7 +23,8 @@ class DefinitionError(WorldError):
 
 class StepError(WorldError):
     """``apply`` refuses a step. ``kind`` names the kind of error as the conformance fixtures
-    write it: ``illegal`` or ``interference``."""
+    write it: ``illegal`` or ``interference``; ``profile`` (stage c2a) never occurs with a
+    correct definition, so no fixture ends in it."""
 
     kind = ""
 
@@ -41,3 +42,12 @@ class InterferenceError(StepError):
     fluent the precondition reads), or the same event occurs twice."""
 
     kind = "interference"
+
+
+class ProfileViolationError(StepError):
+    """After a step, a pair fluent's profile does not hold (stage c2a): a symmetric pair without
+    its reverse, an asymmetric pair with its reverse, a functional row with two pairs, or a pair
+    of an entity with itself. The compiled literals (F4) make this impossible for a correct
+    definition, so the error marks a broken definition, never a broken step."""
+
+    kind = "profile"

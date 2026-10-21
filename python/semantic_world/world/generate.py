@@ -40,6 +40,7 @@ from semantic_world.world.event_types import (
 )
 from semantic_world.world.fluents import Fluents, derived_initial_values, generate_fluents
 from semantic_world.world.numeric import NumericFluents, generate_numeric_fluents
+from semantic_world.world.pair_fluents import PairFluents, generate_pair_fluents
 from semantic_world.world.places import (
     PLACE_CAPACITIES_FILE,
     PLACES_DIR,
@@ -88,6 +89,12 @@ class WorldResult:
     @property
     def rule_set_id(self) -> str:
         return self.definition.rule_set_id
+
+    @property
+    def pair_fluents(self) -> PairFluents:
+        """The pair fluents between entities and their initial pairs (stage c2a), from the
+        event file; none without one."""
+        return self.definition.pair_fluents
 
     def derived_frames(self) -> dict[str, pl.DataFrame]:
         """Every table of ``derived/``, keyed by file name. With places, ``capacities.csv``
@@ -162,6 +169,13 @@ def define(config: Config) -> WorldResult:
     streams = WorldStreams(config.seed)
     statics = build_statics(taxonomy, config, streams, event_file)
     places = generate_places(config, taxonomy, streams)
+    pair_fluents = generate_pair_fluents(
+        len(taxonomy.instances),
+        streams,
+        explicit=event_file.pair_fluents if event_file is not None else None,
+        explicit_source=event_file.source if event_file is not None else None,
+    )
+    spatial = event_file.spatial if event_file is not None else None
     numeric = generate_numeric_fluents(
         config,
         taxonomy,
@@ -179,12 +193,14 @@ def define(config: Config) -> WorldResult:
     )
     derived_initial = derived_initial_values(fluents, taxonomy, numeric)
     event_types = generate_event_types(
-        statics, fluents, config, streams, event_file, derived_initial, numeric
+        statics, fluents, config, streams, event_file, derived_initial, numeric, pair_fluents
     )
     initial_present = _initial_present(fluents, derived_initial)
     features = tuple(f.label for f in taxonomy.features.features)
-    _check(event_types, fluents, initial_present, features, numeric)
-    definition = build_definition(statics, fluents, event_types, numeric, places)
+    _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
+    definition = build_definition(
+        statics, fluents, event_types, numeric, places, pair_fluents, spatial
+    )
     fixed = set()
     if event_file is not None:
         fixed = {
@@ -211,8 +227,10 @@ def define(config: Config) -> WorldResult:
         event_types = redraw_preconditions(
             event_types, never, fluents, config, parts, derived_initial, numeric, numeric_parts
         )
-        _check(event_types, fluents, initial_present, features, numeric)
-        definition = build_definition(statics, fluents, event_types, numeric, places)
+        _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
+        definition = build_definition(
+            statics, fluents, event_types, numeric, places, pair_fluents, spatial
+        )
         episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
     stats = world_stats(fluents, event_types, episodes, statics, numeric, places)
@@ -243,9 +261,10 @@ def _check(
     initial_present: set,
     features: tuple[str, ...],
     numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> None:
     try:
-        check_dynamics(event_types, fluents, initial_present, features, numeric)
+        check_dynamics(event_types, fluents, initial_present, features, numeric, pair_fluents)
     except ValueError as error:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
 

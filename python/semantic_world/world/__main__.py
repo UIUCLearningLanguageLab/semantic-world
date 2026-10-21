@@ -110,6 +110,8 @@ def _define(args: argparse.Namespace) -> int:
         places = (
             f", {result.places.count} places and {len(result.places.event_types)} place event types"
         )
+    if len(result.pair_fluents):
+        places += f", {len(result.pair_fluents)} pair fluents"
     print(
         f"wrote {folder}: {len(result.taxonomy.instances)} entities, {len(result.fluents)} fluents "
         f"({len(result.fluents.derived)} derived), {len(result.numeric)} numeric fluents, "
