@@ -19,7 +19,13 @@ pairs}``), which the evaluator reads directly, never through the matrices: the p
 rules, preconditions, and conditions; the pair effects, both directions of a symmetric pair;
 the pairs, rows, and columns an event reads for non-interference. A fixture of a world with pair
 fluents gives ``initial_pairs`` beside ``initial`` and ``pairs`` after each step, as ``[pair
-fluent, first, second]`` triples.
+fluent, first, second]`` triples. Since stage c3a a location fluent's pairs name a place second:
+the evaluator reads them directly as the others, applies an add on a location fluent as the
+total functional replacement, judges the total profile, and counts a move's row (every pair
+of the entity to every place) as its write and a place's column (every pair of every entity to
+the place) as what ``SOMEOF`` of the place reads; a fixture of a world with location fluents
+gives ``initial_places`` beside ``initial_pairs``, and its ``pairs`` after each step list the
+location pairs too.
 """
 
 from __future__ import annotations
@@ -41,6 +47,7 @@ from semantic_world.world.definition import (
 )
 from semantic_world.world.errors import StepError, WorldError
 from semantic_world.world.identity import read_json, rule_set_id, to_json, write_json
+from semantic_world.world.locations import location_columns
 from semantic_world.world.numeric import clamp
 from semantic_world.world.pair_fluents import initial_pairs_frame
 from semantic_world.world.places import places_frame
@@ -76,7 +83,9 @@ BruteNumeric = dict[str, dict[str, float]]
 """The numeric part of a state: each entity's value of each numeric fluent."""
 BrutePairs = dict[str, frozenset[tuple[str, str]]]
 """The pair part of a state (stage c2a): for each pair fluent, the ordered pairs that hold, by
-labels; both directions of a symmetric pair."""
+labels; both directions of a symmetric pair; a place second for a location fluent (stage c3a)."""
+BrutePlaces = dict[str, dict[str, str]]
+"""The initial places (stage c3a): for each entity, its place on each location fluent."""
 PAIR_KINDS = ("pair", "pair_some", "pair_someof", "pair_same")
 
 
@@ -142,6 +151,7 @@ class BruteForce:
         self.scalars = [s["label"] for s in record["symbols"] if s["kind"] == "scalar"]
         self.pair_fluents = [s["label"] for s in record["symbols"] if s["kind"] == "pair_fluent"]
         self.pair_profile = {s["label"]: s for s in record["symbols"] if s["kind"] == "pair_fluent"}
+        self.location_fluents = [f for f in self.pair_fluents if self.pair_profile[f].get("total")]
         self._numeric: BruteNumeric | None = None
         """The numeric part of the state being evaluated (set by the operations)."""
         self._pairs: BrutePairs | None = None
@@ -198,6 +208,13 @@ class BruteForce:
 
     def symmetric(self, fluent: str) -> bool:
         return self.pair_profile[fluent]["symmetry"] == "symmetric"
+
+    def total(self, fluent: str) -> bool:
+        """A location fluent (stage c3a): its pairs go from entities to places."""
+        return bool(self.pair_profile[fluent].get("total"))
+
+    def is_place_event_type(self, label: str) -> bool:
+        return self.event_types[label]["kind"] == "place_event_type"
 
     def pair_literal(self, literal: Mapping[str, Any], roles: Mapping[str, str]) -> bool:
         """A pair literal of a rule (``role`` null: the entity itself), a precondition, or a
@@ -346,8 +363,14 @@ class BruteForce:
         ]
 
     def performable(self) -> list[str]:
-        """The event types that have events: every event type that is not a category."""
-        return [label for label, e in self.event_types.items() if e["kind"] == "event_type"]
+        """The event types that have events: every event type that is not a category, and
+        (stage c3a) every place event type with a precondition or effects (a move or an act)."""
+        return [
+            label
+            for label, e in self.event_types.items()
+            if e["kind"] == "event_type"
+            or (e["kind"] == "place_event_type" and (e["precondition"]["literals"] or e["effects"]))
+        ]
 
     def cone(self, fluent: str) -> set[str]:
         """The base fluents, Boolean or numeric, a fluent depends on."""
@@ -400,11 +423,16 @@ class BruteForce:
     def writes(self, event: BruteEvent) -> dict[tuple, bool | float]:
         """What the event may write: every effect, whatever its condition: ``(entity,
         fluent)`` for a Boolean or numeric fluent, ``(pair fluent, first, second)`` for a pair
-        (both directions of a symmetric one)."""
+        (both directions of a symmetric one; for an add on a location fluent, stage c3a, every
+        pair of the agent's row, because the old place goes with the new one)."""
         et = self.event_types[event.event_type]
         found: dict[tuple, bool | float] = {}
         for e in et["effects"]:
             if e.get("kind") == "pair":
+                if self.total(e["pair_fluent"]):
+                    for key in self._row_pairs(e["pair_fluent"], event.binding[e["first"]]):
+                        found[key] = key[2] == event.binding[e["second"]]
+                    continue
                 for key in self._pair_effect_keys(e, event.binding):
                     found[key] = bool(e["value"])
             else:
@@ -464,10 +492,17 @@ class BruteForce:
         return found
 
     def _row_pairs(self, fluent: str, entity: str) -> set[tuple[str, str, str]]:
+        """Every pair of the entity's row: to every other entity, or (a location fluent) to
+        every place."""
+        if self.total(fluent):
+            return {(fluent, entity, q) for q in self.place_labels}
         return {(fluent, entity, z) for z in self.entity_labels if z != entity}
 
-    def _column_pairs(self, fluent: str, entity: str) -> set[tuple[str, str, str]]:
-        return {(fluent, z, entity) for z in self.entity_labels if z != entity}
+    def _column_pairs(self, fluent: str, target: str) -> set[tuple[str, str, str]]:
+        """Every pair of the column of an entity, or (a location fluent) of a place."""
+        if self.total(fluent):
+            return {(fluent, z, target) for z in self.entity_labels}
+        return {(fluent, z, target) for z in self.entity_labels if z != target}
 
     def _pair_literal_reads(
         self, lit: Mapping[str, Any], binding: Mapping[str, str]
@@ -543,10 +578,25 @@ class BruteForce:
 
     def check_profiles(self, pairs: BrutePairs) -> str | None:
         """Why the pair sets break a profile, or None: a pair of an entity with itself, a
-        symmetric pair without its reverse, an asymmetric pair with its reverse, or two pairs in
-        a row of a functional pair fluent."""
+        symmetric pair without its reverse, an asymmetric pair with its reverse, two pairs in
+        a row of a functional pair fluent, or (a location fluent, stage c3a) an entity at no
+        place or at a label that is not a place."""
         for fluent, held in pairs.items():
             profile = self.pair_profile[fluent]
+            if self.total(fluent):
+                for a, b in held:
+                    if a not in self.entities or b not in self.places:
+                        return (
+                            f"{fluent} holds between {a} and {b}, which are not an entity and "
+                            f"a place"
+                        )
+                for entity in self.entity_labels:
+                    count = sum(1 for a, _ in held if a == entity)
+                    if count != 1:
+                        return (
+                            f"{fluent} is total and functional, but {entity} is at {count} places"
+                        )
+                continue
             for a, b in held:
                 if a == b:
                     return f"{fluent} holds between {a} and itself"
@@ -583,6 +633,9 @@ class BruteForce:
                 if len(key) == 3:
                     fluent, first, second = key
                     if value:
+                        if self.total(fluent):
+                            # the total functional replacement (stage c3a): the old place goes
+                            new_pairs[fluent] = {p for p in new_pairs[fluent] if p[0] != first}
                         new_pairs[fluent].add((first, second))
                     else:
                         new_pairs[fluent].discard((first, second))
@@ -623,19 +676,43 @@ class BruteForce:
 
     def pairs_record(self, pairs: BrutePairs) -> list[list[str]]:
         """The pairs as a fixture writes them: ``[pair fluent, first, second]`` triples, by
-        pair fluent in symbol order, then by first and second in entity order."""
+        pair fluent in symbol order, then by first and second in entity order (the second of a
+        location fluent's pair in place order)."""
         order = {label: i for i, label in enumerate(self.entity_labels)}
+        place_order = {label: i for i, label in enumerate(self.place_labels)}
         return [
             [fluent, a, b]
             for fluent in self.pair_fluents
-            for a, b in sorted(pairs[fluent], key=lambda p: (order[p[0]], order[p[1]]))
+            for a, b in sorted(
+                pairs[fluent],
+                key=lambda p, f=fluent: (
+                    order[p[0]],
+                    place_order[p[1]] if self.total(f) else order[p[1]],
+                ),
+            )
         ]
 
-    def pairs_from_record(self, rows: Sequence[Sequence[str]]) -> BrutePairs:
+    def pairs_from_record(
+        self, rows: Sequence[Sequence[str]], places: BrutePlaces | None = None
+    ) -> BrutePairs:
+        """The pair sets from ``[pair fluent, first, second]`` triples and, for the location
+        fluents (stage c3a), the places given as ``{entity: {location fluent: place}}``."""
         found: dict[str, set[tuple[str, str]]] = {f: set() for f in self.pair_fluents}
         for fluent, a, b in rows:
             found[str(fluent)].add((str(a), str(b)))
+        for entity, at in (places or {}).items():
+            for fluent, place in at.items():
+                found[str(fluent)] = {p for p in found[str(fluent)] if p[0] != entity}
+                found[str(fluent)].add((str(entity), str(place)))
         return {f: frozenset(v) for f, v in found.items()}
+
+    def places_record(self, pairs: BrutePairs) -> BrutePlaces:
+        """Every entity's place on every location fluent, as a fixture's ``initial_places``."""
+        found: BrutePlaces = {}
+        for fluent in self.location_fluents:
+            for a, b in pairs[fluent]:
+                found.setdefault(a, {})[fluent] = b
+        return {e: found[e] for e in self.entity_labels if e in found}
 
     def state_record(self, state: BruteState) -> dict[str, list[str]]:
         return {e: [f for f in self.base_fluents if f in state[e]] for e in self.entity_labels}
@@ -748,10 +825,12 @@ def fixture_record(
     comparisons: Sequence[Mapping[str, Any]] = (),
     places: Sequence[Mapping[str, Any]] | None = None,
     initial_pairs: Sequence[Sequence[str]] | None = None,
+    initial_places: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Assemble a fixture, with the rule-set identity recomputed from the inline definition.
-    ``initial_numeric`` and ``comparisons`` (stage b2), ``places`` (stage c1), and
-    ``initial_pairs`` (stage c2a) are written only when given."""
+    ``initial_numeric`` and ``comparisons`` (stage b2), ``places`` (stage c1),
+    ``initial_pairs`` (stage c2a), and ``initial_places`` (stage c3a) are written only when
+    given."""
     identity = rule_set_id(
         record["symbols"], record["literals"], record["rules"], record["event_types"]
     )
@@ -770,6 +849,8 @@ def fixture_record(
         fixture["initial_numeric"] = {e: dict(v) for e, v in initial_numeric.items()}
     if initial_pairs is not None:
         fixture["initial_pairs"] = [list(triple) for triple in initial_pairs]
+    if initial_places is not None:
+        fixture["initial_places"] = {e: dict(at) for e, at in initial_places.items()}
     fixture["steps"] = list(steps)
     fixture["error"] = error
     if comparisons:
@@ -808,9 +889,15 @@ def _fail(name: str, message: str) -> FixtureError:
 
 
 def _binding_record(
-    definition: RuntimeDefinition, roles: Sequence[str], binding: Sequence[int]
+    definition: RuntimeDefinition, roles: Sequence[str], binding: Sequence[int], place: bool = False
 ) -> dict[str, str]:
-    return {role: definition.entity_labels[i] for role, i in zip(roles, binding, strict=True)}
+    """A binding by labels; the patient of a place event type (``place``) is a place."""
+    return {
+        role: definition.place_labels[i]
+        if place and role == "patient"
+        else definition.entity_labels[i]
+        for role, i in zip(roles, binding, strict=True)
+    }
 
 
 def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
@@ -853,6 +940,7 @@ def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
             fixture["initial"],
             _initial_numeric(definition, fixture),
             _initial_pairs(definition, fixture),
+            fixture.get("initial_places"),
         )
     except WorldError as err:
         raise _fail(name, f"has a malformed initial state: {err}") from None
@@ -867,7 +955,7 @@ def check_fixture(fixture: Mapping[str, Any]) -> FixtureReport:
         for label in performable:
             et = definition.event_type(label)
             got = [
-                _binding_record(definition, et.roles, b)
+                _binding_record(definition, et.roles, b, et.place)
                 for b in legal_bindings(definition, state, label)
             ]
             if got != list(expected_legal[label]):
@@ -969,7 +1057,7 @@ def _initial_pairs(
 ) -> list[list[str]] | None:
     """The fixture's ``initial_pairs``, or None (the definition's initial pairs) when it has
     none and the world has no pair fluents; a world with pair fluents and no ``initial_pairs``
-    starts with none."""
+    starts with none (the location fluents' pairs come from ``initial_places``)."""
     given = fixture.get("initial_pairs")
     if given is None:
         return [] if definition.pair_fluents else None
@@ -1032,7 +1120,16 @@ def _brute_event_kind(
     if event.event_type not in brute.performable():
         return "illegal"
     roles = ("agent", "patient")[: brute.event_types[event.event_type]["arity"]]
-    if set(event.binding) != set(roles) or len(set(event.binding.values())) != len(roles):
+    if set(event.binding) != set(roles):
+        return "illegal"
+    if brute.is_place_event_type(event.event_type):
+        if (
+            event.binding["agent"] not in brute.entities
+            or event.binding["patient"] not in brute.places
+        ):
+            return "illegal"
+        return None if brute.legal(event, state, numeric, pairs) else "illegal"
+    if len(set(event.binding.values())) != len(roles):
         return "illegal"
     if any(label not in brute.entities for label in event.binding.values()):
         return "illegal"
@@ -1041,9 +1138,7 @@ def _brute_event_kind(
 
 def _brute_initial_pairs(brute: BruteForce, fixture: Mapping[str, Any]) -> BrutePairs:
     given = fixture.get("initial_pairs")
-    if given is None:
-        return brute.empty_pairs()
-    return brute.pairs_from_record(given)
+    return brute.pairs_from_record(given or [], fixture.get("initial_places"))
 
 
 def _brute_initial_numeric(brute: BruteForce, fixture: Mapping[str, Any]) -> BruteNumeric | None:
@@ -1204,6 +1299,7 @@ def generate_fixture(
     initial_numeric: Mapping[str, Mapping[str, float]] | None = None,
     places: Sequence[Mapping[str, Any]] | None = None,
     initial_pairs: Sequence[Sequence[str]] | None = None,
+    initial_places: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any]:
     """A fixture whose expected values come from the brute-force evaluator. Each step draws a
     random set of up to ``max_events`` non-interfering legal events. With ``error``, the last
@@ -1211,7 +1307,8 @@ def generate_fixture(
     (``interference``), found among the events of that state; the search fails with
     :class:`WorldError` when the state offers none. ``places`` (stage c1) is the places table
     of a world with places; ``initial_pairs`` (stage c2a) the pairs at ``TIME.1`` of a world
-    with pair fluents."""
+    with pair fluents; ``initial_places`` (stage c3a) every entity's initial place on each
+    location fluent."""
     brute = BruteForce(record, entities, places or ())
     rng = np.random.default_rng(seed)
     state: BruteState = {e: frozenset(initial.get(e, ())) for e in brute.entity_labels}
@@ -1222,9 +1319,11 @@ def generate_fixture(
     )
     if numeric is None and brute.numeric_fluents:
         raise WorldError("the world has numeric fluents, so the fixture needs their initial values")
-    pairs = brute.pairs_from_record(initial_pairs or [])
+    pairs = brute.pairs_from_record(initial_pairs or [], initial_places)
     if initial_pairs is None and brute.pair_fluents:
         raise WorldError("the world has pair fluents, so the fixture needs its initial pairs")
+    if initial_places is None and brute.location_fluents:
+        raise WorldError("the world has location fluents, so the fixture needs its initial places")
     out_steps: list[dict[str, Any]] = []
     error_entry = None
     for k in range(1, steps + 1):
@@ -1263,6 +1362,7 @@ def generate_fixture(
         initial_numeric,
         places=places,
         initial_pairs=initial_pairs,
+        initial_places=initial_places,
     )
 
 
@@ -1282,6 +1382,9 @@ def _error_events(
             for b in brute.bindings(label)
             if not brute.legal(BruteEvent(label, b), state, numeric, pairs)
         ]
+        # the illegal event names an entity pair, as before stage c3a, when the world has one
+        between = [e for e in illegal if not brute.is_place_event_type(e.event_type)]
+        illegal = between or illegal
         if not illegal:
             raise WorldError("every event is legal in the state; no illegal event to draw")
         return [_rng_choice(rng, illegal)]
@@ -1321,14 +1424,27 @@ def fixture_places(definition: Definition) -> list[dict[str, Any]] | None:
 
 
 def fixture_initial_pairs(definition: Definition) -> list[list[str]] | None:
-    """A built definition's initial pairs as a fixture gives them (the rows of
-    ``initial_pairs.csv`` as triples, through their JSON form), or None without pair fluents
-    (stage c2a)."""
+    """A built definition's initial pairs between entities as a fixture gives them (the rows
+    of ``initial_pairs.csv`` as triples, through their JSON form), or None without pair
+    fluents (stage c2a)."""
     if not len(definition.pair_fluents):
         return None
     frame = initial_pairs_frame(definition.pair_fluents, definition.taxonomy.instances.labels)
     rows = json.loads(to_json(frame.to_dicts(), indent=1, sort_keys=False))
     return [[row["pair_fluent"], row["first"], row["second"]] for row in rows]
+
+
+def fixture_initial_places(definition: Definition) -> dict[str, dict[str, str]] | None:
+    """A built definition's initial places as a fixture gives them (the location columns of
+    ``entities.csv``), or None without location fluents (stage c3a)."""
+    if definition.places is None or not definition.pair_fluents.locations:
+        return None
+    columns = location_columns(definition.pair_fluents, definition.places.labels)
+    labels = definition.taxonomy.instances.labels
+    return {
+        label: {fluent: column[i] for fluent, column in columns.items()}
+        for i, label in enumerate(labels)
+    }
 
 
 def fixture_initial_numeric(definition: Definition) -> dict[str, dict[str, float]] | None:
@@ -1350,6 +1466,7 @@ def world_fixtures(
     initial_numeric = fixture_initial_numeric(definition)
     places = fixture_places(definition)
     initial_pairs = fixture_initial_pairs(definition)
+    initial_places = fixture_initial_places(definition)
     fixtures = []
     for seed in range(1, count + 1):
         fixtures.append(
@@ -1365,6 +1482,7 @@ def world_fixtures(
                 initial_numeric=initial_numeric,
                 places=places,
                 initial_pairs=initial_pairs,
+                initial_places=initial_places,
             )
         )
     for kind, text in (
@@ -1385,6 +1503,7 @@ def world_fixtures(
                 initial_numeric=initial_numeric,
                 places=places,
                 initial_pairs=initial_pairs,
+                initial_places=initial_places,
             )
         )
     return fixtures
@@ -1422,6 +1541,7 @@ __all__ = [
     "check_fixtures",
     "fixture_initial_numeric",
     "fixture_initial_pairs",
+    "fixture_initial_places",
     "fixture_inputs",
     "fixture_paths",
     "fixture_record",

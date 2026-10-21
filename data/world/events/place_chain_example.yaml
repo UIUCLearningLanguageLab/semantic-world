@@ -1,0 +1,47 @@
+# A worked example of an event file with places and a location fluent (docs/specs/WORLD_PHASE_C.md,
+# "Explicit event files"; stage c3a). Over abstract labels, it builds the chain of go, approach,
+# and eat. PLACEEVENTTYPE.1 ("go to") is a move, able for every entity and every place, whose
+# effect PAIRFL.2(agent, patient) := 1 puts the agent at the place (the total functional
+# replacement deletes the old place in the same step) and whose compiled literal NOT
+# PAIRFL.2(agent, patient), of origin move, stops a move to the agent's own place.
+# PLACEEVENTTYPE.2 ("rest") is an act, able at the places with the first place property, whose
+# precondition literal PAIRFL.2(agent, patient), of origin act, puts it at the agent's place; it
+# puts the agent to sleep when someone is at the place (SOMEOF.PAIRFL.2 of the place, which only
+# a place event type can read). EVENTTYPE2.1.1 ("approach") needs the two at the same place
+# (SAME.PAIRFL.2(agent, patient) on the location fluent) and not yet near, and makes them near
+# (PAIRFL.1, symmetric); EVENTTYPE2.1.2 ("eat") needs the agent awake and near the patient and
+# puts the patient to sleep for good; EVENTTYPE1.1 ("wake") wakes a sleeping agent that is near
+# someone. The entity event types' requirements always hold, so legality is the preconditions'
+# alone, and the chain's events can occur only in the order the preconditions force: no approach
+# before the two share a place, no eat before the approach. Event types not listed are sampled.
+# Use it with the tiny world: data/world/tiny_place_chain.yaml names it as event_types.event_file,
+# relative to the configuration file's folder, with one pair fluent between entities (PAIRFL.1,
+# which the file defines) and one location fluent (PAIRFL.2, which the configuration's
+# pair_fluents.locations makes, with the fixed profile; an event file never defines one).
+
+pair_fluents:
+  PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.0}   # say, near
+fluents:
+  BOOLFL.1: {initial_rate: 1.0}        # say, awake
+event_types:
+  EVENTTYPE2.1.1:                                                          # approach
+    requirement: "TRUE"
+    precondition: "SAME.PAIRFL.2(agent, patient) AND NOT PAIRFL.1(agent, patient)"
+    effects: ["PAIRFL.1(agent, patient) := 1"]
+  EVENTTYPE2.1.2:                                                          # eat
+    requirement: "TRUE"
+    precondition: "agent.BOOLFL.1 AND PAIRFL.1(agent, patient)"
+    effects: ["patient.BOOLFL.1 := 0"]
+  EVENTTYPE1.1:                                                            # wake
+    requirement: "TRUE"
+    precondition: "NOT agent.BOOLFL.1 AND SOME.PAIRFL.1(agent)"
+    effects: ["agent.BOOLFL.1 := 1"]
+place_event_types:
+  PLACEEVENTTYPE.1:                                                        # go to
+    kind: move
+    requirement: "TRUE"
+  PLACEEVENTTYPE.2:                                                        # rest
+    kind: act
+    requirement: "patient.PLACEPROPERTY.1"
+    precondition: "agent.BOOLFL.1"
+    effects: ["when SOMEOF.PAIRFL.2(patient) then agent.BOOLFL.1 := 0"]

@@ -48,16 +48,19 @@ WORLD_CONFIGS = {
     "tiny_full": "data/world/tiny_full.yaml",
     "default_full": "data/world/default_full.yaml",
     "tiny_pairs": "data/world/tiny_pairs.yaml",
+    "tiny_place_chain": "data/world/tiny_place_chain.yaml",
 }
 """The worlds of the snapshot. ``tiny_full`` and ``default_full`` carry the phase (c) settings
-until stage c4 (stage c2b, WM.63), and ``tiny_pairs`` is stage c2a's world from an event file,
-kept so that its identity is tested."""
+until stage c4 (stage c2b, WM.63), ``tiny_pairs`` is stage c2a's world from an event file, kept
+so that its identity is tested, and ``tiny_place_chain`` is stage c3a's world with a location
+fluent and the place chain example's moves and acts, the only world of ``data/`` with location
+fluents until stage c3b."""
 CORPUS_CONFIGS = {"tiny": "data/corpus/tiny.yaml", "default": "data/corpus/default.yaml"}
 """The corpora of the snapshot: none runs on a world with pair fluents until stage c4."""
 BASELINE_NAMES = ("tiny", "default", "tiny_full", "default_full")
 """The worlds whose off-setting baselines the snapshot holds: every world of the snapshot
-without an event file (``tiny_pairs`` defines its pair fluents in a file, which the off setting
-of pair fluents would refuse)."""
+without an event file (``tiny_pairs`` and ``tiny_place_chain`` define pair fluents and place
+event types in a file, which the off settings would refuse)."""
 GUIDES = (
     "README.md",
     "docs/guides/README.md",

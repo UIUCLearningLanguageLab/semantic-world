@@ -227,8 +227,8 @@ def test_the_event_file_defines_pair_fluents_and_the_world_has_them(
 
 
 def test_the_pair_streams_come_after_every_earlier_stream(pairs_world: WorldResult) -> None:
-    # stage c2b's three streams follow (test_world_pair_generation.py)
-    assert STREAM_NAMES[-7:-3] == ("places", "place_event_types", "pair_fluents", "pair_initial")
+    # stage c2b's three streams follow, then stage c3a's (test_world_pair_generation.py)
+    assert STREAM_NAMES[-8:-4] == ("places", "place_event_types", "pair_fluents", "pair_initial")
     assert "world:pair_fluents" in pairs_world.stream_seeds
     assert "world:pair_initial" in pairs_world.stream_seeds
 
@@ -519,8 +519,12 @@ def test_interference_through_a_row_and_a_column() -> None:
     SOME literal (a row read), and an event whose precondition reads a column interferes with
     one that writes a pair of it."""
     fixture = read_fixture(FIXTURES_DIR / "hand_35_interference_functional_row.json")
-    definition = runtime_definition(fixture["definition"], fixture["entities"])
-    state = State.from_true(definition, fixture["initial"], fixture["initial_numeric"], [])
+    definition = runtime_definition(
+        fixture["definition"], fixture["entities"], fixture.get("places")
+    )
+    state = State.from_true(
+        definition, fixture["initial"], fixture["initial_numeric"], [], fixture["initial_places"]
+    )
     first = Event.from_labels(
         definition, "EVENTTYPE2.5", {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"}
     )
@@ -573,9 +577,13 @@ def test_the_profile_invariant_is_checked_after_the_step() -> None:
     record["rule_set_id"] = rule_set_id(
         record["symbols"], record["literals"], record["rules"], record["event_types"]
     )
-    definition = runtime_definition(record, fixture["entities"])
+    definition = runtime_definition(record, fixture["entities"], fixture.get("places"))
     state = State.from_true(
-        definition, fixture["initial"], fixture["initial_numeric"], fixture["initial_pairs"]
+        definition,
+        fixture["initial"],
+        fixture["initial_numeric"],
+        fixture["initial_pairs"],
+        fixture.get("initial_places"),
     )
     event = Event.from_labels(
         definition, "EVENTTYPE2.4", {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"}
@@ -935,9 +943,19 @@ def test_the_pair_fluents_block_is_validated(tmp_path: Path) -> None:
         with pytest.raises(ConfigError, match=message) as info:
             _event_file_run(tmp_path, {"pair_fluents": pair_fluents, "event_types": {}})
         assert "events.yaml" in str(info.value)
-    for key in ("place_event_types", "locations"):
-        with pytest.raises(ConfigError, match="stage c3"):
-            _event_file_run(tmp_path, {"pair_fluents": BASE_PAIRS, "event_types": {}, key: {}})
+    # stage c3a: location fluents are never defined in an event file, and a place_event_types
+    # entry needs a location fluent of the configuration
+    with pytest.raises(ConfigError, match="not defined in an event file"):
+        _event_file_run(tmp_path, {"pair_fluents": BASE_PAIRS, "event_types": {}, "locations": {}})
+    with pytest.raises(ConfigError, match="no location fluent"):
+        _event_file_run(
+            tmp_path,
+            {
+                "pair_fluents": BASE_PAIRS,
+                "event_types": {},
+                "place_event_types": {"PLACEEVENTTYPE.1": {"kind": "move"}},
+            },
+        )
     # a pair literal in a world without pair fluents (no entries, and a count of 0) is an error
     with pytest.raises(ConfigError, match="pair fluents are none"):
         _event_file_run(
@@ -1128,10 +1146,20 @@ def test_the_loader_validates_pair_records(pairs_folder: Path) -> None:
     entry["effects"][0]["second"] = "agent"
     with pytest.raises(DefinitionError, match="names the roles"):
         runtime_definition(rehash(broken), entities, places, pairs)
+    # stage c3a: a total pair fluent is a location fluent, general and functional, without an
+    # initial rate, after the pair fluents between entities
     broken = json.loads(json.dumps(record))
     symbol = next(s for s in broken["symbols"] if s["label"] == "PAIRFL.1")
     symbol["total"] = True
-    with pytest.raises(DefinitionError, match="stage c3"):
+    with pytest.raises(DefinitionError, match="general and functional"):
+        runtime_definition(rehash(broken), entities, places, pairs)
+    broken = json.loads(json.dumps(record))
+    symbol = next(s for s in broken["symbols"] if s["label"] == "PAIRFL.3")
+    symbol.update({"total": True, "symmetry": "general"})
+    with pytest.raises(DefinitionError, match="initial rate"):
+        runtime_definition(rehash(broken), entities, places, pairs)
+    symbol["initial_rate"] = None
+    with pytest.raises(DefinitionError, match="after the pair fluents between entities"):
         runtime_definition(rehash(broken), entities, places, pairs)
     broken = json.loads(json.dumps(record))
     symbol = next(s for s in broken["symbols"] if s["label"] == "PAIRFL.4")
@@ -1207,7 +1235,8 @@ def test_the_hand_fixtures_cover_the_specified_cases() -> None:
         assert any(name.endswith(case) for name in names), case
     fixture = read_fixture(FIXTURES_DIR / "hand_29_symmetric_add_writes_both_directions.json")
     assert fixture["initial_pairs"] == []
-    assert fixture["steps"][0]["pairs"] == [
+    # the location pairs of stage c3a follow the pairs between entities
+    assert [p for p in fixture["steps"][0]["pairs"] if p[0] != "PAIRFL.4"] == [
         ["PAIRFL.1", "INSTANCE.1.1.1", "INSTANCE.1.1.2"],
         ["PAIRFL.1", "INSTANCE.1.1.2", "INSTANCE.1.1.1"],
     ]

@@ -42,9 +42,28 @@ agent)`` of origin ``profile``), ``EVENTTYPE2.5`` (adds ``PAIRFL.3(agent, patien
 compiled literals ``NOT SOME.PAIRFL.3(agent)`` and ``NOT SOME.PAIRFL.3(patient)``), and
 ``EVENTTYPE2.6`` (always legal, ``when PAIRFL.1(agent, patient) then patient.BOOLFL.2 := 1``, a
 pair condition). ``hand_29`` to ``hand_37`` are the pair fixtures of ``docs/specs/WORLD_PHASE_C.md``
-("Conformance fixtures", items 1 to 4, 10, 12 to 14, and 16); items 5 to 9, 11, and 15 need the
-places and the location fluent of stage c3. In the cases of phases (a) and (b) no pair holds at
-any time point, so ``BOOLFL.4`` is false everywhere and the pairs after every step are none.
+("Conformance fixtures", items 1 to 4, 10, 12 to 14, and 16). In the cases of phases (a) and
+(b) no pair holds at any time point, so ``BOOLFL.4`` is false everywhere and the pairs after
+every step are none.
+
+Since stage c3a the hand world has two places, ``PLACE.1.1`` (of ``PLACECATEGORY.1``, with the
+free place property ``PLACEPROPERTY.1``) and ``PLACE.2.1`` (of ``PLACECATEGORY.2``, without it);
+a location fluent ``PAIRFL.4`` (general, functional, and total, from entities to places, with no
+initial rate: every case gives its initial places); three place event types, every one able
+for every entity: ``PLACEEVENTTYPE.1`` (say, go: a move, able at every place, with the compiled
+literal ``NOT PAIRFL.4(agent, patient)`` of origin ``move`` and the effect ``PAIRFL.4(agent,
+patient) := 1``), ``PLACEEVENTTYPE.2`` (say, rest: an act, able at the places with
+``PLACEPROPERTY.1`` only, with the literal ``PAIRFL.4(agent, patient)`` of origin ``act``, which
+clears ``agent.BOOLFL.1``), and ``PLACEEVENTTYPE.3`` (say, join: a move to a place where someone
+is, ``SOMEOF.PAIRFL.4(patient)`` beside the compiled literal); and one more two-place event type,
+``EVENTTYPE2.7`` (say, meet: needs ``SAME.PAIRFL.4(agent, patient)``, the two at the same place,
+and sets ``patient.BOOLFL.2``). ``hand_38`` to ``hand_44`` are the location fixtures of
+``docs/specs/WORLD_PHASE_C.md`` ("Conformance fixtures", items 5 to 9, 11, and 15). In every
+earlier case every entity starts at ``PLACE.1.1`` and nothing moves, so the location pairs after
+every step are the three initial ones, go is legal for every entity toward ``PLACE.2.1``, rest for
+every entity at ``PLACE.1.1``, join for nobody (``PLACE.2.1`` is empty), and meet for every ordered
+pair; no state, event, or earlier legality verdict of those cases changed when the places were
+added (the proposal file of stage c3a records the check).
 
 Every expected value in ``CASES`` (the legal bindings before each step, and the state, the
 derived fluents, and the numeric values after it) is typed in by hand, never computed by the
@@ -87,8 +106,9 @@ def numsym(label, drift):
     }
 
 
-def pairsym(label, symmetry, functional):
-    """A pair fluent's symbol (stage c2a): its profile, never total, and the initial rate 0."""
+def pairsym(label, symmetry, functional, total=False):
+    """A pair fluent's symbol (stage c2a): its profile and the initial rate 0; a location
+    fluent (stage c3a) is total, general, and functional, with no initial rate."""
     return {
         "label": label,
         "kind": "pair_fluent",
@@ -97,8 +117,8 @@ def pairsym(label, symmetry, functional):
         "arity": 2,
         "symmetry": symmetry,
         "functional": functional,
-        "total": False,
-        "initial_rate": 0.0,
+        "total": total,
+        "initial_rate": None if total else 0.0,
     }
 
 
@@ -232,10 +252,10 @@ def numlit(role, fluent, operator, threshold):
     return {"role": role, "fluent": fluent, "operator": operator, "threshold": threshold}
 
 
-def et(label, arity, constraints, pre_literals, pre_text, effects):
+def et(label, arity, constraints, pre_literals, pre_text, effects, kind="event_type"):
     return {
         "label": label,
-        "kind": "event_type",
+        "kind": kind,
         "arity": arity,
         "roles": ["agent", "patient"][:arity],
         "parent": None,
@@ -282,6 +302,12 @@ DEFINITION = {
         sym("EVENTTYPE2.4", "event_type", arity=2),
         sym("EVENTTYPE2.5", "event_type", arity=2),
         sym("EVENTTYPE2.6", "event_type", arity=2),
+        pairsym("PAIRFL.4", "general", True, total=True),
+        sym("EVENTTYPE2.7", "event_type", arity=2),
+        sym("PLACEPROPERTY.1", "place_property"),
+        sym("PLACEEVENTTYPE.1", "place_event_type", arity=2),
+        sym("PLACEEVENTTYPE.2", "place_event_type", arity=2),
+        sym("PLACEEVENTTYPE.3", "place_event_type", arity=2),
     ],
     "literals": [
         feat(0, "PROPERTY.1", None, "PROPERTY.1"),
@@ -311,6 +337,8 @@ DEFINITION = {
             "role": None,
             "pair_fluent": "PAIRFL.1",
         },
+        feat(11, "patient.PLACEPROPERTY.1", "patient", "PLACEPROPERTY.1"),
+        con(12, "CONSTRAINT.PLACEEVENTTYPE.2.1"),
     ],
     "rules": [
         rule("PROPERTY.2", "entity", "hand", [0], "10", "NOT PROPERTY.1"),
@@ -362,6 +390,25 @@ DEFINITION = {
         rule("REQUIREMENT.EVENTTYPE2.4", "binding", "requirement", [], "1", "TRUE"),
         rule("REQUIREMENT.EVENTTYPE2.5", "binding", "requirement", [], "1", "TRUE"),
         rule("REQUIREMENT.EVENTTYPE2.6", "binding", "requirement", [], "1", "TRUE"),
+        rule("REQUIREMENT.EVENTTYPE2.7", "binding", "requirement", [], "1", "TRUE"),
+        rule(
+            "CONSTRAINT.PLACEEVENTTYPE.2.1",
+            "place_binding",
+            "hand",
+            [11],
+            "01",
+            "patient.PLACEPROPERTY.1",
+        ),
+        rule("REQUIREMENT.PLACEEVENTTYPE.1", "place_binding", "requirement", [], "1", "TRUE"),
+        rule(
+            "REQUIREMENT.PLACEEVENTTYPE.2",
+            "place_binding",
+            "requirement",
+            [12],
+            "01",
+            "CONSTRAINT.PLACEEVENTTYPE.2.1",
+        ),
+        rule("REQUIREMENT.PLACEEVENTTYPE.3", "place_binding", "requirement", [], "1", "TRUE"),
     ],
     "layers": [
         {
@@ -377,6 +424,7 @@ DEFINITION = {
                 term([3], [False]),
                 term([4], [False]),
                 term([3, 5, 6], [False, True, False]),
+                term([], []),
                 term([], []),
                 term([], []),
                 term([], []),
@@ -404,6 +452,7 @@ DEFINITION = {
                 out("REQUIREMENT.EVENTTYPE2.4", [11]),
                 out("REQUIREMENT.EVENTTYPE2.5", [12]),
                 out("REQUIREMENT.EVENTTYPE2.6", [13]),
+                out("REQUIREMENT.EVENTTYPE2.7", [14]),
             ],
         },
         {
@@ -415,6 +464,22 @@ DEFINITION = {
                 out("REQUIREMENT.EVENTTYPE1.2", [1]),
                 out("REQUIREMENT.EVENTTYPE2.1", [2]),
             ],
+        },
+        {
+            "scope": "place_binding",
+            "layer": 1,
+            "terms": [term([11], [False]), term([], []), term([], [])],
+            "outputs": [
+                out("CONSTRAINT.PLACEEVENTTYPE.2.1", [0]),
+                out("REQUIREMENT.PLACEEVENTTYPE.1", [1]),
+                out("REQUIREMENT.PLACEEVENTTYPE.3", [2]),
+            ],
+        },
+        {
+            "scope": "place_binding",
+            "layer": 2,
+            "terms": [term([12], [False])],
+            "outputs": [out("REQUIREMENT.PLACEEVENTTYPE.2", [0])],
         },
     ],
     "event_types": [
@@ -519,6 +584,44 @@ DEFINITION = {
                 )
             ],
         ),
+        et(
+            "EVENTTYPE2.7",
+            2,
+            [],
+            [pairlit("pair_same", "PAIRFL.4", "agent", "patient", True)],
+            "SAME.PAIRFL.4(agent, patient)",
+            [eff("patient", "BOOLFL.2", True)],
+        ),
+        et(
+            "PLACEEVENTTYPE.1",
+            2,
+            [],
+            [pairlit("pair", "PAIRFL.4", "agent", "patient", False, "move")],
+            "NOT PAIRFL.4(agent, patient)",
+            [paireff("PAIRFL.4", "agent", "patient", True)],
+            kind="place_event_type",
+        ),
+        et(
+            "PLACEEVENTTYPE.2",
+            2,
+            ["CONSTRAINT.PLACEEVENTTYPE.2.1"],
+            [pairlit("pair", "PAIRFL.4", "agent", "patient", True, "act")],
+            "PAIRFL.4(agent, patient)",
+            [eff("agent", "BOOLFL.1", False)],
+            kind="place_event_type",
+        ),
+        et(
+            "PLACEEVENTTYPE.3",
+            2,
+            [],
+            [
+                pairlit("pair_someof", "PAIRFL.4", "patient", None, True),
+                pairlit("pair", "PAIRFL.4", "agent", "patient", False, "move"),
+            ],
+            "SOMEOF.PAIRFL.4(patient) AND NOT PAIRFL.4(agent, patient)",
+            [paireff("PAIRFL.4", "agent", "patient", True)],
+            kind="place_event_type",
+        ),
     ],
 }
 
@@ -528,14 +631,40 @@ ENTITIES = [
     {"label": C, "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25},
 ]
 
+P, Q = "PLACE.1.1", "PLACE.2.1"
+PLACES = [
+    {"label": P, "leaf": "PLACECATEGORY.1", "PLACEPROPERTY.1": 1},
+    {"label": Q, "leaf": "PLACECATEGORY.2", "PLACEPROPERTY.1": 0},
+]
+
 B1, B2, B3, B4 = "BOOLFL.1", "BOOLFL.2", "BOOLFL.3", "BOOLFL.4"
 N1, N2 = "NUMFL.1", "NUMFL.2"
-P1, P2, P3 = "PAIRFL.1", "PAIRFL.2", "PAIRFL.3"
+P1, P2, P3, P4 = "PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4"
 ALL = [{"agent": A}, {"agent": B}, {"agent": C}]
 AB = [{"agent": A, "patient": B}]
 PAIRS = [(A, B), (A, C), (B, A), (B, C), (C, A), (C, B)]
 """Every ordered pair of distinct entities, by agent then patient, in entity order."""
 ALL6 = [{"agent": x, "patient": y} for x, y in PAIRS]
+
+
+def at(a, b, c):
+    """The initial places of the three entities on the location fluent (stage c3a)."""
+    return {A: {P4: a}, B: {P4: b}, C: {P4: c}}
+
+
+def located(a, b, c):
+    """The location pairs of the three entities, as a fixture lists them after a step: after
+    the pairs of the pair fluents between entities, in entity order."""
+    return [[P4, A, a], [P4, B, b], [P4, C, c]]
+
+
+ALL_AT_P = at(P, P, P)
+AT_P = located(P, P, P)
+GO_FROM_P = [{"agent": x, "patient": Q} for x in (A, B, C)]
+"""Go (PLACEEVENTTYPE.1) with everyone at PLACE.1.1: each entity can go to the other place."""
+REST_AT_P = [{"agent": x, "patient": P} for x in (A, B, C)]
+"""Rest (PLACEEVENTTYPE.2) with everyone at PLACE.1.1: legal at the place, which has the
+property; never at PLACE.2.1, which lacks it."""
 
 
 def bindings(pairs):
@@ -547,7 +676,19 @@ def ev(label, agent, patient=None):
     return {"event_type": label, "binding": binding}
 
 
-def legal(e11, e12, e21, e17=(), e23=(), e24=PAIRS, e25=PAIRS):
+def legal(
+    e11,
+    e12,
+    e21,
+    e17=(),
+    e23=(),
+    e24=PAIRS,
+    e25=PAIRS,
+    go=GO_FROM_P,
+    rest=REST_AT_P,
+    join=(),
+    meet=ALL6,
+):
     """The legal bindings before a step. EVENTTYPE1.3, EVENTTYPE1.4, EVENTTYPE1.5, EVENTTYPE1.6,
     and EVENTTYPE1.8 are always able and have no precondition, so every entity is a legal agent
     of each; a condition never bears on legality. EVENTTYPE1.7 is legal for the entities whose
@@ -555,7 +696,11 @@ def legal(e11, e12, e21, e17=(), e23=(), e24=PAIRS, e25=PAIRS):
     ordered pair: EVENTTYPE2.2 and EVENTTYPE2.6 have no precondition, so every ordered pair is
     legal; EVENTTYPE2.3 is legal where the agent is near the patient (``e23``); EVENTTYPE2.4
     where the patient is not above the agent (``e24``); and EVENTTYPE2.5 where neither has a
-    partner (``e25``). With no pair at all, every ordered pair is legal for the last two."""
+    partner (``e25``). With no pair at all, every ordered pair is legal for the last two. The
+    location event types (stage c3a) default to everyone at PLACE.1.1: go (``go``) to the other
+    place for everyone, rest (``rest``) at PLACE.1.1 for everyone, join (``join``) for nobody,
+    because PLACE.2.1 is empty, and meet (``meet``) for every ordered pair, because all share a
+    place."""
     return {
         "EVENTTYPE1.1": [{"agent": x} for x in e11],
         "EVENTTYPE1.2": [{"agent": x} for x in e12],
@@ -571,6 +716,10 @@ def legal(e11, e12, e21, e17=(), e23=(), e24=PAIRS, e25=PAIRS):
         "EVENTTYPE2.4": bindings(e24),
         "EVENTTYPE2.5": bindings(e25),
         "EVENTTYPE2.6": ALL6,
+        "EVENTTYPE2.7": list(meet),
+        "PLACEEVENTTYPE.1": list(go),
+        "PLACEEVENTTYPE.2": list(rest),
+        "PLACEEVENTTYPE.3": list(join),
     }
 
 
@@ -1349,14 +1498,210 @@ PAIR_CASES = [
 ]
 
 
+def move(label, agent, place):
+    """A place event: the patient is a place."""
+    return {"event_type": label, "binding": {"agent": agent, "patient": place}}
+
+
+def go_legal(a, b, c):
+    """Go: each entity to the place it is not at."""
+    return [
+        {"agent": x, "patient": Q if where == P else P} for x, where in ((A, a), (B, b), (C, c))
+    ]
+
+
+def rest_legal(a, b, c):
+    """Rest: the entities at PLACE.1.1, which has the property, there."""
+    return [{"agent": x, "patient": P} for x, where in ((A, a), (B, b), (C, c)) if where == P]
+
+
+def join_legal(a, b, c):
+    """Join: each entity to the other place when someone is there."""
+    where = {A: a, B: b, C: c}
+    return [
+        {"agent": x, "patient": other}
+        for x in (A, B, C)
+        for other in (Q if where[x] == P else P,)
+        if any(where[y] == other for y in (A, B, C) if y != x)
+    ]
+
+
+def meet_legal(a, b, c):
+    """Meet: the ordered pairs of entities at the same place."""
+    where = {A: a, B: b, C: c}
+    return [{"agent": x, "patient": y} for x, y in PAIRS if where[x] == where[y]]
+
+
+def loc_legal(a, b, c, **more):
+    """The legal bindings with the entities at the given places, no Boolean fluent true, and
+    the numeric fluents at 0 (so EVENTTYPE1.1 is legal for A and C, EVENTTYPE1.2 and EVENTTYPE2.1
+    for nobody)."""
+    return legal(
+        [A, C],
+        [],
+        False,
+        go=go_legal(a, b, c),
+        rest=rest_legal(a, b, c),
+        join=join_legal(a, b, c),
+        meet=meet_legal(a, b, c),
+        **more,
+    )
+
+
+def loc_step(events, legal_before, a, b, c, state_after=None, derived_after=None):
+    return {
+        "events": events,
+        "legal": legal_before,
+        "derived": state([], [], []) if derived_after is None else derived_after,
+        "state": state([], [], []) if state_after is None else state_after,
+        "pairs": located(a, b, c),
+    }
+
+
+LOCATION_CASES = [
+    # (name, description, initial places, initial Boolean state, steps, error); every entity
+    # starts with both numeric fluents at 0 and no pair between entities
+    (
+        "hand_38_move_replaces_old_place",
+        "A move replaces the old place (stage c3a, fixture 5): everyone starts at PLACE.1.1. "
+        "PLACEEVENTTYPE.1 (INSTANCE.1.1.1, PLACE.2.1) adds PAIRFL.4(agent, patient), and PAIRFL.4 "
+        "is "
+        "total and functional, so the add deletes the old pair (INSTANCE.1.1.1, PLACE.1.1) in the "
+        "same step: after it INSTANCE.1.1.1 is at PLACE.2.1 and at no other place, and the others "
+        "stay. A history records the two changes. Then go is legal for INSTANCE.1.1.1 toward "
+        "PLACE.1.1 only, rest (which needs the place's property) for the two at PLACE.1.1, join "
+        "for "
+        "everyone (each other place holds someone), and meet for the two at PLACE.1.1 alone.",
+        ALL_AT_P,
+        state([], [], []),
+        [
+            loc_step([move("PLACEEVENTTYPE.1", A, Q)], loc_legal(P, P, P), Q, P, P),
+            loc_step([], loc_legal(Q, P, P), Q, P, P),
+        ],
+        None,
+    ),
+    (
+        "hand_39_move_to_own_place_blocked",
+        "A move to the agent's own place blocked by its compiled literal (stage c3a, fixture 6): "
+        "INSTANCE.1.1.1 is at PLACE.1.1, and PLACEEVENTTYPE.1 (INSTANCE.1.1.1, PLACE.1.1) fails "
+        "NOT "
+        "PAIRFL.4(agent, patient), the compiled literal of origin move; the binding is not legal, "
+        "and applying the event is an illegal-event error.",
+        ALL_AT_P,
+        state([], [], []),
+        [{"events": [move("PLACEEVENTTYPE.1", A, P)], "legal": loc_legal(P, P, P)}],
+        {"step": 1, "kind": "illegal"},
+    ),
+    (
+        "hand_40_act_at_the_place_and_not_elsewhere",
+        "An act at a place legal at the place and not elsewhere (stage c3a, fixture 7): "
+        "PLACEEVENTTYPE.2 is able at PLACE.1.1, which has PLACEPROPERTY.1, and needs the agent "
+        "there (PAIRFL.4(agent, patient), origin act). INSTANCE.1.1.1 is at PLACE.2.1 and the "
+        "others "
+        "at PLACE.1.1: rest is legal for INSTANCE.1.1.2 and INSTANCE.1.2.1 at PLACE.1.1, not for "
+        "INSTANCE.1.1.1 there (it is elsewhere) nor for anyone at PLACE.2.1 (not able). Step 1: "
+        "INSTANCE.1.1.2 rests and loses BOOLFL.1. Step 2: INSTANCE.1.1.1 rests at PLACE.2.1, where "
+        "it is but which is not able, an illegal-event error.",
+        at(Q, P, P),
+        state([], [B1], []),
+        [
+            loc_step(
+                [move("PLACEEVENTTYPE.2", B, P)],
+                loc_legal(Q, P, P),
+                Q,
+                P,
+                P,
+            ),
+            {"events": [move("PLACEEVENTTYPE.2", A, Q)], "legal": loc_legal(Q, P, P)},
+        ],
+        {"step": 2, "kind": "illegal"},
+    ),
+    (
+        "hand_41_same_holds_event_legal",
+        "SAME holds, and the event is legal (stage c3a, fixture 8): INSTANCE.1.1.1 and "
+        "INSTANCE.1.1.2 are at PLACE.1.1, INSTANCE.1.2.1 at PLACE.2.1. EVENTTYPE2.7 needs "
+        "SAME.PAIRFL.4(agent, patient), so it is legal for the two at PLACE.1.1 in both orders and "
+        "for no pair with INSTANCE.1.2.1; EVENTTYPE2.7 (INSTANCE.1.1.1, INSTANCE.1.1.2) sets "
+        "BOOLFL.2 "
+        "of INSTANCE.1.1.2, and no place changes.",
+        at(P, P, Q),
+        state([], [], []),
+        [
+            loc_step(
+                [ev("EVENTTYPE2.7", A, B)],
+                loc_legal(P, P, Q),
+                P,
+                P,
+                Q,
+                state([], [B2], []),
+            )
+        ],
+        None,
+    ),
+    (
+        "hand_42_same_fails_after_move",
+        "SAME fails after a move, and the event is not legal (stage c3a, fixture 9): "
+        "INSTANCE.1.1.1 and INSTANCE.1.1.2 start at PLACE.1.1, where EVENTTYPE2.7 is legal between "
+        "them. Step 1 moves INSTANCE.1.1.1 to PLACE.2.1; in step 2 EVENTTYPE2.7 (INSTANCE.1.1.1, "
+        "INSTANCE.1.1.2) fails SAME.PAIRFL.4(agent, patient), and applying it is an illegal-event "
+        "error.",
+        ALL_AT_P,
+        state([], [], []),
+        [
+            loc_step([move("PLACEEVENTTYPE.1", A, Q)], loc_legal(P, P, P), Q, P, P),
+            {"events": [ev("EVENTTYPE2.7", A, B)], "legal": loc_legal(Q, P, P)},
+        ],
+        {"step": 2, "kind": "illegal"},
+    ),
+    (
+        "hand_43_someof_of_a_place_in_a_precondition",
+        "SOMEOF of a place in a precondition (stage c3a, fixture 11): PLACEEVENTTYPE.3 (join) "
+        "needs SOMEOF.PAIRFL.4(patient), someone at the place, beside its compiled literal. With "
+        "everyone at PLACE.1.1 nobody can join PLACE.2.1, which is empty. Step 1 moves "
+        "INSTANCE.1.1.1 to PLACE.2.1 by PLACEEVENTTYPE.1; then INSTANCE.1.1.2 and INSTANCE.1.2.1 "
+        "can "
+        "join PLACE.2.1, and INSTANCE.1.1.1 can join PLACE.1.1. Step 2: INSTANCE.1.1.2 joins "
+        "PLACE.2.1, and its old place goes.",
+        ALL_AT_P,
+        state([], [], []),
+        [
+            loc_step([move("PLACEEVENTTYPE.1", A, Q)], loc_legal(P, P, P), Q, P, P),
+            loc_step([move("PLACEEVENTTYPE.3", B, Q)], loc_legal(Q, P, P), Q, Q, P),
+            loc_step([], loc_legal(Q, Q, P), Q, Q, P),
+        ],
+        None,
+    ),
+    (
+        "hand_44_interference_move_and_same",
+        "Interference: a move and an event whose precondition reads the mover's place through "
+        "SAME (stage c3a, fixture 15): PLACEEVENTTYPE.1 (INSTANCE.1.1.1, PLACE.2.1) writes the "
+        "whole row of INSTANCE.1.1.1 on PAIRFL.4 (the old place goes with the new one), and "
+        "EVENTTYPE2.7 (INSTANCE.1.1.2, INSTANCE.1.1.1) reads the rows of both through "
+        "SAME.PAIRFL.4(agent, patient). Both are legal with everyone at PLACE.1.1; applying them "
+        "together is an interference error.",
+        ALL_AT_P,
+        state([], [], []),
+        [
+            {
+                "events": [move("PLACEEVENTTYPE.1", A, Q), ev("EVENTTYPE2.7", B, A)],
+                "legal": loc_legal(P, P, P),
+            }
+        ],
+        {"step": 1, "kind": "interference"},
+    ),
+]
+
+
 def hand_fixtures() -> list[dict[str, Any]]:
     """Every hand-written fixture, assembled from the hand world and the cases. The cases of
     phases (a) and (b) start with no pair and no event of theirs writes one, so their pairs
-    after every step are none."""
+    after every step are none between entities; since stage c3a every entity of the earlier
+    cases starts at PLACE.1.1 and nothing moves, so the location pairs after every step are the
+    initial ones."""
     fixtures = []
     for name, description, initial, steps, error in CASES:
         with_numeric = [
-            dict(step, numeric=drifted(k), pairs=[]) if "state" in step else dict(step)
+            dict(step, numeric=drifted(k), pairs=AT_P) if "state" in step else dict(step)
             for k, step in enumerate(steps, start=1)
         ]
         fixtures.append(
@@ -1369,11 +1714,13 @@ def hand_fixtures() -> list[dict[str, Any]]:
                 with_numeric,
                 error,
                 ZERO,
+                places=PLACES,
                 initial_pairs=[],
+                initial_places=ALL_AT_P,
             )
         )
     for name, description, initial, numbers, steps, error, comparisons in NUMERIC_CASES:
-        with_pairs = [dict(step, pairs=[]) if "state" in step else dict(step) for step in steps]
+        with_pairs = [dict(step, pairs=AT_P) if "state" in step else dict(step) for step in steps]
         fixtures.append(
             fixture_record(
                 name,
@@ -1385,12 +1732,16 @@ def hand_fixtures() -> list[dict[str, Any]]:
                 error,
                 numbers,
                 comparisons,
+                places=PLACES,
                 initial_pairs=[],
+                initial_places=ALL_AT_P,
             )
         )
     for name, description, initial_pairs, steps, error in PAIR_CASES:
         with_numeric = [
-            dict(step, numeric=drifted(k)) if "state" in step else dict(step)
+            dict(step, numeric=drifted(k), pairs=step["pairs"] + AT_P)
+            if "state" in step
+            else dict(step)
             for k, step in enumerate(steps, start=1)
         ]
         fixtures.append(
@@ -1403,7 +1754,29 @@ def hand_fixtures() -> list[dict[str, Any]]:
                 with_numeric,
                 error,
                 ZERO,
+                places=PLACES,
                 initial_pairs=initial_pairs,
+                initial_places=ALL_AT_P,
+            )
+        )
+    for name, description, initial_places, initial, steps, error in LOCATION_CASES:
+        with_numeric = [
+            dict(step, numeric=drifted(k)) if "state" in step else dict(step)
+            for k, step in enumerate(steps, start=1)
+        ]
+        fixtures.append(
+            fixture_record(
+                name,
+                description,
+                DEFINITION,
+                ENTITIES,
+                initial,
+                with_numeric,
+                error,
+                ZERO,
+                places=PLACES,
+                initial_pairs=[],
+                initial_places=initial_places,
             )
         )
     return fixtures

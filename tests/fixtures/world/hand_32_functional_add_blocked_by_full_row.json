@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_32_functional_add_blocked_by_full_row",
  "description": "A functional add blocked because the row already holds a pair (stage c2a, fixture 4): PAIRFL.3 is symmetric and functional, and INSTANCE.1.1.1 is paired with INSTANCE.1.2.1. EVENTTYPE2.5 adds PAIRFL.3(agent, patient) with the compiled literals NOT SOME.PAIRFL.3(agent) and NOT SOME.PAIRFL.3(patient): no ordered pair is legal, because INSTANCE.1.1.1 and INSTANCE.1.2.1 have partners and INSTANCE.1.1.2 has no free partner. Applying EVENTTYPE2.5 (INSTANCE.1.1.1, INSTANCE.1.1.2) is an illegal-event error.",
- "rule_set_id": "db87b9dce357591d5b52dee4b1b0c34b45eb0f0e316f7b2577afe5478ae8ab00",
+ "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
  "definition": {
   "version": 1,
-  "rule_set_id": "db87b9dce357591d5b52dee4b1b0c34b45eb0f0e316f7b2577afe5478ae8ab00",
+  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -50,7 +50,13 @@
    {"label": "EVENTTYPE2.3", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
    {"label": "EVENTTYPE2.4", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
    {"label": "EVENTTYPE2.5", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
-   {"label": "EVENTTYPE2.6", "kind": "event_type", "derived": false, "fluent": false, "arity": 2}
+   {"label": "EVENTTYPE2.6", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "PAIRFL.4", "kind": "pair_fluent", "derived": false, "fluent": true, "arity": 2, "symmetry": "general", "functional": true, "total": true, "initial_rate": null},
+   {"label": "EVENTTYPE2.7", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "PLACEPROPERTY.1", "kind": "place_property", "derived": false, "fluent": false, "arity": 1},
+   {"label": "PLACEEVENTTYPE.1", "kind": "place_event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "PLACEEVENTTYPE.2", "kind": "place_event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "PLACEEVENTTYPE.3", "kind": "place_event_type", "derived": false, "fluent": false, "arity": 2}
   ],
   "literals": [
    {"index": 0, "key": "PROPERTY.1", "kind": "feature", "role": null, "feature": "PROPERTY.1"},
@@ -63,7 +69,9 @@
    {"index": 7, "key": "CONSTRAINT.EVENTTYPE1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.1"},
    {"index": 8, "key": "CONSTRAINT.EVENTTYPE1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.2"},
    {"index": 9, "key": "CONSTRAINT.EVENTTYPE2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1"},
-   {"index": 10, "key": "SOME.PAIRFL.1", "kind": "pair_some", "role": null, "pair_fluent": "PAIRFL.1"}
+   {"index": 10, "key": "SOME.PAIRFL.1", "kind": "pair_some", "role": null, "pair_fluent": "PAIRFL.1"},
+   {"index": 11, "key": "patient.PLACEPROPERTY.1", "kind": "feature", "role": "patient", "feature": "PLACEPROPERTY.1"},
+   {"index": 12, "key": "CONSTRAINT.PLACEEVENTTYPE.2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.PLACEEVENTTYPE.2.1"}
   ],
   "rules": [
    {"output": "PROPERTY.2", "scope": "entity", "family": "hand", "inputs": [0], "truth_table": "10", "expression": "NOT PROPERTY.1"},
@@ -85,7 +93,12 @@
    {"output": "REQUIREMENT.EVENTTYPE2.3", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
    {"output": "REQUIREMENT.EVENTTYPE2.4", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
    {"output": "REQUIREMENT.EVENTTYPE2.5", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
-   {"output": "REQUIREMENT.EVENTTYPE2.6", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
+   {"output": "REQUIREMENT.EVENTTYPE2.6", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE2.7", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "CONSTRAINT.PLACEEVENTTYPE.2.1", "scope": "place_binding", "family": "hand", "inputs": [11], "truth_table": "01", "expression": "patient.PLACEPROPERTY.1"},
+   {"output": "REQUIREMENT.PLACEEVENTTYPE.1", "scope": "place_binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.PLACEEVENTTYPE.2", "scope": "place_binding", "family": "requirement", "inputs": [12], "truth_table": "01", "expression": "CONSTRAINT.PLACEEVENTTYPE.2.1"},
+   {"output": "REQUIREMENT.PLACEEVENTTYPE.3", "scope": "place_binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
   ],
   "layers": [
    {
@@ -119,6 +132,7 @@
      {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0}
     ],
     "outputs": [
@@ -135,7 +149,8 @@
      {"output": "REQUIREMENT.EVENTTYPE2.3", "terms": [10], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE2.4", "terms": [11], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE2.5", "terms": [12], "threshold": 1},
-     {"output": "REQUIREMENT.EVENTTYPE2.6", "terms": [13], "threshold": 1}
+     {"output": "REQUIREMENT.EVENTTYPE2.6", "terms": [13], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.7", "terms": [14], "threshold": 1}
     ]
    },
    {
@@ -150,6 +165,30 @@
      {"output": "REQUIREMENT.EVENTTYPE1.1", "terms": [0], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE1.2", "terms": [1], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE2.1", "terms": [2], "threshold": 1}
+    ]
+   },
+   {
+    "scope": "place_binding",
+    "layer": 1,
+    "terms": [
+     {"literals": [11], "complemented": [false], "threshold": 1},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0}
+    ],
+    "outputs": [
+     {"output": "CONSTRAINT.PLACEEVENTTYPE.2.1", "terms": [0], "threshold": 1},
+     {"output": "REQUIREMENT.PLACEEVENTTYPE.1", "terms": [1], "threshold": 1},
+     {"output": "REQUIREMENT.PLACEEVENTTYPE.3", "terms": [2], "threshold": 1}
+    ]
+   },
+   {
+    "scope": "place_binding",
+    "layer": 2,
+    "terms": [
+     {"literals": [12], "complemented": [false], "threshold": 1}
+    ],
+    "outputs": [
+     {"output": "REQUIREMENT.PLACEEVENTTYPE.2", "terms": [0], "threshold": 1}
     ]
    }
   ],
@@ -443,6 +482,87 @@
       }
      }
     ]
+   },
+   {
+    "label": "EVENTTYPE2.7",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.7", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair_same", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": true}
+     ],
+     "expression": "SAME.PAIRFL.4(agent, patient)"
+    },
+    "effects": [
+     {"role": "patient", "fluent": "BOOLFL.2", "value": true, "expression": "patient.BOOLFL.2 := 1"}
+    ]
+   },
+   {
+    "label": "PLACEEVENTTYPE.1",
+    "kind": "place_event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.PLACEEVENTTYPE.1", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": false, "origin": "move"}
+     ],
+     "expression": "NOT PAIRFL.4(agent, patient)"
+    },
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": true, "expression": "PAIRFL.4(agent, patient) := 1"}
+    ]
+   },
+   {
+    "label": "PLACEEVENTTYPE.2",
+    "kind": "place_event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": ["CONSTRAINT.PLACEEVENTTYPE.2.1"], "output": "REQUIREMENT.PLACEEVENTTYPE.2", "expression": "CONSTRAINT.PLACEEVENTTYPE.2.1"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": true, "origin": "act"}
+     ],
+     "expression": "PAIRFL.4(agent, patient)"
+    },
+    "effects": [
+     {"role": "agent", "fluent": "BOOLFL.1", "value": false, "expression": "agent.BOOLFL.1 := 0"}
+    ]
+   },
+   {
+    "label": "PLACEEVENTTYPE.3",
+    "kind": "place_event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.PLACEEVENTTYPE.3", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair_someof", "pair_fluent": "PAIRFL.4", "role": "patient", "value": true},
+      {"kind": "pair", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": false, "origin": "move"}
+     ],
+     "expression": "SOMEOF.PAIRFL.4(patient) AND NOT PAIRFL.4(agent, patient)"
+    },
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.4", "first": "agent", "second": "patient", "value": true, "expression": "PAIRFL.4(agent, patient) := 1"}
+    ]
    }
   ]
  },
@@ -451,6 +571,10 @@
   {"label": "INSTANCE.1.1.2", "leaf": "CATEGORY.1.1", "PROPERTY.1": 0, "SCALARDIM.1": 0.5},
   {"label": "INSTANCE.1.2.1", "leaf": "CATEGORY.1.2", "PROPERTY.1": 1, "SCALARDIM.1": 0.25}
  ],
+ "places": [
+  {"label": "PLACE.1.1", "leaf": "PLACECATEGORY.1", "PLACEPROPERTY.1": 1},
+  {"label": "PLACE.2.1", "leaf": "PLACECATEGORY.2", "PLACEPROPERTY.1": 0}
+ ],
  "initial": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
  "initial_numeric": {
   "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.0},
@@ -458,6 +582,11 @@
   "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.0}
  },
  "initial_pairs": [["PAIRFL.3", "INSTANCE.1.1.1", "INSTANCE.1.2.1"], ["PAIRFL.3", "INSTANCE.1.2.1", "INSTANCE.1.1.1"]],
+ "initial_places": {
+  "INSTANCE.1.1.1": {"PAIRFL.4": "PLACE.1.1"},
+  "INSTANCE.1.1.2": {"PAIRFL.4": "PLACE.1.1"},
+  "INSTANCE.1.2.1": {"PAIRFL.4": "PLACE.1.1"}
+ },
  "steps": [
   {
    "events": [
@@ -524,7 +653,26 @@
      {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
      {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
-    ]
+    ],
+    "EVENTTYPE2.7": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
+    ],
+    "PLACEEVENTTYPE.1": [
+     {"agent": "INSTANCE.1.1.1", "patient": "PLACE.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "PLACE.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "PLACE.2.1"}
+    ],
+    "PLACEEVENTTYPE.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "PLACE.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "PLACE.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "PLACE.1.1"}
+    ],
+    "PLACEEVENTTYPE.3": []
    }
   }
  ],

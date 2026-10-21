@@ -172,6 +172,9 @@ def episode_settings(config: Config, world: World) -> EpisodeSettings:
         event_type_weights=weights,
         policy=scene.policy,
         initial=scene.initial,
+        extra_places=scene.extra_places,
+        places=scene.places,
+        initial_location=scene.initial_location,
     )
 
 
@@ -182,12 +185,14 @@ class SceneGenerator:
     def __init__(self, config: Config, world: World) -> None:
         self.world = world
         self.settings = episode_settings(config, world)
+        places = world.result.config.places
         self.generator = EpisodeGenerator(
             world.definition,
             world.relatedness,
             self.settings,
             world.initial_rates,
             record_legal=False,
+            habitat_strength=1.0 if places is None else places.habitat_strength,
         )
 
     def participant_weights(self, seed: str) -> np.ndarray:

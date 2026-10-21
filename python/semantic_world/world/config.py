@@ -258,8 +258,9 @@ class PairFluentSetting:
 class PairFluentsConfig:
     """The ``pair_fluents`` block (stage c2b of ``docs/specs/WORLD_PHASE_C.md``,
     "Configuration"): how many pair fluents between entities (``count``) and location fluents
-    (``locations``, 0 until stage c3), the weights of the symmetries, the functional rate, the
-    initial rates, the kinds of drawn pair literal, the quotas ``same_rules`` (stage c3) and
+    (``locations``, stage c3a; they need places, and take the labels after the pair fluents
+    between entities, WM.54), the weights of the symmetries, the functional rate, the
+    initial rates, the kinds of drawn pair literal, the quotas ``same_rules`` (stage c3b) and
     ``derived_rules``, the weight of ``SOME`` and ``SOMEOF`` in the other derived rules' pool,
     and the per-fluent overrides. The code's defaults follow ``data/world/default.yaml``
     (WM.E41): ``count`` 0 and ``locations`` 0 until stage c4 (Jon's ruling WM.63), the
@@ -278,7 +279,16 @@ class PairFluentsConfig:
 
     @property
     def labels(self) -> tuple[str, ...]:
+        """The labels of the pair fluents between entities."""
         return tuple(f"{PAIR_PREFIX}.{i}" for i in range(1, self.count + 1))
+
+    @property
+    def location_labels(self) -> tuple[str, ...]:
+        """The labels of the location fluents (stage c3a): after the pair fluents between
+        entities, ``PAIRFL.<count+1>`` and on (WM.54)."""
+        return tuple(
+            f"{PAIR_PREFIX}.{i}" for i in range(self.count + 1, self.count + self.locations + 1)
+        )
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -446,7 +456,7 @@ class PlacesConfig:
 
 @dataclass(frozen=True)
 class PlaceEventTypesConfig:
-    """The ``place_event_types`` block (stage c1): how many, the move share that stage c3 uses,
+    """The ``place_event_types`` block (stage c1): how many, the move share that stage c3b uses,
     the number of constraints of a requirement, the constraint families, and the rule settings
     of the constraints (the taxonomy's ``rules`` settings with the overrides applied)."""
 
@@ -711,15 +721,20 @@ def _read_numeric_fluents(node: _Node) -> NumericFluentsConfig:
     return NumericFluentsConfig(count, default_range, initial, share, amounts, rule_weight, fluents)
 
 
-def _read_pair_fluents(node: _Node, fluents: FluentsConfig) -> PairFluentsConfig:
-    """The ``pair_fluents`` block (stage c2b). ``locations`` must be 0 until stage c3; the
-    overrides name pair fluents ``PAIRFL.1`` to ``PAIRFL.<count>``."""
+def _read_pair_fluents(
+    node: _Node, fluents: FluentsConfig, has_places: bool = True
+) -> PairFluentsConfig:
+    """The ``pair_fluents`` block (stage c2b). ``locations`` (stage c3a) is the number of
+    location fluents, which need places: it must be 0 with ``places: null``; the code's default
+    is 0 until stage c4 (WM.63). The overrides name pair fluents ``PAIRFL.1`` to
+    ``PAIRFL.<count>``, the pair fluents between entities (a location fluent's profile is
+    fixed)."""
     count = node.int("count", 0, min=0)
     locations = node.int("locations", 0, min=0)
-    if locations != 0:
+    if locations != 0 and not has_places:
         raise node.error(
             "locations",
-            "location fluents come in stage c3; until then the world has none (locations: 0)",
+            "location fluents need places; the world has places: null, so locations must be 0",
         )
     symmetry = node.weights("symmetry", dict(DEFAULT_PAIR_SYMMETRY), allowed=SYMMETRIES)
     functional_rate = node.probability("functional_rate", 0.25)
@@ -1075,7 +1090,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     event_types = _read_event_types(root.mapping("event_types"), taxonomy_run)
     places = _read_places(root, source, master_seed)
     place_event_types = _read_place_event_types(root, places, taxonomy_run)
-    pair_fluents = _read_pair_fluents(root.mapping("pair_fluents"), fluents)
+    pair_fluents = _read_pair_fluents(root.mapping("pair_fluents"), fluents, places is not None)
     root.finish()
     return Config(
         name,

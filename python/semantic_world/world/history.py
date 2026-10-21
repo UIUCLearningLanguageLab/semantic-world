@@ -15,7 +15,11 @@ none of these keys, so its histories are as before. Since stage c2a a world with
 (every ordered pair that holds among the participants at ``TIME.1``, as ``[pair fluent, first,
 second]`` triples, both directions of a symmetric pair) and records a pair change as ``{"pair",
 "first", "second", "to"}``, a symmetric pair once, in the direction the effect names; a world
-without pair fluents writes neither.
+without pair fluents writes neither. Since stage c3a a world with location fluents writes
+``places`` after ``participants`` (the episode's places) and ``initial_places`` after
+``initial_numeric`` (each participant's place on each location fluent at ``TIME.1``), and a
+move records the deletion of the old place and the add of the new one as two pair changes of
+its event, the second argument a place; a world without location fluents writes neither.
 
 ``replay`` runs a history's events through the runtime from its initial state and checks that
 every step is legal and free of interference, that the recorded Boolean changes are exactly the
@@ -37,6 +41,7 @@ import numpy as np
 
 from semantic_world.world.definition import RuntimeDefinition
 from semantic_world.world.errors import WorldError
+from semantic_world.world.pair_fluents import profile_violations
 from semantic_world.world.runtime import Event, State, apply_step
 
 EPISODES_FILE = "episodes.jsonl"
@@ -222,9 +227,15 @@ class History:
     """For each participant, its numeric fluents at ``TIME.1`` (stage b2); empty in a world
     without numeric fluents, and then not written."""
     initial_pairs: tuple[PairTriple, ...] | None = None
-    """Every ordered pair that holds among the participants at ``TIME.1`` (stage c2a), as
-    ``(pair fluent, first, second)``; None in a world without pair fluents, and then not
-    written (an empty tuple is written, as ``[]``)."""
+    """Every ordered pair of a pair fluent between entities that holds among the participants
+    at ``TIME.1`` (stage c2a), as ``(pair fluent, first, second)``; None in a world without
+    pair fluents, and then not written (an empty tuple is written, as ``[]``)."""
+    places: tuple[str, ...] | None = None
+    """The episode's places (stage c3a), in place order; None in a world without location
+    fluents, and then not written."""
+    initial_places: dict[str, dict[str, str]] | None = None
+    """For each participant, its place on each location fluent at ``TIME.1`` (stage c3a);
+    None in a world without location fluents, and then not written."""
 
     @property
     def events(self) -> tuple[HistoryEvent, ...]:
@@ -256,15 +267,19 @@ class History:
             "label": self.label,
             "seed": self.seed,
             "participants": list(self.participants),
-            "policy": self.policy,
-            "rule_set_id": self.rule_set_id,
-            "initial": {p: list(self.initial[p]) for p in self.participants},
         }
+        if self.places is not None:
+            data["places"] = list(self.places)
+        data["policy"] = self.policy
+        data["rule_set_id"] = self.rule_set_id
+        data["initial"] = {p: list(self.initial[p]) for p in self.participants}
         if self.initial_numeric:
             data["initial_numeric"] = {
                 p: {f: float(v) for f, v in self.initial_numeric[p].items()}
                 for p in self.participants
             }
+        if self.initial_places is not None:
+            data["initial_places"] = {p: dict(self.initial_places[p]) for p in self.participants}
         if self.initial_pairs is not None:
             data["initial_pairs"] = [list(triple) for triple in self.initial_pairs]
         data["steps"] = [step.to_json() for step in self.steps]
@@ -291,6 +306,13 @@ class History:
             None
             if data.get("initial_pairs") is None
             else tuple((str(a), str(b), str(c)) for a, b, c in data["initial_pairs"]),
+            None if data.get("places") is None else tuple(str(q) for q in data["places"]),
+            None
+            if data.get("initial_places") is None
+            else {
+                str(p): {str(f): str(q) for f, q in at.items()}
+                for p, at in data["initial_places"].items()
+            },
         )
 
 
@@ -347,7 +369,23 @@ def initial_state_of(definition: RuntimeDefinition, history: History) -> State:
         raise HistoryError(
             f"{history.label} lists initial pairs, but the definition has no pair fluents"
         )
-    state = State.from_true(definition, true, {}, pairs)
+    # The places (stage c3a): the participants' initial places; every other entity keeps its
+    # place of the entities table.
+    places = None
+    if definition.has_location_fluents:
+        if history.initial_places is None or history.places is None:
+            raise HistoryError(
+                f"{history.label} lists no places, but the definition has location fluents"
+            )
+        places = history.initial_places
+    elif history.initial_places or history.places:
+        raise HistoryError(
+            f"{history.label} lists places, but the definition has no location fluents"
+        )
+    try:
+        state = State.from_true(definition, true, {}, pairs, places)
+    except WorldError as error:
+        raise HistoryError(f"{history.label}: {error}") from None
     return State(state.values, numeric, state.pairs)
 
 
@@ -398,7 +436,9 @@ def pair_changes_of(
     definition: RuntimeDefinition, before: State, after: State, event: Event
 ) -> list[PairChange]:
     """The pairs the event's pair effects changed between two states, each in the direction the
-    effect names (a symmetric pair once), in effect order."""
+    effect names (a symmetric pair once), in effect order. A move (stage c3a) records the
+    deletion of the agent's old place and the add of the new one, the second argument a
+    place."""
     et = definition.event_type(event.event_type)
     found: list[PairChange] = []
     labels = definition.entity_labels
@@ -409,11 +449,31 @@ def pair_changes_of(
         k = definition.pair_index(effect.fluent)
         i = event.binding[et.roles.index(effect.role)]
         j = event.binding[et.roles.index(effect.second)]
+        if definition.pair_fluents[k].total:
+            places = definition.place_labels
+            if before.pairs[k][i, j] == after.pairs[k][i, j]:
+                continue
+            for old in np.flatnonzero(before.pairs[k][i] & ~after.pairs[k][i]):
+                found.append(PairChange(effect.fluent, labels[i], places[int(old)], False))
+            found.append(PairChange(effect.fluent, labels[i], places[j], True))
+            continue
         if before.pairs[k][i, j] != after.pairs[k][i, j]:
             found.append(
                 PairChange(effect.fluent, labels[i], labels[j], bool(after.pairs[k][i, j]))
             )
     return found
+
+
+def _touched_entities(definition: RuntimeDefinition, events: Sequence[Event]) -> list[int]:
+    """The entities the events bind: the agent alone of a place event (stage c3a), whose
+    patient is a place."""
+    found: set[int] = set()
+    for event in events:
+        et = definition.event_type(event.event_type)
+        for role, index in zip(et.roles, event.binding, strict=True):
+            if not (et.place and role == "patient"):
+                found.add(int(index))
+    return sorted(found)
 
 
 def replay(definition: RuntimeDefinition, history: History) -> list[State]:
@@ -436,9 +496,7 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
             raise HistoryError(f"{history.label}, step {step.step}: {error}") from None
         after = result.state
         recorded = [c for e in step.events for c in e.changes if not c.numeric and not c.pair]
-        found = changes_of(
-            definition, state, after, sorted(set(i for e in events for i in e.binding))
-        )
+        found = changes_of(definition, state, after, _touched_entities(definition, events))
         if sorted(recorded, key=_change_key) != sorted(found, key=_change_key):
             raise HistoryError(
                 f"{history.label}, step {step.step}: the recorded changes are {recorded}, but "
@@ -474,7 +532,7 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
                 definition,
                 state.numeric,
                 result.after_effects,
-                sorted(set(event.binding)),
+                _touched_entities(definition, [event]),
                 recorded_event.label,
                 [e.fluent for e in et.effects if e.numeric],
             )
@@ -493,6 +551,13 @@ def replay(definition: RuntimeDefinition, history: History) -> list[State]:
                 f"{history.label}, step {step.step}: the recorded drift is {list(step.drift)}, "
                 f"but the drift makes {drift}"
             )
+        # every profile at every time point (stage c3a: every entity at exactly one place)
+        for fluent, matrix in zip(definition.pair_fluents, after.pairs, strict=True):
+            violations = profile_violations(fluent, matrix)
+            if violations:
+                raise HistoryError(
+                    f"{history.label}, step {step.step}: a profile is broken: {violations[0]}"
+                )
         state = after
         states.append(state)
     if history.final != f"TIME.{len(history.steps) + 1}":

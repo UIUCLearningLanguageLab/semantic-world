@@ -6,7 +6,9 @@ holds exactly when ``(y, x)`` holds; ``asymmetric``: never both; ``general``: no
 and whether it is ``functional`` (at most one pair in each row, and for a symmetric functional
 pair fluent at most one partner in each row and each column). Every pair fluent is irreflexive.
 A pair fluent between entities is never total (WM.38); the total functional profile is the
-location fluents' alone, toward places (stage c3).
+location fluents' alone, toward places (stage c3a): a location fluent is ``general``,
+functional, and total, its targets are the places, its initial pairs are the entities' initial
+places drawn with the habitat weights (``locations.py``), and it carries no initial rate.
 
 Since stage c2b the world draws ``pair_fluents.count`` pair fluents between entities from
 ``world:pair_fluents``, in label order: each one's symmetry from ``pair_fluents.symmetry``,
@@ -64,14 +66,25 @@ class PairFluent:
     index: int
     symmetry: str
     functional: bool
-    initial_rate: float
+    initial_rate: float | None
+    """The rate the initial pairs were drawn at; None for a location fluent, whose initial
+    pairs are the habitats."""
     total: bool = False
-    """Always False for a pair fluent between entities; a location fluent (stage c3) is total."""
+    """Always False for a pair fluent between entities; a location fluent (stage c3a) is total:
+    general, functional, and total, from entities to places."""
 
     def __post_init__(self) -> None:
         if self.symmetry not in SYMMETRIES:
             raise WorldError(f"{self.label}: unknown symmetry {self.symmetry!r}")
-        if not 0.0 <= self.initial_rate <= 1.0:
+        if self.total:
+            if self.symmetry != "general" or not self.functional:
+                raise WorldError(
+                    f"{self.label}: a total pair fluent (a location fluent) is general and "
+                    f"functional"
+                )
+            if self.initial_rate is not None:
+                raise WorldError(f"{self.label}: a location fluent carries no initial rate")
+        elif self.initial_rate is None or not 0.0 <= self.initial_rate <= 1.0:
             raise WorldError(f"{self.label}: the initial rate is not between 0 and 1")
 
     @property
@@ -82,9 +95,20 @@ class PairFluent:
     def asymmetric(self) -> bool:
         return self.symmetry == "asymmetric"
 
+    @property
+    def location(self) -> bool:
+        """A location fluent (stage c3a): total, from entities to places."""
+        return self.total
+
+    @property
+    def rate(self) -> float:
+        """The initial rate as a number: 0 for a location fluent, which has none."""
+        return 0.0 if self.initial_rate is None else float(self.initial_rate)
+
     def symbol_record(self) -> dict[str, Any]:
         """The symbol of ``definition.json``: a fluent of arity 2 with its profile and its
-        initial rate, all hashed into the rule-set identity."""
+        initial rate (``null`` for a location fluent, stage c3a, as for a derived fluent), all
+        hashed into the rule-set identity."""
         return {
             "label": self.label,
             "kind": PAIR_FLUENT_KIND,
@@ -94,7 +118,7 @@ class PairFluent:
             "symmetry": self.symmetry,
             "functional": self.functional,
             "total": self.total,
-            "initial_rate": float(self.initial_rate),
+            "initial_rate": None if self.initial_rate is None else float(self.initial_rate),
         }
 
     @classmethod
@@ -103,12 +127,13 @@ class PairFluent:
         prefix, _, number = label.partition(".")
         if prefix != PAIR_PREFIX or not number.isdigit():
             raise WorldError(f"{label} is not a pair fluent label")
+        rate = data["initial_rate"]
         return cls(
             label,
             int(number),
             str(data["symmetry"]),
             bool(data["functional"]),
-            float(data["initial_rate"]),
+            None if rate is None else float(rate),
             bool(data.get("total", False)),
         )
 
@@ -116,8 +141,8 @@ class PairFluent:
 @dataclass(frozen=True)
 class PairFluents:
     """The pair fluents of a world and their initial pairs, one Boolean matrix per pair fluent,
-    rows the entities and columns the targets (the entities in this stage, the places for a
-    location fluent in stage c3)."""
+    rows the entities and columns the targets: the entities for a pair fluent between entities,
+    the places for a location fluent (stage c3a), whose initial pairs are the initial places."""
 
     fluents: tuple[PairFluent, ...]
     initial_pairs: tuple[np.ndarray, ...]
@@ -152,6 +177,17 @@ class PairFluents:
     def labels(self) -> tuple[str, ...]:
         return tuple(f.label for f in self.fluents)
 
+    @property
+    def between_entities(self) -> tuple[PairFluent, ...]:
+        """The pair fluents between entities, in label order."""
+        return tuple(f for f in self.fluents if not f.total)
+
+    @property
+    def locations(self) -> tuple[PairFluent, ...]:
+        """The location fluents (stage c3a), in label order, after the pair fluents between
+        entities."""
+        return tuple(f for f in self.fluents if f.total)
+
 
 EMPTY = PairFluents((), ())
 
@@ -169,14 +205,21 @@ def profile_violations(fluent: PairFluent, matrix: np.ndarray) -> list[str]:
     """Why a pair matrix breaks the pair fluent's profile: each violation as a sentence, none
     when the profile holds. A pair fluent between entities is irreflexive; symmetric: every
     pair with its reverse; asymmetric: no pair with its reverse; functional: at most one pair
-    in each row (and in each column of a symmetric one, which symmetry already gives)."""
+    in each row (and in each column of a symmetric one, which symmetry already gives); total (a
+    location fluent, whose columns are the places): exactly one pair in each row."""
     found: list[str] = []
     m = np.asarray(matrix, dtype=bool)
     if m.ndim != 2:
         raise WorldError(f"the pairs of {fluent.label} are a 2-D matrix, got {m.shape}")
     # Each check tests the whole matrix with ``any`` first and locates the first violation only
     # when there is one: the runtime checks every profile after every step of every episode.
-    if m.shape[0] == m.shape[1]:
+    # The checks over pairs of entities do not apply to a location fluent, whose columns are
+    # places (even when the world has as many places as entities).
+    if not fluent.total:
+        if m.shape[0] != m.shape[1]:
+            raise WorldError(
+                f"the pairs of {fluent.label} are a square matrix over the entities, got {m.shape}"
+            )
         diagonal = np.diagonal(m)
         if diagonal.any():
             found.append(
@@ -228,8 +271,12 @@ def draw_initial_pairs(fluent: PairFluent, n: int, rng: np.random.Generator) -> 
     j``, row by row) for a symmetric or an asymmetric pair fluent, with one more draw for the
     direction of an asymmetric pair, and one draw per ordered pair (row by row) for a general
     one. A rate of 0 draws as the others do and selects nothing."""
+    if fluent.total:
+        raise WorldError(
+            f"{fluent.label} is a location fluent; its initial pairs are the initial places"
+        )
     matrix = np.zeros((n, n), dtype=bool)
-    rate = float(fluent.initial_rate)
+    rate = fluent.rate
     if fluent.functional:
         for x in range(n):
             if rng.random() >= rate:
@@ -349,21 +396,33 @@ def generate_pair_fluents(
 
 
 def pair_rows(
-    fluents: Sequence[PairFluent], matrices: Sequence[np.ndarray], labels: Sequence[str]
+    fluents: Sequence[PairFluent],
+    matrices: Sequence[np.ndarray],
+    labels: Sequence[str],
+    place_labels: Sequence[str] = (),
 ) -> list[tuple[str, str, str]]:
     """Every ordered pair that holds, as ``(pair fluent, first, second)`` label triples, by pair
     fluent in label order, then by first and second in entity order; both directions of a
-    symmetric pair."""
+    symmetric pair. The second argument of a location fluent's pair (stage c3a) is a place, by
+    ``place_labels``."""
     rows: list[tuple[str, str, str]] = []
     for fluent, matrix in zip(fluents, matrices, strict=True):
+        targets = place_labels if fluent.total else labels
         for x, y in zip(*np.nonzero(np.asarray(matrix, dtype=bool)), strict=True):
-            rows.append((fluent.label, labels[int(x)], labels[int(y)]))
+            rows.append((fluent.label, labels[int(x)], targets[int(y)]))
     return rows
 
 
 def initial_pairs_frame(pair_fluents: PairFluents, labels: Sequence[str]) -> pl.DataFrame:
-    """``initial_pairs.csv``: one row per ordered pair that holds at ``TIME.1``."""
-    rows = pair_rows(pair_fluents.fluents, pair_fluents.initial_pairs, labels)
+    """``initial_pairs.csv``: one row per ordered pair that holds at ``TIME.1`` of a pair
+    fluent between entities. The initial places of the location fluents (stage c3a) are
+    columns of ``entities.csv``, not rows here."""
+    between = [
+        (f, m)
+        for f, m in zip(pair_fluents.fluents, pair_fluents.initial_pairs, strict=True)
+        if not f.total
+    ]
+    rows = pair_rows([f for f, _ in between], [m for _, m in between], labels)
     return pl.DataFrame(
         {
             "pair_fluent": [r[0] for r in rows],
@@ -379,14 +438,17 @@ def matrices_from_rows(
     fluents: Sequence[PairFluent],
     entity_index: Mapping[str, int],
     what: str = "the initial pairs",
+    place_index: Mapping[str, int] | None = None,
 ) -> tuple[np.ndarray, ...]:
     """The pair matrices from rows of ``(pair fluent, first, second)``, given as mappings with
     those keys (the rows of ``initial_pairs.csv``) or as triples (a history's or a fixture's
-    ``initial_pairs``). An unknown pair fluent or entity, or a pair of an entity with itself,
-    is a :class:`WorldError`."""
+    ``initial_pairs``, or a state's pairs). An unknown pair fluent or entity, or a pair of an
+    entity with itself, is a :class:`WorldError`. A location fluent's matrix (stage c3a) has
+    the places of ``place_index`` as its columns, and its pairs name a place second."""
     n = len(entity_index)
+    places = place_index or {}
     index = {f.label: i for i, f in enumerate(fluents)}
-    matrices = [np.zeros((n, n), dtype=bool) for _ in fluents]
+    matrices = [np.zeros((n, len(places) if f.total else n), dtype=bool) for f in fluents]
     for row in rows:
         if isinstance(row, Mapping):
             fluent, first, second = str(row["pair_fluent"]), str(row["first"]), str(row["second"])
@@ -394,9 +456,18 @@ def matrices_from_rows(
             fluent, first, second = (str(v) for v in row)
         if fluent not in index:
             raise WorldError(f"{what} name {fluent}, which is not a pair fluent of the definition")
-        for label in (first, second):
-            if label not in entity_index:
-                raise WorldError(f"{what} name {label}, which is not an entity of the definition")
+        if first not in entity_index:
+            raise WorldError(f"{what} name {first}, which is not an entity of the definition")
+        if fluents[index[fluent]].total:
+            if second not in places:
+                raise WorldError(
+                    f"{what} name {second} as a place of {fluent}, which is not a place of the "
+                    f"definition"
+                )
+            matrices[index[fluent]][entity_index[first], places[second]] = True
+            continue
+        if second not in entity_index:
+            raise WorldError(f"{what} name {second}, which is not an entity of the definition")
         if first == second:
             raise WorldError(f"{what} hold {fluent} between {first} and itself")
         matrices[index[fluent]][entity_index[first], entity_index[second]] = True

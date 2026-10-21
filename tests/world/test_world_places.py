@@ -150,8 +150,8 @@ def test_the_places_block_is_read_validated_and_defaulted() -> None:
 
 
 def test_the_two_place_streams_come_after_every_earlier_stream() -> None:
-    # then the pair streams of stages c2a and c2b
-    assert STREAM_NAMES[-7:-5] == ("places", "place_event_types")
+    # then the pair streams of stages c2a and c2b, and the habitats of stage c3a
+    assert STREAM_NAMES[-8:-6] == ("places", "place_event_types")
 
 
 def test_the_place_run_is_byte_identical_to_the_taxonomy_run_alone(
@@ -621,12 +621,16 @@ def test_no_episode_or_history_names_a_place(tiny: WorldResult) -> None:
     assert "PLACE" not in json.dumps(tiny.stats["episodes"])
 
 
-def test_apply_refuses_a_place_event_in_this_stage(tiny: WorldResult) -> None:
+def test_apply_refuses_a_place_event_without_dynamics(tiny: WorldResult) -> None:
+    """A place event type with a requirement alone (stage c1; since stage c3a, one that no
+    event file made a move or an act) has no events: applying one is an illegal event."""
+    from semantic_world.world.errors import IllegalEventError
     from semantic_world.world.runtime import Event, apply
 
     definition = tiny.definition.runtime()
     state = initial_state(definition)
     label = tiny.places.event_type_labels[0]  # type: ignore[union-attr]
     binding = legal_bindings(definition, state, label)[0]
-    with pytest.raises(WorldError, match="no precondition or effects in stage c1"):
+    assert not definition.event_type(label).performable
+    with pytest.raises(IllegalEventError, match="requirement alone"):
         apply(definition, state, [Event(label, binding)])

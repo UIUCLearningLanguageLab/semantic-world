@@ -1026,6 +1026,166 @@ tiny_pairs:
       ```
 
       '
+tiny_place_chain:
+  world:
+    name: tiny_place_chain
+    seed: 1
+    rule_set_id: c9479a069634417ebaac7cc37a67d4720c770361118d1cd1aae22f359e74f9dc
+    rule_set_short: c9479a069634
+    rule_set_code: '`c9479a069634...`'
+    entities: 12
+    categories: 6
+    fluents: {base: 3, derived: 1}
+    fluents_total: 4
+    event_types: {one_place: 4, two_place: 4, two_place_categories: 2, leaves: 8}
+    constraints: 12
+    constraints_two_place: 8
+    event_type_features: 4
+    constraint_families: {agent: 2, key_lock: 2, patient: 1, explicit: 2, cross: 1}
+    precondition_literals:
+      total: 12
+      by_kind: {one_place: 5, two_place: 7}
+      by_role: {agent: 10, patient: 2}
+      from_features: 1
+    effects:
+      total: 9
+      by_kind: {one_place: 4, two_place: 5}
+      by_role: {agent: 6, patient: 3}
+      from_features: 1
+    conditional:
+      total: 1
+      by_kind: {one_place: 1, two_place: 0}
+      share_of_drawn: 0.142857
+      share_of_all: 0.111111
+      literals:
+        total: 2
+        by_symbol: {feature: 1, fluent: 1, numeric: 0}
+        by_role: {agent: 2, patient: 0}
+        from_features: 0
+      inherited: []
+      inherited_count: 0
+      own:
+      - {expression: 'when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 0', code: '`when
+          NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 0`', event_type: EVENTTYPE1.2}
+      own_count: 1
+      expressions: ['`when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 0`, on `EVENTTYPE1.2`']
+    numeric:
+      count: 2
+      drifting: 2
+      fluents:
+        NUMFL.1:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0728
+        NUMFL.2:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
+      effects:
+        total: 1
+        by_operator: {add: 1, subtract: 0}
+        by_kind: {one_place: 0, two_place: 1}
+        by_role: {agent: 0, patient: 1}
+        from_features: 0
+      precondition_literals:
+        total: 2
+        by_side: {above: 1, at_or_below: 1}
+        by_kind: {one_place: 1, two_place: 1}
+        by_role: {agent: 1, patient: 1}
+        from_features: 1
+      condition_literals:
+        total: 0
+        by_side: {above: 0, at_or_below: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_threshold: 1
+      changes_per_event: 0.001457
+      drift_changes_per_step: 8.620956
+    places:
+      'on': true
+      places: 4
+      categories: 2
+      features:
+        place_property: {total: 4, free: 3, determined: 1}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 1
+      place_event_types: 2
+      constraints: 2
+      constraint_families: {explicit: 2}
+      density: {mean: 0.75, min: 0.5, max: 1.0}
+      approximate_capacities: 0.0
+    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
+      effects_dropped_no_slot: 0, effects_redrawn: 1, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
+      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
+      numeric_literals_redrawn: 0}
+    enabling_graph: {edges: 13, longest_chain: 2}
+    absorbing_fluents: [BOOLFL.3]
+    absorbing_code: '`BOOLFL.3`'
+    requirements:
+      one_place: {mean: 0.791667, min: 0.666667, max: 1.0}
+      two_place: {mean: 0.401515, min: 0.128788, max: 0.583333}
+    episodes:
+      count: 1000
+      steps: 5440
+      events: 8234
+      two_place_share: 0.672577
+      mean_changes_per_event: 0.212655
+      quiescent_share: 0.0
+      precondition_redraws: {}
+      never_legal: {}
+    pair_fluents:
+      count: 2
+      by_symmetry: {symmetric: 1, asymmetric: 0, general: 1}
+      functional: 1
+      fluents:
+        PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.0, initial_pairs: 0}
+        PAIRFL.2: {symmetry: general, functional: true, initial_rate: null, initial_pairs: 12}
+      initial_pairs: 12
+      precondition_literals:
+        total: 4
+        by_kind: {pair: 2, pair_some: 1, pair_someof: 0, pair_same: 1}
+        by_role: {agent: 4, patient: 0}
+        by_polarity: {positive: 3, negative: 1}
+        by_event_kind: {one_place: 1, two_place: 3}
+        from_features: 0
+      compiled_literals:
+        total: 0
+        by_origin: {}
+      effects:
+        total: 1
+        by_value: {add: 1, delete: 0}
+        by_role: {agent: 1, patient: 0}
+        by_event_kind: {one_place: 0, two_place: 1}
+        by_pair_fluent: {PAIRFL.1: 1, PAIRFL.2: 0}
+        from_features: 0
+      condition_literals:
+        total: 0
+        by_kind: {pair: 0, pair_some: 0, pair_someof: 0, pair_same: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_pair_literal: 0
+      fix_ups: {precondition_replacement_draws: 0, precondition_replacements: 0, precondition_replacements_failed: 0,
+        pair_literals_redrawn: 0, effect_replacement_draws: 0, effect_replacements: 0, pair_effects_redrawn_compiled: 0,
+        pair_effects_dropped_compiled: 0, pair_conditions_drawn: 0, pair_conditions_rejected_named: 0,
+        pair_conditions_rejected_fixed: 0, pair_conditions_rejected_other: 0, adds_kept_unconditional: 0,
+        pair_literals_redrawn_implied: 0, pair_literals_dropped_implied: 0, pair_deletes_redrawn_dead: 0,
+        pair_deletes_dropped_dead: 0, pair_effects_redrawn_reverse: 0}
+      changes_per_event: 0.944377
+      profiles: '`PAIRFL.1` (symmetric, rate 0.0), `PAIRFL.2` (general, functional, rate None)'
+    categories_with_word: 2
+    wrote_line: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place and 4 two-place event
+      types, 12 constraints, 4 places and 2 place event types, 2 pair fluents; rule set c9479a069634
+    redraw_notes: ''
+    quick_start_block: '
+
+      ```
+
+      wrote runs/world/tiny_place_chain_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents,
+      4 one-place and 4 two-place event types, 12 constraints, 4 places and 2 place event types, 2 pair
+      fluents; rule set c9479a069634
+
+      ```
+
+      '
 baselines:
   conditional_effects_off:
     tiny: {rule_set_id: c92f1f584b905329e0fb34a2f5917a87b7a684ed8b03e0c837fa1ed2b2975446, rule_set_short: c92f1f584b90,

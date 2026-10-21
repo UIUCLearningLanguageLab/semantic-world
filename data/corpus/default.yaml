@@ -64,6 +64,9 @@ scene:
   participant_weights: {thematic: 1.0, taxonomic: 0.5, constant: 0.1}
   policy: uniform_event          # the selection policy: uniform_event (uniform over all legal events) or uniform_event_type (the kind, then the event type, then a binding)
   initial: keep                  # keep: scenes start from the entities' initial values; redraw: each scene redraws its participants' initial values
+  extra_places: 1                # in a world with location fluents (stage c3a): places drawn beside the participants' places
+  places: episode                # episode: the participants' places plus the extra places; all: every place in every scene
+  initial_location: world        # world: each participant's own initial place; seed: the seed entity's place for every participant
 
 entity:
   scenes: [2, 5]                 # the number of scenes of an entity narrative

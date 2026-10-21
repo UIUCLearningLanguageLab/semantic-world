@@ -64,6 +64,7 @@ from semantic_world.world.config import (
 )
 from semantic_world.world.constraints import Constraint
 from semantic_world.world.dynamics import (
+    MOVE_ORIGIN,
     PAIR_KIND,
     PAIR_SAME,
     PAIR_SOME,
@@ -375,11 +376,18 @@ def compiled_literals(effect: Effect, fluent: PairFluent) -> list[PairLiteral]:
     """The compiled precondition literals (F4) of an add effect: ``NOT PAIRFL.k(second,
     first)`` for an asymmetric pair fluent, ``NOT SOME.PAIRFL.k(first)`` for a functional one,
     and ``NOT SOME.PAIRFL.k(second)`` too for a symmetric functional one; none for a delete or
-    for a general pair fluent that is not functional. Each carries the origin ``profile``."""
+    for a general pair fluent that is not functional. Each carries the origin ``profile``. An
+    add on a location fluent (a move, stage c3a) gets ``NOT PAIRFL.k(first, second)`` with the
+    origin ``move`` instead (WM.53): an entity never moves to where it is, and the total
+    functional replacement keeps the profile without a ``SOME`` literal."""
     if not effect.pair or not effect.value:
         return []
     assert effect.second is not None
     found: list[PairLiteral] = []
+    if fluent.total:
+        return [
+            PairLiteral(PAIR_KIND, fluent.label, effect.role, effect.second, False, MOVE_ORIGIN)
+        ]
     if fluent.asymmetric:
         found.append(
             PairLiteral(PAIR_KIND, fluent.label, effect.second, effect.role, False, PROFILE_ORIGIN)
@@ -401,12 +409,19 @@ def pair_literal_achievable(
     pair of it; a negative one when some initial state lacks the pair (an initial rate below 1,
     or a functional pair fluent, in which every other pair of a row is absent) or some effect
     deletes a pair of it. ``SAME`` on a symmetric functional pair fluent is never achievable:
-    two entities with the same partner would give that partner two partners."""
+    two entities with the same partner would give that partner two partners. On a location
+    fluent (stage c3a) every literal but ``SOME`` of an entity is achievable: every entity is
+    somewhere and can be at any place (the habitat weights are positive everywhere), so two
+    entities can share a place or not, a place can hold someone or no one, and the agent of a
+    move or an act can be at the bound place or elsewhere; ``SOME`` of an entity is always
+    true, so its negation is never achievable (and the positive literal is never allowed)."""
+    if fluent.total:
+        return literal.kind != PAIR_SOME or literal.value
     if literal.kind == PAIR_SAME and fluent.symmetric and fluent.functional:
         return not literal.value
     if literal.value:
-        return fluent.initial_rate > 0.0 or fluent.label in adds
-    return fluent.initial_rate < 1.0 or fluent.functional or fluent.label in deletes
+        return fluent.rate > 0.0 or fluent.label in adds
+    return fluent.rate < 1.0 or fluent.functional or fluent.label in deletes
 
 
 def add_compiled_literals(
@@ -568,7 +583,7 @@ def random_pair_literal(
     (``pair``: which role comes first), or its form and role (``some``: ``SOME`` or ``SOMEOF``,
     then the role), and its polarity, each uniformly. A one-place event type draws ``some``
     literals on its agent only. None when no kind with a positive weight can be drawn."""
-    fluents = list(pair_fluents.fluents)
+    fluents = list(pair_fluents.between_entities)
     if not fluents:
         return None
     same_pool = [f for f in fluents if f.functional and not f.symmetric]
@@ -595,9 +610,10 @@ def random_pair_literal(
 def random_pair_effect(
     roles: Sequence[str], rng: np.random.Generator, pair_fluents: PairFluents
 ) -> Effect:
-    """One drawn pair effect between the two roles (stage c2b): the pair fluent, the direction,
-    and the value, each uniformly."""
-    fluents = list(pair_fluents.fluents)
+    """One drawn pair effect between the two roles (stage c2b): the pair fluent (between
+    entities; a location fluent is written by moves alone, stage c3a), the direction, and the
+    value, each uniformly."""
+    fluents = list(pair_fluents.between_entities)
     fluent = fluents[int(rng.integers(len(fluents)))]
     first, second = (roles[0], roles[1]) if rng.integers(2) == 0 else (roles[1], roles[0])
     return Effect(first, fluent.label, bool(rng.integers(2)), (), second)
@@ -1633,6 +1649,11 @@ class _Dynamics:
                 where,
                 f"{lit.key}: SAME needs a functional pair fluent, and {fluent.label} is not",
             )
+        from semantic_world.world.definition import location_literal_problem
+
+        problem = location_literal_problem(lit, fluent.total, False)
+        if problem is not None:
+            raise ConfigError(source, where, f"{lit.key} {problem}")
 
     def _check_explicit_pair_effect(
         self,
@@ -1657,11 +1678,18 @@ class _Dynamics:
         assert effect.second is not None
         self._check_role(source, where, et, effect.second, effect.key)
         fluent = self.pair_fluents[effect.fluent]
-        if fluent.total and not effect.value:
+        if fluent.total:
             raise ConfigError(
                 source,
                 where,
-                f"{effect.text} deletes a pair of the total pair fluent {fluent.label}",
+                f"{effect.text} "
+                + (
+                    "writes the location fluent"
+                    if effect.value
+                    else "deletes a pair of the location fluent"
+                )
+                + f" {fluent.label}; only a move (a place_event_types entry of kind move) "
+                f"writes a location fluent, and nothing deletes a pair of it",
             )
         if effect.condition and effect.value and (fluent.asymmetric or fluent.functional):
             raise ConfigError(
@@ -2633,9 +2661,12 @@ def _check_pair_effect(
     assert effect.second is not None
     if effect.second not in et.roles:
         raise ValueError(f"{et.label}: the effect {effect.text} uses a role it has not")
-    if fluent.total and not effect.value:
+    if fluent.total:
         raise ValueError(
-            f"{et.label}: the effect {effect.text} deletes a pair of a total pair fluent"
+            f"{et.label}: the effect {effect.text} writes a location fluent, which moves alone "
+            f"write"
+            if effect.value
+            else f"{et.label}: the effect {effect.text} deletes a pair of a location fluent"
         )
     key = pair_effect_key(effect, fluent)
     if key in effect_keys:

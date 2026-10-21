@@ -18,8 +18,9 @@ place taxonomy's (place properties and parts, free or determined, and threshold 
 place scalars); a comparison, when its family has weight, compares an entity scalar with a
 place scalar. A requirement that holds for no binding or for every binding of the world (the
 entities paired with the places) is drawn again, as a degenerate two-place event type is by
-default. In this stage a place event type has no precondition and no effects; stage c3 makes
-them moves and acts at a place.
+default. A place event type has no precondition and no effects until it is made a move or an
+act at a place: since stage c3a an event file's ``place_event_types`` entry gives it its
+dynamics (``place_dynamics.py``), and stage c3b draws them.
 
 The capacities: ``CAN.PLACEEVENTTYPE.<n>``, an entity is able to be the agent with some possible
 place, is the agent projection of the requirement, with the place taxonomy's rules as the
@@ -39,12 +40,13 @@ from typing import Any
 import numpy as np
 import polars as pl
 
-from semantic_world.taxonomy.config import ScalarsConfig
+from semantic_world.taxonomy.config import ConfigError, ScalarsConfig
 from semantic_world.taxonomy.generate import TaxonomyResult
 from semantic_world.taxonomy.generate import generate as generate_taxonomy
 from semantic_world.taxonomy.rules import CONE_ENUMERATION_LIMIT, _draw
 from semantic_world.world.config import Config
 from semantic_world.world.constraints import Constraint, _ConstraintSampler
+from semantic_world.world.dynamics import AnyLiteral, Effect, precondition_text
 from semantic_world.world.projections import project
 from semantic_world.world.streams import WorldStreams
 
@@ -84,10 +86,58 @@ class PlaceEventType:
     holds."""
     tries: int
     """How many draws the requirement took."""
+    precondition: tuple[AnyLiteral, ...] = ()
+    """The precondition (stage c3a): empty for a place event type without dynamics; an act's
+    location literal ``PAIRFL.k(agent, patient)`` (origin ``act``) or a move's compiled
+    ``NOT PAIRFL.k(agent, patient)`` (origin ``move``), with the entry's further literals."""
+    effects: tuple[Effect, ...] = ()
+    """The effects (stage c3a): a move's add on its location fluent, and further effects on
+    the agent's fluents."""
+    explicit: bool = False
+    """Whether an event file gave the entry (the requirement, the dynamics, or both)."""
 
     @property
     def requirement_label(self) -> str:
         return f"REQUIREMENT.{self.label}"
+
+    @property
+    def performable(self) -> bool:
+        """Whether the place event type has events: a move or an act (stage c3a)."""
+        return bool(self.precondition or self.effects)
+
+    @property
+    def move(self) -> bool:
+        return any(e.pair and e.value for e in self.effects)
+
+    @property
+    def act(self) -> bool:
+        return self.performable and not self.move
+
+    @property
+    def dynamics_kind(self) -> str | None:
+        """``move``, ``act``, or None without dynamics."""
+        if not self.performable:
+            return None
+        return "move" if self.move else "act"
+
+    @property
+    def location(self) -> str | None:
+        """The location fluent the move or the act uses, or None."""
+        for effect in self.effects:
+            if effect.pair and effect.value:
+                return effect.fluent
+        for lit in self.precondition:
+            if lit.pair and lit.kind == "pair" and lit.value:
+                return lit.fluent
+        return None
+
+    @property
+    def roles(self) -> tuple[str, str]:
+        return ("agent", "patient")
+
+    @property
+    def arity(self) -> int:
+        return 2
 
     @property
     def expression(self) -> str:
@@ -103,7 +153,9 @@ class PlaceEventType:
 
     def record(self) -> dict[str, Any]:
         """The event-type record of ``definition.json``: a two-place event type whose patient is
-        a place, flat (no parent), with an empty precondition and no effects in stage c1."""
+        a place, flat (no parent); with an empty precondition and no effects without dynamics
+        (stage c1), and with its precondition and effects, and ``explicit`` true, when an event
+        file made it a move or an act (stage c3a), written as an entity event type's are."""
         return {
             "label": self.label,
             "kind": PLACE_EVENT_TYPE_KIND,
@@ -112,7 +164,7 @@ class PlaceEventType:
             "parent": None,
             "level": 1,
             "features": [],
-            "explicit": False,
+            "explicit": self.explicit,
             "requirement": {
                 "constraints": [c.label for c in self.constraints],
                 "output": self.requirement_label,
@@ -120,8 +172,11 @@ class PlaceEventType:
                 if self.constraints
                 else "TRUE",
             },
-            "precondition": {"literals": [], "expression": "TRUE"},
-            "effects": [],
+            "precondition": {
+                "literals": [lit.record() for lit in self.precondition],
+                "expression": precondition_text(self.precondition),
+            },
+            "effects": [effect.record() for effect in self.effects],
         }
 
 
@@ -170,6 +225,11 @@ class Places:
             if et.label == label:
                 return et
         raise KeyError(f"unknown place event type {label!r}")
+
+    @property
+    def performable(self) -> tuple[PlaceEventType, ...]:
+        """The place event types with dynamics (stage c3a): the moves and the acts."""
+        return tuple(et for et in self.event_types if et.performable)
 
     def holds(self, label: str, agents: np.ndarray, places: np.ndarray) -> np.ndarray:
         """Whether the requirement holds for the aligned bindings ``(agents[k], places[k])`` of
@@ -247,15 +307,40 @@ def requirement_matrix(
 
 
 def generate_places(
-    config: Config, taxonomy: TaxonomyResult, streams: WorldStreams
+    config: Config, taxonomy: TaxonomyResult, streams: WorldStreams, event_file=None
 ) -> Places | None:
     """The places of a world, or None with ``places: null``: the place taxonomy run (in memory,
     on the resolved place configuration), then the place event types from
     ``world:place_event_types``, each requirement drawn again while it holds for no binding or
-    for every binding of the world, then the capacities."""
+    for every binding of the world, then the capacities. An event file's ``place_event_types``
+    entry with a requirement (stage c3a) replaces the drawn requirement of its place event
+    type after every draw is made, before the capacities, as an explicit two-place requirement
+    replaces an own constraint; the entry's dynamics come after the fluents
+    (``place_dynamics.py``)."""
     if config.places is None:
         return None
     place_run = generate_taxonomy(config.places.taxonomy_run)
+    explicit: dict[str, Constraint] = {}
+    if event_file is not None:
+        from semantic_world.world.requirements import place_requirement
+
+        for label, entry in event_file.place_event_types.items():
+            if entry.requirement is None:
+                continue
+            if label not in config.place_event_types.labels:  # type: ignore[union-attr]
+                raise ConfigError(
+                    event_file.source,
+                    entry.field,
+                    "unknown place event type; the world has none with this label",
+                )
+            explicit[label] = place_requirement(
+                entry,
+                taxonomy.features,
+                taxonomy.config.scalars,
+                place_run.features,
+                place_run.config.scalars,
+                event_file.source,
+            )
     settings = config.place_event_types
     assert settings is not None
     rng = streams.place_event_types
@@ -287,12 +372,18 @@ def generate_places(
             density = float(matrix.mean()) if bindings else math.nan
             if bindings == 0 or 0.0 < density < 1.0 or tries >= MAX_TRIES:
                 break
-        if bindings and not 0.0 < density < 1.0:
+        if label in explicit:
+            constraints = (explicit[label],)
+            matrix = requirement_matrix(constraints, values, scalars, place_values, place_scalars)
+            density = float(matrix.mean()) if bindings else math.nan
+        elif bindings and not 0.0 < density < 1.0:
             warnings.append(
                 f"place event type {label} holds for "
                 f"{'no' if density == 0.0 else 'every'} binding after {tries} tries"
             )
-        event_types.append(PlaceEventType(label, index, constraints, density, tries))
+        event_types.append(
+            PlaceEventType(label, index, constraints, density, tries, explicit=label in explicit)
+        )
         requirement[label] = matrix
     n, m, k = values.shape[0], place_values.shape[0], len(event_types)
     agent = np.zeros((n, k), dtype=bool)

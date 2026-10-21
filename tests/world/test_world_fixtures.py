@@ -55,6 +55,14 @@ HAND_CASES = (
     "numeric_precondition_at_threshold",
     "numeric_condition",
     "numeric_read_by_another_event",
+    # stage c3a: locations (the pair cases of stage c2a are listed in test_world_pairs.py)
+    "move_replaces_old_place",
+    "move_to_own_place_blocked",
+    "act_at_the_place_and_not_elsewhere",
+    "same_holds_event_legal",
+    "same_fails_after_move",
+    "someof_of_a_place_in_a_precondition",
+    "interference_move_and_same",
 )
 
 
