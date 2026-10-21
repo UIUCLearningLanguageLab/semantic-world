@@ -174,7 +174,7 @@ def test_generated_fixtures_are_reproducible(tiny: WorldResult) -> None:
 
 def test_generated_fixtures_record_the_tiny_world_identity(tiny: WorldResult) -> None:
     for path in fixture_paths(FIXTURES_DIR):
-        if path.stem.startswith("tiny_"):
+        if path.stem.startswith("tiny_") and not path.stem.startswith("tiny_full_"):
             assert read_fixture(path)["rule_set_id"] == tiny.rule_set_id
 
 

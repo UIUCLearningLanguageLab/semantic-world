@@ -227,7 +227,8 @@ def test_the_event_file_defines_pair_fluents_and_the_world_has_them(
 
 
 def test_the_pair_streams_come_after_every_earlier_stream(pairs_world: WorldResult) -> None:
-    assert STREAM_NAMES[-4:] == ("places", "place_event_types", "pair_fluents", "pair_initial")
+    # stage c2b's three streams follow (test_world_pair_generation.py)
+    assert STREAM_NAMES[-7:-3] == ("places", "place_event_types", "pair_fluents", "pair_initial")
     assert "world:pair_fluents" in pairs_world.stream_seeds
     assert "world:pair_initial" in pairs_world.stream_seeds
 
@@ -732,7 +733,9 @@ def test_the_redraw_comes_after_every_other_draw_of_the_part(
         "fluents": data["fluents"],
         "event_types": {label: {"requirement": "TRUE"} for label in data["event_types"]},
     }
-    without = _generator(_event_file_run(tmp_path, stripped, "stripped.yaml"), initial="redraw")
+    without = _generator(
+        _event_file_run(tmp_path, stripped, "stripped.yaml", pair_count=0), initial="redraw"
+    )
     with_pairs = _generator(pairs_world, initial="redraw")
     for a, b in zip(
         with_pairs.run(2, 30, STATS_STREAM), without.run(2, 30, STATS_STREAM), strict=True
@@ -758,11 +761,18 @@ def test_simulate_writes_pairs_and_reads_them_back(pairs_folder: Path, tmp_path:
 # ---------------------------------------------------------------------------------------------
 
 
-def _event_file_run(tmp_path: Path, data: dict[str, Any], name: str = "events.yaml") -> WorldResult:
+def _event_file_run(
+    tmp_path: Path, data: dict[str, Any], name: str = "events.yaml", pair_count: int | None = None
+) -> WorldResult:
+    """The tiny_pairs configuration over another event file; ``pair_count`` replaces
+    ``pair_fluents.count`` (stage c2b: the configuration must allow the file's pair fluents,
+    and a file without them needs a count of 0 for a world without pair fluents)."""
     path = tmp_path / name
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     world = yaml.safe_load((DATA / "tiny_pairs.yaml").read_text(encoding="utf-8"))
     world["event_types"]["event_file"] = str(path)
+    if pair_count is not None:
+        world["pair_fluents"]["count"] = pair_count
     return define(config_from_mapping(world, source=str(DATA / "tiny_pairs.yaml")))
 
 
@@ -907,7 +917,9 @@ def test_a_one_place_entry_cannot_read_two_roles(tmp_path: Path) -> None:
 
 def test_the_pair_fluents_block_is_validated(tmp_path: Path) -> None:
     for pair_fluents, message in (
-        ({"PAIRFL.2": BASE_PAIRS["PAIRFL.2"]}, "without a gap"),
+        # stage c2b: the file's entries replace the draws of the pair fluents they name, among
+        # PAIRFL.1 to PAIRFL.<count> (a gap is allowed; a label above the count is not)
+        ({"PAIRFL.5": BASE_PAIRS["PAIRFL.2"]}, "pair_fluents.count is 4"),
         ({"PAIRFL.1": {**BASE_PAIRS["PAIRFL.1"], "total": True}}, "location fluent"),
         ({"PAIRFL.1": {**BASE_PAIRS["PAIRFL.1"], "symmetry": "circular"}}, "symmetry"),
         ({"PAIRFL.1": {"symmetry": "symmetric", "functional": False}}, "initial_rate"),
@@ -920,11 +932,19 @@ def test_the_pair_fluents_block_is_validated(tmp_path: Path) -> None:
     for key in ("place_event_types", "locations"):
         with pytest.raises(ConfigError, match="stage c3"):
             _event_file_run(tmp_path, {"pair_fluents": BASE_PAIRS, "event_types": {}, key: {}})
-    # a pair literal in a file without pair fluents names the empty block
-    with pytest.raises(ConfigError, match="no pair fluent"):
+    # a pair literal in a world without pair fluents (no entries, and a count of 0) is an error
+    with pytest.raises(ConfigError, match="pair fluents are none"):
         _event_file_run(
-            tmp_path, {"event_types": {"EVENTTYPE2.1.1": _entry("PAIRFL.1(agent, patient)")}}
+            tmp_path,
+            {"event_types": {"EVENTTYPE2.1.1": _entry("PAIRFL.1(agent, patient)")}},
+            pair_count=0,
         )
+    # a file with one entry under a count of 4 gets the other three drawn (stage c2b)
+    drawn = _event_file_run(
+        tmp_path, {"pair_fluents": {"PAIRFL.2": BASE_PAIRS["PAIRFL.2"]}, "event_types": {}}
+    )
+    assert drawn.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4")
+    assert drawn.pair_fluents["PAIRFL.2"].asymmetric
     # the parser's own errors
     with pytest.raises(ValueError, match="two roles"):
         PairLiteral.parse("SAME.PAIRFL.1(agent)")

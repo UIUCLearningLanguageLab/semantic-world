@@ -1082,6 +1082,9 @@ def test_config_yaml_records_the_taxonomy_and_every_seed(tiny_folder: Path) -> N
         "world:place_event_types",
         "world:pair_fluents",
         "world:pair_initial",
+        "world:pair_preconditions",
+        "world:pair_effects",
+        "world:pair_conditions",
     ]
     assert "taxonomy:rules" in seeds
     assert not any(name in seeds for name in ("taxonomy:verb_tree", "taxonomy:constraints"))

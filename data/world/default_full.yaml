@@ -1,0 +1,78 @@
+# The default world with the phase (c) settings of docs/specs/WORLD_PHASE_C.md, "Configuration":
+# every setting of default.yaml, plus 4 pair fluents between entities and the pair shares of
+# preconditions, effects, and conditions (stage c2b; the location settings come in stage c3).
+# The default corpus keeps running on default.yaml, which has no pair fluents, until stage c4
+# extends the corpus's truth oracle to pairs and moves these settings into default.yaml (Jon's
+# ruling WM.63). Until then this file is the reference for the phase (c) defaults, as
+# default.yaml is for every other parameter; the two files differ in the name, the comments,
+# and pair_fluents.count alone.
+
+name: default_full
+seed: 1
+taxonomy: {config: data/taxonomy/relations.yaml, seed: null}   # null: the world's seed
+
+fluents:
+  count: 8
+  derived_proportion: 0.25
+  max_chain_depth: 1
+  initial_rates: [0.0, 0.2, 0.8, 1.0]        # each base fluent's initial rate is drawn from this list
+
+numeric_fluents:                              # the numeric fluents (stage b2); 0 gives the world of stage b1
+  count: 2
+  range: [0.0, 1.0]                           # the range of every numeric fluent, unless `fluents` gives one its own
+  initial: {kind: uniform}                    # the initial distribution: uniform over the range, {kind: fixed, value: v}, or {kind: beta, mean: m, concentration: c}
+  drift: {share: 0.5, amounts: [-0.1, 0.1]}   # a share of the numeric fluents drifts at every step, by an amount drawn from this interval
+  rule_weight: 21.0                           # the weight of a numeric threshold literal in the input pool of a derived fluent's rule (a Boolean fluent weighs 1); 21 is the smallest whole weight at which the default world (seed 1) has a derived Boolean fluent over a numeric threshold (stage b3a)
+  fluents: {}                                 # per-fluent overrides, NUMFL.<n>: {range, initial, drift}
+
+event_types:
+  unary:                                      # the one-place event types: how many, and sampling overrides of their requirements (the taxonomy's rules keys)
+    count: 20
+    rules: {operator_mix: {AND: 3, OR: 1, XOR: 1}}   # stricter requirements than the taxonomy's equal mix (the code's default): about half of the entities meet one
+  binary:                                     # the two-place event types (the old `verbs` block of the taxonomy); null turns them off
+    taxonomy: {superordinates: 5, depth: 2, branching: 4}   # 20 two-place event types in 5 categories, as many as the one-place event types (the code's default is 3 superordinates with 2 to 3 each)
+    own_constraint: false                     # a requirement is the constraints of the event type's features alone (the code's default adds one constraint per event type)
+    constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 0.5, comparison: 1}   # the key-lock family holds for the fewest pairs (the code's default weighs every family 1)
+    rules: {operator_mix: {AND: 1, OR: 4, XOR: 1}}   # constraints that hold for more pairs than the taxonomy's equal mix (the code's default) gives
+  preconditions:
+    literals: {0: 0.3, 1: 0.5, 2: 0.2}        # weights over the number of an event type's own precondition literals
+    feature_rate: 0.3                         # the probability that an event-type feature carries a precondition literal
+    roles: {agent: 0.5, patient: 0.5}
+    enabled_share: 0.7                        # the share of literals drawn from values that some effect produces
+    numeric_share: 0.3                        # the share of literals that are numeric threshold literals (stage b2), when the world has numeric fluents
+    numeric_thresholds: [0.25, 0.5, 0.75]     # the fractions of a numeric fluent's range a threshold is drawn from
+    pair_share: 0.2                           # the share of literals that are pair literals (stage c2b), when the world has pair fluents
+  effects:
+    count: {1: 0.7, 2: 0.3}                   # weights over the number of an event type's own effects
+    feature_rate: 0.5
+    roles: {agent: 0.4, patient: 0.6}
+    conditional_share: 0.2                    # the share of effects that get a condition (stage b1); 0 gives the unconditional world of phase (a)
+    condition_literals: {1: 0.7, 2: 0.3}      # weights over the number of literals of a condition
+    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0.2}   # weights over the kind of a condition literal, a static feature, a Boolean fluent, a numeric threshold (stage b2), or a pair literal (stage c2b, used only when the world has pair fluents)
+    numeric_share: 0.3                        # the share of effects that are numeric (+= or -=, stage b2), when the world has numeric fluents
+    numeric_amounts: [0.1, 0.5]               # the interval a numeric effect's constant is drawn from
+    pair_share: 0.2                           # the share of the effects of two-place event types that are pair effects (stage c2b), when the world has pair fluents
+  event_file: null                            # a file of explicit event types
+
+places:                                       # the places (stage c1): a second taxonomy run; null turns places off
+  taxonomy: {config: data/taxonomy/places_default.yaml, seed: null}   # a taxonomy configuration with labels.kind: place; null: the seed of the stream world:places
+  habitat_strength: 1.0                       # the weight of an entity's capacities at a place in its initial place (stage c3; 0: uniform)
+
+place_event_types:                            # the place event types (stage c1: requirements only; their moves and acts come in stage c3)
+  count: 4
+  move_share: 0.5                             # the share that are moves (stage c3)
+  constraints: {1: 0.6, 2: 0.4}               # weights over the number of constraints of a requirement
+  constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}   # the comparison family (an entity scalar against a place scalar) is off by default
+  rules: {}                                   # overrides of the taxonomy's rules settings for the constraints
+
+pair_fluents:                                 # the pair fluents between entities (stage c2b)
+  count: 4                                    # the specification's default; default.yaml keeps 0 until stage c4 (Jon's ruling WM.63)
+  locations: 0                                # location fluents come in stage c3; the specification's default of 1 waits for them
+  symmetry: {symmetric: 1, asymmetric: 1, general: 1}   # weights over a pair fluent's symmetry
+  functional_rate: 0.25                       # the probability that a pair fluent is functional (at most one partner in each row)
+  initial_rates: [0.0, 0.05, 0.2]             # each pair fluent's initial rate is drawn from this list
+  literal_kinds: {pair: 0.6, same: 0.1, some: 0.3}   # weights over the kind of a drawn pair literal: a pair, SAME, or SOME and SOMEOF
+  same_rules: 2                               # two-place event types that must require SAME on a location fluent (stage c3; nothing without location fluents)
+  derived_rules: 1                            # derived fluents whose rule must read a SOME or SOMEOF literal
+  rule_weight: 1.0                            # the weight of a SOME or SOMEOF literal in the input pool of the other derived fluents' rules
+  fluents: {}                                 # per-fluent overrides, PAIRFL.<n>: {symmetry, functional, initial_rate}

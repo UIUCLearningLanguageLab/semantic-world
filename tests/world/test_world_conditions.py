@@ -785,7 +785,12 @@ def test_condition_kinds_weigh_the_kinds() -> None:
     )
     assert even.rule_set_id != spelled.rule_set_id
     defaults = config_from_mapping({}).event_types.effects
-    assert defaults.condition_kinds == {"feature": 0.4, "fluent": 0.4, "numeric": 0.2}
+    assert defaults.condition_kinds == {
+        "feature": 0.4,
+        "fluent": 0.4,
+        "numeric": 0.2,
+        "pair": 0.2,  # stage c2b: used only when the world has pair fluents
+    }
     with pytest.raises(ConfigError, match="condition_kinds"):
         tiny_config(0.5, condition_kinds={"feature": 0, "fluent": 0})
     with pytest.raises(ConfigError, match="condition_kinds"):

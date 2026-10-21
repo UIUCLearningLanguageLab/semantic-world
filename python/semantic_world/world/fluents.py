@@ -12,6 +12,15 @@ taxonomy's rule settings. Rules and rates draw from ``world:fluents``; initial v
 ``world:initial``. Fluents named in an event file are always base fluents, and take the file's
 initial rates. With no numeric fluents the input pool is as it was before stage b2, so every
 rule draw is unchanged.
+
+Since stage c2b (``docs/specs/WORLD_PHASE_C.md``, "Derived fluents") a rule may read
+``SOME.PAIRFL.k`` and ``SOMEOF.PAIRFL.k`` of its own entity, on the pair fluents between
+entities: the first ``pair_fluents.derived_rules`` derived fluents (in layer order) draw their
+rules first, each with one such literal drawn uniformly among them beside the fluent of the layer
+below (an arity drawn as 1 is raised to 2 for them), and the other derived fluents draw from the
+pool, where each ``SOME`` and ``SOMEOF`` literal weighs ``pair_fluents.rule_weight``. With no pair
+fluents, or with the weight and the quota both 0, the literals are left out of the pool, so the
+pool and the rules are those of the world without pair fluents (review point 3).
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ from semantic_world.taxonomy.rules import MAX_TRIES, _draw, build_function, mode
 from semantic_world.world.config import Config
 from semantic_world.world.errors import WorldError
 from semantic_world.world.numeric import NumericFluent, NumericFluents, NumericThreshold
+from semantic_world.world.pair_fluents import PairFluent, PairFluents
 from semantic_world.world.streams import WorldStreams
 
 FLUENT_PREFIX = "BOOLFL"
@@ -75,6 +85,41 @@ class ThresholdLiteral:
 
 
 @dataclass(frozen=True)
+class PairRuleInput:
+    """A pair literal a derived fluent's rule can read (stage c2b): ``SOME.PAIRFL.k`` (the
+    entity's row holds a pair) or ``SOMEOF.PAIRFL.k`` (its column does)."""
+
+    prefix: str
+    """``SOME`` or ``SOMEOF``."""
+    fluent: PairFluent
+
+    @property
+    def key(self) -> str:
+        return f"{self.prefix}.{self.fluent.label}"
+
+    @property
+    def order(self) -> tuple[int, int]:
+        return (0 if self.prefix == "SOME" else 1, self.fluent.index)
+
+    def values(self, matrix: np.ndarray) -> np.ndarray:
+        m = np.asarray(matrix, dtype=bool)
+        return (m.any(axis=1) if self.prefix == "SOME" else m.any(axis=0)).astype(np.uint8)
+
+
+def pair_rule_inputs(pair_fluents: PairFluents | None) -> list[PairRuleInput]:
+    """Every pair literal a rule can read, ``SOME`` then ``SOMEOF`` of each pair fluent between
+    entities, in label order."""
+    if pair_fluents is None:
+        return []
+    return [
+        PairRuleInput(prefix, fluent)
+        for fluent in pair_fluents.fluents
+        if not fluent.total
+        for prefix in ("SOME", "SOMEOF")
+    ]
+
+
+@dataclass(frozen=True)
 class FluentRule:
     """A derived fluent's rule, over literal keys in the world's vocabulary."""
 
@@ -87,6 +132,11 @@ class FluentRule:
     thresholds: tuple[ThresholdLiteral, ...]
     numeric_thresholds: tuple[NumericThreshold, ...] = ()
     """The numeric threshold literals the rule reads (stage b2)."""
+
+    @property
+    def pair_inputs(self) -> tuple[str, ...]:
+        """The ``SOME`` and ``SOMEOF`` literals the rule reads (stage c2b), by key."""
+        return tuple(k for k in self.inputs if k.startswith("SOME.") or k.startswith("SOMEOF."))
 
     @property
     def min_dnf_literals(self) -> int:
@@ -189,10 +239,13 @@ def generate_fluents(
     explicit_rates: Mapping[str, float] | None = None,
     explicit_source: str | None = None,
     numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> Fluents:
     """Draw the fluents of a world. ``explicit_rates`` are the initial rates of fluents named
     in an event file; those fluents are base fluents. ``numeric`` gives the numeric fluents,
-    whose threshold literals join the input pool of the derived fluents' rules."""
+    whose threshold literals join the input pool of the derived fluents' rules, and
+    ``pair_fluents`` the pair fluents, whose ``SOME`` and ``SOMEOF`` literals join it too
+    (stage c2b)."""
     settings = config.fluents
     explicit_rates = dict(explicit_rates or {})
     count = settings.count
@@ -239,7 +292,7 @@ def generate_fluents(
             rate = float(explicit_rates[label])
         fluents.append(Fluent(label, index, False, 0, float(rate)))
 
-    rules = _draw_rules(fluents, taxonomy, rng, config, numeric)
+    rules = _draw_rules(fluents, taxonomy, rng, config, numeric, pair_fluents)
     base = [f for f in fluents if not f.derived]
     n = len(taxonomy.instances)
     initial = np.zeros((n, len(base)), dtype=np.uint8)
@@ -255,6 +308,7 @@ def _draw_rules(
     rng: np.random.Generator,
     world_config: Config | None = None,
     numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> list[FluentRule]:
     config: TaxonomyConfig = taxonomy.config
     sampling: RuleSampling = config.rules.sampling
@@ -274,9 +328,20 @@ def _draw_rules(
         fractions = world_config.event_types.preconditions.numeric_thresholds
         if numeric_weight > 0:
             numeric_pool = list(numeric.fluents)
+    # The pair literals (stage c2b): in the pool at rule_weight when it is above 0, and drawn
+    # first by the quota; with no pair fluents, or the weight and the quota both 0, left out,
+    # so that the pool reads the stream as before.
+    pair_literals = pair_rule_inputs(pair_fluents) if world_config is not None else []
+    pair_weight = world_config.pair_fluents.rule_weight if world_config is not None else 0.0
+    quota = world_config.pair_fluents.derived_rules if world_config is not None else 0
+    pair_pool: list[PairRuleInput] = list(pair_literals) if pair_weight > 0 else []
+    if not pair_literals:
+        quota = 0
     rules: list[FluentRule] = []
     seen: set[tuple] = set()
-    for output in sorted((f for f in fluents if f.derived), key=lambda f: (f.layer, f.index)):
+    for number, output in enumerate(
+        sorted((f for f in fluents if f.derived), key=lambda f: (f.layer, f.index))
+    ):
         below = [f for f in fluents if f.layer < output.layer]
         previous = [f for f in below if f.layer == output.layer - 1]
         if not previous:
@@ -284,25 +349,34 @@ def _draw_rules(
                 f"the derived fluent {output.label} at layer {output.layer} has no fluent at "
                 f"layer {output.layer - 1} to read"
             )
-        pool: list[Fluent | Feature | int | NumericFluent] = (
+        quota_rule = number < quota
+        pool: list[Fluent | Feature | int | NumericFluent | PairRuleInput] = (
             list(below) + list(static_pool) + list(scalar_pool) + list(numeric_pool)
         )
+        if quota_rule:
+            pool += [entry for entry in pair_literals if entry not in pair_pool]
+        pool += list(pair_pool)
         for _ in range(MAX_TRIES):
             arity = _draw(rng, sampling.arity)
+            if quota_rule:
+                arity = max(arity, 2)
             if arity > len(pool):
                 raise WorldError(
                     f"a rule for {output.label} needs {arity} inputs but only {len(pool)} are "
                     f"eligible; lower rules.arity in the taxonomy configuration"
                 )
             first = previous[int(rng.integers(len(previous)))]
-            rest = [entry for entry in pool if entry is not first]
-            chosen: list[Fluent | Feature | int | NumericFluent] = [first]
-            if arity > 1:
+            chosen: list[Fluent | Feature | int | NumericFluent | PairRuleInput] = [first]
+            if quota_rule:
+                chosen.append(pair_literals[int(rng.integers(len(pair_literals)))])
+            rest = [entry for entry in pool if entry not in chosen]
+            if arity > len(chosen):
                 weights = np.array(
-                    [_weight(entry, sampling, numeric_weight) for entry in rest], dtype=float
+                    [_weight(entry, sampling, numeric_weight, pair_weight) for entry in rest],
+                    dtype=float,
                 )
                 picks = rng.choice(
-                    len(rest), size=arity - 1, replace=False, p=weights / weights.sum()
+                    len(rest), size=arity - len(chosen), replace=False, p=weights / weights.sum()
                 )
                 chosen.extend(rest[int(i)] for i in picks)
             inputs, atoms, thresholds, numeric_thresholds = _inputs(chosen, config, rng, fractions)
@@ -337,30 +411,39 @@ def _sort_permutation(inputs: Sequence[str]) -> list[int]:
 
 
 def _weight(
-    entry: Fluent | Feature | int | NumericFluent, sampling: RuleSampling, numeric_weight: float
+    entry: Fluent | Feature | int | NumericFluent | PairRuleInput,
+    sampling: RuleSampling,
+    numeric_weight: float,
+    pair_weight: float = 0.0,
 ) -> float:
     if isinstance(entry, Fluent):
         return FLUENT_WEIGHT
     if isinstance(entry, NumericFluent):
         return numeric_weight
+    if isinstance(entry, PairRuleInput):
+        # a quota rule's pool holds the pair literals even at weight 0; they weigh at least
+        # a fluent there, so that the rest of the rule can still draw one
+        return pair_weight if pair_weight > 0 else FLUENT_WEIGHT
     if isinstance(entry, int):
         return sampling.scalar_weight
     return sampling.input_type_weights[entry.type]
 
 
 def _inputs(
-    chosen: Sequence[Fluent | Feature | int | NumericFluent],
+    chosen: Sequence[Fluent | Feature | int | NumericFluent | PairRuleInput],
     config: TaxonomyConfig,
     rng: np.random.Generator,
     fractions: Sequence[float] = (),
 ) -> tuple[list[str], list[Expr], list[ThresholdLiteral], list[NumericThreshold]]:
     """Inputs in a fixed order: static features by position, fluents by index, threshold
-    literals by scalar (drawn in that order), then numeric threshold literals by fluent (each at
-    a point of the range drawn from the fractions, stage b2)."""
+    literals by scalar (drawn in that order), numeric threshold literals by fluent (each at a
+    point of the range drawn from the fractions, stage b2), then the pair literals, ``SOME``
+    before ``SOMEOF``, by pair fluent (stage c2b)."""
     features = sorted((e for e in chosen if isinstance(e, Feature)), key=lambda f: f.position)
     fluents = sorted((e for e in chosen if isinstance(e, Fluent)), key=lambda f: f.index)
     scalars = sorted(e for e in chosen if isinstance(e, int))
     numeric = sorted((e for e in chosen if isinstance(e, NumericFluent)), key=lambda f: f.index)
+    pairs = sorted((e for e in chosen if isinstance(e, PairRuleInput)), key=lambda e: e.order)
     keys: list[str] = []
     atoms: list[Expr] = []
     thresholds: list[ThresholdLiteral] = []
@@ -386,14 +469,21 @@ def _inputs(
         numeric_thresholds.append(literal)
         keys.append(literal.key)
         atoms.append(Gt(fluent.label, literal.threshold))
+    for pair in pairs:
+        keys.append(pair.key)
+        atoms.append(Var(pair.key))
     return keys, atoms, thresholds, numeric_thresholds
 
 
 def derived_initial_values(
-    fluents: Fluents, taxonomy: TaxonomyResult, numeric: NumericFluents | None = None
+    fluents: Fluents,
+    taxonomy: TaxonomyResult,
+    numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> dict[str, np.ndarray]:
     """Every derived fluent's value for every entity in the initial state, by truth-table
-    lookup in layer order (the reference evaluation; the matrices are checked against it)."""
+    lookup in layer order (the reference evaluation; the matrices are checked against it); the
+    ``SOME`` and ``SOMEOF`` literals read the initial pairs (stage c2b)."""
     features = taxonomy.features
     values = taxonomy.instances.values
     scalars = taxonomy.instances.scalars
@@ -411,6 +501,11 @@ def derived_initial_values(
                 assert numeric is not None
                 literal = next(t for t in rule.numeric_thresholds if t.key == key)
                 inputs.append(literal.values(numeric.initial_values, numeric.index(literal.fluent)))
+            elif key.startswith("SOME.") or key.startswith("SOMEOF."):
+                assert pair_fluents is not None
+                prefix, _, label = key.partition(".")
+                entry = PairRuleInput(prefix, pair_fluents[label])
+                inputs.append(entry.values(pair_fluents.initial_pairs[pair_fluents.index(label)]))
             elif ">" in key:
                 literal = next(t for t in rule.thresholds if t.key == key)
                 inputs.append(literal.values(scalars))

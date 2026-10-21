@@ -20,7 +20,12 @@ taxonomy run, when the configuration gives none) and ``world:place_event_types``
 requirements of the place event types, and the samples of their capacities' local test). Stage
 c2a adds ``world:pair_fluents`` (the profiles and initial rates of the pair fluents, drawn in
 stage c2b; nothing is drawn from it in c2a, where an event file gives them) and
-``world:pair_initial`` (the initial pairs of each pair fluent between entities).
+``world:pair_initial`` (the initial pairs of each pair fluent between entities). Stage c2b adds
+``world:pair_preconditions`` (the pair literals that replace precondition literals at
+``event_types.preconditions.pair_share``; a never-legal event type's redraw uses its own part,
+``world:pair_preconditions:<label>``), ``world:pair_effects`` (the pair effects that replace
+effects of two-place event types at ``event_types.effects.pair_share``), and
+``world:pair_conditions`` (the pair condition literals of the kind ``pair``).
 """
 
 from __future__ import annotations
@@ -51,13 +56,19 @@ STREAM_NAMES = (
     "place_event_types",
     "pair_fluents",
     "pair_initial",
+    "pair_preconditions",
+    "pair_effects",
+    "pair_conditions",
 )
 """The order is the order of creation: the two place streams of stage c1 (``world:places``, the
 place taxonomy's seed, and ``world:place_event_types``, the requirements of the place event types
 and the samples of their capacities' local test) come after every earlier stream, so that with
 ``places: null`` every earlier draw is unchanged; the two pair streams of stage c2a
 (``world:pair_fluents``, ``world:pair_initial``) come after them, so that a world without pair
-fluents is byte-identical to the world of stage c1."""
+fluents is byte-identical to the world of stage c1; and the three pair streams of stage c2b
+(``world:pair_preconditions``, ``world:pair_effects``, ``world:pair_conditions``) come last, so
+that a world whose configuration draws no pair fluent is byte-identical to the world of stage
+c2a. Stage c3 adds ``world:place_dynamics`` and ``world:habitats`` after them."""
 
 
 class WorldStreams:
@@ -83,6 +94,9 @@ class WorldStreams:
     place_event_types: np.random.Generator
     pair_fluents: np.random.Generator
     pair_initial: np.random.Generator
+    pair_preconditions: np.random.Generator
+    pair_effects: np.random.Generator
+    pair_conditions: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

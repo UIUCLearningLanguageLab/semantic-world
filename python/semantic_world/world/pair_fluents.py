@@ -8,15 +8,20 @@ pair fluent at most one partner in each row and each column). Every pair fluent 
 A pair fluent between entities is never total (WM.38); the total functional profile is the
 location fluents' alone, toward places (stage c3).
 
-In this stage pair fluents come from an event file alone (``pair_fluents`` in
-``event_file.py``): the generator draws nothing from ``world:pair_fluents``, which exists so
-that the order of the streams is fixed for stage c2b. The initial pairs are drawn from
-``world:pair_initial`` at each pair fluent's initial rate, respecting the profile ("Initial pairs
-between entities"): a symmetric pair fluent draws each unordered pair at the rate and writes both
-directions; an asymmetric one draws each unordered pair at the rate and then one direction; a
-general one draws each ordered pair at the rate; a functional one gives each entity, at the rate,
-one partner drawn uniformly among the entities that still keep the profile. The pairs are written
-to ``initial_pairs.csv``, one ordered pair per row (both directions of a symmetric pair).
+Since stage c2b the world draws ``pair_fluents.count`` pair fluents between entities from
+``world:pair_fluents``, in label order: each one's symmetry from ``pair_fluents.symmetry``,
+whether it is functional at ``pair_fluents.functional_rate``, and its initial rate uniformly
+from ``pair_fluents.initial_rates``. An override ``pair_fluents.fluents.PAIRFL.<n>`` or an event
+file's ``pair_fluents`` entry replaces the drawn values of that pair fluent after the draws are
+made, so that no other pair fluent's draws shift (as ``fluents.py`` draws an overridden Boolean
+fluent's rate before replacing it); an event file's entries must be among ``PAIRFL.1`` to
+``PAIRFL.<count>``. The initial pairs are drawn from ``world:pair_initial`` at each pair
+fluent's initial rate, respecting the profile ("Initial pairs between entities"): a symmetric
+pair fluent draws each unordered pair at the rate and writes both directions; an asymmetric one
+draws each unordered pair at the rate and then one direction; a general one draws each ordered
+pair at the rate; a functional one gives each entity, at the rate, one partner drawn uniformly
+among the entities that still keep the profile. The pairs are written to ``initial_pairs.csv``,
+one ordered pair per row (both directions of a symmetric pair).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import numpy as np
 import polars as pl
 
 from semantic_world.taxonomy.config import ConfigError
+from semantic_world.taxonomy.rules import _draw
 from semantic_world.world.errors import WorldError
 
 PAIR_PREFIX = "PAIRFL"
@@ -168,36 +174,40 @@ def profile_violations(fluent: PairFluent, matrix: np.ndarray) -> list[str]:
     m = np.asarray(matrix, dtype=bool)
     if m.ndim != 2:
         raise WorldError(f"the pairs of {fluent.label} are a 2-D matrix, got {m.shape}")
+    # Each check tests the whole matrix with ``any`` first and locates the first violation only
+    # when there is one: the runtime checks every profile after every step of every episode.
     if m.shape[0] == m.shape[1]:
-        diagonal = np.flatnonzero(np.diagonal(m))
-        if diagonal.size:
-            found.append(f"{fluent.label} holds between entity {int(diagonal[0])} and itself")
+        diagonal = np.diagonal(m)
+        if diagonal.any():
+            found.append(
+                f"{fluent.label} holds between entity {int(np.flatnonzero(diagonal)[0])} and itself"
+            )
         if fluent.symmetric:
-            rows, columns = np.nonzero(m & ~m.T)
-            if rows.size:
+            broken = m & ~m.T
+            if broken.any():
+                rows, columns = np.nonzero(broken)
                 found.append(
                     f"{fluent.label} is symmetric, but ({int(rows[0])}, {int(columns[0])}) "
                     f"holds without ({int(columns[0])}, {int(rows[0])})"
                 )
         if fluent.asymmetric:
-            rows, columns = np.nonzero(m & m.T)
-            if rows.size:
+            broken = m & m.T
+            if broken.any():
+                rows, columns = np.nonzero(broken)
                 found.append(
                     f"{fluent.label} is asymmetric, but ({int(rows[0])}, {int(columns[0])}) "
                     f"and ({int(columns[0])}, {int(rows[0])}) both hold"
                 )
-    if fluent.functional:
+    if fluent.functional or fluent.total:
         counts = m.sum(axis=1)
-        over = np.flatnonzero(counts > 1)
-        if over.size:
+        if fluent.functional and (counts > 1).any():
+            over = np.flatnonzero(counts > 1)
             found.append(
                 f"{fluent.label} is functional, but the row of entity {int(over[0])} holds "
                 f"{int(counts[over[0]])} pairs"
             )
-    if fluent.total:
-        counts = m.sum(axis=1)
-        empty = np.flatnonzero(counts == 0)
-        if empty.size:
+        if fluent.total and (counts == 0).any():
+            empty = np.flatnonzero(counts == 0)
             found.append(
                 f"{fluent.label} is total, but the row of entity {int(empty[0])} holds no pair"
             )
@@ -275,36 +285,55 @@ def generate_pair_fluents(
     streams,
     explicit: Mapping[str, Mapping[str, Any]] | None = None,
     explicit_source: str | None = None,
+    config=None,
 ) -> PairFluents:
-    """The pair fluents of a world and their initial pairs. In stage c2a the pair fluents are
-    those of the event file (``explicit``: ``{label: {symmetry, functional, initial_rate}}``),
-    labeled ``PAIRFL.1`` to ``PAIRFL.k`` without a gap; nothing is drawn from
-    ``world:pair_fluents``. The initial pairs come from ``world:pair_initial``, fluent by fluent
-    in label order. Without pair fluents nothing is drawn at all."""
-    if not explicit:
-        return EMPTY
+    """The pair fluents of a world and their initial pairs. ``config`` is the ``pair_fluents``
+    block (``PairFluentsConfig``; the code's defaults when None): ``count`` profiles and initial
+    rates are drawn from ``world:pair_fluents`` in label order, three draws per pair fluent
+    (symmetry, functional, initial rate), and an override of ``fluents.PAIRFL.<n>`` or an event
+    file's entry (``explicit``: ``{label: {symmetry, functional, initial_rate}}``, labels among
+    ``PAIRFL.1`` to ``PAIRFL.<count>``) replaces the drawn values after the draws. The initial
+    pairs come from ``world:pair_initial``, fluent by fluent in label order. Without pair
+    fluents nothing is drawn at all."""
+    count = config.count if config is not None else 0
+    explicit = dict(explicit or {})
     source = explicit_source or "<event file>"
-    fluents: list[PairFluent] = []
-    expected = [pair_label(i) for i in range(1, len(explicit) + 1)]
+    expected = [pair_label(i) for i in range(1, count + 1)]
     labels = sorted(explicit, key=lambda label: int(label.split(".")[1]))
-    if labels != expected:
+    if explicit and (not count or labels[-1] not in expected):
         raise ConfigError(
             source,
             "pair_fluents",
-            f"the pair fluents are labeled {', '.join(labels)}; they must be "
-            f"{expected[0]} to {expected[-1]} without a gap",
+            f"the event file defines {', '.join(labels)}, but the world configuration's "
+            f"pair_fluents.count is {count}; the file's pair fluents must be among "
+            f"{pair_label(1)} to {pair_label(count)}"
+            if count
+            else f"the event file defines {', '.join(labels)}, but the world configuration's "
+            f"pair_fluents.count is 0; set it to at least {labels[-1].split('.')[1]}",
         )
-    for label in expected:
-        setting = explicit[label]
-        fluents.append(
-            PairFluent(
-                label,
-                int(label.split(".")[1]),
-                str(setting["symmetry"]),
-                bool(setting["functional"]),
-                float(setting["initial_rate"]),
-            )
-        )
+    if not count:
+        return EMPTY
+    rng = streams.pair_fluents
+    overrides = config.fluents if config is not None else {}
+    fluents: list[PairFluent] = []
+    for index, label in enumerate(expected, start=1):
+        symmetry = str(_draw(rng, config.symmetry))
+        functional = bool(rng.random() < config.functional_rate)
+        rate = float(config.initial_rates[int(rng.integers(len(config.initial_rates)))])
+        override = overrides.get(label)
+        if override is not None:
+            if override.symmetry is not None:
+                symmetry = override.symmetry
+            if override.functional is not None:
+                functional = override.functional
+            if override.initial_rate is not None:
+                rate = float(override.initial_rate)
+        entry = explicit.get(label)
+        if entry is not None:
+            symmetry = str(entry["symmetry"])
+            functional = bool(entry["functional"])
+            rate = float(entry["initial_rate"])
+        fluents.append(PairFluent(label, index, symmetry, functional, rate))
     rng = streams.pair_initial
     initial = tuple(draw_initial_pairs(fluent, entity_count, rng) for fluent in fluents)
     for fluent, matrix in zip(fluents, initial, strict=True):

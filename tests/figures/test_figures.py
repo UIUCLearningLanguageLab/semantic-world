@@ -2,7 +2,8 @@
 
 One test compares the figures of the tiny world and corpus, regenerated in memory into a
 temporary folder, with the snapshot (the fast tier), and one the figures of the default world and
-corpus (the slow tier). The snapshot is rewritten on purpose by
+corpus (the slow tier); the ``tiny_full``, ``default_full``, and ``tiny_pairs`` worlds (stage
+c2b) are compared the same way, without a corpus. The snapshot is rewritten on purpose by
 ``python -m semantic_world.figures snapshot``, which reads ``runs/`` and prints what moved; the
 tests never read ``runs/``. The baselines of the off settings in the same file are checked by
 ``tests/world/test_world_off_settings.py``.
@@ -17,6 +18,7 @@ import pytest
 from semantic_world.corpus import generate
 from semantic_world.corpus import load_config as load_corpus_config
 from semantic_world.figures import (
+    BASELINE_NAMES,
     CORPUS_CONFIGS,
     REPO,
     SNAPSHOT_FILE,
@@ -32,6 +34,13 @@ from semantic_world.world.generate import define
 
 SLOW = pytest.mark.slow
 NAMES = ["tiny", pytest.param("default", marks=SLOW)]
+WORLD_NAMES = [
+    "tiny",
+    pytest.param("default", marks=SLOW),
+    "tiny_full",
+    pytest.param("default_full", marks=SLOW),
+    "tiny_pairs",
+]
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +54,7 @@ def _differences(expected: dict, found: dict) -> str:
     )
 
 
-@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("name", WORLD_NAMES)
 def test_the_world_figures_are_the_snapshots(name: str, tmp_path: Path) -> None:
     snapshot = load_snapshot(SNAPSHOT_FILE)
     folder = define(load_world_config(REPO / WORLD_CONFIGS[name])).write(tmp_path / "world")
@@ -65,8 +74,10 @@ def test_the_corpus_figures_are_the_snapshots(name: str, tmp_path: Path) -> None
 
 def test_the_snapshot_holds_both_runs_and_the_baselines() -> None:
     snapshot = load_snapshot(SNAPSHOT_FILE)
-    assert set(snapshot) == {"tiny", "default", "baselines"}
-    for name in ("tiny", "default"):
-        assert set(snapshot[name]) == {"world", "corpus"}
+    assert set(snapshot) == set(WORLD_CONFIGS) | {"baselines"}
+    for name in WORLD_CONFIGS:
+        assert set(snapshot[name]) == ({"world", "corpus"} if name in CORPUS_CONFIGS else {"world"})
+    for feature, worlds in snapshot["baselines"].items():
+        assert set(worlds) == set(BASELINE_NAMES), feature
     keys = flatten(snapshot)
     assert all(not isinstance(v, float) or v == round(v, 6) for v in keys.values())
