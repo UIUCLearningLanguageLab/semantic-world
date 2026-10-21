@@ -33,7 +33,7 @@ python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms run
 
 | Step | Output folder | What the step writes | Time at default scale |
 | --- | --- | --- | --- |
-| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the place taxonomy run, the definition, the entities and the places, the derived values, and the world's statistics | 7 seconds (6.9 s in stage c2b, 6.8 s in stage c2a, 6.4 s in stage c1, 6.3 s in stage b3b, 6.1 s in stage b3a, 6.7 s in stage b2, 7.6 s in stage b1, 7.8 s in stage a8); 11 seconds for `default_full.yaml`, the default world with four pair fluents (`WORLD.md`, "The full worlds") |
+| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the place taxonomy run, the definition, the entities and the places, the derived values, and the world's statistics | 7 seconds (6.9 s in stage c2b, 6.8 s in stage c2a, 6.4 s in stage c1, 6.3 s in stage b3b, 6.1 s in stage b3a, 6.7 s in stage b2, 7.6 s in stage b1, 7.8 s in stage a8); 7 seconds for `default_full.yaml`, the default world with four pair fluents (`WORLD.md`, "The full worlds") |
 | `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request | 2.4 minutes (142 s in stages c2b and c2a, 134 s in stage c1, 141 s in stage b3b, 133 s in stage b3a, 158 s in stage b2, 157 s in stage b1, 158 s in stage a8) |
 | `wordforms all` | `runs/wordforms/corpus_default_seed1/` | Word forms, audio, auditory front ends, sound embeddings, and their evaluation | about 30 minutes |
 | `render` | `runs/corpus/default_seed1/` | The spelled rendering (`corpus.txt`) and the word columns of `lexicon.csv` | 3 seconds |

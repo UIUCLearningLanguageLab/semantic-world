@@ -115,7 +115,15 @@ class State:
         object.__setattr__(self, "numeric", numeric)
         pairs = []
         for matrix in self.pairs:
-            matrix = np.array(matrix, dtype=bool, copy=True)
+            # A read-only Boolean matrix (another state's, which no one can write) is shared
+            # rather than copied, so that a step copies only the matrices it writes (stage
+            # c2b's follow-up); anything else is copied and frozen.
+            if not (
+                isinstance(matrix, np.ndarray)
+                and matrix.dtype == bool
+                and not matrix.flags.writeable
+            ):
+                matrix = np.array(matrix, dtype=bool, copy=True)
             if matrix.ndim != 2 or matrix.shape[0] != values.shape[0]:
                 raise WorldError(
                     f"the pairs of a state are 2-D matrices with one row per entity, got "
@@ -987,7 +995,47 @@ def _check_legal(
 
 Key = tuple
 """A fact an event reads or writes: ``(entity, fluent)`` for a base Boolean or numeric fluent,
-and ``(pair fluent, first, second)`` for one ordered pair of a pair fluent (stage c2a)."""
+``(pair fluent, first, second)`` for one ordered pair of a pair fluent (stage c2a), and, since
+stage c2b's follow-up (Jon's ruling 3 of October 21, 2026), ``("row", pair fluent, entity)``
+for every pair of a row and ``("column", pair fluent, entity)`` for every pair of a column, so
+that a row or a column is one entry of a read or write set rather than every pair in it;
+``overlaps`` says when two keys share a fact."""
+ROW = "row"
+COLUMN = "column"
+
+
+def overlaps(a: Key, b: Key) -> bool:
+    """Whether two keys share a fact: equal keys; a pair and the row of its first argument or
+    the column of its second; a row and a column of one pair fluent of two different entities
+    (they share the pair from the one to the other). Two different rows, or two different
+    columns, share nothing, and a base fluent shares nothing with a pair."""
+    if a == b:
+        return True
+    if len(a) != 3 or len(b) != 3:
+        return False
+    if a[0] in (ROW, COLUMN):
+        if b[0] in (ROW, COLUMN):
+            return a[0] != b[0] and a[1] == b[1] and a[2] != b[2]
+        return overlaps(b, a)
+    if b[0] == ROW:
+        return b[1] == a[0] and b[2] == a[1]
+    if b[0] == COLUMN:
+        return b[1] == a[0] and b[2] == a[2]
+    return False
+
+
+def covered(writes: Iterable[Key], reads: Iterable[Key]) -> list[Key]:
+    """The written keys that share a fact with some read key, sorted (base keys before pair
+    keys, each kind in its own order, so that keys of two kinds never compare)."""
+    reads = tuple(reads)
+    return sorted(
+        (w for w in writes if any(overlaps(w, r) for r in reads)), key=lambda k: (len(k), k)
+    )
+
+
+def _any_overlap(writes: Iterable[Key], reads: Iterable[Key]) -> bool:
+    reads = tuple(reads)
+    return any(overlaps(w, r) for w in writes for r in reads)
 
 
 def _pair_keys(
@@ -1046,11 +1094,13 @@ def _pair_reads(
 
 
 def _row_keys(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
-    return [(fluent, entity, z) for z in range(definition.entity_count) if z != entity]
+    """The row of an entity as one key (every pair ``(entity, z)``)."""
+    return [(ROW, fluent, entity)]
 
 
 def _column_keys(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
-    return [(fluent, z, entity) for z in range(definition.entity_count) if z != entity]
+    """The column of an entity as one key (every pair ``(z, entity)``)."""
+    return [(COLUMN, fluent, entity)]
 
 
 def _cone_reads(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
@@ -1072,7 +1122,8 @@ def _reads_by_reader(
     every derived fluent: ``{key: reader}``, the reader being ``"the precondition"`` or ``"a
     condition"`` (the precondition when both read). A static literal of a condition reads
     nothing that an event can write. A pair literal reads its pair (both directions of a
-    symmetric one), or every pair of the row or the column it names (stage c2a)."""
+    symmetric one), or the row or the column it names, as one key each (stage c2a; the keys
+    since stage c2b's follow-up)."""
     found: dict[Key, str] = {}
     for effect in et.effects:
         for lit in effect.condition:
@@ -1096,10 +1147,40 @@ def _reads_by_reader(
     return found
 
 
+def _reader_of(reads: Mapping[Key, str], key: Key) -> str:
+    """Who reads a written fact: ``"the precondition"`` when any precondition read shares the
+    fact (a row or a column read covers every pair in it), else ``"a condition"``."""
+    readers = {reader for read, reader in reads.items() if overlaps(key, read)}
+    return "the precondition" if "the precondition" in readers else "a condition"
+
+
 def _reads(definition: RuntimeDefinition, event: Event, et: EventTypeRecord) -> set[Key]:
     """The facts the event's precondition and its effects' conditions read, through the cone of
     every derived fluent."""
     return set(_reads_by_reader(definition, event, et))
+
+
+InterferenceSets = tuple[frozenset, dict]
+"""What non-interference needs of one event: its write keys and its read keys by reader."""
+
+
+def interference_sets(definition: RuntimeDefinition, event: Event) -> InterferenceSets:
+    """The write keys and the read keys of a well-formed event, computed once so that a policy
+    can compare one event with many (stage c2b's follow-up)."""
+    et = definition.event_type(event.event_type)
+    return frozenset(_writes(event, et, definition)), _reads_by_reader(definition, event, et)
+
+
+def interferes_sets(a: InterferenceSets, b: InterferenceSets) -> bool:
+    """Whether two events interfere, by their sets: a shared write, or a write of one that
+    shares a fact with a read of the other."""
+    writes_a, reads_a = a
+    writes_b, reads_b = b
+    return (
+        _any_overlap(writes_a, writes_b)
+        or _any_overlap(writes_a, reads_b)
+        or _any_overlap(writes_b, reads_a)
+    )
 
 
 def _condition_holds(
@@ -1183,13 +1264,7 @@ def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
     fluents), or the two are the same event."""
     if a == b:
         return True
-    et_a, et_b = definition.event_type(a.event_type), definition.event_type(b.event_type)
-    writes_a, writes_b = set(_writes(a, et_a, definition)), set(_writes(b, et_b, definition))
-    if writes_a & writes_b:
-        return True
-    return bool(writes_a & _reads(definition, b, et_b)) or bool(
-        writes_b & _reads(definition, a, et_a)
-    )
+    return interferes_sets(interference_sets(definition, a), interference_sets(definition, b))
 
 
 @dataclass(frozen=True)
@@ -1235,7 +1310,7 @@ def apply_step(
             first, second = events[a].describe(definition), events[b].describe(definition)
             if events[a] == events[b]:
                 raise InterferenceError(f"{first} occurs twice in the step")
-            shared = sorted(set(writes[a]) & set(writes[b]))
+            shared = covered(writes[a], writes[b])
             if shared:
                 raise InterferenceError(
                     f"{first} and {second} interfere: both write {_fact(definition, shared[0])}"
@@ -1244,18 +1319,26 @@ def apply_step(
                 (first, second, writes[a], reads[b]),
                 (second, first, writes[b], reads[a]),
             ):
-                shared = sorted(set(w) & set(r))
+                shared = covered(w, r)
                 if shared:
                     raise InterferenceError(
                         f"{writer} and {reader} interfere: {writer} writes "
-                        f"{_fact(definition, shared[0])}, which {r[shared[0]]} of {reader} reads"
+                        f"{_fact(definition, shared[0])}, which {_reader_of(r, shared[0])} of "
+                        f"{reader} reads"
                     )
     values = np.array(state.values, dtype=np.uint8, copy=True)
     numeric = np.array(state.numeric, dtype=np.float64, copy=True)
-    pairs = [np.array(matrix, dtype=bool, copy=True) for matrix in state.pairs]
+    # The pair matrices are copied only where a fired effect writes one (stage c2b's follow-up);
+    # an unwritten matrix is shared with the state before the step, read-only as every state's.
+    fired = [_fired(definition, state, event, et) for event, et in zip(events, types, strict=True)]
+    written = {definition.pair_index(key[0]) for found in fired for key in found if len(key) == 3}
+    pairs = [
+        np.array(matrix, dtype=bool, copy=True) if k in written else matrix
+        for k, matrix in enumerate(state.pairs)
+    ]
     low, high = definition.range_bounds
-    for event, et in zip(events, types, strict=True):
-        for key, value in _fired(definition, state, event, et).items():
+    for found in fired:
+        for key, value in found.items():
             if len(key) == 3:
                 pairs[definition.pair_index(key[0])][key[1], key[2]] = bool(value)
                 continue
@@ -1270,17 +1353,23 @@ def apply_step(
     after_effects = np.array(numeric, copy=True)
     if numeric.shape[1] and drift:
         numeric = np.minimum(np.maximum(numeric + definition.drift_vector[None, :], low), high)
-    _check_profiles(definition, pairs, events)
+    _check_profiles(definition, pairs, events, written)
     return StepResult(State(values, numeric, tuple(pairs)), after_effects)
 
 
 def _check_profiles(
-    definition: RuntimeDefinition, pairs: Sequence[np.ndarray], events: Sequence[Event]
+    definition: RuntimeDefinition,
+    pairs: Sequence[np.ndarray],
+    events: Sequence[Event],
+    written: set[int] | None = None,
 ) -> None:
     """Every profile holds after the step; otherwise :class:`ProfileViolationError` names the
     pair fluent, the pairs, and the events. The compiled literals (F4) make a violation
-    impossible for a correct definition."""
-    for fluent, matrix in zip(definition.pair_fluents, pairs, strict=True):
+    impossible for a correct definition. A pair fluent no effect wrote (``written`` gives the
+    indices of those written) held its profile before the step and holds it after."""
+    for k, (fluent, matrix) in enumerate(zip(definition.pair_fluents, pairs, strict=True)):
+        if written is not None and k not in written:
+            continue
         violations = profile_violations(fluent, matrix)
         if violations:
             labels = definition.entity_labels
@@ -1565,7 +1654,10 @@ __all__ = [
     "greater",
     "increase",
     "initial_state",
+    "interference_sets",
     "interferes",
+    "interferes_sets",
+    "overlaps",
     "legal",
     "legal_bindings",
     "is_place_class",

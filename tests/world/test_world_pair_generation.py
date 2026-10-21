@@ -45,6 +45,7 @@ from semantic_world.world.event_types import (
     check_dynamics,
     compiled_literals,
     fixed_pair_literals,
+    implied_conflict,
     keeps_no_condition,
     pair_effect_key,
     pair_literal_key,
@@ -65,7 +66,20 @@ from semantic_world.world.generate import WorldResult, _initial_present, define
 from semantic_world.world.history import History, replay
 from semantic_world.world.identity import to_json
 from semantic_world.world.pair_fluents import PairFluent, draw_initial_pairs, profile_violations
-from semantic_world.world.runtime import State, derive, initial_state, legal_bindings
+from semantic_world.world.runtime import (
+    COLUMN,
+    ROW,
+    InterferenceError,
+    State,
+    apply,
+    covered,
+    derive,
+    initial_state,
+    interference_sets,
+    interferes,
+    legal_bindings,
+    overlaps,
+)
 from semantic_world.world.streams import STREAM_NAMES, WorldStreams
 
 DATA = Path("data/world")
@@ -205,9 +219,22 @@ def _check_acceptance(result: WorldResult) -> None:
     ``SAME`` on a symmetric pair fluent, no drawn pair condition naming what the precondition
     names or fixed by it under the implications of item 6, no conditional add on an asymmetric
     or functional pair fluent, and at least ``derived_rules`` derived fluents reading a ``SOME``
-    or ``SOMEOF`` literal."""
+    or ``SOMEOF`` literal. Jon's rulings of October 21, 2026: no delete on a pair fluent that
+    can never hold (an initial rate of 0 and no add), and no pair literal of a precondition
+    implied by, contradicted by, or implying another literal of it, compiled literals
+    included."""
     pair_fluents = result.pair_fluents
     assert len(pair_fluents) == result.config.pair_fluents.count
+    adds = {e.fluent for et in result.event_types.leaves for e in et.effects if e.pair and e.value}
+    dead = {f.label for f in pair_fluents if f.initial_rate == 0.0 and f.label not in adds}
+    for et in result.event_types.leaves:
+        for effect in et.effects:
+            if effect.pair and not effect.value:
+                assert effect.fluent not in dead, (et.label, effect.text)
+        pair_literals = [lit for lit in et.precondition if isinstance(lit, PairLiteral)]
+        for lit in pair_literals:
+            others = [o for o in pair_literals if o is not lit]
+            assert not implied_conflict(lit, others, pair_fluents, et.roles), (et.label, lit.text)
     derived_initial = derived_initial_values(
         result.fluents, result.taxonomy, result.numeric, pair_fluents
     )
@@ -686,6 +713,62 @@ def test_fixed_pair_literals_lists_the_implications_of_item_6() -> None:
     }
 
 
+def test_implied_conflict_reads_both_directions() -> None:
+    from semantic_world.world.pair_fluents import PairFluents
+
+    symmetric = PairFluent("PAIRFL.1", 1, "symmetric", False, 0.1)
+    general = PairFluent("PAIRFL.2", 2, "general", False, 0.1)
+    fluents = PairFluents(
+        (symmetric, general), tuple(np.zeros((3, 3), dtype=bool) for _ in range(2))
+    )
+    pair = PairLiteral(PAIR_KIND, "PAIRFL.2", "agent", "patient", True)
+    some = PairLiteral(PAIR_SOME, "PAIRFL.2", "agent", None, True)
+    not_some = PairLiteral(PAIR_SOME, "PAIRFL.2", "agent", None, False)
+    not_pair = PairLiteral(PAIR_KIND, "PAIRFL.2", "agent", "patient", False)
+    someof_patient = PairLiteral(PAIR_SOMEOF, "PAIRFL.2", "patient", None, True)
+    # PAIRFL.2(agent, patient) implies SOME(agent) and SOMEOF(patient), either way round
+    assert implied_conflict(some, [pair], fluents, ("agent", "patient"))
+    assert implied_conflict(pair, [some], fluents, ("agent", "patient"))
+    assert implied_conflict(someof_patient, [pair], fluents, ("agent", "patient"))
+    # NOT SOME(agent) implies NOT PAIRFL.2(agent, patient), and contradicts the pair
+    assert implied_conflict(not_pair, [not_some], fluents, ("agent", "patient"))
+    assert implied_conflict(pair, [not_some], fluents, ("agent", "patient"))
+    # a literal on another pair fluent, or on the other row, is free
+    other = PairLiteral(PAIR_SOME, "PAIRFL.1", "agent", None, True)
+    assert not implied_conflict(other, [pair], fluents, ("agent", "patient"))
+    some_patient = PairLiteral(PAIR_SOME, "PAIRFL.2", "patient", None, True)
+    assert not implied_conflict(some_patient, [pair], fluents, ("agent", "patient"))
+    # on a symmetric pair fluent the pair fixes both rows
+    sym_pair = PairLiteral(PAIR_KIND, "PAIRFL.1", "agent", "patient", True)
+    sym_some_patient = PairLiteral(PAIR_SOME, "PAIRFL.1", "patient", None, True)
+    assert implied_conflict(sym_some_patient, [sym_pair], fluents, ("agent", "patient"))
+
+
+def test_dead_deletes_are_redrawn_and_implied_literals_too() -> None:
+    """With every pair fluent at the rate 0 and the effect share at 1, a world draws many
+    deletes on pair fluents that no effect adds; the fix-up removes every one (an own effect
+    drawn again, an inherited one dropped, counted), and keeps a pair fluent that never holds
+    as it is. With the precondition share at 1 the implied literals are counted too."""
+    result = _world(
+        "tiny_full",
+        None,
+        FULL_SHARES,
+        {"pair_fluents": {"initial_rates": [0.0]}},
+    )
+    _check_acceptance(result)
+    stats = result.event_types.pair_stats
+    assert stats["pair_deletes_redrawn_dead"] + stats["pair_deletes_dropped_dead"] > 0
+    adds = {e.fluent for et in result.event_types.leaves for e in et.effects if e.pair and e.value}
+    for et in result.event_types.leaves:
+        for effect in et.effects:
+            if effect.pair and not effect.value:
+                assert effect.fluent in adds
+    # the check does not touch an explicit event file (tiny_pairs: PAIRFL.4 with the rate 0)
+    pairs = define(load_config(DATA / "tiny_pairs.yaml"))
+    assert pairs.rule_set_id == C2A_TINY_PAIRS_IDENTITY
+    assert pairs.event_types.pair_stats["pair_deletes_redrawn_dead"] == 0
+
+
 def test_pair_conditions_are_drawn_from_their_stream_and_obey_the_rules(
     forced: WorldResult,
 ) -> None:
@@ -995,3 +1078,107 @@ def test_with_the_pair_dynamics_off_default_full_has_the_default_event_types() -
     assert _records(off) == _records(default)
     assert [r.record() for r in off.fluents.rules] == [r.record() for r in default.fluents.rules]
     assert baseline_identity("default_full", "pair_dynamics_off") == off.rule_set_id
+
+
+# ---------------------------------------------------------------------------------------------
+# Non-interference with rows and columns as single keys (Jon's ruling 3, the follow-up)
+# ---------------------------------------------------------------------------------------------
+
+
+def _expanded(definition: RuntimeDefinition, keys) -> set[tuple]:
+    """A read or write set with every row and column expanded to its pairs over every entity
+    of the definition, the form of stage c2a."""
+    found: set[tuple] = set()
+    n = definition.entity_count
+    for key in keys:
+        if len(key) == 3 and key[0] == ROW:
+            found |= {(key[1], key[2], z) for z in range(n) if z != key[2]}
+        elif len(key) == 3 and key[0] == COLUMN:
+            found |= {(key[1], z, key[2]) for z in range(n) if z != key[2]}
+        else:
+            found.add(key)
+    return found
+
+
+def test_overlaps_says_when_two_keys_share_a_fact() -> None:
+    pair = ("PAIRFL.1", 2, 5)
+    assert overlaps(pair, pair)
+    assert overlaps(pair, (ROW, "PAIRFL.1", 2)) and overlaps((ROW, "PAIRFL.1", 2), pair)
+    assert overlaps(pair, (COLUMN, "PAIRFL.1", 5))
+    assert not overlaps(pair, (ROW, "PAIRFL.1", 5)) and not overlaps(pair, (COLUMN, "PAIRFL.1", 2))
+    assert not overlaps(pair, (ROW, "PAIRFL.2", 2))
+    assert overlaps((ROW, "PAIRFL.1", 2), (COLUMN, "PAIRFL.1", 5))
+    assert not overlaps((ROW, "PAIRFL.1", 2), (COLUMN, "PAIRFL.1", 2))  # no pair (2, 2)
+    assert not overlaps((ROW, "PAIRFL.1", 2), (ROW, "PAIRFL.1", 3))
+    assert not overlaps((2, "BOOLFL.1"), pair) and overlaps((2, "BOOLFL.1"), (2, "BOOLFL.1"))
+    # the covered keys come sorted, base keys before pair keys
+    writes = [pair, (1, "BOOLFL.2"), ("PAIRFL.1", 0, 1)]
+    reads = [(ROW, "PAIRFL.1", 2), (1, "BOOLFL.2")]
+    assert covered(writes, reads) == [(1, "BOOLFL.2"), pair]
+
+
+def test_the_single_keys_give_the_verdicts_of_the_expanded_sets(forced: WorldResult) -> None:
+    """On the forced tiny world (pair literals, pair conditions, and derived fluents over pairs
+    everywhere), ``interferes`` by the single keys agrees with the intersection of the sets
+    expanded to every pair, for every pair of legal events in random states, and ``apply``
+    names the same fact and reader as the expanded form would."""
+    runtime = forced.definition.runtime()
+    rng = np.random.default_rng(7)
+    compared = 0
+    for _ in range(60):
+        state = _random_state(runtime, rng)
+        events = [
+            (label, b)
+            for label in _performable(runtime)
+            for b in legal_bindings(runtime, state, label)
+        ]
+        from semantic_world.world.runtime import Event
+
+        events = [Event(label, b) for label, b in events]
+        sets = {event: interference_sets(runtime, event) for event in events}
+        for i, a in enumerate(events):
+            for b in events[i + 1 :]:
+                writes_a, reads_a = sets[a]
+                writes_b, reads_b = sets[b]
+                expanded = bool(
+                    _expanded(runtime, writes_a) & _expanded(runtime, writes_b)
+                    or _expanded(runtime, writes_a) & _expanded(runtime, reads_b)
+                    or _expanded(runtime, writes_b) & _expanded(runtime, reads_a)
+                )
+                assert interferes(runtime, a, b) == expanded, (a, b)
+                compared += 1
+                if not expanded:
+                    continue
+                with pytest.raises(InterferenceError) as info:
+                    apply(runtime, state, [a, b])
+                # the fact named is the smallest written key of the expanded intersection
+                shared = sorted(
+                    _expanded(runtime, writes_a) & _expanded(runtime, writes_b),
+                    key=lambda k: (len(k), k),
+                )
+                if not shared:
+                    shared = sorted(
+                        _expanded(runtime, writes_a) & _expanded(runtime, reads_b),
+                        key=lambda k: (len(k), k),
+                    ) or sorted(
+                        _expanded(runtime, writes_b) & _expanded(runtime, reads_a),
+                        key=lambda k: (len(k), k),
+                    )
+                key = shared[0]
+                labels = runtime.entity_labels
+                fact = (
+                    f"{key[0]} between {labels[key[1]]} and {labels[key[2]]}"
+                    if len(key) == 3
+                    else f"{key[1]} of {labels[key[0]]}"
+                )
+                assert fact in str(info.value)
+    assert compared > 1000
+
+
+def test_apply_shares_the_pair_matrices_no_effect_wrote(tiny_full: WorldResult) -> None:
+    runtime = tiny_full.definition.runtime()
+    state = initial_state(runtime)
+    after = apply(runtime, state, [])
+    for before_matrix, after_matrix in zip(state.pairs, after.pairs, strict=True):
+        assert after_matrix is before_matrix
+        assert not after_matrix.flags.writeable

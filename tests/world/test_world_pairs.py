@@ -801,6 +801,12 @@ BROKEN_ENTRIES = [
         "not achievable",
     ),
     ("positive_not_achievable", _entry("PAIRFL.4(agent, patient)"), "not achievable"),
+    (
+        # stage c2b's follow-up: one event cannot add both directions of an asymmetric pair
+        "adds_both_directions_asymmetric",
+        _entry(None, ["PAIRFL.2(agent, patient) := 1", "PAIRFL.2(patient, agent) := 1"]),
+        "both directions",
+    ),
     ("some_not_achievable", _entry("SOMEOF.PAIRFL.4(agent)"), "not achievable"),
     (
         "contradicting_effects",

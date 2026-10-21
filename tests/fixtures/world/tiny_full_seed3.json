@@ -2,10 +2,10 @@
  "version": 1,
  "name": "tiny_full_seed3",
  "description": "6 random steps of the tiny_full world from its initial state, fixture seed 3: at each step, up to three non-interfering legal events.",
- "rule_set_id": "f61676fdfa0a939de27eb80e0f134525c6ae2ba03a05eca787de10be6c08815b",
+ "rule_set_id": "fd0132ef72debebec38c2ded327561d59a475355dc880abd4a5ad3b879907346",
  "definition": {
   "version": 1,
-  "rule_set_id": "f61676fdfa0a939de27eb80e0f134525c6ae2ba03a05eca787de10be6c08815b",
+  "rule_set_id": "fd0132ef72debebec38c2ded327561d59a475355dc880abd4a5ad3b879907346",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": false, "fluent": false, "arity": 1},
@@ -500,8 +500,8 @@
      "expression": "agent.BOOLFL.2 AND patient.BOOLFL.1"
     },
     "effects": [
-     {"kind": "pair", "pair_fluent": "PAIRFL.1", "first": "patient", "second": "agent", "value": false, "expression": "PAIRFL.1(patient, agent) := 0"},
-     {"kind": "pair", "pair_fluent": "PAIRFL.2", "first": "agent", "second": "patient", "value": false, "expression": "PAIRFL.2(agent, patient) := 0"}
+     {"kind": "pair", "pair_fluent": "PAIRFL.2", "first": "agent", "second": "patient", "value": false, "expression": "PAIRFL.2(agent, patient) := 0"},
+     {"role": "agent", "fluent": "BOOLFL.3", "value": false, "expression": "agent.BOOLFL.3 := 0"}
     ]
    },
    {

@@ -24,7 +24,13 @@ import numpy as np
 
 from semantic_world.world.definition import RuntimeDefinition
 from semantic_world.world.errors import WorldError
-from semantic_world.world.runtime import Binding, Event, State, interferes
+from semantic_world.world.runtime import (
+    Binding,
+    Event,
+    State,
+    interference_sets,
+    interferes_sets,
+)
 
 DEFAULT_POLICY = "uniform_event"
 
@@ -53,12 +59,21 @@ class StepContext:
         ]
 
     def available(self, chosen: Sequence[Event]) -> list[Event]:
-        """The legal events that do not interfere with any event already chosen."""
-        return [
-            event
-            for event in self.events()
-            if all(not interferes(self.definition, event, other) for other in chosen)
-        ]
+        """The legal events that do not interfere with any event already chosen (the same
+        event counts as interfering with itself); each event's read and write sets are
+        computed once (stage c2b's follow-up)."""
+        if not chosen:
+            return self.events()
+        taken = [(other, interference_sets(self.definition, other)) for other in chosen]
+        found = []
+        for event in self.events():
+            sets = interference_sets(self.definition, event)
+            if all(
+                event != other and not interferes_sets(sets, other_sets)
+                for other, other_sets in taken
+            ):
+                found.append(event)
+        return found
 
 
 Policy = Callable[[StepContext, np.random.Generator, int], list[Event]]
