@@ -43,6 +43,7 @@ from semantic_world.taxonomy.config import (
 from semantic_world.taxonomy.config import Config as TaxonomyRunConfig
 from semantic_world.taxonomy.config import config_from_mapping as taxonomy_from_mapping
 from semantic_world.taxonomy.streams import stream_seed
+from semantic_world.world.pair_fluents import PAIR_PREFIX, SYMMETRIES
 
 ROLES = ("agent", "patient")
 REMOVED_BINARY_KEYS = ("projections",)
@@ -98,6 +99,10 @@ class FluentsConfig:
 DEFAULT_NUMERIC_THRESHOLDS = (0.25, 0.5, 0.75)
 """The fractions of a numeric fluent's range from which a numeric threshold literal's point is
 drawn (stage b2): the quarter points by default."""
+DEFAULT_PAIR_SHARE = 0.2
+"""The share of precondition literals, and of the effects of two-place event types, that are
+pair literals or pair effects when the world has pair fluents (stage c2b of
+``docs/specs/WORLD_PHASE_C.md``, "Preconditions" and "Effects")."""
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,9 @@ class PreconditionsConfig:
     """The share of precondition literals that are numeric threshold literals, when the world
     has numeric fluents (stage b2)."""
     numeric_thresholds: tuple[float, ...] = DEFAULT_NUMERIC_THRESHOLDS
+    pair_share: float = DEFAULT_PAIR_SHARE
+    """The share of precondition literals that are pair literals, when the world has pair
+    fluents (stage c2b)."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -119,13 +127,16 @@ class PreconditionsConfig:
             "enabled_share": self.enabled_share,
             "numeric_share": self.numeric_share,
             "numeric_thresholds": list(self.numeric_thresholds),
+            "pair_share": self.pair_share,
         }
 
 
-CONDITION_KINDS = ("feature", "fluent", "numeric")
-"""The kinds of a condition literal: a static feature, a Boolean fluent, or a numeric threshold
-(stage b2)."""
-DEFAULT_CONDITION_KINDS = {"feature": 0.4, "fluent": 0.4, "numeric": 0.2}
+CONDITION_KINDS = ("feature", "fluent", "numeric", "pair")
+"""The kinds of a condition literal: a static feature, a Boolean fluent, a numeric threshold
+(stage b2), or a pair literal (stage c2b, F5)."""
+DEFAULT_CONDITION_KINDS = {"feature": 0.4, "fluent": 0.4, "numeric": 0.2, "pair": 0.2}
+"""The ``pair`` weight (WM.47) is used only when the world has pair fluents, so a world without
+them draws its conditions as before."""
 
 
 @dataclass(frozen=True)
@@ -145,6 +156,9 @@ class EffectsConfig:
     fluents (stage b2)."""
     numeric_amounts: tuple[float, float] = (0.1, 0.5)
     """The interval a numeric effect's constant is drawn from, uniformly."""
+    pair_share: float = DEFAULT_PAIR_SHARE
+    """The share of the effects of two-place event types that are pair effects, when the world
+    has pair fluents between entities (stage c2b)."""
 
     def __post_init__(self) -> None:
         if self.condition_literals is None:
@@ -162,6 +176,7 @@ class EffectsConfig:
             "condition_kinds": dict(self.condition_kinds),
             "numeric_share": self.numeric_share,
             "numeric_amounts": list(self.numeric_amounts),
+            "pair_share": self.pair_share,
         }
 
 
@@ -206,6 +221,75 @@ class NumericFluentsConfig:
             "range": list(self.range),
             "initial": dict(self.initial),
             "drift": {"share": self.drift_share, "amounts": list(self.drift_amounts)},
+            "rule_weight": self.rule_weight,
+            "fluents": {label: setting.resolved() for label, setting in self.fluents.items()},
+        }
+
+
+PAIR_LITERAL_KINDS = ("pair", "same", "some")
+"""The kinds of a drawn pair literal (``pair_fluents.literal_kinds``): a pair literal, ``SAME``,
+or ``some``, which covers ``SOME`` and ``SOMEOF`` (WM.52)."""
+DEFAULT_PAIR_SYMMETRY = {"symmetric": 1.0, "asymmetric": 1.0, "general": 1.0}
+DEFAULT_PAIR_INITIAL_RATES = (0.0, 0.05, 0.2)
+DEFAULT_PAIR_LITERAL_KINDS = {"pair": 0.6, "same": 0.1, "some": 0.3}
+
+
+@dataclass(frozen=True)
+class PairFluentSetting:
+    """The per-fluent overrides of ``pair_fluents.fluents.PAIRFL.<n>``: each given key replaces
+    the draw of that part of the profile, or the initial rate; the draws are still made."""
+
+    symmetry: str | None
+    functional: bool | None
+    initial_rate: float | None
+
+    def resolved(self) -> dict[str, Any]:
+        data: dict[str, Any] = {}
+        if self.symmetry is not None:
+            data["symmetry"] = self.symmetry
+        if self.functional is not None:
+            data["functional"] = self.functional
+        if self.initial_rate is not None:
+            data["initial_rate"] = self.initial_rate
+        return data
+
+
+@dataclass(frozen=True)
+class PairFluentsConfig:
+    """The ``pair_fluents`` block (stage c2b of ``docs/specs/WORLD_PHASE_C.md``,
+    "Configuration"): how many pair fluents between entities (``count``) and location fluents
+    (``locations``, 0 until stage c3), the weights of the symmetries, the functional rate, the
+    initial rates, the kinds of drawn pair literal, the quotas ``same_rules`` (stage c3) and
+    ``derived_rules``, the weight of ``SOME`` and ``SOMEOF`` in the other derived rules' pool,
+    and the per-fluent overrides. The code's defaults follow ``data/world/default.yaml``
+    (WM.E41): ``count`` 0 and ``locations`` 0 until stage c4 (Jon's ruling WM.63), the
+    specification's values otherwise."""
+
+    count: int
+    locations: int
+    symmetry: dict[str, float]
+    functional_rate: float
+    initial_rates: tuple[float, ...]
+    literal_kinds: dict[str, float]
+    same_rules: int
+    derived_rules: int
+    rule_weight: float
+    fluents: dict[str, PairFluentSetting]
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        return tuple(f"{PAIR_PREFIX}.{i}" for i in range(1, self.count + 1))
+
+    def resolved(self) -> dict[str, Any]:
+        return {
+            "count": self.count,
+            "locations": self.locations,
+            "symmetry": dict(self.symmetry),
+            "functional_rate": self.functional_rate,
+            "initial_rates": list(self.initial_rates),
+            "literal_kinds": dict(self.literal_kinds),
+            "same_rules": self.same_rules,
+            "derived_rules": self.derived_rules,
             "rule_weight": self.rule_weight,
             "fluents": {label: setting.resolved() for label, setting in self.fluents.items()},
         }
@@ -423,6 +507,9 @@ class Config:
     without a ``places`` key the default place taxonomy."""
     place_event_types: PlaceEventTypesConfig | None = None
     """The place event types; None exactly when the world has no places."""
+    pair_fluents: PairFluentsConfig = None  # type: ignore[assignment]
+    """The pair fluents (stage c2b); the code's defaults (no pair fluent) when the file has no
+    block."""
 
     def __post_init__(self) -> None:
         if self.numeric_fluents is None:
@@ -430,6 +517,12 @@ class Config:
                 self,
                 "numeric_fluents",
                 _read_numeric_fluents(_Node("<default>", "numeric_fluents", {})),
+            )
+        if self.pair_fluents is None:
+            object.__setattr__(
+                self,
+                "pair_fluents",
+                _read_pair_fluents(_Node("<default>", "pair_fluents", {}), self.fluents),
             )
 
     """The validated taxonomy configuration the world generates from."""
@@ -471,6 +564,7 @@ class Config:
             "place_event_types": (
                 None if self.place_event_types is None else self.place_event_types.resolved()
             ),
+            "pair_fluents": self.pair_fluents.resolved(),
         }
 
 
@@ -617,6 +711,65 @@ def _read_numeric_fluents(node: _Node) -> NumericFluentsConfig:
     return NumericFluentsConfig(count, default_range, initial, share, amounts, rule_weight, fluents)
 
 
+def _read_pair_fluents(node: _Node, fluents: FluentsConfig) -> PairFluentsConfig:
+    """The ``pair_fluents`` block (stage c2b). ``locations`` must be 0 until stage c3; the
+    overrides name pair fluents ``PAIRFL.1`` to ``PAIRFL.<count>``."""
+    count = node.int("count", 0, min=0)
+    locations = node.int("locations", 0, min=0)
+    if locations != 0:
+        raise node.error(
+            "locations",
+            "location fluents come in stage c3; until then the world has none (locations: 0)",
+        )
+    symmetry = node.weights("symmetry", dict(DEFAULT_PAIR_SYMMETRY), allowed=SYMMETRIES)
+    functional_rate = node.probability("functional_rate", 0.25)
+    rates = node.get("initial_rates", list(DEFAULT_PAIR_INITIAL_RATES))
+    if not isinstance(rates, list) or not rates:
+        raise node.error("initial_rates", f"expected a non-empty list, found {_describe(rates)}")
+    initial_rates = tuple(float(node.check_number("initial_rates", r, min=0, max=1)) for r in rates)
+    literal_kinds = node.weights(
+        "literal_kinds", dict(DEFAULT_PAIR_LITERAL_KINDS), allowed=PAIR_LITERAL_KINDS
+    )
+    same_rules = node.int("same_rules", 2, min=0)
+    derived_rules = node.int("derived_rules", 1, min=0)
+    rule_weight = float(node.number("rule_weight", 1.0, min=0))
+    overrides: dict[str, PairFluentSetting] = {}
+    entries = node.mapping("fluents")
+    for label in list(entries.data):
+        prefix, _, number = str(label).partition(".")
+        if prefix != PAIR_PREFIX or not number.isdigit() or not 1 <= int(number) <= count:
+            raise entries.error(
+                label, f"expected a pair fluent label {PAIR_PREFIX}.1 to {PAIR_PREFIX}.{count}"
+            )
+        entry = entries.mapping(label)
+        setting_symmetry = (
+            entry.choice("symmetry", None, SYMMETRIES) if "symmetry" in entry.data else None
+        )
+        functional = entry.bool("functional", None) if "functional" in entry.data else None
+        rate = (
+            float(entry.probability("initial_rate", None)) if "initial_rate" in entry.data else None
+        )
+        entry.finish()
+        overrides[str(label)] = PairFluentSetting(setting_symmetry, functional, rate)
+    entries.finish()
+    node.finish()
+    # The quota applies to the first derived_rules derived fluents; a world with fewer derived
+    # fluents (fluents.count 0, say, the off setting of the fluents) applies it to all of them,
+    # so that the quota is a setting of the pair fluents and never a constraint on the fluents.
+    return PairFluentsConfig(
+        count,
+        locations,
+        symmetry,
+        functional_rate,
+        initial_rates,
+        literal_kinds,
+        same_rules,
+        derived_rules,
+        rule_weight,
+        dict(sorted(overrides.items(), key=lambda item: int(item[0].split(".")[1]))),
+    )
+
+
 def _read_roles(node: _Node, key: str, default: dict[str, float]) -> dict[str, float]:
     return node.weights(key, default, allowed=ROLES)
 
@@ -652,8 +805,9 @@ def _read_preconditions(node: _Node) -> PreconditionsConfig:
     points = tuple(float(node.check_number("numeric_thresholds", v)) for v in thresholds)
     if any(not 0.0 < v < 1.0 for v in points):
         raise node.error("numeric_thresholds", "every fraction is strictly between 0 and 1")
+    pair_share = node.probability("pair_share", DEFAULT_PAIR_SHARE)
     node.finish()
-    return PreconditionsConfig(literals, rate, roles, enabled, numeric_share, points)
+    return PreconditionsConfig(literals, rate, roles, enabled, numeric_share, points, pair_share)
 
 
 def _read_effects(node: _Node) -> EffectsConfig:
@@ -671,6 +825,7 @@ def _read_effects(node: _Node) -> EffectsConfig:
     amounts = _read_pair(node, "numeric_amounts", [0.1, 0.5])
     if amounts[0] < 0:
         raise node.error("numeric_amounts", "the constants of numeric effects are positive")
+    pair_share = node.probability("pair_share", DEFAULT_PAIR_SHARE)
     node.finish()
     return EffectsConfig(
         count,
@@ -681,6 +836,7 @@ def _read_effects(node: _Node) -> EffectsConfig:
         condition_kinds,
         numeric_share,
         amounts,
+        pair_share,
     )
 
 
@@ -919,6 +1075,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     event_types = _read_event_types(root.mapping("event_types"), taxonomy_run)
     places = _read_places(root, source, master_seed)
     place_event_types = _read_place_event_types(root, places, taxonomy_run)
+    pair_fluents = _read_pair_fluents(root.mapping("pair_fluents"), fluents)
     root.finish()
     return Config(
         name,
@@ -931,6 +1088,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         numeric,
         places,
         place_event_types,
+        pair_fluents,
     )
 
 

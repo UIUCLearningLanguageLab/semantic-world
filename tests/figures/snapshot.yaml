@@ -1,4 +1,5 @@
-# The figures of the default and tiny runs, and the baselines of the off settings.
+# The figures of the default and tiny runs (and of the default_full, tiny_full, and
+# tiny_pairs worlds), and the baselines of the off settings.
 # Written by `python -m semantic_world.figures snapshot` from the runs in runs/;
 # compared by tests/figures/test_figures.py against runs regenerated in memory. Never
 # edited by hand: rewrite it on purpose after a change that alters a run, and say what
@@ -506,29 +507,586 @@ default:
       ```
 
       '
+tiny_full:
+  world:
+    name: tiny_full
+    seed: 1
+    rule_set_id: fd0132ef72debebec38c2ded327561d59a475355dc880abd4a5ad3b879907346
+    rule_set_short: fd0132ef72de
+    rule_set_code: '`fd0132ef72de...`'
+    entities: 12
+    categories: 6
+    fluents: {base: 3, derived: 1}
+    fluents_total: 4
+    event_types: {one_place: 4, two_place: 4, two_place_categories: 2, leaves: 8}
+    constraints: 12
+    constraints_two_place: 8
+    event_type_features: 4
+    constraint_families: {agent: 3, key_lock: 2, patient: 1, comparison: 1, cross: 1}
+    precondition_literals:
+      total: 11
+      by_kind: {one_place: 3, two_place: 8}
+      by_role: {agent: 6, patient: 5}
+      from_features: 1
+    effects:
+      total: 10
+      by_kind: {one_place: 4, two_place: 6}
+      by_role: {agent: 8, patient: 2}
+      from_features: 1
+    conditional:
+      total: 2
+      by_kind: {one_place: 1, two_place: 1}
+      share_of_drawn: 0.181818
+      share_of_all: 0.2
+      literals:
+        total: 3
+        by_symbol: {feature: 1, fluent: 2, numeric: 0}
+        by_role: {agent: 2, patient: 1}
+        from_features: 0
+      inherited: []
+      inherited_count: 0
+      own:
+      - {expression: 'when NOT agent.BOOLFL.4 AND agent.BOOLFL.1 then agent.BOOLFL.2 := 1', code: '`when
+          NOT agent.BOOLFL.4 AND agent.BOOLFL.1 then agent.BOOLFL.2 := 1`', event_type: EVENTTYPE1.1}
+      - {expression: 'when NOT patient.PROPERTY.4 then patient.BOOLFL.2 := 1', code: '`when NOT patient.PROPERTY.4
+          then patient.BOOLFL.2 := 1`', event_type: EVENTTYPE2.2.2}
+      own_count: 2
+      expressions: ['`when NOT agent.BOOLFL.4 AND agent.BOOLFL.1 then agent.BOOLFL.2 := 1`, on `EVENTTYPE1.1`',
+        '`when NOT patient.PROPERTY.4 then patient.BOOLFL.2 := 1`, on `EVENTTYPE2.2.2`']
+    numeric:
+      count: 2
+      drifting: 2
+      fluents:
+        NUMFL.1:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0728
+        NUMFL.2:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
+      effects:
+        total: 3
+        by_operator: {add: 2, subtract: 1}
+        by_kind: {one_place: 1, two_place: 2}
+        by_role: {agent: 3, patient: 0}
+        from_features: 0
+      precondition_literals:
+        total: 5
+        by_side: {above: 1, at_or_below: 4}
+        by_kind: {one_place: 1, two_place: 4}
+        by_role: {agent: 2, patient: 3}
+        from_features: 1
+      condition_literals:
+        total: 0
+        by_side: {above: 0, at_or_below: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_threshold: 1
+      changes_per_event: 0.333937
+      drift_changes_per_step: 8.565734
+    places:
+      'on': true
+      places: 4
+      categories: 2
+      features:
+        place_property: {total: 4, free: 3, determined: 1}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 1
+      place_event_types: 2
+      constraints: 2
+      constraint_families: {agent: 2}
+      density: {mean: 0.583333, min: 0.5, max: 0.666667}
+      approximate_capacities: 0.0
+    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
+      effects_dropped_no_slot: 0, effects_redrawn: 2, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
+      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
+      numeric_literals_redrawn: 0}
+    enabling_graph: {edges: 6, longest_chain: 2}
+    absorbing_fluents: [BOOLFL.1, BOOLFL.2, BOOLFL.3]
+    absorbing_code: '`BOOLFL.1`, `BOOLFL.2`, `BOOLFL.3`'
+    requirements:
+      one_place: {mean: 0.666667, min: 0.5, max: 0.75}
+      two_place: {mean: 0.278409, min: 0.128788, max: 0.356061}
+    episodes:
+      count: 1000
+      steps: 5469
+      events: 8277
+      two_place_share: 0.353268
+      mean_changes_per_event: 0.322097
+      quiescent_share: 0.0
+      precondition_redraws: {}
+      never_legal: {}
+    pair_fluents:
+      count: 2
+      by_symmetry: {symmetric: 2, asymmetric: 0, general: 0}
+      functional: 0
+      fluents:
+        PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.0, initial_pairs: 0}
+        PAIRFL.2: {symmetry: symmetric, functional: false, initial_rate: 0.2, initial_pairs: 28}
+      initial_pairs: 28
+      precondition_literals:
+        total: 2
+        by_kind: {pair: 0, pair_some: 2, pair_someof: 0, pair_same: 0}
+        by_role: {agent: 2, patient: 0}
+        by_polarity: {positive: 0, negative: 2}
+        by_event_kind: {one_place: 1, two_place: 1}
+        from_features: 0
+      compiled_literals:
+        total: 0
+        by_origin: {}
+      effects:
+        total: 1
+        by_value: {add: 0, delete: 1}
+        by_role: {agent: 1, patient: 0}
+        by_event_kind: {one_place: 0, two_place: 1}
+        by_pair_fluent: {PAIRFL.1: 0, PAIRFL.2: 1}
+        from_features: 0
+      condition_literals:
+        total: 0
+        by_kind: {pair: 0, pair_some: 0, pair_someof: 0, pair_same: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_pair_literal: 1
+      fix_ups: {precondition_replacement_draws: 9, precondition_replacements: 2, precondition_replacements_failed: 0,
+        pair_literals_redrawn: 0, effect_replacement_draws: 8, effect_replacements: 2, pair_effects_redrawn_compiled: 0,
+        pair_effects_dropped_compiled: 0, pair_conditions_drawn: 0, pair_conditions_rejected_named: 0,
+        pair_conditions_rejected_fixed: 0, pair_conditions_rejected_other: 0, adds_kept_unconditional: 0,
+        pair_literals_redrawn_implied: 0, pair_literals_dropped_implied: 0, pair_deletes_redrawn_dead: 1,
+        pair_deletes_dropped_dead: 0, pair_effects_redrawn_reverse: 0}
+      changes_per_event: 0.008336
+      profiles: '`PAIRFL.1` (symmetric, rate 0.0), `PAIRFL.2` (symmetric, rate 0.2)'
+    categories_with_word: 2
+    wrote_line: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place and 4 two-place event
+      types, 12 constraints, 4 places and 2 place event types, 2 pair fluents; rule set fd0132ef72de
+    redraw_notes: ''
+    quick_start_block: '
+
+      ```
+
+      wrote runs/world/tiny_full_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
+      and 4 two-place event types, 12 constraints, 4 places and 2 place event types, 2 pair fluents; rule
+      set fd0132ef72de
+
+      ```
+
+      '
+default_full:
+  world:
+    name: default_full
+    seed: 1
+    rule_set_id: cb87e47c91c45fac4c4338d415dd3485d84471109abd4f9751ee00a059f8fee3
+    rule_set_short: cb87e47c91c4
+    rule_set_code: '`cb87e47c91c4...`'
+    entities: 284
+    categories: 56
+    fluents: {base: 6, derived: 2}
+    fluents_total: 8
+    event_types: {one_place: 20, two_place: 20, two_place_categories: 5, leaves: 40}
+    constraints: 32
+    constraints_two_place: 12
+    event_type_features: 12
+    constraint_families: {patient: 4, agent: 3, cross: 2, comparison: 2, key_lock: 1}
+    precondition_literals:
+      total: 74
+      by_kind: {one_place: 18, two_place: 56}
+      by_role: {agent: 41, patient: 33}
+      from_features: 5
+    effects:
+      total: 75
+      by_kind: {one_place: 22, two_place: 53}
+      by_role: {agent: 47, patient: 28}
+      from_features: 5
+    conditional:
+      total: 12
+      by_kind: {one_place: 3, two_place: 9}
+      share_of_drawn: 0.134615
+      share_of_all: 0.16
+      literals:
+        total: 18
+        by_symbol: {feature: 9, fluent: 1, numeric: 0, pair: 8}
+        by_role: {agent: 10, patient: 8}
+        from_features: 2
+      inherited:
+      - {expression: 'when NOT patient.PART.1 AND NOT PAIRFL.4(agent, patient) then patient.NUMFL.1 +=
+          0.3641', code: '`when NOT patient.PART.1 AND NOT PAIRFL.4(agent, patient) then patient.NUMFL.1
+          += 0.3641`', holders: 6}
+      inherited_count: 1
+      own:
+      - {expression: when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542, code: '`when NOT agent.PROPERTY.6
+          then agent.NUMFL.1 -= 0.2542`', event_type: EVENTTYPE1.6}
+      - {expression: when NOT agent.BOOLFL.2 then agent.NUMFL.2 += 0.3231, code: '`when NOT agent.BOOLFL.2
+          then agent.NUMFL.2 += 0.3231`', event_type: EVENTTYPE1.15}
+      - {expression: 'when agent.PROPERTY.18 then agent.BOOLFL.2 := 0', code: '`when agent.PROPERTY.18
+          then agent.BOOLFL.2 := 0`', event_type: EVENTTYPE1.17}
+      - {expression: 'when SOMEOF.PAIRFL.4(patient) then patient.BOOLFL.5 := 0', code: '`when SOMEOF.PAIRFL.4(patient)
+          then patient.BOOLFL.5 := 0`', event_type: EVENTTYPE2.2.1}
+      - {expression: 'when agent.PROPERTY.15 then patient.BOOLFL.4 := 0', code: '`when agent.PROPERTY.15
+          then patient.BOOLFL.4 := 0`', event_type: EVENTTYPE2.3.2}
+      - {expression: when SOME.PAIRFL.4(patient) then patient.NUMFL.1 -= 0.4935, code: '`when SOME.PAIRFL.4(patient)
+          then patient.NUMFL.1 -= 0.4935`', event_type: EVENTTYPE2.3.4}
+      own_count: 6
+      expressions: ['`when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542`, on `EVENTTYPE1.6`', '`when
+          NOT agent.BOOLFL.2 then agent.NUMFL.2 += 0.3231`, on `EVENTTYPE1.15`', '`when agent.PROPERTY.18
+          then agent.BOOLFL.2 := 0`, on `EVENTTYPE1.17`', '`when NOT patient.PART.1 AND NOT PAIRFL.4(agent,
+          patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.1.4`', '`when SOMEOF.PAIRFL.4(patient)
+          then patient.BOOLFL.5 := 0`, on `EVENTTYPE2.2.1`', '`when NOT patient.PART.1 AND NOT PAIRFL.4(agent,
+          patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.2.3`', '`when NOT patient.PART.1 AND
+          NOT PAIRFL.4(agent, patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.3.1`', '`when agent.PROPERTY.15
+          then patient.BOOLFL.4 := 0`, on `EVENTTYPE2.3.2`', '`when NOT patient.PART.1 AND NOT PAIRFL.4(agent,
+          patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.3.3`', '`when SOME.PAIRFL.4(patient)
+          then patient.NUMFL.1 -= 0.4935`, on `EVENTTYPE2.3.4`', '`when NOT patient.PART.1 AND NOT PAIRFL.4(agent,
+          patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.4.1`', '`when NOT patient.PART.1 AND
+          NOT PAIRFL.4(agent, patient) then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.5.3`']
+    numeric:
+      count: 2
+      drifting: 2
+      fluents:
+        NUMFL.1:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0728
+        NUMFL.2:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
+      effects:
+        total: 17
+        by_operator: {add: 11, subtract: 6}
+        by_kind: {one_place: 6, two_place: 11}
+        by_role: {agent: 7, patient: 10}
+        from_features: 1
+      precondition_literals:
+        total: 21
+        by_side: {above: 11, at_or_below: 10}
+        by_kind: {one_place: 6, two_place: 15}
+        by_role: {agent: 9, patient: 12}
+        from_features: 1
+      condition_literals:
+        total: 0
+        by_side: {above: 0, at_or_below: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_threshold: 1
+      changes_per_event: 0.238335
+      drift_changes_per_step: 8.596357
+    places:
+      'on': true
+      places: 12
+      categories: 8
+      features:
+        place_property: {total: 12, free: 9, determined: 3}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 2
+      place_event_types: 4
+      constraints: 5
+      constraint_families: {agent: 2, cross: 1, key_lock: 2}
+      density: {mean: 0.534331, min: 0.018192, max: 0.819836}
+      approximate_capacities: 0.0
+    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 6,
+      effects_dropped_no_slot: 0, effects_redrawn: 5, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
+      literals_dropped_unachievable: 0, literals_redrawn: 2, conditions_redrawn: 1, conditions_dropped: 0,
+      numeric_literals_redrawn: 0}
+    enabling_graph: {edges: 234, longest_chain: 1}
+    absorbing_fluents: [BOOLFL.3]
+    absorbing_code: '`BOOLFL.3`'
+    requirements:
+      one_place: {mean: 0.580106, min: 0.133803, max: 0.978873}
+      two_place: {mean: 0.17088, min: 0.004342, max: 0.964789}
+    episodes:
+      count: 1000
+      steps: 5490
+      events: 8337
+      two_place_share: 0.368358
+      mean_changes_per_event: 0.418616
+      quiescent_share: 0.0
+      precondition_redraws: {}
+      never_legal: {}
+    pair_fluents:
+      count: 4
+      by_symmetry: {symmetric: 3, asymmetric: 0, general: 1}
+      functional: 0
+      fluents:
+        PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.0, initial_pairs: 0}
+        PAIRFL.2: {symmetry: symmetric, functional: false, initial_rate: 0.2, initial_pairs: 16288}
+        PAIRFL.3: {symmetry: symmetric, functional: false, initial_rate: 0.0, initial_pairs: 0}
+        PAIRFL.4: {symmetry: general, functional: false, initial_rate: 0.2, initial_pairs: 15929}
+      initial_pairs: 32217
+      precondition_literals:
+        total: 14
+        by_kind: {pair: 1, pair_some: 12, pair_someof: 1, pair_same: 0}
+        by_role: {agent: 13, patient: 1}
+        by_polarity: {positive: 2, negative: 12}
+        by_event_kind: {one_place: 3, two_place: 11}
+        from_features: 1
+      compiled_literals:
+        total: 0
+        by_origin: {}
+      effects:
+        total: 5
+        by_value: {add: 1, delete: 4}
+        by_role: {agent: 5, patient: 0}
+        by_event_kind: {one_place: 0, two_place: 5}
+        by_pair_fluent: {PAIRFL.1: 0, PAIRFL.2: 2, PAIRFL.3: 0, PAIRFL.4: 3}
+        from_features: 1
+      condition_literals:
+        total: 8
+        by_kind: {pair: 6, pair_some: 1, pair_someof: 1, pair_same: 0}
+        by_role: {agent: 6, patient: 2}
+      rules_reading_a_pair_literal: 1
+      fix_ups: {precondition_replacement_draws: 44, precondition_replacements: 7, precondition_replacements_failed: 0,
+        pair_literals_redrawn: 2, effect_replacement_draws: 35, effect_replacements: 7, pair_effects_redrawn_compiled: 0,
+        pair_effects_dropped_compiled: 0, pair_conditions_drawn: 3, pair_conditions_rejected_named: 0,
+        pair_conditions_rejected_fixed: 0, pair_conditions_rejected_other: 0, adds_kept_unconditional: 0,
+        pair_literals_redrawn_implied: 1, pair_literals_dropped_implied: 0, pair_deletes_redrawn_dead: 1,
+        pair_deletes_dropped_dead: 7, pair_effects_redrawn_reverse: 0}
+      changes_per_event: 0.018952
+      profiles: '`PAIRFL.1` (symmetric, rate 0.0), `PAIRFL.2` (symmetric, rate 0.2), `PAIRFL.3` (symmetric,
+        rate 0.0), `PAIRFL.4` (general, rate 0.2)'
+    categories_with_word: 5
+    wrote_line: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place and 20 two-place
+      event types, 32 constraints, 12 places and 4 place event types, 4 pair fluents; rule set cb87e47c91c4
+    redraw_notes: ''
+    quick_start_block: '
+
+      ```
+
+      wrote runs/world/default_full_seed1: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20
+      one-place and 20 two-place event types, 32 constraints, 12 places and 4 place event types, 4 pair
+      fluents; rule set cb87e47c91c4
+
+      ```
+
+      '
+tiny_pairs:
+  world:
+    name: tiny_pairs
+    seed: 1
+    rule_set_id: 7585db2f22a8e41b0990d73bad462150d282e2da49a2cf4352b52acb19dbbba2
+    rule_set_short: 7585db2f22a8
+    rule_set_code: '`7585db2f22a8...`'
+    entities: 12
+    categories: 6
+    fluents: {base: 3, derived: 1}
+    fluents_total: 4
+    event_types: {one_place: 4, two_place: 4, two_place_categories: 2, leaves: 8}
+    constraints: 12
+    constraints_two_place: 8
+    event_type_features: 4
+    constraint_families: {agent: 1, key_lock: 2, patient: 1, explicit: 4}
+    precondition_literals:
+      total: 13
+      by_kind: {one_place: 4, two_place: 9}
+      by_role: {agent: 12, patient: 1}
+      from_features: 1
+    effects:
+      total: 10
+      by_kind: {one_place: 4, two_place: 6}
+      by_role: {agent: 8, patient: 2}
+      from_features: 1
+    conditional:
+      total: 3
+      by_kind: {one_place: 1, two_place: 2}
+      share_of_drawn: 0.25
+      share_of_all: 0.3
+      literals:
+        total: 4
+        by_symbol: {feature: 1, fluent: 1, numeric: 0, pair: 2}
+        by_role: {agent: 2, patient: 2}
+        from_features: 0
+      inherited: []
+      inherited_count: 0
+      own:
+      - {expression: when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.NUMFL.2 += 0.3067, code: '`when
+          NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.NUMFL.2 += 0.3067`', event_type: EVENTTYPE1.2}
+      - {expression: 'when SOME.PAIRFL.2(patient) then patient.BOOLFL.1 := 0', code: '`when SOME.PAIRFL.2(patient)
+          then patient.BOOLFL.1 := 0`', event_type: EVENTTYPE2.1.2}
+      - {expression: 'when PAIRFL.2(patient, agent) then patient.BOOLFL.2 := 1', code: '`when PAIRFL.2(patient,
+          agent) then patient.BOOLFL.2 := 1`', event_type: EVENTTYPE2.2.2}
+      own_count: 3
+      expressions: ['`when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.NUMFL.2 += 0.3067`, on `EVENTTYPE1.2`',
+        '`when SOME.PAIRFL.2(patient) then patient.BOOLFL.1 := 0`, on `EVENTTYPE2.1.2`', '`when PAIRFL.2(patient,
+          agent) then patient.BOOLFL.2 := 1`, on `EVENTTYPE2.2.2`']
+    numeric:
+      count: 2
+      drifting: 2
+      fluents:
+        NUMFL.1:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0728
+        NUMFL.2:
+          range: [0.0, 1.0]
+          initial: {kind: uniform}
+          drift: 0.0056
+      drifts: [0.0728, 0.0056]
+      effects:
+        total: 1
+        by_operator: {add: 1, subtract: 0}
+        by_kind: {one_place: 1, two_place: 0}
+        by_role: {agent: 1, patient: 0}
+        from_features: 0
+      precondition_literals:
+        total: 1
+        by_side: {above: 1, at_or_below: 0}
+        by_kind: {one_place: 1, two_place: 0}
+        by_role: {agent: 1, patient: 0}
+        from_features: 1
+      condition_literals:
+        total: 0
+        by_side: {above: 0, at_or_below: 0}
+        by_role: {agent: 0, patient: 0}
+      rules_reading_a_threshold: 1
+      changes_per_event: 0.063006
+      drift_changes_per_step: 8.539418
+    places:
+      'on': true
+      places: 4
+      categories: 2
+      features:
+        place_property: {total: 4, free: 3, determined: 1}
+        place_part: {total: 0, free: 0, determined: 0}
+        place_scalar: 1
+      place_event_types: 2
+      constraints: 2
+      constraint_families: {agent: 2}
+      density: {mean: 0.583333, min: 0.5, max: 0.666667}
+      approximate_capacities: 0.0
+    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
+      effects_dropped_no_slot: 0, effects_redrawn: 1, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
+      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
+      numeric_literals_redrawn: 0}
+    enabling_graph: {edges: 8, longest_chain: 2}
+    absorbing_fluents: [BOOLFL.2]
+    absorbing_code: '`BOOLFL.2`'
+    requirements:
+      one_place: {mean: 0.791667, min: 0.666667, max: 1.0}
+      two_place: {mean: 0.473484, min: 0.363636, max: 0.583333}
+    episodes:
+      count: 1000
+      steps: 5467
+      events: 8269
+      two_place_share: 0.573104
+      mean_changes_per_event: 0.133753
+      quiescent_share: 0.0
+      precondition_redraws: {}
+      never_legal: {}
+    pair_fluents:
+      count: 4
+      by_symmetry: {symmetric: 1, asymmetric: 2, general: 1}
+      functional: 2
+      fluents:
+        PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.2, initial_pairs: 32}
+        PAIRFL.2: {symmetry: asymmetric, functional: false, initial_rate: 0.1, initial_pairs: 5}
+        PAIRFL.3: {symmetry: general, functional: true, initial_rate: 0.2, initial_pairs: 2}
+        PAIRFL.4: {symmetry: asymmetric, functional: true, initial_rate: 0.0, initial_pairs: 0}
+      initial_pairs: 39
+      precondition_literals:
+        total: 6
+        by_kind: {pair: 3, pair_some: 1, pair_someof: 1, pair_same: 1}
+        by_role: {agent: 6, patient: 0}
+        by_polarity: {positive: 5, negative: 1}
+        by_event_kind: {one_place: 1, two_place: 5}
+        from_features: 0
+      compiled_literals:
+        total: 3
+        by_origin: {profile: 3}
+      effects:
+        total: 4
+        by_value: {add: 3, delete: 1}
+        by_role: {agent: 4, patient: 0}
+        by_event_kind: {one_place: 0, two_place: 4}
+        by_pair_fluent: {PAIRFL.1: 2, PAIRFL.2: 0, PAIRFL.3: 1, PAIRFL.4: 1}
+        from_features: 0
+      condition_literals:
+        total: 2
+        by_kind: {pair: 1, pair_some: 1, pair_someof: 0, pair_same: 0}
+        by_role: {agent: 0, patient: 2}
+      rules_reading_a_pair_literal: 0
+      fix_ups: {precondition_replacement_draws: 0, precondition_replacements: 0, precondition_replacements_failed: 0,
+        pair_literals_redrawn: 0, effect_replacement_draws: 0, effect_replacements: 0, pair_effects_redrawn_compiled: 0,
+        pair_effects_dropped_compiled: 0, pair_conditions_drawn: 0, pair_conditions_rejected_named: 0,
+        pair_conditions_rejected_fixed: 0, pair_conditions_rejected_other: 0, adds_kept_unconditional: 0,
+        pair_literals_redrawn_implied: 0, pair_literals_dropped_implied: 0, pair_deletes_redrawn_dead: 0,
+        pair_deletes_dropped_dead: 0, pair_effects_redrawn_reverse: 0}
+      changes_per_event: 0.573104
+      profiles: '`PAIRFL.1` (symmetric, rate 0.2), `PAIRFL.2` (asymmetric, rate 0.1), `PAIRFL.3` (general,
+        functional, rate 0.2), `PAIRFL.4` (asymmetric, functional, rate 0.0)'
+    categories_with_word: 2
+    wrote_line: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place and 4 two-place event
+      types, 12 constraints, 4 places and 2 place event types, 4 pair fluents; rule set 7585db2f22a8
+    redraw_notes: ''
+    quick_start_block: '
+
+      ```
+
+      wrote runs/world/tiny_pairs_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
+      and 4 two-place event types, 12 constraints, 4 places and 2 place event types, 4 pair fluents; rule
+      set 7585db2f22a8
+
+      ```
+
+      '
 baselines:
   conditional_effects_off:
     tiny: {rule_set_id: c92f1f584b905329e0fb34a2f5917a87b7a684ed8b03e0c837fa1ed2b2975446, rule_set_short: c92f1f584b90,
       rule_set_code: '`c92f1f584b90...`', documents_sha256: ac58a46bbeb5bfbcd2ec5206adab21a98294a930d4192157aa707969f1d9ee56}
     default: {rule_set_id: e9e38a67d89cc13ab59aa1e270b687b0e2b9cf71eeb5724be188164e90682bd3, rule_set_short: e9e38a67d89c,
       rule_set_code: '`e9e38a67d89c...`'}
+    tiny_full: {rule_set_id: 6785a3c5b14f0685d2a72b27cf6c3694c627a70d69b4c54df811a7f2c17cfe8c, rule_set_short: 6785a3c5b14f,
+      rule_set_code: '`6785a3c5b14f...`'}
+    default_full: {rule_set_id: 237db8f80ed34fa9979e1cede383c68aef9ceacb56af4dc7bab82ced650d1187, rule_set_short: 237db8f80ed3,
+      rule_set_code: '`237db8f80ed3...`'}
   fluents_off:
     tiny: {rule_set_id: a3d5b81c947b0af6da2ff04b4272e729b253d4846f42454d7c7dd8d9091c57e3, rule_set_short: a3d5b81c947b,
       rule_set_code: '`a3d5b81c947b...`'}
     default: {rule_set_id: b78bdf87d15d40dac01bc69313e8c66acd197be6d933f957235cdedae625231c, rule_set_short: b78bdf87d15d,
       rule_set_code: '`b78bdf87d15d...`'}
+    tiny_full: {rule_set_id: 133eba656fa6820c9a15d55f40e8bdcdf13a159b462491328caee7204117ec83, rule_set_short: 133eba656fa6,
+      rule_set_code: '`133eba656fa6...`'}
+    default_full: {rule_set_id: dde1d182541255573ee933c73b9179cebd654d463f506e66a5e82de6b00b035c, rule_set_short: dde1d1825412,
+      rule_set_code: '`dde1d1825412...`'}
   two_place_off:
     tiny: {rule_set_id: feed342b5645bb07de5e60306e17a6157e71b14385719df7f37c3698c972480e, rule_set_short: feed342b5645,
       rule_set_code: '`feed342b5645...`'}
     default: {rule_set_id: 17fc009d43a5cd447a776c607482b3365f851678b9e6f086e4c477f9be1d5cf2, rule_set_short: 17fc009d43a5,
       rule_set_code: '`17fc009d43a5...`'}
+    tiny_full: {rule_set_id: be00e37e01b1b465c4789758602cddf457cbc5982b0bc2a77fcdc33cd5f2857f, rule_set_short: be00e37e01b1,
+      rule_set_code: '`be00e37e01b1...`'}
+    default_full: {rule_set_id: 8ee3e286c152df0faee38fed9780cfc7498a273cb83b13622cbc7b0efdfce99b, rule_set_short: 8ee3e286c152,
+      rule_set_code: '`8ee3e286c152...`'}
   numeric_fluents_off:
     tiny: {rule_set_id: 700cf0fc88a43c2cbb5ce9eb193c334dd8e097af36ad2adb4311e8b9a695f2fd, rule_set_short: 700cf0fc88a4,
       rule_set_code: '`700cf0fc88a4...`'}
     default: {rule_set_id: 4522d2471f881f1e4c01c4b559340dd3a2c93b9bf7890dc3819f299be4df3f80, rule_set_short: 4522d2471f88,
       rule_set_code: '`4522d2471f88...`'}
+    tiny_full: {rule_set_id: 09339441a18d2f3a9473a9fcb60b185903ffc08dc0ee6340dbb7e7ad5a3c517d, rule_set_short: 09339441a18d,
+      rule_set_code: '`09339441a18d...`'}
+    default_full: {rule_set_id: c10abcbf0217298e94c2607e10fec457c01cd1c744af026e7fcf35962928870b, rule_set_short: c10abcbf0217,
+      rule_set_code: '`c10abcbf0217...`'}
   places_off:
     tiny: {rule_set_id: 6834c215f732f636019a1ff554982219a18de94d1e27224cda1e13f5abdd3682, rule_set_short: 6834c215f732,
       rule_set_code: '`6834c215f732...`'}
     default: {rule_set_id: cc1e27fac81953d454a038cfc0facde68353bb517ad42171862e130589d5c0db, rule_set_short: cc1e27fac819,
       rule_set_code: '`cc1e27fac819...`'}
+    tiny_full: {rule_set_id: b041540a47db95b5242b8d2697d4b76ed3c101863dd23c7c5dcc95d411d1bf65, rule_set_short: b041540a47db,
+      rule_set_code: '`b041540a47db...`'}
+    default_full: {rule_set_id: 46bf62e0008dc69c50865c7d9f05c02fde146e67a812fdfbb6abaebfb7c8ecd1, rule_set_short: 46bf62e0008d,
+      rule_set_code: '`46bf62e0008d...`'}
+  pair_fluents_off:
+    tiny: {rule_set_id: 9659a419573f5f798a8eb1995aef76a525a41e77fd11ca344646976580ffc27a, rule_set_short: 9659a419573f,
+      rule_set_code: '`9659a419573f...`'}
+    default: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
+      rule_set_code: '`7677556dac8f...`'}
+    tiny_full: {rule_set_id: 9659a419573f5f798a8eb1995aef76a525a41e77fd11ca344646976580ffc27a, rule_set_short: 9659a419573f,
+      rule_set_code: '`9659a419573f...`'}
+    default_full: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
+      rule_set_code: '`7677556dac8f...`'}
+  pair_dynamics_off:
+    tiny: {rule_set_id: 9659a419573f5f798a8eb1995aef76a525a41e77fd11ca344646976580ffc27a, rule_set_short: 9659a419573f,
+      rule_set_code: '`9659a419573f...`'}
+    default: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
+      rule_set_code: '`7677556dac8f...`'}
+    tiny_full: {rule_set_id: b6933cb6d521f1f945cdf6149335b4e810ed9418617192d105048f806007163d, rule_set_short: b6933cb6d521,
+      rule_set_code: '`b6933cb6d521...`'}
+    default_full: {rule_set_id: 732eb42cb0728d626b57ae398c5159232cb46c95fcd240337daea3be576b836c, rule_set_short: 732eb42cb072,
+      rule_set_code: '`732eb42cb072...`'}

@@ -47,15 +47,17 @@ event_types:
     enabled_share: 0.7                        # the share of literals drawn from values that some effect produces
     numeric_share: 0.3                        # the share of literals that are numeric threshold literals (stage b2), when the world has numeric fluents
     numeric_thresholds: [0.25, 0.5, 0.75]     # the fractions of a numeric fluent's range a threshold is drawn from
+    pair_share: 0.2                           # the share of literals that are pair literals (stage c2b), when the world has pair fluents
   effects:
     count: {1: 0.7, 2: 0.3}                   # weights over the number of an event type's own effects
     feature_rate: 0.5
     roles: {agent: 0.4, patient: 0.6}
     conditional_share: 0.2                    # the share of effects that get a condition (stage b1); 0 gives the unconditional world of phase (a)
     condition_literals: {1: 0.7, 2: 0.3}      # weights over the number of literals of a condition
-    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2}   # weights over the kind of a condition literal, a static feature, a Boolean fluent, or a numeric threshold (stage b2)
+    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0.2}   # weights over the kind of a condition literal, a static feature, a Boolean fluent, a numeric threshold (stage b2), or a pair literal (stage c2b, used only when the world has pair fluents)
     numeric_share: 0.3                        # the share of effects that are numeric (+= or -=, stage b2), when the world has numeric fluents
     numeric_amounts: [0.1, 0.5]               # the interval a numeric effect's constant is drawn from
+    pair_share: 0.2                           # the share of the effects of two-place event types that are pair effects (stage c2b), when the world has pair fluents
   event_file: null                            # a file of explicit event types
 
 places:                                       # the places (stage c1): a second taxonomy run; null turns places off
@@ -68,3 +70,15 @@ place_event_types:                            # the place event types (stage c1:
   constraints: {1: 0.6, 2: 0.4}               # weights over the number of constraints of a requirement
   constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}   # the comparison family (an entity scalar against a place scalar) is off by default
   rules: {}                                   # overrides of the taxonomy's rules settings for the constraints
+
+pair_fluents:                                 # the pair fluents between entities (stage c2b); count 0 until stage c4 moves the phase (c) settings here from default_full.yaml (Jon's ruling WM.63)
+  count: 0                                    # the specification's default is 4 (default_full.yaml); with 0 nothing is drawn, and the world is the world of stage c2a
+  locations: 0                                # location fluents come in stage c3; the specification's default of 1 waits for them
+  symmetry: {symmetric: 1, asymmetric: 1, general: 1}   # weights over a pair fluent's symmetry
+  functional_rate: 0.25                       # the probability that a pair fluent is functional (at most one partner in each row)
+  initial_rates: [0.0, 0.05, 0.2]             # each pair fluent's initial rate is drawn from this list
+  literal_kinds: {pair: 0.6, same: 0.1, some: 0.3}   # weights over the kind of a drawn pair literal: a pair, SAME, or SOME and SOMEOF
+  same_rules: 2                               # two-place event types that must require SAME on a location fluent (stage c3; nothing without location fluents)
+  derived_rules: 1                            # derived fluents whose rule must read a SOME or SOMEOF literal
+  rule_weight: 1.0                            # the weight of a SOME or SOMEOF literal in the input pool of the other derived fluents' rules
+  fluents: {}                                 # per-fluent overrides, PAIRFL.<n>: {symmetry, functional, initial_rate}

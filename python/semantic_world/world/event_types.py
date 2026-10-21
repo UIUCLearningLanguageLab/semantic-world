@@ -23,12 +23,30 @@ at 0 the Boolean side is drawn exactly as before the stage. A condition literal 
 threshold too (the kind ``numeric`` of ``condition_kinds``, its symbol and threshold from
 ``world:numeric_conditions``). A numeric literal is achievable when its fluent's initial
 distribution, drift, or some effect can bring a value to its side of the threshold.
+
+Since stage c2b (``docs/specs/WORLD_PHASE_C.md``, "Preconditions", "Effects", "Conditions
+(F5)") the same pattern draws pair literals, pair effects, and pair conditions when the world has
+pair fluents: a precondition literal is replaced by a pair literal at
+``event_types.preconditions.pair_share`` from ``world:pair_preconditions`` (its kind from
+``pair_fluents.literal_kinds``, the pair fluent uniformly among those the kind allows, the
+direction or role and the polarity uniformly, ``SAME`` only on a functional pair fluent that is
+not symmetric, a one-place event type drawing ``SOME`` and ``SOMEOF`` of its agent alone), an
+effect of a two-place event type by a pair effect at ``event_types.effects.pair_share`` from
+``world:pair_effects`` (the pair fluent, the direction, and the value uniformly), and a
+condition literal of the kind ``pair`` is drawn from ``world:pair_conditions``. Every rule that
+stage c2a enforces on an explicit entry with an error is a redraw here: an unachievable literal,
+a contradiction, an empty effect, an add whose compiled literals contradict the precondition, a
+condition that names a pair or row the precondition names (or, under the implications of
+``fixed_pair_literals``, whose value the precondition fixes), and a conditional add on an
+asymmetric or functional pair fluent, which keeps no condition. The compiled literals of F4 are
+appended to every draft after the fix-ups. With the shares at 0 nothing is drawn from the pair
+streams, and the Boolean draws are those of the world without pair fluents.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,7 +56,12 @@ from semantic_world.common.boolean import TruthTable, dnf_literal_count
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.taxonomy.expressions import Cmp, Const, Expr, Gt, Not, Op, Var
 from semantic_world.taxonomy.rules import MAX_TRIES, Rule, _draw, input_key
-from semantic_world.world.config import Config, EffectsConfig, PreconditionsConfig
+from semantic_world.world.config import (
+    Config,
+    EffectsConfig,
+    PairFluentsConfig,
+    PreconditionsConfig,
+)
 from semantic_world.world.constraints import Constraint
 from semantic_world.world.dynamics import (
     PAIR_KIND,
@@ -54,6 +77,7 @@ from semantic_world.world.dynamics import (
     PairLiteral,
     precondition_text,
 )
+from semantic_world.world.errors import WorldError
 from semantic_world.world.event_file import EventFile, ExplicitEventType
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.numeric import NumericFluents, drawn, empty_numeric
@@ -213,6 +237,9 @@ class EventTypes:
     condition_draws: dict[str, int] = field(default_factory=dict)
     """The effects a condition was drawn for (``drawn``) and how many got one
     (``conditional``)."""
+    pair_stats: dict[str, int] = field(default_factory=dict)
+    """Counts of the pair draws and redraws of stage c2b (``pair_fluents.fix_ups`` of
+    ``world_stats.yaml``); empty in a world without pair fluents."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_constraints", {c.label: c for c in self.constraints})
@@ -406,6 +433,217 @@ def add_compiled_literals(
     return tuple(found)
 
 
+def _other_role(roles: Sequence[str], role: str) -> str | None:
+    others = [r for r in roles if r != role]
+    return others[0] if others else None
+
+
+def fixed_pair_literals(
+    precondition: Sequence[AnyLiteral], pair_fluents: PairFluents, roles: Sequence[str] = ROLES
+) -> dict[tuple, bool]:
+    """What the pair literals of a precondition fix, by ``pair_literal_key``, beyond what they
+    name (stage c2b, item 6 of the stage prompt): a condition literal with one of these keys
+    would be redundant with its value, or never fire with the other, so its effect would be
+    unconditional either way. The implications, over the binding's two roles ``x`` and ``y``:
+
+    - ``PAIRFL.k(x, y)`` fixes ``SOME.PAIRFL.k(x)`` and ``SOMEOF.PAIRFL.k(y)`` true; for a
+      symmetric pair fluent also ``PAIRFL.k(y, x)``, ``SOME.PAIRFL.k(y)``, and
+      ``SOMEOF.PAIRFL.k(x)`` true; for an asymmetric one ``PAIRFL.k(y, x)`` false; and for a
+      functional one ``SAME.PAIRFL.k(x, y)`` false (``x``'s one partner is ``y``, which is not
+      a partner of itself);
+    - ``NOT SOME.PAIRFL.k(x)`` fixes ``PAIRFL.k(x, y)`` and ``SAME.PAIRFL.k(x, y)`` false (and
+      for a symmetric pair fluent ``PAIRFL.k(y, x)``, the same pair);
+    - ``NOT SOMEOF.PAIRFL.k(y)`` fixes ``PAIRFL.k(x, y)`` false (and for a symmetric pair
+      fluent, where the column is the row, ``SAME.PAIRFL.k(x, y)`` false too);
+    - ``SAME.PAIRFL.k(x, y)`` fixes ``SOME.PAIRFL.k(x)`` and ``SOME.PAIRFL.k(y)`` true and
+      ``PAIRFL.k(x, y)`` and ``PAIRFL.k(y, x)`` false (the shared partner is a third entity,
+      and ``k`` is functional).
+
+    A negative pair literal, a positive ``SOME`` or ``SOMEOF``, and a negative ``SAME`` fix
+    nothing beyond themselves. The literal's own key is included with its value."""
+    fixed: dict[tuple, bool] = {}
+    for lit in precondition:
+        if not isinstance(lit, PairLiteral) or lit.pair_fluent not in pair_fluents:
+            continue
+        fluent = pair_fluents[lit.pair_fluent]
+        implied: list[tuple[str, str, str | None, bool]] = []
+        x, y = lit.first, lit.second
+        if lit.kind == PAIR_KIND and lit.value:
+            assert y is not None
+            implied += [(PAIR_SOME, x, None, True), (PAIR_SOMEOF, y, None, True)]
+            if fluent.symmetric:
+                implied += [(PAIR_SOME, y, None, True), (PAIR_SOMEOF, x, None, True)]
+            if fluent.asymmetric:
+                implied.append((PAIR_KIND, y, x, False))
+            if fluent.functional:
+                implied.append((PAIR_SAME, x, y, False))
+        elif lit.kind in (PAIR_SOME, PAIR_SOMEOF) and not lit.value:
+            other = _other_role(roles, x)
+            if other is not None:
+                if lit.kind == PAIR_SOME or fluent.symmetric:
+                    implied.append((PAIR_KIND, x, other, False))
+                    if fluent.functional:
+                        implied.append((PAIR_SAME, x, other, False))
+                if lit.kind == PAIR_SOMEOF or fluent.symmetric:
+                    implied.append((PAIR_KIND, other, x, False))
+        elif lit.kind == PAIR_SAME and lit.value:
+            assert y is not None
+            implied += [
+                (PAIR_SOME, x, None, True),
+                (PAIR_SOME, y, None, True),
+                (PAIR_KIND, x, y, False),
+                (PAIR_KIND, y, x, False),
+            ]
+        fixed[pair_literal_key(lit, fluent)] = lit.value
+        for kind, first, second, value in implied:
+            literal = PairLiteral(kind, fluent.label, first, second, value)
+            fixed[pair_literal_key(literal, fluent)] = value
+    return fixed
+
+
+def condition_pair_names(effects: Sequence[Effect], pair_fluents: PairFluents) -> set[tuple]:
+    """The pairs, rows, and columns the pair literals of the effects' conditions name."""
+    return {
+        name
+        for effect in effects
+        for lit in effect.condition
+        if isinstance(lit, PairLiteral) and lit.pair_fluent in pair_fluents
+        for name in pair_literal_names(lit, pair_fluents[lit.pair_fluent])
+    }
+
+
+def condition_pair_keys(effects: Sequence[Effect], pair_fluents: PairFluents) -> set[tuple]:
+    """The keys (``pair_literal_key``) of the pair literals of the effects' conditions."""
+    return {
+        pair_literal_key(lit, pair_fluents[lit.pair_fluent])
+        for effect in effects
+        for lit in effect.condition
+        if isinstance(lit, PairLiteral) and lit.pair_fluent in pair_fluents
+    }
+
+
+def precondition_literal_fits_conditions(
+    literal: PairLiteral, effects: Sequence[Effect], pair_fluents: PairFluents, roles: Sequence[str]
+) -> bool:
+    """Whether a drawn precondition pair literal leaves the effects' pair conditions as
+    conditions: it names no pair or row a condition names (F5), and fixes no condition literal
+    under the implications of ``fixed_pair_literals``."""
+    fluent = pair_fluents[literal.pair_fluent]
+    if pair_literal_names(literal, fluent) & condition_pair_names(effects, pair_fluents):
+        return False
+    fixed = fixed_pair_literals([literal], pair_fluents, roles)
+    return not (set(fixed) & condition_pair_keys(effects, pair_fluents))
+
+
+def implied_conflict(
+    candidate: PairLiteral,
+    kept: Sequence[AnyLiteral],
+    pair_fluents: PairFluents,
+    roles: Sequence[str],
+) -> bool:
+    """Whether a drawn pair literal is implied by, contradicted by, or implies another literal
+    of the same precondition (Jon's ruling 2 of October 21, 2026, on stage c2b: item 6's
+    implications extend to preconditions), under ``fixed_pair_literals``: the candidate's key
+    is fixed by the kept literals, or a kept literal's key is fixed by the candidate."""
+    others = [lit for lit in kept if isinstance(lit, PairLiteral)]
+    if not others:
+        return False
+    fluent = pair_fluents[candidate.pair_fluent]
+    if pair_literal_key(candidate, fluent) in fixed_pair_literals(others, pair_fluents, roles):
+        return True
+    own = fixed_pair_literals([candidate], pair_fluents, roles)
+    return any(pair_literal_key(lit, pair_fluents[lit.pair_fluent]) in own for lit in others)
+
+
+def random_pair_literal(
+    roles: Sequence[str],
+    rng: np.random.Generator,
+    pair_fluents: PairFluents,
+    literal_kinds: Mapping[str, float],
+) -> PairLiteral | None:
+    """One drawn pair literal over the roles (stage c2b), unchecked: its kind from
+    ``literal_kinds`` (``pair``, ``same``, or ``some``, the last covering ``SOME`` and
+    ``SOMEOF``), its pair fluent uniformly among those the kind allows (``SAME`` on a functional
+    pair fluent that is not symmetric, on which it could never hold), then its direction
+    (``pair``: which role comes first), or its form and role (``some``: ``SOME`` or ``SOMEOF``,
+    then the role), and its polarity, each uniformly. A one-place event type draws ``some``
+    literals on its agent only. None when no kind with a positive weight can be drawn."""
+    fluents = list(pair_fluents.fluents)
+    if not fluents:
+        return None
+    same_pool = [f for f in fluents if f.functional and not f.symmetric]
+    if len(roles) == 1:
+        kinds = {k: w for k, w in literal_kinds.items() if k == "some" and w > 0}
+    else:
+        kinds = {k: w for k, w in literal_kinds.items() if w > 0 and (k != "same" or same_pool)}
+    if not kinds:
+        return None
+    kind = _draw(rng, kinds)
+    if kind == "pair":
+        fluent = fluents[int(rng.integers(len(fluents)))]
+        first, second = (roles[0], roles[1]) if rng.integers(2) == 0 else (roles[1], roles[0])
+        return PairLiteral(PAIR_KIND, fluent.label, first, second, bool(rng.integers(2)))
+    if kind == "same":
+        fluent = same_pool[int(rng.integers(len(same_pool)))]
+        return PairLiteral(PAIR_SAME, fluent.label, roles[0], roles[1], bool(rng.integers(2)))
+    fluent = fluents[int(rng.integers(len(fluents)))]
+    form = PAIR_SOME if rng.integers(2) == 0 else PAIR_SOMEOF
+    role = roles[0] if len(roles) == 1 else roles[int(rng.integers(2))]
+    return PairLiteral(form, fluent.label, role, None, bool(rng.integers(2)))
+
+
+def random_pair_effect(
+    roles: Sequence[str], rng: np.random.Generator, pair_fluents: PairFluents
+) -> Effect:
+    """One drawn pair effect between the two roles (stage c2b): the pair fluent, the direction,
+    and the value, each uniformly."""
+    fluents = list(pair_fluents.fluents)
+    fluent = fluents[int(rng.integers(len(fluents)))]
+    first, second = (roles[0], roles[1]) if rng.integers(2) == 0 else (roles[1], roles[0])
+    return Effect(first, fluent.label, bool(rng.integers(2)), (), second)
+
+
+def reverse_add_conflict(
+    effect: Effect, kept: Iterable[Effect], pair_fluents: PairFluents
+) -> Effect | None:
+    """The kept effect that adds the reverse pair of an add on an asymmetric pair fluent, or
+    None: one event type cannot add both directions (each add's compiled literal holds before
+    the step, and the profile breaks after it), so the two are a contradiction (found in stage
+    c2b's follow-up; stage c2a's rules counted the two directions as two pairs)."""
+    if not effect.pair or not effect.value or effect.fluent not in pair_fluents:
+        return None
+    fluent = pair_fluents[effect.fluent]
+    if not fluent.asymmetric:
+        return None
+    for other in kept:
+        if (
+            other.pair
+            and other.value
+            and other.fluent == effect.fluent
+            and other.role == effect.second
+            and other.second == effect.role
+        ):
+            return other
+    return None
+
+
+def _effect_slot(effect: Effect, pair_fluents: PairFluents | None = None) -> tuple:
+    """The slot an effect fills: ``(role, fluent)`` for a Boolean or numeric effect, and the
+    pair it writes (both directions of a symmetric pair are one slot) for a pair effect."""
+    if effect.pair and pair_fluents is not None and effect.fluent in pair_fluents:
+        return pair_effect_key(effect, pair_fluents[effect.fluent])
+    return (effect.role, effect.fluent)
+
+
+def keeps_no_condition(effect: Effect, pair_fluents: PairFluents) -> bool:
+    """An add on an asymmetric or functional pair fluent keeps no condition (F4): its compiled
+    literals would not be a plain precondition, so the generator never draws one for it."""
+    if not effect.pair or not effect.value or effect.fluent not in pair_fluents:
+        return False
+    fluent = pair_fluents[effect.fluent]
+    return fluent.asymmetric or fluent.functional
+
+
 # ---------------------------------------------------------------------------------------------
 # Preconditions and effects
 # ---------------------------------------------------------------------------------------------
@@ -416,13 +654,15 @@ class _Draft:
     event_type: EventType
     inherited_effects: list[tuple[int, Effect]] = field(default_factory=list)
     own_effects: list[Effect] = field(default_factory=list)
-    inherited_literals: list[tuple[int, Literal]] = field(default_factory=list)
-    own_literals: list[Literal] = field(default_factory=list)
+    inherited_literals: list[tuple[int, AnyLiteral]] = field(default_factory=list)
+    own_literals: list[AnyLiteral] = field(default_factory=list)
     explicit: ExplicitEventType | None = None
     effects: tuple[Effect, ...] = ()
     precondition: tuple[AnyLiteral, ...] = ()
-    own_effect_keys: set[tuple[str, str]] = field(default_factory=set)
-    own_literal_keys: set[tuple[str, str]] = field(default_factory=set)
+    own_effect_keys: set[tuple] = field(default_factory=set)
+    """The slots (``_effect_slot``) of the event type's own effects."""
+    own_literal_keys: set[tuple] = field(default_factory=set)
+    """The slots (``_literal_slot``) of the event type's own precondition literals."""
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -452,12 +692,16 @@ class _Dynamics:
         self.pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
         self.effects_config: EffectsConfig = config.event_types.effects
         self.preconditions_config: PreconditionsConfig = config.event_types.preconditions
+        self.pair_config: PairFluentsConfig = config.pair_fluents
         self.rng_effects = streams.effects
         self.rng_preconditions = streams.preconditions
         self.rng_conditions = streams.conditions
         self.rng_numeric_effects = streams.numeric_effects
         self.rng_numeric_preconditions = streams.numeric_preconditions
         self.rng_numeric_conditions = streams.numeric_conditions
+        self.rng_pair_preconditions = streams.pair_preconditions
+        self.rng_pair_effects = streams.pair_effects
+        self.rng_pair_conditions = streams.pair_conditions
         self.event_file = event_file
         self.base_labels = fluents.base_labels
         self.all_labels = fluents.labels
@@ -483,6 +727,46 @@ class _Dynamics:
             "conditions_dropped": 0,
             "numeric_literals_redrawn": 0,
         }
+        self.pair_stats: dict[str, int] = (
+            {
+                "precondition_replacement_draws": 0,
+                "precondition_replacements": 0,
+                "precondition_replacements_failed": 0,
+                "pair_literals_redrawn": 0,
+                "effect_replacement_draws": 0,
+                "effect_replacements": 0,
+                "pair_effects_redrawn_compiled": 0,
+                "pair_effects_dropped_compiled": 0,
+                "pair_conditions_drawn": 0,
+                "pair_conditions_rejected_named": 0,
+                "pair_conditions_rejected_fixed": 0,
+                "pair_conditions_rejected_other": 0,
+                "adds_kept_unconditional": 0,
+                "pair_literals_redrawn_implied": 0,
+                "pair_literals_dropped_implied": 0,
+                "pair_deletes_redrawn_dead": 0,
+                "pair_deletes_dropped_dead": 0,
+                "pair_effects_redrawn_reverse": 0,
+            }
+            if len(self.pair_fluents)
+            else {}
+        )
+        """The pair draws and redraws of stage c2b (``pair_fluents.fix_ups`` of
+        ``world_stats.yaml``): the draws against the share for precondition literals and the
+        literals replaced by a pair literal (and the replacements that found no achievable pair
+        literal and kept the drawn literal), the pair literal candidates rejected
+        (unachievable, a slot already taken, or clashing with a condition), the draws against
+        the share for effects and the effects replaced by a pair effect, the pair adds whose
+        compiled literals contradicted the precondition (redrawn when own, dropped when
+        inherited), the pair condition literals drawn, the conditions rejected for a pair
+        literal that names what the precondition names, that the precondition fixes, or that
+        breaks another rule, the adds on an asymmetric or functional pair fluent that keep
+        no condition, the drawn pair literals drawn again (own) or dropped (inherited) because
+        another literal of the precondition, or a compiled literal, implied or contradicted
+        them, and the deletes drawn again (own) or dropped (inherited) because their pair
+        fluent can never hold (Jon's rulings 1 and 2 of October 21, 2026), and the drawn adds
+        rejected because the event type already adds the reverse pair of an asymmetric pair
+        fluent."""
         self.condition_draws: dict[str, int] = {"drawn": 0, "conditional": 0}
         """The effects a condition was drawn for, and how many of them got one (Jon's ruling 2
         on stage b1: the share counts drawn effects; ``world_stats.yaml`` reports it beside the
@@ -532,10 +816,29 @@ class _Dynamics:
             return self._numeric_effect(effect.role)
         return effect
 
+    def _maybe_pair_effect(self, effect: Effect, roles: tuple[str, ...]) -> Effect:
+        """The effect, or a pair effect between the two roles at ``pair_share`` (stage c2b),
+        from ``world:pair_effects``; nothing is drawn for a one-place event type, with the share
+        at 0, or without pair fluents."""
+        share = self.effects_config.pair_share
+        if len(roles) != 2 or not len(self.pair_fluents) or share <= 0:
+            return effect
+        self.pair_stats["effect_replacement_draws"] += 1
+        if self.rng_pair_effects.random() < share:
+            self.pair_stats["effect_replacements"] += 1
+            return random_pair_effect(roles, self.rng_pair_effects, self.pair_fluents)
+        return effect
+
     def _draw_effect(
-        self, roles: tuple[str, ...], forbidden: set[tuple[str, str]] = frozenset()
-    ) -> Effect | None:  # type: ignore[assignment]
+        self,
+        roles: tuple[str, ...],
+        forbidden: set[tuple] = frozenset(),  # type: ignore[assignment]
+        kept: Iterable[Effect] = (),
+    ) -> Effect | None:
+        """An effect over the roles whose slot is not in ``forbidden`` and that adds no reverse
+        pair of an add in ``kept`` on an asymmetric pair fluent, or None after ``MAX_TRIES``."""
         rng = self.rng_effects
+        kept = tuple(kept)
         for _ in range(MAX_TRIES):
             role = self._role(rng, roles, self.effects_config.roles)
             if self.base_labels:
@@ -544,8 +847,13 @@ class _Dynamics:
                 effect = self._maybe_numeric(Effect(role, fluent, value))
             else:
                 effect = self._numeric_effect(role)
-            if (effect.role, effect.fluent) not in forbidden:
-                return effect
+            effect = self._maybe_pair_effect(effect, roles)
+            if _effect_slot(effect, self.pair_fluents) in forbidden:
+                continue
+            if reverse_add_conflict(effect, kept, self.pair_fluents) is not None:
+                self.pair_stats["pair_effects_redrawn_reverse"] += 1
+                continue
+            return effect
         return None
 
     def produced_numeric(self) -> set[tuple[str, int]]:
@@ -598,23 +906,99 @@ class _Dynamics:
                 return candidate
         return literal
 
+    def _pair_literal(
+        self,
+        roles: tuple[str, ...],
+        rng: np.random.Generator,
+        forbidden: set[tuple],
+        effects: Sequence[Effect],
+        kept: Sequence[AnyLiteral] = (),
+    ) -> PairLiteral | None:
+        """A pair literal of a precondition (stage c2b), drawn from ``rng`` by
+        ``random_pair_literal`` and drawn again while it is not achievable, fills a slot the
+        precondition already fills, clashes with a pair condition of the effects, or is implied
+        by, contradicted by, or implies a literal of ``kept`` (the precondition's other
+        literals and the compiled literals its effects will get), up to ``MAX_TRIES``; None
+        when none was found."""
+        adds, deletes = self.pair_adds_and_deletes()
+        kinds = self.pair_config.literal_kinds
+        for _ in range(MAX_TRIES):
+            literal = random_pair_literal(roles, rng, self.pair_fluents, kinds)
+            if literal is None:
+                return None
+            fluent = self.pair_fluents[literal.pair_fluent]
+            if (
+                pair_literal_key(literal, fluent) in forbidden
+                or not pair_literal_achievable(literal, fluent, adds, deletes)
+                or not precondition_literal_fits_conditions(
+                    literal, effects, self.pair_fluents, roles
+                )
+            ):
+                self.pair_stats["pair_literals_redrawn"] += 1
+                continue
+            if implied_conflict(literal, kept, self.pair_fluents, roles):
+                self.pair_stats["pair_literals_redrawn"] += 1
+                self.pair_stats["pair_literals_redrawn_implied"] += 1
+                continue
+            return literal
+        return None
+
+    def _maybe_pair_literal(
+        self,
+        literal: Literal,
+        roles: tuple[str, ...],
+        forbidden: set[tuple],
+        rng: np.random.Generator,
+        effects: Sequence[Effect],
+        kept: Sequence[AnyLiteral] = (),
+    ) -> AnyLiteral:
+        """The literal, or a pair literal over the roles at ``pair_share`` (the literal again
+        when no achievable pair literal was found); nothing is drawn with the share at 0 or
+        without pair fluents."""
+        share = self.preconditions_config.pair_share
+        if not len(self.pair_fluents) or share <= 0:
+            return literal
+        self.pair_stats["precondition_replacement_draws"] += 1
+        if rng.random() < share:
+            self.pair_stats["precondition_replacements"] += 1
+            candidate = self._pair_literal(roles, rng, forbidden, effects, kept)
+            if candidate is not None:
+                return candidate
+            self.pair_stats["precondition_replacements_failed"] += 1
+        return literal
+
     def _draw_literal(
         self,
         roles: tuple[str, ...],
         achievable: set[tuple[str, bool]],
         produced: list[tuple[str, bool]],
-        forbidden: set[tuple[str, str]] = frozenset(),  # type: ignore[assignment]
+        forbidden: set[tuple] = frozenset(),  # type: ignore[assignment]
         numeric_rng: np.random.Generator | None = None,
-    ) -> Literal | None:
+        pair_rng: np.random.Generator | None = None,
+        effects: Sequence[Effect] = (),
+        kept: Sequence[AnyLiteral] = (),
+    ) -> AnyLiteral | None:
+        """A precondition literal over the roles: a Boolean literal from ``world:preconditions``
+        (an enabling one at ``enabled_share``), replaced by a numeric literal at
+        ``numeric_share`` and then by a pair literal at ``pair_share``, each from its own
+        stream; ``forbidden`` holds the slots the precondition already fills, ``effects`` the
+        effects whose conditions a pair literal must leave as conditions, and ``kept`` the
+        literals a pair literal must neither imply nor be implied by."""
         rng = self.rng_preconditions
         numeric_rng = self.rng_numeric_preconditions if numeric_rng is None else numeric_rng
+        pair_rng = self.rng_pair_preconditions if pair_rng is None else pair_rng
         if not achievable and not self.numeric_labels:
             return None
         for _ in range(MAX_TRIES):
             role = self._role(rng, roles, self.preconditions_config.roles)
             if not self.all_labels:
-                return self._numeric_literal(
+                numeric = self._numeric_literal(
                     role, numeric_rng, set(forbidden), self.produced_numeric()
+                )
+                if numeric is None:
+                    return None
+                return self._maybe_pair_literal(
+                    numeric, roles, set(forbidden), pair_rng, effects, kept
                 )
             if produced and rng.random() < self.preconditions_config.enabled_share:
                 fluent, value = produced[int(rng.integers(len(produced)))]
@@ -622,8 +1006,11 @@ class _Dynamics:
                 fluent = self.all_labels[int(rng.integers(len(self.all_labels)))]
                 value = bool(rng.integers(2))
             if (fluent, value) in achievable and (role, fluent) not in forbidden:
-                return self._maybe_numeric_literal(
+                literal = self._maybe_numeric_literal(
                     Literal(role, fluent, value), set(forbidden), numeric_rng
+                )
+                return self._maybe_pair_literal(
+                    literal, roles, set(forbidden), pair_rng, effects, kept
                 )
         return None
 
@@ -680,27 +1067,33 @@ class _Dynamics:
         if draft.explicit is not None and draft.explicit.effects is not None:
             draft.effects = draft.explicit.effects
             return
-        kept: dict[tuple[str, str], Effect] = {}
+        kept: dict[tuple, Effect] = {}
         for _, effect in draft.inherited_effects:
-            key = (effect.role, effect.fluent)
+            key = _effect_slot(effect, self.pair_fluents)
             if key in kept:
                 if kept[key].value != effect.value:
                     self.stats["effects_dropped_contradiction"] += 1
                 else:
                     self.stats["effects_dropped_duplicate"] += 1
                 continue
+            if reverse_add_conflict(effect, kept.values(), self.pair_fluents) is not None:
+                self.stats["effects_dropped_contradiction"] += 1
+                continue
             kept[key] = effect
         draft.own_effect_keys = set()
         for effect in draft.own_effects:
             candidate: Effect | None = effect
-            while candidate is not None and (candidate.role, candidate.fluent) in kept:
+            while candidate is not None and (
+                _effect_slot(candidate, self.pair_fluents) in kept
+                or reverse_add_conflict(candidate, kept.values(), self.pair_fluents) is not None
+            ):
                 self.stats["effects_redrawn"] += 1
-                candidate = self._draw_effect(draft.roles, set(kept))
+                candidate = self._draw_effect(draft.roles, set(kept), kept.values())
             if candidate is None:
                 self.stats["effects_dropped_no_slot"] += 1
                 continue
-            kept[(candidate.role, candidate.fluent)] = candidate
-            draft.own_effect_keys.add((candidate.role, candidate.fluent))
+            kept[_effect_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_effect_keys.add(_effect_slot(candidate, self.pair_fluents))
         draft.effects = tuple(kept.values())
 
     # Preconditions ----------------------------------------------------------------------------
@@ -728,7 +1121,7 @@ class _Dynamics:
             n = _draw(self.rng_preconditions, cfg.literals)
             draft = self.drafts[et.label]
             for _ in range(n):
-                literal = self._draw_literal(et.roles, achievable, produced)
+                literal = self._draw_literal(et.roles, achievable, produced, effects=draft.effects)
                 if literal is not None:
                     draft.own_literals.append(literal)
         for feature in self.static.features:
@@ -740,7 +1133,7 @@ class _Dynamics:
             n = _draw(self.rng_preconditions, cfg.literals)
             draft = self.drafts[et.label]
             for _ in range(n):
-                literal = self._draw_literal(et.roles, achievable, produced)
+                literal = self._draw_literal(et.roles, achievable, produced, effects=draft.effects)
                 if literal is not None:
                     draft.own_literals.append(literal)
         for et in self.static.event_types:
@@ -756,31 +1149,53 @@ class _Dynamics:
             return
         achievable = self.achievable()
         produced = self.produced()
-        kept: dict[tuple[str, str], Literal] = {}
+        kept: dict[tuple, AnyLiteral] = {}
+        compiled = self.virtual_compiled(draft)
         for _, literal in draft.inherited_literals:
-            key = (literal.role, literal.fluent)
+            key = _literal_slot(literal, self.pair_fluents)
             if key in kept:
                 if kept[key].value != literal.value:
                     self.stats["literals_dropped_contradiction"] += 1
                 else:
                     self.stats["literals_dropped_duplicate"] += 1
                 continue
+            if isinstance(literal, PairLiteral) and implied_conflict(
+                literal, list(kept.values()) + compiled, self.pair_fluents, draft.roles
+            ):
+                self.pair_stats["pair_literals_dropped_implied"] += 1
+                continue
             kept[key] = literal
         draft.own_literal_keys = set()
         read = condition_keys(draft.effects)
         for literal in draft.own_literals:
-            candidate: Literal | None = literal
+            candidate: AnyLiteral | None = literal
             while candidate is not None and (
-                (candidate.role, candidate.fluent) in kept
-                or (candidate.role, candidate.fluent) in read
+                _literal_slot(candidate, self.pair_fluents) in kept
+                or _literal_slot(candidate, self.pair_fluents) in read
+                or (
+                    isinstance(candidate, PairLiteral)
+                    and (
+                        not precondition_literal_fits_conditions(
+                            candidate, draft.effects, self.pair_fluents, draft.roles
+                        )
+                        or self._implied(candidate, list(kept.values()) + compiled, draft)
+                    )
+                )
             ):
                 self.stats["literals_redrawn"] += 1
-                candidate = self._draw_literal(draft.roles, achievable, produced, set(kept) | read)
+                candidate = self._draw_literal(
+                    draft.roles,
+                    achievable,
+                    produced,
+                    set(kept) | read,
+                    effects=draft.effects,
+                    kept=list(kept.values()) + compiled,
+                )
             if candidate is None:
                 self.stats["literals_dropped_unachievable"] += 1
                 continue
-            kept[(candidate.role, candidate.fluent)] = candidate
-            draft.own_literal_keys.add((candidate.role, candidate.fluent))
+            kept[_literal_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_literal_keys.add(_literal_slot(candidate, self.pair_fluents))
         draft.precondition = tuple(kept.values())
 
     # Fix-ups -----------------------------------------------------------------------------------
@@ -789,15 +1204,20 @@ class _Dynamics:
         """An effect that sets a fluent to the value the precondition already requires changes
         nothing: an own effect is redrawn, an inherited one dropped. Returns whether anything
         changed."""
-        required = {
+        required: dict[tuple, bool] = {
             (lit.role, lit.fluent): lit.value
             for lit in draft.precondition
             if not lit.numeric and not lit.pair
         }
+        # a pair add whose precondition requires the pair, or a delete whose precondition
+        # requires its absence, changes nothing either (stage c2b)
+        for lit in draft.precondition:
+            if isinstance(lit, PairLiteral) and lit.kind == PAIR_KIND:
+                required[pair_literal_key(lit, self.pair_fluents[lit.pair_fluent])] = lit.value
         changed = False
-        kept: dict[tuple[str, str], Effect] = {(e.role, e.fluent): e for e in draft.effects}
+        kept: dict[tuple, Effect] = {_effect_slot(e, self.pair_fluents): e for e in draft.effects}
         for effect in list(draft.effects):
-            key = (effect.role, effect.fluent)
+            key = _effect_slot(effect, self.pair_fluents)
             if effect.numeric or required.get(key) != effect.value:
                 continue  # a numeric effect is never empty: it can always add or subtract
             changed = True
@@ -808,11 +1228,11 @@ class _Dynamics:
             draft.own_effect_keys.discard(key)
             candidate = None
             for _ in range(MAX_TRIES):
-                candidate = self._draw_effect(draft.roles, set(kept))
+                candidate = self._draw_effect(draft.roles, set(kept), kept.values())
                 if (
                     candidate is None
                     or candidate.numeric
-                    or required.get((candidate.role, candidate.fluent)) != candidate.value
+                    or required.get(_effect_slot(candidate, self.pair_fluents)) != candidate.value
                 ):
                     break
                 candidate = None
@@ -820,8 +1240,49 @@ class _Dynamics:
             if candidate is None:
                 self.stats["effects_dropped_no_slot"] += 1
                 continue
-            kept[(candidate.role, candidate.fluent)] = candidate
-            draft.own_effect_keys.add((candidate.role, candidate.fluent))
+            kept[_effect_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_effect_keys.add(_effect_slot(candidate, self.pair_fluents))
+        if changed:
+            draft.effects = tuple(kept.values())
+        return changed
+
+    def fix_compiled_contradictions(self, draft: _Draft) -> bool:
+        """A pair add whose compiled literals (F4) contradict the precondition could never
+        happen (stage c2b): an own add is redrawn, an inherited one dropped. Returns whether
+        anything changed."""
+        if not any(e.pair for e in draft.effects):
+            return False
+        present = {
+            pair_literal_key(lit, self.pair_fluents[lit.pair_fluent]): lit.value
+            for lit in draft.precondition
+            if isinstance(lit, PairLiteral)
+        }
+        changed = False
+        kept: dict[tuple, Effect] = {_effect_slot(e, self.pair_fluents): e for e in draft.effects}
+        for effect in list(draft.effects):
+            if not effect.pair or effect.condition or not effect.value:
+                continue
+            fluent = self.pair_fluents[effect.fluent]
+            contradicted = any(
+                present.get(pair_literal_key(lit, fluent)) == (not lit.value)
+                for lit in compiled_literals(effect, fluent)
+            )
+            if not contradicted:
+                continue
+            changed = True
+            key = _effect_slot(effect, self.pair_fluents)
+            del kept[key]
+            if key not in draft.own_effect_keys:
+                self.pair_stats["pair_effects_dropped_compiled"] += 1
+                continue
+            draft.own_effect_keys.discard(key)
+            self.pair_stats["pair_effects_redrawn_compiled"] += 1
+            candidate = self._draw_effect(draft.roles, set(kept), kept.values())
+            if candidate is None:
+                self.stats["effects_dropped_no_slot"] += 1
+                continue
+            kept[_effect_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_effect_keys.add(_effect_slot(candidate, self.pair_fluents))
         if changed:
             draft.effects = tuple(kept.values())
         return changed
@@ -830,12 +1291,14 @@ class _Dynamics:
         self, draft: _Draft, achievable: set[tuple[str, bool]], produced: list[tuple[str, bool]]
     ) -> bool:
         changed = False
-        kept: dict[tuple, AnyLiteral] = {_literal_slot(lit): lit for lit in draft.precondition}
+        kept: dict[tuple, AnyLiteral] = {
+            _literal_slot(lit, self.pair_fluents): lit for lit in draft.precondition
+        }
         for literal in list(draft.precondition):
             if self.literal_achievable(literal, achievable):
                 continue
             changed = True
-            key = _literal_slot(literal)
+            key = _literal_slot(literal, self.pair_fluents)
             del kept[key]
             if key not in draft.own_literal_keys:
                 self.stats["literals_dropped_unachievable"] += 1
@@ -843,15 +1306,138 @@ class _Dynamics:
             draft.own_literal_keys.discard(key)
             self.stats["literals_redrawn"] += 1
             candidate = self._draw_literal(
-                draft.roles, achievable, produced, set(kept) | condition_keys(draft.effects)
+                draft.roles,
+                achievable,
+                produced,
+                set(kept) | condition_keys(draft.effects),
+                effects=draft.effects,
+                kept=list(kept.values()) + self.virtual_compiled(draft),
             )
             if candidate is None:
                 self.stats["literals_dropped_unachievable"] += 1
                 continue
-            kept[(candidate.role, candidate.fluent)] = candidate
-            draft.own_literal_keys.add((candidate.role, candidate.fluent))
+            kept[_literal_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_literal_keys.add(_literal_slot(candidate, self.pair_fluents))
         if changed:
             draft.precondition = tuple(kept.values())
+        return changed
+
+    def virtual_compiled(self, draft: _Draft) -> list[PairLiteral]:
+        """The compiled literals (F4) the draft's unconditional adds will get, as
+        ``compile_profile_literals`` will append them, those already present by what they name
+        left out: a drawn literal must neither imply nor be implied by one of them (Jon's
+        ruling 2 on stage c2b: compiled literals are never redrawn)."""
+        present = {
+            pair_literal_key(lit, self.pair_fluents[lit.pair_fluent])
+            for lit in draft.precondition
+            if isinstance(lit, PairLiteral)
+        }
+        found: list[PairLiteral] = []
+        for effect in draft.effects:
+            if not effect.pair or effect.condition or not effect.value:
+                continue
+            fluent = self.pair_fluents[effect.fluent]
+            for literal in compiled_literals(effect, fluent):
+                key = pair_literal_key(literal, fluent)
+                if key not in present:
+                    present.add(key)
+                    found.append(literal)
+        return found
+
+    def _implied(self, candidate: PairLiteral, kept: Sequence[AnyLiteral], draft: _Draft) -> bool:
+        """``implied_conflict`` with its count."""
+        if implied_conflict(candidate, kept, self.pair_fluents, draft.roles):
+            self.pair_stats["pair_literals_redrawn_implied"] += 1
+            return True
+        return False
+
+    def fix_implied_literals(
+        self, draft: _Draft, achievable: set[tuple[str, bool]], produced: list[tuple[str, bool]]
+    ) -> bool:
+        """A drawn pair literal implied by, contradicted by, or implying another literal of the
+        precondition or a compiled literal the effects will get is drawn again (own) or dropped
+        (inherited); compiled literals are never redrawn (Jon's ruling 2 on stage c2b). Run in
+        the fix-up rounds, because the effects, and so the compiled literals, can change
+        there. Returns whether anything changed."""
+        if not any(isinstance(lit, PairLiteral) for lit in draft.precondition):
+            return False
+        changed = False
+        kept: dict[tuple, AnyLiteral] = {
+            _literal_slot(lit, self.pair_fluents): lit for lit in draft.precondition
+        }
+        for literal in list(draft.precondition):
+            if not isinstance(literal, PairLiteral):
+                continue
+            key = _literal_slot(literal, self.pair_fluents)
+            if key not in kept:
+                continue
+            others = [lit for lit in kept.values() if lit is not literal]
+            others += self.virtual_compiled(_Draft(draft.event_type, effects=draft.effects))
+            if not implied_conflict(literal, others, self.pair_fluents, draft.roles):
+                continue
+            changed = True
+            del kept[key]
+            if key not in draft.own_literal_keys:
+                self.pair_stats["pair_literals_dropped_implied"] += 1
+                continue
+            draft.own_literal_keys.discard(key)
+            self.stats["literals_redrawn"] += 1
+            self.pair_stats["pair_literals_redrawn_implied"] += 1
+            candidate = self._draw_literal(
+                draft.roles,
+                achievable,
+                produced,
+                set(kept) | condition_keys(draft.effects),
+                effects=draft.effects,
+                kept=others,
+            )
+            if candidate is None:
+                self.stats["literals_dropped_unachievable"] += 1
+                continue
+            kept[_literal_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_literal_keys.add(_literal_slot(candidate, self.pair_fluents))
+        if changed:
+            draft.precondition = tuple(kept.values())
+        return changed
+
+    def dead_pair_fluents(self) -> set[str]:
+        """The pair fluents that can never hold: an initial rate of 0 and no add anywhere in
+        the world (after the draws); a delete on one can never change anything (Jon's ruling 1
+        on stage c2b)."""
+        adds, _ = self.pair_adds_and_deletes()
+        return {f.label for f in self.pair_fluents if f.initial_rate == 0.0 and f.label not in adds}
+
+    def fix_dead_deletes(self, draft: _Draft) -> bool:
+        """A delete on a pair fluent that can never hold is redrawn as an empty effect is: an
+        own effect drawn again, an inherited one dropped. Run in the fix-up rounds until
+        stable, because a redrawn effect can be an add that brings a pair fluent to life."""
+        if not any(e.pair and not e.value for e in draft.effects):
+            return False
+        dead = self.dead_pair_fluents()
+        if not dead:
+            return False
+        changed = False
+        kept: dict[tuple, Effect] = {_effect_slot(e, self.pair_fluents): e for e in draft.effects}
+        for effect in list(draft.effects):
+            if not effect.pair or effect.value or effect.fluent not in dead:
+                continue
+            changed = True
+            key = _effect_slot(effect, self.pair_fluents)
+            del kept[key]
+            if key not in draft.own_effect_keys:
+                self.pair_stats["pair_deletes_dropped_dead"] += 1
+                continue
+            draft.own_effect_keys.discard(key)
+            self.pair_stats["pair_deletes_redrawn_dead"] += 1
+            self.stats["effects_redrawn"] += 1
+            candidate = self._draw_effect(draft.roles, set(kept), kept.values())
+            if candidate is None:
+                self.stats["effects_dropped_no_slot"] += 1
+                continue
+            kept[_effect_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_effect_keys.add(_effect_slot(candidate, self.pair_fluents))
+        if changed:
+            draft.effects = tuple(kept.values())
         return changed
 
     # Explicit entries -----------------------------------------------------------------------
@@ -1034,9 +1620,9 @@ class _Dynamics:
             raise ConfigError(
                 source,
                 where,
-                f"{lit.key} reads unknown pair fluent {lit.pair_fluent}; the event file's "
-                f"pair_fluents block defines "
-                f"{', '.join(self.pair_fluents.labels) or 'no pair fluent'}",
+                f"{lit.key} reads unknown pair fluent {lit.pair_fluent}; the world's pair "
+                f"fluents are {', '.join(self.pair_fluents.labels) or 'none'} (the event "
+                f"file's pair_fluents block and pair_fluents.count of the configuration)",
             )
         for role in lit.roles:
             self._check_role(source, where, et, role, lit.key)
@@ -1064,8 +1650,9 @@ class _Dynamics:
             raise ConfigError(
                 source,
                 where,
-                f"writes unknown pair fluent {effect.fluent}; the event file's pair_fluents "
-                f"block defines {', '.join(self.pair_fluents.labels) or 'no pair fluent'}",
+                f"writes unknown pair fluent {effect.fluent}; the world's pair fluents are "
+                f"{', '.join(self.pair_fluents.labels) or 'none'} (the event file's "
+                f"pair_fluents block and pair_fluents.count of the configuration)",
             )
         assert effect.second is not None
         self._check_role(source, where, et, effect.second, effect.key)
@@ -1098,6 +1685,14 @@ class _Dynamics:
                     if fluent.symmetric
                     else ""
                 ),
+            )
+        reverse = ("pair", fluent.label, (effect.second, effect.role))
+        if fluent.asymmetric and effect.value and seen.get(reverse) is True:
+            raise ConfigError(
+                source,
+                where,
+                f"{effect.text} adds the reverse of a pair the entry already adds on the "
+                f"asymmetric pair fluent {fluent.label}; one event cannot add both directions",
             )
         seen[key] = effect.value
 
@@ -1147,7 +1742,12 @@ class _Dynamics:
                 for literal in compiled_literals(effect, fluent):
                     other = keys.get(pair_literal_key(literal, fluent))
                     if other is not None and other.value != literal.value:
-                        assert self.event_file is not None and draft.explicit is not None
+                        if self.event_file is None or draft.explicit is None:
+                            raise WorldError(
+                                f"{draft.event_type.label}: the effect {effect.text} needs the "
+                                f"compiled literal {literal.text}, which contradicts the "
+                                f"precondition literal {other.text} after the fix-ups"
+                            )
                         raise ConfigError(
                             self.event_file.source,
                             draft.explicit.field,
@@ -1296,11 +1896,24 @@ class _Dynamics:
         name the fluent the effect sets (with the effect's value the effect would change
         nothing, and with the other value the fluent has the effect's value after the event
         either way, so the condition would be a condition in name only); and some able binding
-        of every holder satisfies the static literals."""
-        keys = {(lit.role, lit.symbol) for lit in condition}
+        of every holder satisfies the static literals. A pair literal (stage c2b, F5) is
+        achievable, names no pair or row a holder's precondition names (its compiled literals
+        included), is not fixed by a holder's precondition under ``fixed_pair_literals``, and
+        is not the pair the effect itself writes."""
+        keys = {
+            pair_literal_key(lit, self.pair_fluents[lit.pair_fluent])
+            if isinstance(lit, PairLiteral)
+            else (lit.role, lit.symbol)
+            for lit in condition
+        }
         if len(keys) < len(condition):
+            self.pair_stats_count("pair_conditions_rejected_other", condition)
             return False
         for lit in condition:
+            if isinstance(lit, PairLiteral):
+                if not self._pair_condition_ok(effect, lit, holders):
+                    return False
+                continue
             if lit.kind == "feature":
                 continue
             if not self._condition_literal_achievable(lit, achievable):
@@ -1311,9 +1924,50 @@ class _Dynamics:
             if not lit.numeric and (lit.role, lit.symbol) == (effect.role, effect.fluent):
                 return False
             for draft in holders:
-                if any((p.role, p.fluent) == (lit.role, lit.symbol) for p in draft.precondition):
+                if any(
+                    not p.pair and (p.role, p.fluent) == (lit.role, lit.symbol)
+                    for p in draft.precondition
+                ):
                     return False
         return all(self._static_satisfiable(d.event_type, condition) for d in holders)
+
+    def _pair_kind_drawable(self, roles: tuple[str, ...]) -> bool:
+        """Whether a pair literal can be drawn over the roles at all (a one-place event type
+        needs the ``some`` kind with a positive weight)."""
+        kinds = self.pair_config.literal_kinds
+        if len(roles) == 1:
+            return kinds.get("some", 0) > 0
+        return any(w > 0 for w in kinds.values())
+
+    def pair_stats_count(self, key: str, condition: Sequence[AnyLiteral]) -> None:
+        """Count a rejected condition under ``key`` when it holds a pair literal."""
+        if any(isinstance(lit, PairLiteral) for lit in condition) and self.pair_stats:
+            self.pair_stats[key] += 1
+
+    def _pair_condition_ok(
+        self, effect: Effect, lit: PairLiteral, holders: Sequence[_Draft]
+    ) -> bool:
+        """The rules of a drawn pair condition literal (F5, and item 6 of the stage prompt)."""
+        fluent = self.pair_fluents[lit.pair_fluent]
+        adds, deletes = self.pair_adds_and_deletes()
+        key = pair_literal_key(lit, fluent)
+        if not pair_literal_achievable(lit, fluent, adds, deletes) or (
+            effect.pair and key == pair_effect_key(effect, self.pair_fluents[effect.fluent])
+        ):
+            self.pair_stats["pair_conditions_rejected_other"] += 1
+            return False
+        names = pair_literal_names(lit, fluent)
+        for draft in holders:
+            for other in draft.precondition:
+                if not isinstance(other, PairLiteral):
+                    continue
+                if names & pair_literal_names(other, self.pair_fluents[other.pair_fluent]):
+                    self.pair_stats["pair_conditions_rejected_named"] += 1
+                    return False
+            if key in fixed_pair_literals(draft.precondition, self.pair_fluents, draft.roles):
+                self.pair_stats["pair_conditions_rejected_fixed"] += 1
+                return False
+        return True
 
     def _draw_condition(
         self,
@@ -1333,11 +1987,14 @@ class _Dynamics:
             "feature": self.feature_labels,
             "fluent": self.all_labels,
             "numeric": self.numeric_labels,
+            "pair": self.pair_fluents.labels,
         }
         weights = {
             kind: weight
             for kind, weight in self.effects_config.condition_kinds.items()
-            if weight > 0 and pools.get(kind)
+            if weight > 0
+            and pools.get(kind)
+            and (kind != "pair" or self._pair_kind_drawable(roles))
         }
         # The even split between features and fluents is drawn with rng.integers(2), as stage b1
         # drew it: a weighted draw (rng.choice with probabilities) reads the stream differently,
@@ -1369,13 +2026,25 @@ class _Dynamics:
                         ConditionLiteral(role, symbol, above, self.numeric[symbol].point(fraction))
                     )
                     continue
+                if kind == "pair":
+                    # the pair literal draws its own role (stage c2b, "as for preconditions")
+                    pair_literal = random_pair_literal(
+                        roles,
+                        self.rng_pair_conditions,
+                        self.pair_fluents,
+                        self.pair_config.literal_kinds,
+                    )
+                    assert pair_literal is not None  # the kind is drawn only when one can be
+                    self.pair_stats["pair_conditions_drawn"] += 1
+                    literals.append(pair_literal)
+                    continue
                 pool = pools[kind]
                 symbol = pool[int(rng.integers(len(pool)))]
                 value = bool(rng.integers(2))
                 literals.append(ConditionLiteral(role, symbol, value))
             condition = tuple(literals)
-            if self._condition_ok(effect, condition, holders, achievable):
-                return condition
+            if self._condition_ok(effect, condition, holders, achievable):  # type: ignore[arg-type]
+                return condition  # type: ignore[return-value]
             self.stats["conditions_redrawn"] += 1
         return None
 
@@ -1391,21 +2060,37 @@ class _Dynamics:
         # effects of every event type without an explicit entry (an inherited effect counts
         # once, for the feature; the statistics report the share of all effects beside it).
         self.condition_draws["drawn"] = sum(
-            1 for effect in self.feature_effects.values() if effect is not None
+            1
+            for effect in self.feature_effects.values()
+            if effect is not None and not keeps_no_condition(effect, self.pair_fluents)
         ) + sum(
             1
             for draft in self.drafts.values()
             if draft.explicit is None or draft.explicit.effects is None
             for effect in draft.effects
-            if (effect.role, effect.fluent) in draft.own_effect_keys
+            if _effect_slot(effect, self.pair_fluents) in draft.own_effect_keys
+            and not keeps_no_condition(effect, self.pair_fluents)
         )
+        if self.pair_stats:
+            self.pair_stats["adds_kept_unconditional"] = sum(
+                1
+                for effect in self.feature_effects.values()
+                if effect is not None and keeps_no_condition(effect, self.pair_fluents)
+            ) + sum(
+                1
+                for draft in self.drafts.values()
+                if draft.explicit is None or draft.explicit.effects is None
+                for effect in draft.effects
+                if _effect_slot(effect, self.pair_fluents) in draft.own_effect_keys
+                and keeps_no_condition(effect, self.pair_fluents)
+            )
         if cfg.conditional_share <= 0 or not (self.base_labels or self.numeric_labels):
             return
         rng = self.rng_conditions
         achievable = self.achievable()
         for feature in self.static.features:
             effect = self.feature_effects.get(feature)
-            if effect is None:
+            if effect is None or keeps_no_condition(effect, self.pair_fluents):
                 continue
             if rng.random() >= cfg.conditional_share:
                 continue
@@ -1420,7 +2105,7 @@ class _Dynamics:
             if condition is None:
                 self.stats["conditions_dropped"] += 1
                 continue
-            conditioned = Effect(effect.role, effect.fluent, effect.value, condition)
+            conditioned = Effect(effect.role, effect.fluent, effect.value, condition, effect.second)
             self.feature_effects[feature] = conditioned
             self.condition_draws["conditional"] += 1
             for draft in holders:
@@ -1430,7 +2115,9 @@ class _Dynamics:
                 continue
             effects = list(draft.effects)
             for i, effect in enumerate(effects):
-                if (effect.role, effect.fluent) not in draft.own_effect_keys:
+                if _effect_slot(effect, self.pair_fluents) not in draft.own_effect_keys:
+                    continue
+                if keeps_no_condition(effect, self.pair_fluents):
                     continue
                 if rng.random() >= cfg.conditional_share:
                     continue
@@ -1438,7 +2125,9 @@ class _Dynamics:
                 if condition is None:
                     self.stats["conditions_dropped"] += 1
                     continue
-                effects[i] = Effect(effect.role, effect.fluent, effect.value, condition)
+                effects[i] = Effect(
+                    effect.role, effect.fluent, effect.value, condition, effect.second
+                )
                 self.condition_draws["conditional"] += 1
             draft.effects = tuple(effects)
 
@@ -1457,11 +2146,14 @@ class _Dynamics:
             for draft in self.drafts.values():
                 if draft.explicit is None or draft.explicit.effects is None:
                     changed |= self.fix_empty_effects(draft)
+                    changed |= self.fix_compiled_contradictions(draft)
+                    changed |= self.fix_dead_deletes(draft)
             achievable = self.achievable()
             produced = self.produced()
             for draft in self.drafts.values():
                 if draft.explicit is None or draft.explicit.precondition is None:
                     changed |= self.fix_unachievable(draft, achievable, produced)
+                    changed |= self.fix_implied_literals(draft, achievable, produced)
             if not changed:
                 break
         self.compile_profile_literals()
@@ -1491,6 +2183,7 @@ class _Dynamics:
             dict(self.feature_effects),
             dict(self.stats),
             dict(self.condition_draws),
+            dict(self.pair_stats),
         )
 
 
@@ -1562,18 +2255,27 @@ def redraw_preconditions(
     derived_initial: Mapping[str, np.ndarray],
     numeric: NumericFluents | None = None,
     numeric_parts: Mapping[str, np.random.Generator] | None = None,
+    pair_fluents: PairFluents | None = None,
+    pair_parts: Mapping[str, np.random.Generator] | None = None,
 ) -> EventTypes:
     """The event types with the own precondition literals of the named event types drawn
-    again, each from its own generator (the part ``world:preconditions:<label>``, and
-    ``world:numeric_preconditions:<label>`` for the numeric replacements), as ``define``
-    redraws an event type that was never legal in the statistics episodes. The inherited
-    literals stay, except one that is no longer achievable (the generator's fix-ups dropped it
-    from the event type when the effect that produced its value went); a literal that would make
-    one of the event type's own effects empty, that duplicates an inherited one, or that fixes a
-    fluent one of the event type's conditions reads, is drawn again. No other event type
-    changes."""
+    again, each from its own generator (the part ``world:preconditions:<label>``,
+    ``world:numeric_preconditions:<label>`` for the numeric replacements, and, since stage
+    c2b, ``world:pair_preconditions:<label>`` for the pair replacements at ``pair_share``), as
+    ``define`` redraws an event type that was never legal in the statistics episodes. The
+    inherited literals stay, except one that is no longer achievable (the generator's fix-ups
+    dropped it from the event type when the effect that produced its value went), and so do the
+    compiled literals; a literal that would make one of the event type's own effects empty,
+    that duplicates an inherited or a compiled one, that fixes a fluent one of the event type's
+    conditions reads, or (a pair literal) that names what a pair condition names or fixes a
+    pair condition's value, is drawn again. No other event type changes."""
     cfg = config.event_types.preconditions
     numeric = numeric if numeric is not None else empty_numeric(fluents.initial_values.shape[0])
+    pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
+    adds = {e.fluent for et in event_types.event_types for e in et.effects if e.pair and e.value}
+    deletes = {
+        e.fluent for et in event_types.event_types for e in et.effects if e.pair and not e.value
+    }
     achievable: set[tuple[str, bool]] = set()
     for i, fluent in enumerate(fluents.base):
         for value in np.unique(fluents.initial_values[:, i]):
@@ -1581,8 +2283,14 @@ def redraw_preconditions(
     for label, column in derived_initial.items():
         for value in np.unique(column):
             achievable.add((label, bool(value)))
+    # the Boolean values effects produce; a pair effect produces no fluent value (stage c2b)
     produced = sorted(
-        {(e.fluent, e.value) for et in event_types.event_types for e in et.effects if not e.numeric}
+        {
+            (e.fluent, e.value)
+            for et in event_types.event_types
+            for e in et.effects
+            if not e.numeric and not e.pair
+        }
     )
     achievable |= set(produced)
     signs = produced_numeric(event_types)
@@ -1599,18 +2307,29 @@ def redraw_preconditions(
         et = event_types.event_type(label)
         rng = parts[label]
         numeric_rng = (numeric_parts or {}).get(label)
-        inherited: dict[tuple[str, str], Literal] = {}
+        pair_rng = (pair_parts or {}).get(label)
+        inherited: dict[tuple, AnyLiteral] = {}
         for feature in event_types.features:
             literal = feature_literals.get(feature)
-            if literal is not None and feature in et.features and ok(literal):
+            if literal is None or feature not in et.features:
+                continue
+            if isinstance(literal, PairLiteral):
+                fluent = pair_fluents[literal.pair_fluent]
+                if pair_literal_achievable(literal, fluent, adds, deletes):
+                    inherited.setdefault(_literal_slot(literal, pair_fluents), literal)
+            elif ok(literal):
                 inherited.setdefault((literal.role, literal.fluent), literal)
         empty = {(e.role, e.fluent, e.value) for e in et.effects if not e.numeric and not e.pair}
+        empty_pairs = {(_effect_slot(e, pair_fluents), e.value) for e in et.effects if e.pair}
         read = condition_keys(et.effects)
         kept: dict[tuple, AnyLiteral] = dict(inherited)
         # The compiled literals of stage c2a (origin profile) stay with the event type.
         for lit in et.precondition:
             if isinstance(lit, PairLiteral) and lit.compiled:
-                kept[("compiled", lit.key)] = lit
+                kept[_literal_slot(lit, pair_fluents)] = lit
+
+        pair_draw = (pair_fluents, config, et.roles, pair_rng)
+        pair_sets = (adds, deletes, empty_pairs)
         n = _draw(rng, cfg.literals)
         for _ in range(n):
             for _ in range(MAX_TRIES):
@@ -1618,7 +2337,11 @@ def redraw_preconditions(
                 if not fluents.labels:
                     literal = _redraw_numeric(numeric, cfg, role, numeric_rng, kept, read, signs)
                     if literal is not None:
-                        kept[(role, literal.fluent)] = literal
+                        replacement = _redraw_pair(*pair_draw, kept, et.effects, *pair_sets)
+                        if replacement is not None:
+                            kept[_literal_slot(replacement, pair_fluents)] = replacement
+                        else:
+                            kept[(role, literal.fluent)] = literal
                         break
                     continue
                 if produced and rng.random() < cfg.enabled_share:
@@ -1644,13 +2367,53 @@ def redraw_preconditions(
                         )
                         if replacement is not None:
                             literal = replacement
-                    kept[(role, literal.fluent)] = literal
+                    pair_literal = _redraw_pair(*pair_draw, kept, et.effects, *pair_sets)
+                    if pair_literal is not None:
+                        kept[_literal_slot(pair_literal, pair_fluents)] = pair_literal
+                    else:
+                        kept[(role, literal.fluent)] = literal
                     break
         redrawn[label] = dataclasses.replace(et, precondition=tuple(kept.values()))
     return dataclasses.replace(
         event_types,
         event_types=tuple(redrawn.get(et.label, et) for et in event_types.event_types),
     )
+
+
+def _redraw_pair(
+    pair_fluents: PairFluents,
+    config: Config,
+    roles: tuple[str, ...],
+    rng: np.random.Generator | None,
+    kept: Mapping[tuple, AnyLiteral],
+    effects: tuple[Effect, ...],
+    adds: set[str],
+    deletes: set[str],
+    empty_pairs: set[tuple],
+) -> PairLiteral | None:
+    """A pair literal for a redraw at ``pair_share`` from the event type's part of
+    ``world:pair_preconditions``, or None: achievable, in a free slot, leaving the conditions
+    as conditions, and not making an own pair effect empty."""
+    cfg = config.event_types.preconditions
+    if rng is None or not len(pair_fluents) or cfg.pair_share <= 0:
+        return None
+    if rng.random() >= cfg.pair_share:
+        return None
+    for _ in range(MAX_TRIES):
+        candidate = random_pair_literal(roles, rng, pair_fluents, config.pair_fluents.literal_kinds)
+        if candidate is None:
+            return None
+        fluent = pair_fluents[candidate.pair_fluent]
+        slot = pair_literal_key(candidate, fluent)
+        if (
+            slot not in kept
+            and pair_literal_achievable(candidate, fluent, adds, deletes)
+            and precondition_literal_fits_conditions(candidate, effects, pair_fluents, roles)
+            and (slot, candidate.value) not in empty_pairs
+            and not implied_conflict(candidate, list(kept.values()), pair_fluents, roles)
+        ):
+            return candidate
+    return None
 
 
 def _redraw_numeric(
@@ -1877,6 +2640,12 @@ def _check_pair_effect(
     key = pair_effect_key(effect, fluent)
     if key in effect_keys:
         raise ValueError(f"{et.label}: two effects write {effect.key}")
+    reverse = ("pair", fluent.label, (effect.second, effect.role))
+    if fluent.asymmetric and effect.value and effect_keys.get(reverse) is True:
+        raise ValueError(
+            f"{et.label}: the effect {effect.text} adds the reverse of a pair the event type "
+            f"adds on the asymmetric pair fluent {fluent.label}"
+        )
     effect_keys[key] = effect.value
     required = pair_precondition.get(key)
     if required is not None and required.value == effect.value:
@@ -1946,6 +2715,15 @@ __all__ = [
     "CONSTRAINT_PREFIX",
     "add_compiled_literals",
     "compiled_literals",
+    "condition_pair_keys",
+    "condition_pair_names",
+    "fixed_pair_literals",
+    "implied_conflict",
+    "keeps_no_condition",
+    "precondition_literal_fits_conditions",
+    "random_pair_effect",
+    "random_pair_literal",
+    "reverse_add_conflict",
     "pair_effect_key",
     "pair_literal_achievable",
     "pair_literal_key",

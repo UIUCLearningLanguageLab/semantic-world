@@ -174,6 +174,7 @@ def define(config: Config) -> WorldResult:
         streams,
         explicit=event_file.pair_fluents if event_file is not None else None,
         explicit_source=event_file.source if event_file is not None else None,
+        config=config.pair_fluents,
     )
     spatial = event_file.spatial if event_file is not None else None
     numeric = generate_numeric_fluents(
@@ -190,8 +191,9 @@ def define(config: Config) -> WorldResult:
         explicit_rates=event_file.fluents if event_file is not None else None,
         explicit_source=event_file.source if event_file is not None else None,
         numeric=numeric,
+        pair_fluents=pair_fluents,
     )
-    derived_initial = derived_initial_values(fluents, taxonomy, numeric)
+    derived_initial = derived_initial_values(fluents, taxonomy, numeric, pair_fluents)
     event_types = generate_event_types(
         statics, fluents, config, streams, event_file, derived_initial, numeric, pair_fluents
     )
@@ -211,6 +213,7 @@ def define(config: Config) -> WorldResult:
     redraws: dict[str, int] = {}
     parts: dict[str, np.random.Generator] = {}
     numeric_parts: dict[str, np.random.Generator] = {}
+    pair_parts: dict[str, np.random.Generator] = {}
     episodes = statistics_episodes(definition, statics, config, redraws)
     for _ in range(MAX_REDRAW_ROUNDS):
         never = [
@@ -223,9 +226,20 @@ def define(config: Config) -> WorldResult:
         for label in never:
             parts.setdefault(label, streams.part("preconditions", label))
             numeric_parts.setdefault(label, streams.part("numeric_preconditions", label))
+            if len(pair_fluents):
+                pair_parts.setdefault(label, streams.part("pair_preconditions", label))
             redraws[label] = redraws.get(label, 0) + 1
         event_types = redraw_preconditions(
-            event_types, never, fluents, config, parts, derived_initial, numeric, numeric_parts
+            event_types,
+            never,
+            fluents,
+            config,
+            parts,
+            derived_initial,
+            numeric,
+            numeric_parts,
+            pair_fluents,
+            pair_parts,
         )
         _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
         definition = build_definition(
@@ -233,7 +247,7 @@ def define(config: Config) -> WorldResult:
         )
         episodes = statistics_episodes(definition, statics, config, redraws)
     report = check_definition(definition)
-    stats = world_stats(fluents, event_types, episodes, statics, numeric, places)
+    stats = world_stats(fluents, event_types, episodes, statics, numeric, places, pair_fluents)
     seeds = {**TaxonomyStreams(taxonomy.config.seed).seeds(), **streams.seeds()}
     warnings = tuple(taxonomy.warnings) + tuple(statics.warnings)
     if places is not None:

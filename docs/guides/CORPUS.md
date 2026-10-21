@@ -32,7 +32,7 @@ The default corpus is 10,000 documents about the default world, `data/world/defa
 PYTHONPATH=python python -m semantic_world.corpus generate data/corpus/default.yaml
 ```
 
-It prints <!--figure:default.corpus.wrote_code-->`10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457 pairs`<!--/figure-->, and takes about 2.4 minutes (142 seconds) on a laptop (October 21, 2026, stage c2a; 134 seconds in stage c1, 141 seconds in stage b3b, 133 seconds in stage b3a, 158 seconds in stage b2, 157 seconds in stage b1, 158 seconds in stage a8). The world itself takes 7 seconds (`WORLD.md`). Every stage records these times, measured with nothing else running, and flags a growth of more than half in its proposal file; there is no hard time limit, and no step is made cheaper by changing what it produces by default (Jon's ruling 3 on stage a8).
+It prints <!--figure:default.corpus.wrote_code-->`10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457 pairs`<!--/figure-->, and takes about 2.4 minutes (142 seconds) on a laptop (October 21, 2026, stages c2b and c2a; 134 seconds in stage c1, 141 seconds in stage b3b, 133 seconds in stage b3a, 158 seconds in stage b2, 157 seconds in stage b1, 158 seconds in stage a8). The world itself takes 7 seconds (`WORLD.md`). Every stage records these times, measured with nothing else running, and flags a growth of more than half in its proposal file; there is no hard time limit, and no step is made cheaper by changing what it produces by default (Jon's ruling 3 on stage a8).
 
 Two options change a run without editing the configuration:
 

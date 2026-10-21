@@ -7,10 +7,13 @@ A figure is a number, a label, or a short text that a run's files hold: ``config
 ``world_stats.yaml``, ``definition.json``, and ``derived/`` of a world run, and ``config.yaml``
 and ``stats.yaml`` of a corpus run. ``world_figures`` and ``corpus_figures`` read them into one
 mapping each. The snapshot (``tests/figures/snapshot.yaml``) holds the figures of the tiny and
-default worlds and corpora, and the baselines of the settings that turn a feature off (the
-rule-set identity of each world with the feature off, and the hash of the tiny corpus's
-``documents.jsonl`` without conditional effects). One test compares a regenerated run with the
-snapshot; ``snapshot`` rewrites the file on purpose and prints what moved.
+default worlds and corpora, of the ``tiny_full`` and ``default_full`` worlds (the phase (c)
+settings until stage c4, Jon's ruling WM.63; no corpus runs on them) and of the ``tiny_pairs``
+world (stage c2a's world from an event file, whose identity must not move), and the baselines of
+the settings that turn a feature off (the rule-set identity of each world without an event file
+with the feature off, and the hash of the tiny corpus's ``documents.jsonl`` without conditional
+effects). One test compares a regenerated run with the snapshot; ``snapshot`` rewrites the file
+on purpose and prints what moved.
 
 The guides quote figures between marker comments, ``<!--figure:KEY|FORMAT-->TEXT<!--/figure-->``,
 where ``KEY`` is a dotted path into the figures (``default.corpus.sentences``,
@@ -39,8 +42,22 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 SNAPSHOT_FILE = REPO / "tests" / "figures" / "snapshot.yaml"
 RUNS = REPO / "runs"
-WORLD_CONFIGS = {"tiny": "data/world/tiny.yaml", "default": "data/world/default.yaml"}
+WORLD_CONFIGS = {
+    "tiny": "data/world/tiny.yaml",
+    "default": "data/world/default.yaml",
+    "tiny_full": "data/world/tiny_full.yaml",
+    "default_full": "data/world/default_full.yaml",
+    "tiny_pairs": "data/world/tiny_pairs.yaml",
+}
+"""The worlds of the snapshot. ``tiny_full`` and ``default_full`` carry the phase (c) settings
+until stage c4 (stage c2b, WM.63), and ``tiny_pairs`` is stage c2a's world from an event file,
+kept so that its identity is tested."""
 CORPUS_CONFIGS = {"tiny": "data/corpus/tiny.yaml", "default": "data/corpus/default.yaml"}
+"""The corpora of the snapshot: none runs on a world with pair fluents until stage c4."""
+BASELINE_NAMES = ("tiny", "default", "tiny_full", "default_full")
+"""The worlds whose off-setting baselines the snapshot holds: every world of the snapshot
+without an event file (``tiny_pairs`` defines its pair fluents in a file, which the off setting
+of pair fluents would refuse)."""
 GUIDES = (
     "README.md",
     "docs/guides/README.md",
@@ -54,12 +71,29 @@ OFF_SETTINGS: dict[str, dict[str, Any]] = {
     "two_place_off": {"event_types": {"binary": None}},
     "numeric_fluents_off": {"numeric_fluents": {"count": 0}},
     "places_off": {"places": None, "place_event_types": None},
+    "pair_fluents_off": {"pair_fluents": {"count": 0, "locations": 0}},
+    "pair_dynamics_off": {
+        "pair_fluents": {"rule_weight": 0, "derived_rules": 0},
+        "event_types": {
+            "preconditions": {"pair_share": 0},
+            "effects": {
+                "pair_share": 0,
+                "condition_kinds": {"feature": 0.4, "fluent": 0.4, "numeric": 0.2, "pair": 0},
+            },
+        },
+    },
 }
 """The features of the world with an off setting, and the setting: conditional effects (stage
 b1, promised byte-identical to the world without them), fluents (the static side is promised
 unchanged), two-place event types (the taxonomy and the one-place side are promised unchanged),
-numeric fluents (stage b2, promised byte-identical to the b1 world), and places (stage c1,
-promised byte-identical to the world before places, after the rounding of drawn reals)."""
+numeric fluents (stage b2, promised byte-identical to the b1 world), places (stage c1, promised
+byte-identical to the world before places, after the rounding of drawn reals), pair fluents
+(stage c2b: ``default_full`` with ``count`` 0 is promised byte-identical to the default world of
+stage c2a, and every world without pair fluents is its own baseline), and the pair dynamics
+(stage c2b: with the pair shares, the pair condition weight, the rule weight, and the quota at
+0, the pair fluents exist with their initial pairs but nothing reads or writes them, and the
+event types and the derived rules are promised to be those of the world without pair
+fluents)."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -150,6 +184,7 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
     numeric = stats.get("numeric_fluents") or {}
     places = stats.get("places") or {}
     place_densities = list((places.get("density") or {}).values())
+    pair_block = stats.get("pair_fluents")
     figures: dict[str, Any] = {
         "name": config["name"],
         "seed": config["seed"],
@@ -239,6 +274,28 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
             )
         },
     }
+    if pair_block:
+        # the pair figures (stage c2b), only in a world with pair fluents, so that the figures
+        # of every other world do not move
+        figures["pair_fluents"] = {
+            "count": pair_block["count"],
+            "by_symmetry": dict(pair_block["by_symmetry"]),
+            "functional": pair_block["functional"],
+            "fluents": json.loads(json.dumps(pair_block["fluents"])),
+            "initial_pairs": pair_block["initial_pairs"],
+            "precondition_literals": json.loads(json.dumps(pair_block["precondition_literals"])),
+            "compiled_literals": json.loads(json.dumps(pair_block["compiled_literals"])),
+            "effects": json.loads(json.dumps(pair_block["effects"])),
+            "condition_literals": json.loads(json.dumps(pair_block["condition_literals"])),
+            "rules_reading_a_pair_literal": pair_block["rules_reading_a_pair_literal"],
+            "fix_ups": dict(pair_block["fix_ups"]),
+            "changes_per_event": pair_block["pair_changes_per_event"],
+            "profiles": ", ".join(
+                f"`{label}` ({row['symmetry']}{', functional' if row['functional'] else ''}, "
+                f"rate {row['initial_rate']})"
+                for label, row in pair_block["fluents"].items()
+            ),
+        }
     figures["categories_with_word"] = sum(
         1 for e in definition["event_types"] if e["kind"] == "event_type_category"
     )
@@ -248,6 +305,8 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
         if figures["places"]["on"]
         else ""
     )
+    if pair_block:
+        place_text += f", {pair_block['count']} pair fluents"
     figures["wrote_line"] = (
         f"{entities} entities, {figures['fluents_total']} fluents "
         f"({figures['fluents']['derived']} derived), {figures['numeric']['count']} numeric "
@@ -419,7 +478,7 @@ def baseline_identity(name: str, feature: str) -> str:
     return define(world_config_off(name, feature)).rule_set_id
 
 
-def baselines(names: Sequence[str] = ("tiny", "default")) -> dict[str, Any]:
+def baselines(names: Sequence[str] = BASELINE_NAMES) -> dict[str, Any]:
     """The baselines of every off setting for the given worlds: the rule-set identities, and
     for conditional effects the hash of the tiny corpus's ``documents.jsonl``."""
     import tempfile
@@ -463,8 +522,8 @@ def tiny_corpus_hash_off(feature: str, folder: str | Path) -> str:
 
 
 def run_folders(runs: str | Path = RUNS) -> dict[str, dict[str, Path]]:
-    """The default and tiny run folders under ``runs``, by the configurations' names and
-    seeds."""
+    """The run folders under ``runs``, by the configurations' names and seeds: a world for
+    every entry of ``WORLD_CONFIGS``, and a corpus for every entry of ``CORPUS_CONFIGS``."""
     from semantic_world.corpus import load_config as load_corpus_config
     from semantic_world.world.config import load_config as load_world_config
 
@@ -472,11 +531,10 @@ def run_folders(runs: str | Path = RUNS) -> dict[str, dict[str, Path]]:
     found: dict[str, dict[str, Path]] = {}
     for name in WORLD_CONFIGS:
         world = load_world_config(REPO / WORLD_CONFIGS[name])
-        corpus = load_corpus_config(REPO / CORPUS_CONFIGS[name])
-        found[name] = {
-            "world": runs / "world" / f"{world.name}_seed{world.seed}",
-            "corpus": runs / "corpus" / f"{corpus.name}_seed{corpus.seed}",
-        }
+        found[name] = {"world": runs / "world" / f"{world.name}_seed{world.seed}"}
+        if name in CORPUS_CONFIGS:
+            corpus = load_corpus_config(REPO / CORPUS_CONFIGS[name])
+            found[name]["corpus"] = runs / "corpus" / f"{corpus.name}_seed{corpus.seed}"
     return found
 
 
@@ -487,7 +545,7 @@ def figures_of_runs(runs: str | Path = RUNS) -> dict[str, Any]:
         found[name] = {}
         if (folders["world"] / "world_stats.yaml").is_file():
             found[name]["world"] = world_figures(folders["world"])
-        if (folders["corpus"] / "stats.yaml").is_file():
+        if "corpus" in folders and (folders["corpus"] / "stats.yaml").is_file():
             found[name]["corpus"] = corpus_figures(folders["corpus"])
     return found
 
@@ -527,7 +585,8 @@ def write_snapshot(
     new["baselines"] = baselines() if with_baselines else old.get("baselines", {})
     changed = moves(old, new)
     header = (
-        "# The figures of the default and tiny runs, and the baselines of the off settings.\n"
+        "# The figures of the default and tiny runs (and of the default_full, tiny_full, and\n"
+        "# tiny_pairs worlds), and the baselines of the off settings.\n"
         "# Written by `python -m semantic_world.figures snapshot` from the runs in runs/;\n"
         "# compared by tests/figures/test_figures.py against runs regenerated in memory. Never\n"
         "# edited by hand: rewrite it on purpose after a change that alters a run, and say what\n"

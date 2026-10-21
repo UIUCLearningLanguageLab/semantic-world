@@ -1,4 +1,7 @@
-# The tiny world with the pair example's pair fluents and explicit event types (stage c2a).
+# The tiny world with the pair example's pair fluents and explicit event types (stage c2a). Since
+# stage c2b the configuration must allow the event file's four pair fluents (pair_fluents.count 4),
+# and the pair shares, the pair condition weight, the derived-rule quota, and the rule weight are
+# 0, so that generation adds nothing and the world keeps stage c2a's rule-set identity (WM.63).
 
 name: tiny_pairs
 seed: 1
@@ -14,4 +17,10 @@ event_types:
   binary:
     features: {count: 4, expected_true: 2}
     taxonomy: {superordinates: 2, depth: 2, branching: 2}
+  preconditions: {pair_share: 0}
+  effects:
+    pair_share: 0
+    condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0}
   event_file: events/pair_example.yaml
+
+pair_fluents: {count: 4, derived_rules: 0, rule_weight: 0}

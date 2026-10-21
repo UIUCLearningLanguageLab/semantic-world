@@ -6,7 +6,9 @@ kept in ``tests/figures/snapshot.yaml`` (taken from a run with the feature off, 
 conditional effects of stage b1 equal to the identity of the a8 world), and the tiny corpus over
 the tiny world without conditional effects is the a8 corpus, by the hash of its
 ``documents.jsonl``. One test per feature and world: the tiny worlds in the fast tier, the
-default world in the slow tier.
+default worlds in the slow tier. Since stage c2b the worlds are those of ``BASELINE_NAMES``
+(``tiny_full`` and ``default_full`` beside ``tiny`` and ``default``), and the features include
+the pair fluents and the pair dynamics.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from semantic_world.figures import (
+    BASELINE_NAMES,
     OFF_SETTINGS,
     REPO,
     SNAPSHOT_FILE,
@@ -25,7 +28,12 @@ from semantic_world.figures import (
 )
 
 SLOW = pytest.mark.slow
-NAMES = ["tiny", pytest.param("default", marks=SLOW)]
+NAMES = [
+    "tiny",
+    pytest.param("default", marks=SLOW),
+    "tiny_full",
+    pytest.param("default_full", marks=SLOW),
+]
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +46,10 @@ def _run_from_the_repository_root(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_world_with_the_feature_off_has_the_baseline_identity(name: str, feature: str) -> None:
     baseline = load_snapshot(SNAPSHOT_FILE)["baselines"][feature][name]
     assert baseline_identity(name, feature) == baseline["rule_set_id"]
+
+
+def test_the_baseline_worlds_are_those_of_the_tests() -> None:
+    assert {n if isinstance(n, str) else n.values[0] for n in NAMES} == set(BASELINE_NAMES)
 
 
 def test_the_tiny_corpus_without_conditional_effects_is_the_a8_corpus(tmp_path: Path) -> None:

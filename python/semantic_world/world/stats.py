@@ -18,7 +18,13 @@ types, and constraints, the constraints by family, the share of approximate proj
 the relation proportions were estimated from a sample of pairs, the event types with fewer sampled
 pairs than requested, and the event types the generator could not bring inside the density range
 (stage a6, Jon's ruling 6 on the a5b questions). It is null in a world without two-place event
-types.
+types. The ``pair_fluents`` block (stage c2b of ``docs/specs/WORLD_PHASE_C.md``, "World
+statistics") reports the pair fluents by profile, their initial rates and initial pairs, the
+pair literals of preconditions by kind, role, polarity, and kind of event type, the compiled
+literals by origin, the pair effects by value, the pair condition literals, the derived rules
+that read a pair literal, the pair draws and redraws, and the episodes' pair changes per event;
+it is written only when the world has pair fluents, so that the statistics of every other world
+are as before.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from semantic_world.world.event_types import EventTypes
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.history import History
 from semantic_world.world.numeric import NumericFluents
+from semantic_world.world.pair_fluents import PairFluents
 from semantic_world.world.places import Places, places_stats
 
 if TYPE_CHECKING:
@@ -140,12 +147,20 @@ def episode_stats(
         for label in {e.type for e in step.events}:
             occurred_steps[label] += 1
     events = [e for step in steps for e in step.events]
-    changes = sum(1 for e in events for c in e.changes if not c.numeric)
+    changes = sum(1 for e in events for c in e.changes if not c.numeric and not c.pair)
     numeric_changes = sum(1 for e in events for c in e.changes if c.numeric)
+    pair_changes = sum(1 for e in events for c in e.changes if c.pair)
     drift_changes = sum(len(step.drift) for step in steps)
     never = [label for label in event_types if legal_steps[label] == 0]
     quiescent = sum(1 for h in histories if h.quiescent)
     reasons = {label: "never_able" if label in never_able else "preconditions" for label in never}
+    # the pair changes per event (stage c2b), only in a world with pair fluents, whose
+    # histories list their initial pairs
+    pairs = (
+        {"pair_changes_per_event": round(pair_changes / len(events), 6) if events else 0.0}
+        if any(h.initial_pairs is not None for h in histories)
+        else {}
+    )
     return {
         "count": len(histories),
         "steps": total,
@@ -164,6 +179,7 @@ def episode_stats(
         "two_place_share": round(sum(1 for e in events if e.patient is not None) / len(events), 6)
         if events
         else 0.0,
+        **pairs,
         "precondition_redraws": dict(redraws or {}),
         "never_legal": reasons,
         "warnings": [
@@ -290,6 +306,96 @@ def numeric_stats(
     }
 
 
+def pair_fluent_stats(
+    pair_fluents: PairFluents | None,
+    event_types: EventTypes,
+    fluents: Fluents,
+    episodes: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """The ``pair_fluents`` block of ``world_stats.yaml`` (stage c2b), or None without pair
+    fluents."""
+    if pair_fluents is None or not len(pair_fluents):
+        return None
+    leaves = event_types.leaves
+    kinds = ("pair", "pair_some", "pair_someof", "pair_same")
+    literals: dict[str, Any] = {
+        "total": 0,
+        "by_kind": dict.fromkeys(kinds, 0),
+        "by_role": {"agent": 0, "patient": 0},
+        "by_polarity": {"positive": 0, "negative": 0},
+        "by_event_kind": {"one_place": 0, "two_place": 0},
+        "from_features": sum(
+            1 for v in event_types.feature_preconditions.values() if v is not None and v.pair
+        ),
+    }
+    compiled: dict[str, Any] = {"total": 0, "by_origin": {}}
+    effects: dict[str, Any] = {
+        "total": 0,
+        "by_value": {"add": 0, "delete": 0},
+        "by_role": {"agent": 0, "patient": 0},
+        "by_event_kind": {"one_place": 0, "two_place": 0},
+        "by_pair_fluent": {f.label: 0 for f in pair_fluents},
+        "from_features": sum(
+            1 for v in event_types.feature_effects.values() if v is not None and v.pair
+        ),
+    }
+    conditions: dict[str, Any] = {
+        "total": 0,
+        "by_kind": dict.fromkeys(kinds, 0),
+        "by_role": {"agent": 0, "patient": 0},
+    }
+    for et in leaves:
+        kind = "one_place" if et.arity == 1 else "two_place"
+        for lit in et.precondition:
+            if not lit.pair:
+                continue
+            if lit.compiled:
+                compiled["total"] += 1
+                compiled["by_origin"][lit.origin] = compiled["by_origin"].get(lit.origin, 0) + 1
+                continue
+            literals["total"] += 1
+            literals["by_kind"][lit.kind] += 1
+            literals["by_role"][lit.role] += 1
+            literals["by_polarity"]["positive" if lit.value else "negative"] += 1
+            literals["by_event_kind"][kind] += 1
+        for effect in et.effects:
+            if effect.pair:
+                effects["total"] += 1
+                effects["by_value"]["add" if effect.value else "delete"] += 1
+                effects["by_role"][effect.role] += 1
+                effects["by_event_kind"][kind] += 1
+                effects["by_pair_fluent"][effect.fluent] += 1
+            for lit in effect.condition:
+                if lit.pair:
+                    conditions["total"] += 1
+                    conditions["by_kind"][lit.kind] += 1
+                    conditions["by_role"][lit.role] += 1
+    by_symmetry = {"symmetric": 0, "asymmetric": 0, "general": 0}
+    rows: dict[str, Any] = {}
+    for fluent, matrix in zip(pair_fluents.fluents, pair_fluents.initial_pairs, strict=True):
+        by_symmetry[fluent.symmetry] += 1
+        rows[fluent.label] = {
+            "symmetry": fluent.symmetry,
+            "functional": fluent.functional,
+            "initial_rate": fluent.initial_rate,
+            "initial_pairs": int(matrix.sum()),
+        }
+    return {
+        "count": len(pair_fluents),
+        "by_symmetry": by_symmetry,
+        "functional": sum(1 for f in pair_fluents if f.functional),
+        "fluents": rows,
+        "initial_pairs": sum(row["initial_pairs"] for row in rows.values()),
+        "precondition_literals": literals,
+        "compiled_literals": compiled,
+        "effects": effects,
+        "condition_literals": conditions,
+        "rules_reading_a_pair_literal": sum(1 for rule in fluents.rules if rule.pair_inputs),
+        "fix_ups": dict(event_types.pair_stats),
+        "pair_changes_per_event": (episodes or {}).get("pair_changes_per_event"),
+    }
+
+
 def world_stats(
     fluents: Fluents,
     event_types: EventTypes,
@@ -297,6 +403,7 @@ def world_stats(
     statics: StaticWorld | None = None,
     numeric: NumericFluents | None = None,
     places: Places | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> dict[str, Any]:
     leaves = event_types.leaves
     by_kind = {
@@ -395,5 +502,10 @@ def world_stats(
         "numeric_fluents": numeric_stats(numeric, event_types, fluents),
         "relations": relation_stats(statics) if statics is not None else None,
         "places": places_stats(places),
+        **(
+            {"pair_fluents": pair_fluent_stats(pair_fluents, event_types, fluents, episodes)}
+            if pair_fluents is not None and len(pair_fluents)
+            else {}
+        ),
         "episodes": episodes,
     }
