@@ -1,10 +1,13 @@
 # A world small enough to read by eye: the tiny taxonomy with 1 scalar dimension (12 instances),
-# 4 one-place event types, 4 two-place event types in a tree of 2 superordinates, and 4 fluents.
-# Parameters not listed keep their defaults (see default.yaml).
+# 4 one-place event types, 4 two-place event types in a tree of 2 superordinates, 4 fluents, and,
+# since stage c1, the tiny place taxonomy (4 places) with 2 place event types. Parameters not
+# listed keep their defaults (see default.yaml).
 
 name: tiny
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
+places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
+place_event_types: {count: 2}
 
 fluents:
   count: 4

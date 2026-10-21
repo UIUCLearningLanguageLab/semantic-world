@@ -149,7 +149,7 @@ def _event_type_weights(node: _Node, definition: RuntimeDefinition | None) -> di
         name = str(label)
         node.check_number(f"{key}.{label}", weight, min=0)
         if definition is not None and not any(
-            et.label == name and not et.is_category for et in definition.event_types
+            et.label == name and et.performable for et in definition.event_types
         ):
             raise node.error(f"{key}.{label}", "is not an event type of the world")
         weights[name] = float(weight)
@@ -334,7 +334,7 @@ class EpisodeGenerator:
         )
         self.record_legal = record_legal
         self.policy = policy(self.settings.policy)
-        self.performable = tuple(et.label for et in definition.event_types if not et.is_category)
+        self.performable = tuple(et.label for et in definition.event_types if et.performable)
         for label in self.settings.event_type_weights:
             if label not in self.performable:
                 raise WorldError(

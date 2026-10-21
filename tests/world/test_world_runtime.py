@@ -22,7 +22,7 @@ from semantic_world.world.errors import (
     InterferenceError,
     WorldError,
 )
-from semantic_world.world.fixtures import BruteEvent, BruteForce, fixture_inputs
+from semantic_world.world.fixtures import BruteEvent, BruteForce, fixture_inputs, fixture_places
 from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, define
 from semantic_world.world.identity import read_json, to_json
@@ -56,7 +56,7 @@ def runtime(tiny: WorldResult) -> RuntimeDefinition:
 @pytest.fixture(scope="module")
 def brute(tiny: WorldResult) -> BruteForce:
     record, entities, _ = fixture_inputs(tiny.definition)
-    return BruteForce(record, entities)
+    return BruteForce(record, entities, fixture_places(tiny.definition) or ())
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +100,7 @@ def _labels(definition: RuntimeDefinition, label: str, binding: tuple[int, ...])
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
-    return [et.label for et in definition.event_types if not et.is_category]
+    return [et.label for et in definition.event_types if et.performable]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -120,20 +120,25 @@ def test_loader_reads_a_run_folder_and_matches_the_built_definition(
     assert np.array_equal(loaded.initial_values, tiny.fluents.initial_values)
     assert loaded.base_fluents == tuple(f.label for f in tiny.fluents.base)
     assert loaded.derived_fluents == tuple(f.label for f in tiny.fluents.derived)
-    assert len(loaded.event_types) == len(tiny.event_types.event_types)
+    assert tiny.places is not None
+    assert len(loaded.event_types) == len(tiny.event_types.event_types) + len(
+        tiny.places.event_types
+    )
+    assert loaded.place_labels == tiny.places.labels
     check_definition_agreement(loaded)
 
 
 def test_loader_refuses_a_wrong_identity(tiny_folder: Path) -> None:
     record = read_json(tiny_folder / "definition.json")
     entities = pl.read_csv(tiny_folder / "entities.csv")
+    places = pl.read_csv(tiny_folder / "places.csv")
     record["rule_set_id"] = "0" * 64
     with pytest.raises(DefinitionError, match="hash to"):
-        runtime_definition(record, entities)
+        runtime_definition(record, entities, places)
     record = read_json(tiny_folder / "definition.json")
     record["rules"][0]["truth_table"] = record["rules"][0]["truth_table"][::-1]
     with pytest.raises(DefinitionError, match="hash to"):
-        runtime_definition(record, entities)
+        runtime_definition(record, entities, places)
 
 
 def test_loader_names_malformed_tables(tiny_folder: Path) -> None:
@@ -146,19 +151,27 @@ def test_loader_names_malformed_tables(tiny_folder: Path) -> None:
         return record
 
     entities = pl.read_csv(tiny_folder / "entities.csv")
+    places = pl.read_csv(tiny_folder / "places.csv")
     record = rehash({**read_json(tiny_folder / "definition.json"), "version": 2})
     with pytest.raises(DefinitionError, match="version"):
-        runtime_definition(record, entities)
+        runtime_definition(record, entities, places)
     record = read_json(tiny_folder / "definition.json")
     effect = next(e for e in record["event_types"] if e["effects"])["effects"][0]
     effect["fluent"] = "BOOLFL.4"  # the derived fluent
     with pytest.raises(DefinitionError, match="not a base fluent"):
-        runtime_definition(rehash(record), entities)
+        runtime_definition(rehash(record), entities, places)
     record = read_json(tiny_folder / "definition.json")
     with pytest.raises(DefinitionError, match="no column PROPERTY.1"):
-        runtime_definition(record, entities.drop("PROPERTY.1"))
+        runtime_definition(record, entities.drop("PROPERTY.1"), places)
     with pytest.raises(DefinitionError, match="column PART.7"):
-        runtime_definition(record, entities.with_columns(pl.lit(0).alias("PART.7")))
+        runtime_definition(record, entities.with_columns(pl.lit(0).alias("PART.7")), places)
+    # the places table (stage c1): required with places, and checked like the entities'
+    with pytest.raises(DefinitionError, match="places table is empty"):
+        runtime_definition(record, entities)
+    with pytest.raises(DefinitionError, match="no column PLACEPROPERTY.1"):
+        runtime_definition(record, entities, places.drop("PLACEPROPERTY.1"))
+    with pytest.raises(DefinitionError, match="column PLACEPART.9"):
+        runtime_definition(record, entities, places.with_columns(pl.lit(0).alias("PLACEPART.9")))
 
 
 def test_cones_follow_derived_fluent_rules(tiny: WorldResult, runtime: RuntimeDefinition) -> None:
@@ -199,7 +212,7 @@ def test_able_matches_the_capacities(tiny: WorldResult, runtime: RuntimeDefiniti
     capacities = capacities_frame(tiny.statics)
     n = runtime.entity_count
     for et in runtime.event_types:
-        if et.is_category:
+        if not et.performable:
             continue
         if et.arity == 1:
             got = able(runtime, et.label, np.arange(n).reshape(-1, 1))
@@ -252,6 +265,16 @@ def test_legal_bindings_order_and_subsets(runtime: RuntimeDefinition) -> None:
         subset = legal_bindings(runtime, state, label, [5, 2, 7])
         assert subset == [b for b in bindings if set(b) <= {2, 5, 7}]
         assert legal_bindings(runtime, state, label, []) == []
+    # a place event type's bindings are an entity and a place, by agent then place (stage c1)
+    for et in runtime.event_types:
+        if not et.place:
+            continue
+        bindings = legal_bindings(runtime, state, et.label)
+        assert bindings == sorted(bindings)
+        assert all(0 <= p < runtime.place_count for _, p in bindings)
+        assert bindings == [b for b in bindings if able(runtime, et.label, [b])[0]]
+        subset = legal_bindings(runtime, state, et.label, [5, 2], [1, 0])
+        assert subset == [b for b in bindings if b[0] in {2, 5} and b[1] in {0, 1}]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -377,7 +400,9 @@ def test_interference_through_a_derived_fluent_cone() -> None:
     from semantic_world.world.fixtures import read_fixture
 
     fixture = read_fixture(Path("tests/fixtures/world/hand_10_interfere_through_cone.json"))
-    definition = runtime_definition(fixture["definition"], fixture["entities"])
+    definition = runtime_definition(
+        fixture["definition"], fixture["entities"], fixture.get("places")
+    )
     assert definition.cone("BOOLFL.3") == ("BOOLFL.1", "BOOLFL.2")
     state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
     reader = Event.from_labels(definition, "EVENTTYPE1.2", {"agent": "INSTANCE.1.1.2"})

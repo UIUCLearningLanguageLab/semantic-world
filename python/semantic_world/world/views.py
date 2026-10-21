@@ -9,6 +9,11 @@ of CAN, and the scalars). ``--include`` takes label prefixes: a prefix that matc
 preset narrows the view to them, and a prefix that matches none of the preset's columns adds every
 available column with that prefix (the initial Boolean and numeric fluents among them). A
 sidecar YAML file records the preset, the prefixes, the columns, and the rule-set identity.
+
+Since stage c1, ``--places`` writes a table of the places instead: ``label``, ``leaf``, the free
+place features, and the place scalars (``base``); with the derived place features and the place
+capacities ``CANBE.PLACEEVENTTYPE.<n>`` (``static``); or with the ISA columns of the place tree
+too (``classic``). ``--include`` works as for entities, over the place columns.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from semantic_world.world.definition import DEFINITION_FILE, ENTITIES_FILE
 from semantic_world.world.derived import DERIVED_DIR, load_derived_csv
 from semantic_world.world.errors import WorldError
 from semantic_world.world.identity import read_json
+from semantic_world.world.places import PLACE_CAPACITIES_FILE, PLACES_DIR, PLACES_FILE
 
 PRESETS = ("base", "static", "classic")
 VIEWS_DIR = "views"
@@ -35,10 +41,14 @@ _ORDER = (
     "PART.",
     "CAN.EVENTTYPE1.",
     "CAN.EVENTTYPE2.",
+    "CAN.PLACEEVENTTYPE.",
     "CANBE.",
     "SCALARDIM.",
     "BOOLFL.",
     "NUMFL.",
+    "PLACEPROPERTY.",
+    "PLACEPART.",
+    "PLACESCALARDIM.",
 )
 
 
@@ -78,8 +88,41 @@ def available_columns(run: Path) -> tuple[pl.DataFrame, dict[str, list[str]]]:
     return frame, kinds
 
 
-def _isa_frame(run: Path, entities: pl.DataFrame) -> pl.DataFrame:
-    tree = pl.read_csv(run / "taxonomy" / "tree.csv", schema_overrides={"parent": pl.Utf8})
+def available_place_columns(run: Path) -> tuple[pl.DataFrame, dict[str, list[str]]]:
+    """Every column a view of the places can hold (stage c1), as one frame keyed by place, and
+    the columns by kind: the free place features, the place scalars, the derived place features
+    (from ``derived/static_features.csv`` of the place run, under ``places/``), the place
+    capacities, and the ISA columns of the place tree."""
+    definition = read_json(run / DEFINITION_FILE)
+    identity = definition["rule_set_id"]
+    path = run / PLACES_FILE
+    if not path.is_file():
+        raise WorldError(f"{run} has no {PLACES_FILE}: the world has no places")
+    places = pl.read_csv(path, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
+    static = pl.read_csv(
+        run / PLACES_DIR / DERIVED_DIR / STATIC_FEATURES_FILE, schema_overrides={"label": pl.Utf8}
+    )
+    capacities = load_derived_csv(run / DERIVED_DIR, PLACE_CAPACITIES_FILE, identity)
+    frame = places.join(static, on="label", how="left").join(
+        capacities.drop("approximate"), on="label", how="left"
+    )
+    isa = _isa_frame(run, places, PLACES_DIR)
+    frame = frame.join(isa, on="label", how="left")
+    kinds = {
+        "base": [c for c in places.columns if c.startswith(("PLACEPROPERTY.", "PLACEPART."))],
+        "scalars": [c for c in places.columns if c.startswith("PLACESCALARDIM.")],
+        "fluents": [],
+        "numeric": [],
+        "derived_static": [c for c in static.columns if c != "label"],
+        "capacities": [c for c in capacities.columns if c not in ("label", "approximate")],
+        "static_extra": [c for c in capacities.columns if c.startswith("CANBE.")],
+        "isa": [c for c in isa.columns if c != "label"],
+    }
+    return frame, kinds
+
+
+def _isa_frame(run: Path, entities: pl.DataFrame, taxonomy_dir: str = "taxonomy") -> pl.DataFrame:
+    tree = pl.read_csv(run / taxonomy_dir / "tree.csv", schema_overrides={"parent": pl.Utf8})
     labels = tree["label"].to_list()
     parents = tree["parent"].to_list()
     parent_of = dict(zip(labels, parents, strict=True))
@@ -102,9 +145,17 @@ def preset_columns(preset: str, kinds: dict[str, list[str]]) -> list[str]:
     if preset == "base":
         return kinds["base"] + kinds["scalars"]
     if preset == "static":
-        return _sorted(kinds["base"] + kinds["derived_static"]) + kinds["scalars"]
+        return (
+            _sorted(kinds["base"] + kinds["derived_static"])
+            + kinds.get("static_extra", [])
+            + kinds["scalars"]
+        )
     if preset == "classic":
-        one_place = [c for c in kinds["capacities"] if c.startswith("CAN.EVENTTYPE1.")]
+        one_place = [
+            c
+            for c in kinds["capacities"]
+            if c.startswith("CAN.EVENTTYPE1.") or c.startswith("CANBE.PLACEEVENTTYPE.")
+        ]
         return (
             kinds["isa"]
             + _sorted(kinds["base"] + kinds["derived_static"])
@@ -140,17 +191,22 @@ def write_view(
     preset: str = "classic",
     include: Sequence[str] = (),
     out: str | Path | None = None,
+    places: bool = False,
 ) -> Path:
-    """Write a view of a run and its sidecar, and return the table's path."""
+    """Write a view of a run and its sidecar, and return the table's path. With ``places``, the
+    table is of the places (stage c1): the static preset adds the determined place features and
+    the place capacities, and the classic preset the ISA columns of the place tree."""
     run = Path(run)
-    frame, kinds = available_columns(run)
+    frame, kinds = available_place_columns(run) if places else available_columns(run)
     columns = view_columns(preset, list(include), kinds)
     table = frame.select(["label", "leaf", *columns])
-    path = Path(out) if out is not None else run / VIEWS_DIR / f"{preset}.csv"
+    name = f"places_{preset}.csv" if places else f"{preset}.csv"
+    path = Path(out) if out is not None else run / VIEWS_DIR / name
     path.parent.mkdir(parents=True, exist_ok=True)
     table.write_csv(path)
     sidecar = {
         "preset": preset,
+        "places": places,
         "include": list(include),
         "columns": ["label", "leaf", *columns],
         "rule_set_id": read_json(run / DEFINITION_FILE)["rule_set_id"],

@@ -38,6 +38,7 @@ from semantic_world.world.dynamics import Effect
 from semantic_world.world.errors import IllegalEventError, InterferenceError, WorldError
 from semantic_world.world.matrices import AgreementReport, check_agreement
 from semantic_world.world.numeric import clamp
+from semantic_world.world.places import EVERYPLACE
 
 Binding = tuple[int, ...]
 ABLE_CHUNK_ROWS = 32768
@@ -46,6 +47,7 @@ ENTITY = "ENTITY"
 """The world symbol for all entities: the comparison class of a top-level category."""
 RANGE = "RANGE"
 """The standard of an absolute comparison of a numeric fluent: the ends of its range."""
+PLACE_CATEGORY_PREFIX = "PLACECATEGORY."
 
 
 # ---------------------------------------------------------------------------------------------
@@ -273,7 +275,7 @@ def static_facts(definition: RuntimeDefinition) -> StaticFacts:
             continue
         if reads["kind"] == "feature" and reads["feature"] in free_index:
             literals[:, i] = definition.free_values[:, free_index[reads["feature"]]]
-        elif reads["kind"] == "threshold":
+        elif reads["kind"] == "threshold" and reads["scalar"] in scalar_index:
             column = definition.scalar_values[:, scalar_index[reads["scalar"]]]
             literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
     outputs = definition.entity_matrices.evaluate(literals)
@@ -298,6 +300,50 @@ def _literal_column(definition: RuntimeDefinition, key: str) -> int | None:
         return definition.entity_matrices.literal_index(key)
     except KeyError:
         return None
+
+
+@dataclass(frozen=True)
+class PlaceFacts:
+    """Every static fact of every place (stage c1): the place literal matrix with its columns
+    filled, and each place feature's column, free and derived."""
+
+    literals: np.ndarray
+    values: dict[str, np.ndarray]
+
+
+def place_facts(definition: RuntimeDefinition) -> PlaceFacts:
+    """The places' static facts, computed on the first call and cached on the definition."""
+    cached = definition.cache.get("place_static")
+    if cached is not None:
+        return cached
+    if not definition.has_places:
+        raise WorldError("the definition has no places")
+    assert definition.place_matrices is not None
+    assert definition.place_free_values is not None and definition.place_scalar_values is not None
+    n = definition.place_count
+    free_index = {label: j for j, label in enumerate(definition.place_free_features)}
+    scalar_index = {label: j for j, label in enumerate(definition.place_scalars)}
+    literals = definition.place_matrices.literal_matrix(n)
+    for i, spec in enumerate(definition.literals):
+        reads = spec.reads
+        if reads["role"] is not None:
+            continue
+        if reads["kind"] == "feature" and reads["feature"] in free_index:
+            literals[:, i] = definition.place_free_values[:, free_index[reads["feature"]]]
+        elif reads["kind"] == "threshold" and reads["scalar"] in scalar_index:
+            column = definition.place_scalar_values[:, scalar_index[reads["scalar"]]]
+            literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
+    outputs = definition.place_matrices.evaluate(literals)
+    values = {label: definition.place_free_values[:, j] for label, j in free_index.items()}
+    for label in definition.place_derived_features:
+        values[label] = outputs[label]
+        try:
+            literals[:, definition.place_matrices.literal_index(label)] = outputs[label]
+        except KeyError:
+            pass
+    facts = PlaceFacts(literals, values)
+    definition.cache["place_static"] = facts
+    return facts
 
 
 # ---------------------------------------------------------------------------------------------
@@ -382,10 +428,21 @@ def _bindings_array(
     if array.size == 0:
         return np.zeros((0, et.arity), dtype=np.intp)
     if array.ndim != 2 or array.shape[1] != et.arity:
+        what = "an entity and a place" if et.place else f"{et.arity} entities"
         raise WorldError(
-            f"a binding of {et.label} names {et.arity} entities ({', '.join(et.roles)}); "
+            f"a binding of {et.label} names {what} ({', '.join(et.roles)}); "
             f"got an array of shape {array.shape}"
         )
+    if et.place:
+        if array[:, 0].min() < 0 or array[:, 0].max() >= definition.entity_count:
+            raise WorldError(
+                f"a binding names an entity index outside 0..{definition.entity_count - 1}"
+            )
+        if array[:, 1].min() < 0 or array[:, 1].max() >= definition.place_count:
+            raise WorldError(
+                f"a binding names a place index outside 0..{definition.place_count - 1}"
+            )
+        return array
     if array.min() < 0 or array.max() >= definition.entity_count:
         raise WorldError(
             f"a binding names an entity index outside 0..{definition.entity_count - 1}"
@@ -393,6 +450,80 @@ def _bindings_array(
     if et.arity == 2 and np.any(array[:, 0] == array[:, 1]):
         raise WorldError("a binding never uses one entity twice")
     return array
+
+
+def _place_binding_literals(definition: RuntimeDefinition, array: np.ndarray) -> np.ndarray:
+    """The base literal matrix of bindings of an entity (``array[:, 0]``) and a place
+    (``array[:, 1]``): the agent's features and thresholds from the entities' static facts, the
+    place's from the places', comparisons of an entity scalar with a place scalar, constraint
+    outputs 0."""
+    assert definition.place_binding_matrices is not None
+    facts = static_facts(definition)
+    places = place_facts(definition)
+    scalar_index = {label: j for j, label in enumerate(definition.scalars)}
+    place_scalar_index = {label: j for j, label in enumerate(definition.place_scalars)}
+    agents, patients = array[:, 0], array[:, 1]
+    literals = definition.place_binding_matrices.literal_matrix(array.shape[0])
+    assert definition.place_scalar_values is not None
+    for i, spec in enumerate(definition.literals):
+        reads = spec.reads
+        role = reads["role"]
+        if role is None or reads["kind"] == "constraint":
+            continue
+        if reads["kind"] == "comparison":
+            if reads["patient_scalar"] not in place_scalar_index:
+                continue
+            a = definition.scalar_values[agents, scalar_index[reads["agent_scalar"]]]
+            p = definition.place_scalar_values[
+                patients, place_scalar_index[reads["patient_scalar"]]
+            ]
+            difference = a - p
+            holds = difference > reads["low"]
+            if reads["high"] is not None:
+                holds &= difference < reads["high"]
+            literals[:, i] = holds.astype(np.uint8)
+        elif role == "agent":
+            if reads["kind"] == "feature":
+                literals[:, i] = facts.values[reads["feature"]][agents]
+            else:
+                column = definition.scalar_values[agents, scalar_index[reads["scalar"]]]
+                literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
+        elif reads["kind"] == "feature":
+            if reads["feature"] in places.values:
+                literals[:, i] = places.values[reads["feature"]][patients]
+        elif reads["scalar"] in place_scalar_index:
+            column = definition.place_scalar_values[patients, place_scalar_index[reads["scalar"]]]
+            literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
+    return literals
+
+
+def place_able_table(definition: RuntimeDefinition) -> dict[str, np.ndarray]:
+    """Every place event type's requirement over every binding of an entity and a place, as a
+    bool matrix of shape ``(entities, places)``, computed once and cached on the definition."""
+    cached = definition.cache.get("place_able")
+    if cached is not None:
+        return cached
+    table: dict[str, np.ndarray] = {}
+    if definition.has_places:
+        n, m = definition.entity_count, definition.place_count
+        agents = np.repeat(np.arange(n, dtype=np.intp), m)
+        patients = np.tile(np.arange(m, dtype=np.intp), n)
+        pairs = np.stack([agents, patients], axis=1)
+        outputs: dict[str, list[np.ndarray]] = {}
+        for start in range(0, pairs.shape[0], ABLE_CHUNK_ROWS):
+            chunk = pairs[start : start + ABLE_CHUNK_ROWS]
+            part = definition.place_binding_matrices.evaluate(  # type: ignore[union-attr]
+                _place_binding_literals(definition, chunk)
+            )
+            for key, column in part.items():
+                outputs.setdefault(key, []).append(column)
+        for et in definition.event_types:
+            if et.place:
+                matrix = np.zeros((n, m), dtype=bool)
+                matrix[agents, patients] = np.concatenate(outputs[et.requirement]).astype(bool)
+                table[et.label] = matrix
+    definition.cache["place_able"] = table
+    return table
 
 
 def _binding_literals(
@@ -412,7 +543,7 @@ def _binding_literals(
         if role is None or reads["kind"] == "constraint":
             continue
         if reads["kind"] == "comparison":
-            if "patient" not in rows:
+            if "patient" not in rows or reads["patient_scalar"] not in scalar_index:
                 continue
             a = definition.scalar_values[rows["agent"], scalar_index[reads["agent_scalar"]]]
             p = definition.scalar_values[rows["patient"], scalar_index[reads["patient_scalar"]]]
@@ -423,8 +554,9 @@ def _binding_literals(
             literals[:, i] = holds.astype(np.uint8)
         elif role in rows:
             if reads["kind"] == "feature":
-                literals[:, i] = facts.values[reads["feature"]][rows[role]]
-            else:
+                if reads["feature"] in facts.values:
+                    literals[:, i] = facts.values[reads["feature"]][rows[role]]
+            elif reads["scalar"] in scalar_index:
                 column = definition.scalar_values[rows[role], scalar_index[reads["scalar"]]]
                 literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
     return literals
@@ -447,7 +579,7 @@ def able_table(definition: RuntimeDefinition) -> dict[str, np.ndarray]:
     for et in definition.event_types:
         if et.arity == 1:
             table[et.label] = outputs[et.requirement].astype(bool)
-    if any(et.arity == 2 for et in definition.event_types):
+    if any(et.arity == 2 and not et.place for et in definition.event_types):
         agents = np.repeat(np.arange(n, dtype=np.intp), n)
         patients = np.tile(np.arange(n, dtype=np.intp), n)
         keep = agents != patients
@@ -461,7 +593,7 @@ def able_table(definition: RuntimeDefinition) -> dict[str, np.ndarray]:
             for key, column in part.items():
                 outputs.setdefault(key, []).append(column)
         for et in definition.event_types:
-            if et.arity == 2:
+            if et.arity == 2 and not et.place:
                 matrix = np.zeros((n, n), dtype=bool)
                 matrix[pairs[:, 0], pairs[:, 1]] = np.concatenate(outputs[et.requirement]).astype(
                     bool
@@ -480,6 +612,8 @@ def able(
     array = _bindings_array(definition, et, bindings)
     if array.shape[0] == 0:
         return np.zeros(0, dtype=bool)
+    if et.place:
+        return place_able_table(definition)[et.label][array[:, 0], array[:, 1]]
     table = able_table(definition)[et.label]
     if et.arity == 1:
         return table[array[:, 0]]
@@ -517,6 +651,21 @@ def check_definition_agreement(
     binding_report = check_agreement(
         definition.binding_matrices, definition.binding_rules, binding_literals
     )
+    if definition.has_places:
+        assert definition.place_matrices is not None
+        assert definition.place_binding_matrices is not None
+        check_agreement(
+            definition.place_matrices, definition.place_rules, place_facts(definition).literals
+        )
+        m = definition.place_count
+        place_array = np.stack(
+            [np.repeat(np.arange(n), m), np.tile(np.arange(m), n)], axis=1
+        ).astype(np.intp)
+        check_agreement(
+            definition.place_binding_matrices,
+            definition.place_binding_rules,
+            _place_binding_literals(definition, place_array),
+        )
     return entity_report, binding_report
 
 
@@ -571,14 +720,27 @@ def legal_bindings(
     state: State,
     event_type: str,
     entities: Sequence[int] | None = None,
+    places: Sequence[int] | None = None,
 ) -> list[Binding]:
     """Every legal binding of the event type among the given entities (every entity when None),
     in a fixed order: by agent, then patient, in entity order (the order of the entities table,
-    whatever order the entities are given in)."""
+    whatever order the entities are given in). For a place event type (stage c1), the patients
+    are the given places (every place when None), in place order, after the agent."""
     _check_state(definition, state)
     et = _event_type(definition, event_type)
     rows = np.unique(_entity_rows(definition, entities))
-    if et.arity == 1:
+    if et.place:
+        place_rows = (
+            np.arange(definition.place_count, dtype=np.intp)
+            if places is None
+            else np.unique(np.asarray(places, dtype=np.intp))
+        )
+        if place_rows.size and (place_rows.min() < 0 or place_rows.max() >= definition.place_count):
+            raise WorldError(f"a place index is outside 0..{definition.place_count - 1}")
+        array = np.stack(
+            [np.repeat(rows, place_rows.size), np.tile(place_rows, rows.size)], axis=1
+        ).reshape(-1, 2)
+    elif et.arity == 1:
         array = rows.reshape(-1, 1)
     else:
         agents = np.repeat(rows, rows.size)
@@ -607,6 +769,11 @@ def _check_event(definition: RuntimeDefinition, event: Event) -> EventTypeRecord
     if et.is_category:
         raise IllegalEventError(
             f"{text} is illegal: {et.label} is a category of event types, not an event type"
+        )
+    if et.place:
+        raise WorldError(
+            f"{et.label} is a place event type, which has no precondition or effects in stage "
+            f"c1; no event of it can be applied"
         )
     if len(event.binding) != et.arity:
         raise IllegalEventError(
@@ -881,26 +1048,36 @@ Argument = int | Mean
 """An argument of a comparison: an entity (by index) or a category mean."""
 
 
+def is_place_class(category: str) -> bool:
+    """Whether a comparison class is a class of places: ``EVERYPLACE`` or a place category."""
+    return category == EVERYPLACE or category.startswith(PLACE_CATEGORY_PREFIX)
+
+
+def _leaf_members(leaves: Sequence[str], category: str) -> list[int]:
+    prefix = category + "."
+    return [i for i, leaf in enumerate(leaves) if leaf == category or leaf.startswith(prefix)]
+
+
 def members(definition: RuntimeDefinition, category: str) -> np.ndarray:
     """The indices of the entities below a category: those whose leaf is the category or below
     it, read off the leaf labels (``CATEGORY.1.3.2`` is below ``CATEGORY.1.3``); every entity
-    for ``ENTITY``."""
+    for ``ENTITY``. For a class of places (stage c1), ``EVERYPLACE`` or a place category, the
+    indices of the places below it."""
     if category == ENTITY:
         return np.arange(definition.entity_count, dtype=np.intp)
-    prefix = category + "."
-    found = [
-        i for i, leaf in enumerate(definition.leaves) if leaf == category or leaf.startswith(prefix)
-    ]
+    if category == EVERYPLACE:
+        return np.arange(definition.place_count, dtype=np.intp)
+    leaves = definition.place_leaves if is_place_class(category) else definition.leaves
+    found = _leaf_members(leaves, category)
     if not found:
-        raise WorldError(f"{category} is not a category of the definition's entities")
+        what = "places" if is_place_class(category) else "entities"
+        raise WorldError(f"{category} is not a category of the definition's {what}")
     return np.array(found, dtype=np.intp)
 
 
-def categories(definition: RuntimeDefinition) -> tuple[str, ...]:
-    """Every category the leaves name, from the top down, with every ancestor: the comparison
-    classes beside ``ENTITY``."""
+def _ancestor_categories(leaves: Sequence[str]) -> tuple[str, ...]:
     found: dict[str, None] = {}
-    for leaf in definition.leaves:
+    for leaf in leaves:
         parts = leaf.split(".")
         for k in range(2, len(parts) + 1):
             found.setdefault(".".join(parts[:k]), None)
@@ -909,12 +1086,25 @@ def categories(definition: RuntimeDefinition) -> tuple[str, ...]:
     )
 
 
+def categories(definition: RuntimeDefinition) -> tuple[str, ...]:
+    """Every category the leaves name, from the top down, with every ancestor: the comparison
+    classes beside ``ENTITY``."""
+    return _ancestor_categories(definition.leaves)
+
+
+def place_categories(definition: RuntimeDefinition) -> tuple[str, ...]:
+    """Every category of places the place leaves name (stage c1): the comparison classes beside
+    ``EVERYPLACE``."""
+    return _ancestor_categories(definition.place_leaves)
+
+
 def comparison_classes(
     definition: RuntimeDefinition,
 ) -> dict[tuple[str, str], tuple[int, float, float]]:
     """For every category and ``ENTITY``, and every scalar: the number of instances, the mean,
     and the population standard deviation of the scalar over the instances below the category
-    (``derived/comparison_classes.csv`` holds the same figures). Computed once and cached."""
+    (``derived/comparison_classes.csv`` holds the same figures); with places, ``EVERYPLACE``
+    and every place category on every place scalar too. Computed once and cached."""
     cached = definition.cache.get("comparison_classes")
     if cached is not None:
         return cached
@@ -924,6 +1114,17 @@ def comparison_classes(
         for j, scalar in enumerate(definition.scalars):
             column = definition.scalar_values[rows, j]
             table[(category, scalar)] = (int(rows.size), float(column.mean()), float(column.std()))
+    if definition.has_places:
+        assert definition.place_scalar_values is not None
+        for category in (EVERYPLACE, *place_categories(definition)):
+            rows = members(definition, category)
+            for j, scalar in enumerate(definition.place_scalars):
+                column = definition.place_scalar_values[rows, j]
+                table[(category, scalar)] = (
+                    int(rows.size),
+                    float(column.mean()),
+                    float(column.std()),
+                )
     definition.cache["comparison_classes"] = table
     return table
 
@@ -933,6 +1134,9 @@ def _dimension_column(
 ) -> np.ndarray:
     if dimension in definition.scalars:
         return definition.scalar_values[:, definition.scalars.index(dimension)]
+    if definition.is_place_scalar(dimension):
+        assert definition.place_scalar_values is not None
+        return definition.place_scalar_values[:, definition.place_scalars.index(dimension)]
     if definition.is_numeric_fluent(dimension):
         if state is None:
             raise WorldError(f"a comparison of {dimension} needs a state: it is a numeric fluent")
@@ -941,16 +1145,34 @@ def _dimension_column(
     raise WorldError(f"{dimension} is not a scalar dimension or a numeric fluent")
 
 
+def _check_class_of_dimension(definition: RuntimeDefinition, dimension: str, category: str) -> None:
+    """A comparison never mixes an entity scalar with a place scalar: a class of places goes
+    with a place scalar, and a class of entities with an entity scalar or a numeric fluent."""
+    place_dimension = definition.is_place_scalar(dimension)
+    if place_dimension != is_place_class(category):
+        raise WorldError(
+            f"a comparison of {dimension} cannot take {category}: a place scalar takes a class "
+            f"of places (EVERYPLACE or a PLACECATEGORY), and an entity dimension a class of "
+            f"entities"
+        )
+
+
 def value_of(
     definition: RuntimeDefinition, dimension: str, x: Argument, state: State | None = None
 ) -> float:
     """An argument's value on a dimension: the entity's value, or the mean over a category's
-    members, on the static scalars, or on a numeric fluent in ``state``."""
+    members, on the static scalars, or on a numeric fluent in ``state``; on a place scalar
+    (stage c1), a place's value by its index, or the mean of a class of places."""
     column = _dimension_column(definition, dimension, state)
     if isinstance(x, Mean):
+        _check_class_of_dimension(definition, dimension, x.category)
         return float(column[members(definition, x.category)].mean())
-    if not 0 <= int(x) < definition.entity_count:
-        raise WorldError(f"an entity index is outside 0..{definition.entity_count - 1}")
+    count = (
+        definition.place_count if definition.is_place_scalar(dimension) else definition.entity_count
+    )
+    if not 0 <= int(x) < count:
+        what = "a place" if definition.is_place_scalar(dimension) else "an entity"
+        raise WorldError(f"{what} index is outside 0..{count - 1}")
     return float(column[int(x)])
 
 
@@ -989,6 +1211,7 @@ def above(
         return value > low + z * (high - low)
     if standard == RANGE:
         raise WorldError(f"a comparison of the scalar {dimension} takes a comparison class")
+    _check_class_of_dimension(definition, dimension, standard)
     _, mean, sd = comparison_classes(definition)[(standard, dimension)]
     return sd > 0 and value >= mean + z * sd
 
@@ -1012,6 +1235,7 @@ def below(
         return value <= low + z * (high - low)
     if standard == RANGE:
         raise WorldError(f"a comparison of the scalar {dimension} takes a comparison class")
+    _check_class_of_dimension(definition, dimension, standard)
     _, mean, sd = comparison_classes(definition)[(standard, dimension)]
     return sd > 0 and value <= mean - z * sd
 
@@ -1033,6 +1257,7 @@ def decrease(
 
 __all__ = [
     "ENTITY",
+    "EVERYPLACE",
     "RANGE",
     "Argument",
     "Binding",
@@ -1060,7 +1285,11 @@ __all__ = [
     "interferes",
     "legal",
     "legal_bindings",
+    "is_place_class",
     "members",
+    "place_able_table",
+    "place_categories",
+    "place_facts",
     "static_facts",
     "value_of",
 ]

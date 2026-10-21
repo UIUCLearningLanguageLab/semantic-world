@@ -17,6 +17,7 @@ import numpy as np
 import polars as pl
 
 from semantic_world.taxonomy.fixed import FIXED_TEST_NAMES
+from semantic_world.world.places import Places
 from semantic_world.world.statics import StaticWorld
 
 CAPACITIES_FILE = "capacities.csv"
@@ -24,21 +25,37 @@ CAPACITY_ROLES_FILE = "capacity_roles.csv"
 CAPACITY_ROLE_COLUMNS = ["category", "event_type", "status", "test"]
 
 
-def capacities_frame(statics: StaticWorld) -> pl.DataFrame:
-    """``derived/capacities.csv``."""
+def capacities_frame(statics: StaticWorld, places: Places | None = None) -> pl.DataFrame:
+    """``derived/capacities.csv``: the one-place capacities, the two-place agent and patient
+    capacities (intensional), with places the entities' ``CAN.PLACEEVENTTYPE.<n>`` (stage c1),
+    the ``approximate`` flag naming every column the local test decided, then the extensional
+    columns, the place event types' last."""
     instances = statics.instances
     data: dict[str, Any] = {"label": list(instances.labels)}
     for label in statics.unary.labels:
         data[f"CAN.{label}"] = statics.unary.column(label).astype(np.int64).tolist()
     projections = statics.projections
-    if projections is not None:
-        for name, column in projections.all_columns().items():
-            if isinstance(column, str):
-                data[name] = [column] * len(instances)
-            else:
-                data[name] = np.asarray(column).astype(np.int64).tolist()
-    else:
-        data["approximate"] = [""] * len(instances)
+    columns = projections.all_columns() if projections is not None else {}
+    approximate = [projections.approximate_labels()] if projections is not None else []
+    place_columns = places.agent_columns() if places is not None else {}
+    if places is not None:
+        approximate.append(places.approximate_agent_labels())
+    for name, column in columns.items():
+        if name == "approximate":
+            break
+        data[name] = np.asarray(column).astype(np.int64).tolist()
+    for name, column in place_columns.items():
+        if name.startswith("CAN."):
+            data[name] = np.asarray(column).astype(np.int64).tolist()
+    data["approximate"] = [";".join(label for group in approximate for label in group)] * len(
+        instances
+    )
+    for name, column in columns.items():
+        if name.startswith("ACTUAL_"):
+            data[name] = np.asarray(column).astype(np.int64).tolist()
+    for name, column in place_columns.items():
+        if name.startswith("ACTUAL_"):
+            data[name] = np.asarray(column).astype(np.int64).tolist()
     return pl.DataFrame(data, schema_overrides={"label": pl.Utf8, "approximate": pl.Utf8})
 
 

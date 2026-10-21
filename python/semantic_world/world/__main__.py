@@ -2,6 +2,7 @@
 
 python -m semantic_world.world define CONFIG [--seed N] [--out DIR]
 python -m semantic_world.world view RUN_FOLDER --preset classic [--include A,B] [--out FILE]
+    [--places]
 python -m semantic_world.world simulate RUN_FOLDER --episodes N [--seed N] [--legal] [--out FILE]
     [--config CORPUS.yaml]
 python -m semantic_world.world check-fixtures [FOLDER]
@@ -45,6 +46,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     view_parser.add_argument(
         "--out", default=None, help="the CSV file (default: RUN/views/<preset>.csv)"
+    )
+    view_parser.add_argument(
+        "--places",
+        action="store_true",
+        help="a table of the places instead of the entities (RUN/views/places_<preset>.csv)",
     )
     simulate_parser = commands.add_parser("simulate", help="run episodes of a world run")
     simulate_parser.add_argument("run", help="a world run folder")
@@ -99,12 +105,17 @@ def _define(args: argparse.Namespace) -> int:
     result = define(config)
     folder = result.write(args.out)
     event_types = result.event_types
+    places = ""
+    if result.places is not None:
+        places = (
+            f", {result.places.count} places and {len(result.places.event_types)} place event types"
+        )
     print(
         f"wrote {folder}: {len(result.taxonomy.instances)} entities, {len(result.fluents)} fluents "
         f"({len(result.fluents.derived)} derived), {len(result.numeric)} numeric fluents, "
         f"{len(event_types.unary)} one-place and "
         f"{len(event_types.binary)} two-place event types, "
-        f"{len(event_types.constraints)} constraints; rule set {result.rule_set_id[:12]}"
+        f"{len(event_types.constraints)} constraints{places}; rule set {result.rule_set_id[:12]}"
     )
     episodes = result.stats.get("episodes") or {}
     for label, count in (episodes.get("precondition_redraws") or {}).items():
@@ -150,7 +161,7 @@ def _make_fixtures(args: argparse.Namespace) -> int:
 
 def _view(args: argparse.Namespace) -> int:
     include = [p for p in (args.include or "").split(",") if p]
-    path = write_view(args.run, args.preset, include, args.out)
+    path = write_view(args.run, args.preset, include, args.out, places=args.places)
     print(f"wrote {path}")
     return 0
 

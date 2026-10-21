@@ -1,0 +1,27 @@
+# The default place taxonomy (docs/specs/WORLD_PHASE_C.md, "Places"): 2 superordinates, depth 2,
+# branching 3, and 2 places per kind, so 12 places in 8 categories; 12 place properties, a quarter
+# of them determined by rules; no place parts; and 2 place scalars. The default world
+# (data/world/default.yaml) runs it as its second taxonomy, with the seed of the stream
+# world:places. With `labels.kind: place` the generator writes PLACECATEGORY, PLACE,
+# ISA.PLACECATEGORY, PLACEPROPERTY, PLACEPART, and PLACESCALARDIM in place of the entity labels,
+# and nothing else changes. Parameters not listed keep their defaults (see default.yaml).
+
+name: places_default
+seed: 1
+
+labels: {kind: place}
+
+features:
+  property: {count: 12, proportion_determined: 0.25, expected_true_free: 3}   # 9 free, 3 determined; a free place property is true of a third of the places on average
+  part: {count: 0}                                                            # no place parts by default (WM.50)
+
+taxonomy:
+  superordinates: 2
+  depth: 2
+  branching: 3
+
+instances:
+  per_leaf: 2
+
+scalars:
+  count: 2

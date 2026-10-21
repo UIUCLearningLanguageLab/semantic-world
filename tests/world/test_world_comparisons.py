@@ -22,7 +22,7 @@ from semantic_world.world.config import load_config
 from semantic_world.world.definition import RuntimeDefinition
 from semantic_world.world.derived import load_derived_csv
 from semantic_world.world.errors import WorldError
-from semantic_world.world.fixtures import BruteForce, fixture_inputs
+from semantic_world.world.fixtures import BruteForce, fixture_inputs, fixture_places
 from semantic_world.world.generate import WorldResult, define
 from semantic_world.world.runtime import (
     ENTITY,
@@ -108,7 +108,9 @@ def test_comparison_classes_agree_with_a_recomputation_from_base_csv(
     rows = frame.to_dicts()
     assert [r["category"] for r in rows][: len(scalars)] == [ENTITY] * len(scalars)
     expected_categories = [ENTITY] + [row["label"] for row in tree]
-    assert [r["category"] for r in rows] == [c for c in expected_categories for _ in scalars]
+    entity_rows = [r for r in rows if not r["scalar"].startswith("PLACE")]
+    assert [r["category"] for r in entity_rows] == [c for c in expected_categories for _ in scalars]
+    rows = entity_rows
     for row in rows:
         values = np.array([float(r[row["scalar"]]) for r in below(row["category"])])
         assert row["instances"] == len(values)
@@ -128,7 +130,8 @@ def test_the_runtime_computes_the_same_classes_from_the_leaf_labels(worlds, name
     table = comparison_classes(definition)
     frame = comparison_classes_frame(world.taxonomy).to_dicts()
     assert set(categories(definition)) == {row["category"] for row in frame} - {ENTITY}
-    assert len(table) == len(frame)
+    place_rows = [key for key in table if key[1].startswith("PLACE")]
+    assert len(table) == len(frame) + len(place_rows)
     for row in frame:
         count, mean, sd = table[(row["category"], row["scalar"])]
         assert count == row["instances"]
@@ -159,7 +162,11 @@ def test_the_corpus_computes_the_same_classes(worlds, name: str) -> None:
     build_lexicon(config, corpus_world, Streams(config.seed))
     truth = Truth(config, corpus_world)
     definition = world.definition.runtime()
-    table = comparison_classes(definition)
+    table = {
+        key: value
+        for key, value in comparison_classes(definition).items()
+        if key[0] != "EVERYPLACE" and not key[0].startswith("PLACECATEGORY.")
+    }
     checked = 0
     for (category, scalar), (count, mean, sd) in table.items():
         assert truth.comparison_class(category, scalar) == (count, mean, sd)
@@ -292,7 +299,7 @@ def test_numeric_comparisons_at_a_time_agree_with_direct_arithmetic(
 
     rng = np.random.default_rng(3)
     state = initial_state(runtime)
-    performable = [et.label for et in runtime.event_types if not et.is_category]
+    performable = [et.label for et in runtime.event_types if et.performable]
     seen_increase = seen_decrease = seen_above = seen_below = 0
     for _ in range(60):
         events = [
@@ -346,7 +353,7 @@ def test_the_brute_force_evaluator_judges_the_same_comparisons(
     tiny: WorldResult, runtime: RuntimeDefinition
 ) -> None:
     record, entities, _ = fixture_inputs(tiny.definition)
-    brute = BruteForce(record, entities)
+    brute = BruteForce(record, entities, fixture_places(tiny.definition) or ())
     rng = np.random.default_rng(4)
     state = initial_state(runtime)
     numeric = state.numeric_values(runtime)

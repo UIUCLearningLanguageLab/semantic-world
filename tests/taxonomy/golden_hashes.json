@@ -15,6 +15,38 @@
   "summary.yaml": "71322f80fdd92c50079d53c4b50a6e1e40a2b025597f55ab25deb89d563ed98b",
   "tree.csv": "650da2315cee21a8e1c34e3f3cc55e280de6ed38d2d5b95809dd3213f135c007"
  },
+ "places_default": {
+  "base.csv": "92e5ed622a5043f4f1b5b93cd38eae08ce21e67e174b111c9b0504b9b1f377af",
+  "categories_defining.csv": "20a62e428005b838ed05b2135b3d49922ba56b891b30d48de386110559ca70e3",
+  "categories_generative.csv": "b4933cd0c734413286b760e315841b220b3b5f2de34ed861b75417c1483474f1",
+  "categories_mean.csv": "9a55146c089589c6aaedd1e01905dfa18bf487d21e22d85822b554dadd131913",
+  "derived/manifest.yaml": "4b22724991ea48f2ced7b08c096e8949b26a2a3ff62620455760d828e68f6aba",
+  "derived/static_features.csv": "b2dcae1f214b3ef70ec2c2be093c94d1337504b77ad4380b760440aef152bd55",
+  "feature_stats.csv": "de7a1792c0be8b99e70b634e6733a051d6d21a6d605be68d18e18429882f5cf0",
+  "features.csv": "ca9f8d424cd8686cdc4827045a69ae2295733312082bedf74637772105648fbc",
+  "roles.csv": "40b8770b069df95d8d8dc8664c62aaca630820e30ce5782dac8216f2a129b0fd",
+  "rule_matrices.json": "cedab9ebf9b725a00e42340f7d4033faf5fd5327e2a0b5f64c089a590c9ab8a5",
+  "rules.yaml": "5ef3f3962220a823e67336a6fbcca80714e95edef868b144573fdf9a901327b6",
+  "similarity.csv": "6d4c16f778aa3b5416f9abe21c9da0fa196dacbf372f55c2de4ec1c248548cc8",
+  "summary.yaml": "a341970ae3a89d32848bb3a3ff7a58db4739502511546933475a6b261ed7cd9c",
+  "tree.csv": "ed97c70689412237cfcb1b761bf9accab02a84780c88e1dbafeb9be383a7040e"
+ },
+ "places_tiny": {
+  "base.csv": "5be72e0f1273b43588e40f9330f485ac8a0365adaef60824d913eab577d42136",
+  "categories_defining.csv": "b70919c65beec6641160c7a7a37e8bea34033d9703045d9e1d39d58c2c185756",
+  "categories_generative.csv": "fd57102121289b37602494e492c7828493460f438f0af09732df794118aa9188",
+  "categories_mean.csv": "00a7c143f7be147da33e46dd03a687ebb358ce916ac6edb0572d719a05041591",
+  "derived/manifest.yaml": "f698022d15ac01f3efa675c04bd1104c34758825d4b01ecf75820c70a430c9c0",
+  "derived/static_features.csv": "dda8e4ec0e79fc26c7b901adb697345e7387df228829c6996c34689058b84c24",
+  "feature_stats.csv": "0db5dd6c2d86b0af4407a44fba00892ed3f181c33f1122ba26ec05b978221394",
+  "features.csv": "7488e5ac7b9d4c1cf9b7800ad790a21badf3de293cdff03872111b3c0009c86e",
+  "roles.csv": "291c2826a9a868daf62f5631ea9da9eaf3ac7f134bf5ffd8805c7dcdde9ed9a2",
+  "rule_matrices.json": "504884116de412bc79c33e179a194a8c4d9e5f4088052b48508b978fd10fac9e",
+  "rules.yaml": "b7fa179f12bf8435fbc072f37e14979156a18db9c3be402bb587db35636a0587",
+  "similarity.csv": "6404716af0297e0ead07d9adccdc8ffca50bc376f3a4925c6ae325a40c526814",
+  "summary.yaml": "b1559909b2d588fd4e6a1814b2b6512359acbdb6bc232644950447eedf013eec",
+  "tree.csv": "90c7d29054c3e408dd179c5e849bc88f9b839253d1691684808a280257f09a3d"
+ },
  "relations": {
   "base.csv": "99ee558a419e31d1e360538c678900669080a63a48e2dc9119636e6f64e78aaf",
   "categories_defining.csv": "ba1041cf3b07d2b3b906d0a5deaca8e0f26486deb6cd5b329d5acd73f4a16c10",

@@ -217,14 +217,18 @@ def test_capacities_csv_columns(tiny: WorldResult, tmp_path: Path) -> None:
     event_types = list(p.event_type_labels)
     one_place = list(tiny.statics.unary.labels)
     assert one_place == [f"EVENTTYPE1.{i}" for i in range(1, 5)]
+    assert tiny.places is not None
+    place_types = list(tiny.places.event_type_labels)
     expected = (
         ["label"]
         + [f"CAN.{v}" for v in one_place]
         + [f"CAN.{v}" for v in event_types]
         + [f"CANBE.{v}" for v in event_types]
+        + [f"CAN.{v}" for v in place_types]  # the entities' place capacities (stage c1)
         + ["approximate"]
         + [f"ACTUAL_CAN.{v}" for v in event_types]
         + [f"ACTUAL_CANBE.{v}" for v in event_types]
+        + [f"ACTUAL_CAN.{v}" for v in place_types]
     )
     assert capacities.columns == expected
     assert capacities.height == len(tiny.statics.instances)
@@ -243,7 +247,9 @@ def test_capacities_csv_columns(tiny: WorldResult, tmp_path: Path) -> None:
     for label in one_place:
         assert capacities[f"CAN.{label}"].to_list() == tiny.statics.unary.column(label).tolist()
     assert set(np.unique(capacities.drop(["label", "approximate"]).to_numpy())) <= {0, 1}
-    assert capacities_frame(tiny.statics).equals(tiny.derived_frames()["capacities.csv"])
+    assert capacities_frame(tiny.statics, tiny.places).equals(
+        tiny.derived_frames()["capacities.csv"]
+    )
     # No file of the run carries the old exposed columns.
     base = pl.read_csv(folder / "taxonomy" / "base.csv")
     assert not any(c.startswith(("CAN.", "CANBE.")) for c in base.columns)

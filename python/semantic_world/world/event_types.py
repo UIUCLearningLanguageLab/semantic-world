@@ -49,7 +49,7 @@ from semantic_world.world.dynamics import (
 )
 from semantic_world.world.event_file import EventFile, ExplicitEventType
 from semantic_world.world.fluents import Fluents
-from semantic_world.world.numeric import NumericFluents, empty_numeric
+from semantic_world.world.numeric import NumericFluents, drawn, empty_numeric
 from semantic_world.world.statics import StaticWorld
 from semantic_world.world.streams import WorldStreams
 
@@ -399,12 +399,13 @@ class _Dynamics:
 
     def _numeric_effect(self, role: str) -> Effect:
         """A numeric effect of a role, from ``world:numeric_effects``: the fluent uniformly, the
-        operator uniformly, the constant uniformly from ``numeric_amounts``."""
+        operator uniformly, the constant uniformly from ``numeric_amounts``, rounded to 4
+        decimals when drawn (WM.60)."""
         rng = self.rng_numeric_effects
         cfg = self.effects_config
         fluent = self.numeric_labels[int(rng.integers(len(self.numeric_labels)))]
         sign = 1.0 if rng.integers(2) == 0 else -1.0
-        amount = float(rng.uniform(cfg.numeric_amounts[0], cfg.numeric_amounts[1]))
+        amount = drawn(rng.uniform(cfg.numeric_amounts[0], cfg.numeric_amounts[1]))
         return Effect(role, fluent, sign * amount)
 
     def _maybe_numeric(self, effect: Effect) -> Effect:

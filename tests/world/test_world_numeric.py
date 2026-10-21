@@ -44,6 +44,7 @@ from semantic_world.world.fixtures import (
     BruteForce,
     fixture_initial_numeric,
     fixture_inputs,
+    fixture_places,
 )
 from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, define
@@ -117,7 +118,7 @@ def runtime(heavy: WorldResult) -> RuntimeDefinition:
 @pytest.fixture(scope="module")
 def brute(heavy: WorldResult) -> BruteForce:
     record, entities, _ = fixture_inputs(heavy.definition)
-    return BruteForce(record, entities)
+    return BruteForce(record, entities, fixture_places(heavy.definition) or ())
 
 
 @pytest.fixture(scope="module")
@@ -154,7 +155,7 @@ def _brute_numeric(definition: RuntimeDefinition, state: State) -> dict[str, dic
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
-    return [et.label for et in definition.event_types if not et.is_category]
+    return [et.label for et in definition.event_types if et.performable]
 
 
 def _labels(definition: RuntimeDefinition, label: str, binding: tuple[int, ...]) -> dict:
@@ -870,10 +871,11 @@ def test_the_loader_validates_the_numeric_records(heavy: WorldResult) -> None:
     numeric = fixture_initial_numeric(heavy.definition)
     assert numeric is not None
     full = [{**row, **numeric[row["label"]]} for row in rows]
-    loaded = runtime_definition(record, full)
+    places = fixture_places(heavy.definition)
+    loaded = runtime_definition(record, full, places)
     assert loaded.numeric_fluents == ("NUMFL.1", "NUMFL.2")
     assert loaded.initial_numeric is not None and loaded.initial_numeric.shape == (12, 2)
-    without = runtime_definition(record, rows)
+    without = runtime_definition(record, rows, places)
     assert without.initial_numeric is None
     with pytest.raises(WorldError, match="no initial"):
         initial_state(without)
@@ -917,14 +919,14 @@ def test_the_loader_validates_the_numeric_records(heavy: WorldResult) -> None:
     ]
     for change, message in cases:
         with pytest.raises(DefinitionError, match=message):
-            runtime_definition(broken(change), full)
+            runtime_definition(broken(change), full, places)
     outside = json.loads(json.dumps(full))
     outside[0]["NUMFL.1"] = 7.0
     with pytest.raises(DefinitionError, match="outside its range"):
-        runtime_definition(record, outside)
+        runtime_definition(record, outside, places)
     partial = [{k: v for k, v in row.items() if k != "NUMFL.2"} for row in full]
     with pytest.raises(DefinitionError, match="some numeric fluent columns"):
-        runtime_definition(record, partial)
+        runtime_definition(record, partial, places)
 
 
 def test_an_event_file_gives_numeric_dynamics(tmp_path: Path) -> None:

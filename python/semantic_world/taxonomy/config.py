@@ -31,6 +31,11 @@ LABEL_PREFIX = {"property": "PROPERTY", "part": "PART"}
 SCALAR_PREFIX = "SCALARDIM"
 CATEGORY_PREFIX = "CATEGORY."
 INSTANCE_PREFIX = "INSTANCE."
+LABEL_KINDS = ("entity", "place")
+"""``labels.kind`` (stage c1 of ``docs/specs/WORLD_PHASE_C.md``): ``entity``, the labels above,
+or ``place``, the labels of a place taxonomy (``PLACECATEGORY``, ``PLACE``, ``ISA.PLACECATEGORY``,
+``PLACEPROPERTY``, ``PLACEPART``, ``PLACESCALARDIM``). Nothing but the labels changes with the
+kind."""
 MOVED_KEYS = {
     "features.can": "event_types.unary",
     "rules.overrides.can": "event_types.unary.rules",
@@ -66,6 +71,45 @@ class ConfigError(ValueError):
 # ---------------------------------------------------------------------------------------------
 # Configuration types
 # ---------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Labels:
+    """The label prefixes a run writes, by ``labels.kind``: ``CATEGORY``, ``INSTANCE``,
+    ``PROPERTY``, ``PART``, and ``SCALARDIM`` for entities (the default), and ``PLACECATEGORY``,
+    ``PLACE``, ``PLACEPROPERTY``, ``PLACEPART``, and ``PLACESCALARDIM`` for places. The ISA
+    labels follow the category labels (``ISA.PLACECATEGORY.1``)."""
+
+    kind: str
+    category: str
+    instance: str
+    property: str
+    part: str
+    scalar: str
+
+    @classmethod
+    def for_kind(cls, kind: str) -> Labels:
+        if kind == "entity":
+            return cls("entity", "CATEGORY", "INSTANCE", "PROPERTY", "PART", SCALAR_PREFIX)
+        if kind == "place":
+            return cls(
+                "place", "PLACECATEGORY", "PLACE", "PLACEPROPERTY", "PLACEPART", "PLACESCALARDIM"
+            )
+        raise ValueError(f"unknown label kind {kind!r}; the kinds are {', '.join(LABEL_KINDS)}")
+
+    def feature_prefix(self, feature_type: str) -> str:
+        """The label prefix of a binary feature type (``property`` or ``part``)."""
+        if feature_type == "property":
+            return self.property
+        if feature_type == "part":
+            return self.part
+        raise ValueError(f"{feature_type!r} is not a binary feature type")
+
+    def resolved(self) -> dict[str, Any]:
+        return {"kind": self.kind}
+
+
+ENTITY_LABELS = Labels.for_kind("entity")
 
 
 @dataclass(frozen=True)
@@ -287,10 +331,16 @@ class Config:
     scalars: ScalarsConfig
     source: str
     """Where the configuration came from: the file path, or a label for an in-memory mapping."""
+    labels: Labels = ENTITY_LABELS
+    """The label prefixes the run writes (``labels.kind``, stage c1)."""
 
     def tree_settings(self) -> TreeSettings:
         return TreeSettings(
-            self.taxonomy, self.inheritance, self.similarity_bound, self.scalars, CATEGORY_PREFIX
+            self.taxonomy,
+            self.inheritance,
+            self.similarity_bound,
+            self.scalars,
+            self.labels.category + ".",
         )
 
     def rule_file_path(self) -> Path | None:
@@ -316,6 +366,7 @@ class Config:
         return {
             "name": self.name,
             "seed": self.seed,
+            "labels": self.labels.resolved(),
             "features": {
                 "property": _resolved_free_type(features.property),
                 "part": _resolved_free_type(features.part),
@@ -757,6 +808,12 @@ def _check_renamed_keys(node: _Node) -> None:
             )
 
 
+def _read_labels(node: _Node) -> Labels:
+    kind = node.choice("kind", "entity", LABEL_KINDS)
+    node.finish()
+    return Labels.for_kind(kind)
+
+
 def _read_features(node: _Node) -> FeaturesConfig:
     if "can" in node.data:
         raise _moved_key_error(node, "can", "features.can")
@@ -1028,6 +1085,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         raise root.error("provenance", f"expected a mapping, found {_describe(prov)}")
     if seed is not None:
         master_seed = root.check_int("seed", seed, min=0, max=SEED_MAX)
+    labels = _read_labels(root.mapping("labels"))
     features = _read_features(root.mapping("features"))
     taxonomy = _read_taxonomy(root.mapping("taxonomy"))
     scalars = _read_scalars(root.mapping("scalars"), taxonomy.depth)
@@ -1051,6 +1109,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
         analysis=analysis,
         scalars=scalars,
         source=source,
+        labels=labels,
     )
 
 

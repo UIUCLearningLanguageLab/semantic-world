@@ -202,6 +202,8 @@ def test_densities_are_reported_in_the_outputs(tiny: WorldResult, tmp_path: Path
     assert stats.columns[-2:] == ["leaf_pair_density", "tries"]
     relations = tiny.statics.relations
     for row in stats.iter_rows(named=True):
+        if row["event_type"].startswith("PLACEEVENTTYPE."):
+            continue  # the place event types' densities are over the world's bindings (c1)
         assert row["leaf_pair_density"] == pytest.approx(
             relations.event_type_density[row["event_type"]], abs=1e-6
         )
