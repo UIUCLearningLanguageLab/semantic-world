@@ -14,7 +14,13 @@ feature or a threshold of the agent (shared with the binding scope), a place fea
 threshold of the patient, a comparison of an entity scalar with a place scalar, or a constraint's
 output. Place symbols, literals, rules, layers, and event types appear only when the world has
 places, so with ``places: null`` the definition and its identity are those of the world before
-places.
+places. Since stage c2a a world with pair fluents (``docs/specs/WORLD_PHASE_C.md``) has symbols
+of kind ``pair_fluent`` with their profiles, entity-scope literals of the kinds ``pair_some`` and
+``pair_someof`` where a derived fluent's rule reads ``SOME.PAIRFL.k`` or ``SOMEOF.PAIRFL.k`` of
+its own entity (computed before the matrices, from the state's pairs), pair literals in the
+preconditions and conditions and pair effects in the event-type records, and, when an event file
+gives one, a ``spatial`` block with its own ``spatial_id`` outside the rule-set identity. A world
+without pair fluents has none of these keys.
 
 The rule-set identity is the SHA-256 of the canonical JSON of ``symbols``, ``literals``,
 ``rules``, and ``event_types``. The agreement test checks every entity rule on every entity and
@@ -41,12 +47,25 @@ from semantic_world.world.constraints import (
     RoleThreshold,
     ScalarComparison,
 )
-from semantic_world.world.dynamics import ROLES, ConditionLiteral, Effect, Literal
+from semantic_world.world.dynamics import (
+    PAIR_KIND,
+    PAIR_KINDS,
+    PAIR_SAME,
+    PAIR_SOME,
+    PAIR_SOMEOF,
+    ROLES,
+    TWO_ARGUMENT_KINDS,
+    ConditionLiteral,
+    Effect,
+    Literal,
+    PairLiteral,
+)
 from semantic_world.world.errors import DefinitionError, WorldError
 from semantic_world.world.event_types import ConstraintSpec, EventTypes
 from semantic_world.world.fluents import Fluents, ThresholdLiteral
 from semantic_world.world.identity import (
     DEFINITION_VERSION,
+    canonical_json,
     read_json,
     rule_set_id,
     to_json,
@@ -67,6 +86,15 @@ from semantic_world.world.numeric import (
     NumericFluents,
     NumericThreshold,
     empty_numeric,
+)
+from semantic_world.world.pair_fluents import (
+    INITIAL_PAIRS_FILE,
+    PAIR_FLUENT_KIND,
+    PairFluent,
+    PairFluents,
+    empty_pair_fluents,
+    initial_pairs_frame,
+    matrices_from_rows,
 )
 from semantic_world.world.places import (
     PLACE_EVENT_TYPE_KIND,
@@ -132,6 +160,61 @@ def numeric_threshold_literal(label: str, threshold: float) -> LiteralSpec:
             "threshold": float(threshold),
         },
     )
+
+
+PAIR_LITERAL_PREFIX = {PAIR_SOME: "SOME.", PAIR_SOMEOF: "SOMEOF."}
+
+
+def pair_literal_spec(kind: str, pair_fluent: str) -> LiteralSpec:
+    """An entity-scope pair literal (stage c2a), read by a derived fluent's rule of its own
+    entity: ``SOME.PAIRFL.1`` (the entity's row holds a pair) or ``SOMEOF.PAIRFL.1`` (its
+    column does)."""
+    if kind not in PAIR_LITERAL_PREFIX:
+        raise WorldError(f"a rule reads {kind} literals; a rule reads SOME and SOMEOF only")
+    key = f"{PAIR_LITERAL_PREFIX[kind]}{pair_fluent}"
+    return LiteralSpec(key, {"kind": kind, "role": None, "pair_fluent": pair_fluent})
+
+
+def pair_literal_key_of_rule_input(key: str) -> tuple[str, str] | None:
+    """``(kind, pair fluent)`` when a rule's input key is a pair literal, ``SOME.PAIRFL.1`` or
+    ``SOMEOF.PAIRFL.1``; None otherwise."""
+    for kind, prefix in PAIR_LITERAL_PREFIX.items():
+        if key.startswith(prefix) and key[len(prefix) :].startswith("PAIRFL."):
+            return kind, key[len(prefix) :]
+    return None
+
+
+def spatial_identity(block: Mapping[str, Any]) -> str:
+    """``spatial_id`` (F6): the SHA-256 hash of the canonical JSON of the ``spatial`` block."""
+    import hashlib
+
+    return hashlib.sha256(canonical_json(dict(block)).encode("utf-8")).hexdigest()
+
+
+def check_spatial_block(block: Any, pair_fluents: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """The form of a ``spatial`` block: a mapping from a pair fluent of the definition to a
+    mapping with a ``detector`` name and a ``parameters`` mapping. The runtime checks nothing
+    else."""
+    if not isinstance(block, Mapping):
+        raise DefinitionError("the spatial block is not a mapping")
+    found: dict[str, dict[str, Any]] = {}
+    for label, entry in block.items():
+        if label not in pair_fluents:
+            raise DefinitionError(f"the spatial block names {label}, which is not a pair fluent")
+        if (
+            not isinstance(entry, Mapping)
+            or not isinstance(entry.get("detector"), str)
+            or not isinstance(entry.get("parameters", {}), Mapping)
+            or set(entry) - {"detector", "parameters"}
+        ):
+            raise DefinitionError(
+                f"the spatial entry of {label} is not {{detector: name, parameters: mapping}}"
+            )
+        found[str(label)] = {
+            "detector": str(entry["detector"]),
+            "parameters": dict(entry.get("parameters", {})),
+        }
+    return found
 
 
 def comparison_literal(item: ScalarComparison) -> LiteralSpec:
@@ -205,17 +288,27 @@ def _is_place_literal(reads: Mapping[str, Any], place_features: Mapping[str, int
 
 
 _GROUP_ORDER = {
-    (None, "feature"): 0,
-    (None, "threshold"): 1,
-    (None, "fluent"): 2,
-    (None, "numeric_threshold"): 3,
-    ("agent", "feature"): 4,
-    ("agent", "threshold"): 5,
-    ("patient", "feature"): 6,
-    ("patient", "threshold"): 7,
-    ("binding", "comparison"): 8,
-    ("binding", "constraint"): 9,
+    key: position
+    for position, key in enumerate(
+        (
+            (None, "feature"),
+            (None, "threshold"),
+            (None, "fluent"),
+            (None, "numeric_threshold"),
+            (None, PAIR_SOME),
+            (None, PAIR_SOMEOF),
+            ("agent", "feature"),
+            ("agent", "threshold"),
+            ("patient", "feature"),
+            ("patient", "threshold"),
+            ("binding", "comparison"),
+            ("binding", "constraint"),
+        )
+    )
 }
+"""The order of the literal groups in the literal table. The entity-scope pair literals of
+stage c2a (``SOME`` and ``SOMEOF`` of the entity) follow the numeric thresholds; a world
+without them orders its literals as before."""
 
 
 def _literal_sort_key(
@@ -239,6 +332,8 @@ def _literal_sort_key(
         return (group, _natural(reads["fluent"]), 0.0)
     if reads["kind"] == "numeric_threshold":
         return (group, _natural(reads["fluent"]), reads["threshold"])
+    if reads["kind"] in PAIR_KINDS:
+        return (group, _natural(reads["pair_fluent"]), 0.0)
     if reads["kind"] == "comparison":
         return (
             group,
@@ -278,11 +373,18 @@ class Definition:
     """The constraints and requirements of the place event types (scope ``place_binding``)."""
     place_matrices: RuleMatrices | None = None
     place_binding_matrices: RuleMatrices | None = None
+    pair_fluents: PairFluents = None  # type: ignore[assignment]
+    """The pair fluents between entities and their initial pairs (stage c2a); none when the
+    world has none."""
+    spatial: dict[str, dict[str, Any]] | None = None
+    """The ``spatial`` block (F6), from an event file; None when there is none."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_index", {lit.key: i for i, lit in enumerate(self.literals)})
         if self.numeric is None:
             object.__setattr__(self, "numeric", empty_numeric(len(self.statics.instances)))
+        if self.pair_fluents is None:
+            object.__setattr__(self, "pair_fluents", empty_pair_fluents())
         if self.places is not None and (
             self.place_matrices is None or self.place_binding_matrices is None
         ):
@@ -342,9 +444,14 @@ class Definition:
             records += [et.record() for et in self.places.event_types]
         return records
 
+    @property
+    def spatial_id(self) -> str | None:
+        return None if self.spatial is None else spatial_identity(self.spatial)
+
     def record(self) -> dict[str, Any]:
-        """The contents of ``definition.json``."""
-        return {
+        """The contents of ``definition.json``. The ``spatial`` block and its ``spatial_id``
+        (F6) are written only when the definition has the block; neither is hashed."""
+        record = {
             "version": DEFINITION_VERSION,
             "rule_set_id": self.rule_set_id,
             "symbols": list(self.symbols),
@@ -353,6 +460,10 @@ class Definition:
             "layers": self.layers_record(),
             "event_types": self.event_types_record(),
         }
+        if self.spatial is not None:
+            record["spatial"] = {k: dict(v) for k, v in self.spatial.items()}
+            record["spatial_id"] = self.spatial_id
+        return record
 
     def runtime(self) -> RuntimeDefinition:
         """The definition as the runtime reads it, built from this definition's own record and
@@ -364,7 +475,18 @@ class Definition:
             places = json.loads(
                 to_json(places_frame(self.places).to_dicts(), indent=1, sort_keys=False)
             )
-        return runtime_definition(record, entities, places)
+        initial_pairs = None
+        if len(self.pair_fluents):
+            initial_pairs = json.loads(
+                to_json(
+                    initial_pairs_frame(
+                        self.pair_fluents, self.taxonomy.instances.labels
+                    ).to_dicts(),
+                    indent=1,
+                    sort_keys=False,
+                )
+            )
+        return runtime_definition(record, entities, places, initial_pairs)
 
     # Literal values ---------------------------------------------------------------------------
 
@@ -381,17 +503,21 @@ class Definition:
         scalars: np.ndarray,
         base_fluents: np.ndarray,
         numeric: np.ndarray | None = None,
+        pairs: Sequence[np.ndarray] | None = None,
     ) -> np.ndarray:
         """The base literal matrix of entities: free features from ``values`` (the static
         feature matrix, by position), thresholds from ``scalars``, base fluents from
         ``base_fluents`` (``(n, base fluents)``), numeric thresholds from ``numeric`` (``(n,
-        numeric fluents)``, the initial values when None), and 0 for every literal that a rule
-        computes or that a binding reads."""
+        numeric fluents)``, the initial values when None), the pair literals ``SOME`` and
+        ``SOMEOF`` from ``pairs`` (one matrix per pair fluent; the initial pairs when None), and
+        0 for every literal that a rule computes or that a binding reads."""
         n = values.shape[0]
         matrix = self.entity_matrices.literal_matrix(n)
         base_index = {label: i for i, label in enumerate(self.fluents.base_labels)}
         if numeric is None:
             numeric = self.numeric.initial_values
+        if pairs is None:
+            pairs = self.pair_fluents.initial_pairs
         for i, spec in enumerate(self.literals):
             reads = spec.reads
             if reads["role"] is not None or _is_place_literal(reads, self._place_positions()):
@@ -408,6 +534,12 @@ class Definition:
             elif reads["kind"] == "numeric_threshold":
                 column = numeric[:, self.numeric.index(reads["fluent"])]
                 matrix[:, i] = (column > reads["threshold"]).astype(np.uint8)
+            elif reads["kind"] == PAIR_SOME:
+                pair_matrix = pairs[self.pair_fluents.index(reads["pair_fluent"])]
+                matrix[:, i] = np.asarray(pair_matrix, dtype=bool).any(axis=1).astype(np.uint8)
+            elif reads["kind"] == PAIR_SOMEOF:
+                pair_matrix = pairs[self.pair_fluents.index(reads["pair_fluent"])]
+                matrix[:, i] = np.asarray(pair_matrix, dtype=bool).any(axis=0).astype(np.uint8)
         return matrix
 
     def binding_literal_values(
@@ -562,7 +694,11 @@ def _place_symbols(places: Places) -> list[dict[str, Any]]:
 
 
 def _symbols(
-    statics: StaticWorld, fluents: Fluents, event_types: EventTypes, numeric: NumericFluents
+    statics: StaticWorld,
+    fluents: Fluents,
+    event_types: EventTypes,
+    numeric: NumericFluents,
+    pair_fluents: PairFluents | None = None,
 ) -> list[dict[str, Any]]:
     taxonomy = statics.taxonomy
     symbols: list[dict[str, Any]] = []
@@ -599,6 +735,8 @@ def _symbols(
         )
     for numeric_fluent in numeric.fluents:
         symbols.append(numeric_fluent.symbol_record())
+    for pair_fluent in pair_fluents or ():
+        symbols.append(pair_fluent.symbol_record())
     for et in event_types.event_types:
         symbols.append(
             {
@@ -618,12 +756,20 @@ def build_definition(
     event_types: EventTypes,
     numeric: NumericFluents | None = None,
     places: Places | None = None,
+    pair_fluents: PairFluents | None = None,
+    spatial: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Definition:
     """Assemble the definition: the literal table, the rule scopes (entity and binding, and
-    with places the place and place-binding scopes), the matrices, and the identity."""
+    with places the place and place-binding scopes), the matrices, and the identity. With pair
+    fluents (stage c2a), their symbols, the entity-scope pair literals the derived rules read,
+    and, when given, the ``spatial`` block."""
     taxonomy = statics.taxonomy
     if numeric is None:
         numeric = empty_numeric(len(taxonomy.instances))
+    if pair_fluents is None:
+        pair_fluents = empty_pair_fluents()
+    if spatial is not None:
+        spatial = check_spatial_block(spatial, pair_fluents.labels)
     position_of = {f.label: f.position for f in statics.features.features}
     place_position_of = (
         {f.label: f.position for f in places.taxonomy.features.features}
@@ -648,6 +794,13 @@ def build_definition(
         for key in rule.inputs:
             if key in fluents:
                 add(fluent_literal(key))
+            elif (pair_input := pair_literal_key_of_rule_input(key)) is not None:
+                if pair_input[1] not in pair_fluents:
+                    raise WorldError(
+                        f"the rule for {rule.output} reads {key}, but {pair_input[1]} is not a "
+                        f"pair fluent of the world"
+                    )
+                add(pair_literal_spec(*pair_input))
             elif key.startswith("NUMFL."):
                 numeric_literal: NumericThreshold = next(
                     t for t in rule.numeric_thresholds if t.key == key
@@ -722,7 +875,7 @@ def build_definition(
         build_matrices(literals, place_binding_rules) if places is not None else None
     )
     symbols = tuple(
-        _symbols(statics, fluents, event_types, numeric)
+        _symbols(statics, fluents, event_types, numeric, pair_fluents)
         + (_place_symbols(places) if places is not None else [])
     )
 
@@ -745,6 +898,8 @@ def build_definition(
             tuple(place_binding_rules),
             place_matrices,
             place_binding_matrices,
+            pair_fluents,
+            None if spatial is None else dict(spatial),
         )
 
     draft = assemble("")
@@ -919,11 +1074,17 @@ def entities_frame(definition: Definition) -> pl.DataFrame:
 
 
 def write_definition(definition: Definition, folder: str | Path) -> None:
+    """Write ``definition.json``, ``entities.csv``, ``places.csv`` in a world with places, and
+    ``initial_pairs.csv`` in a world with pair fluents (stage c2a)."""
     folder = Path(folder)
     write_json(folder / DEFINITION_FILE, definition.record())
     entities_frame(definition).write_csv(folder / ENTITIES_FILE)
     if definition.places is not None:
         places_frame(definition.places).write_csv(folder / PLACES_FILE)
+    if len(definition.pair_fluents):
+        initial_pairs_frame(
+            definition.pair_fluents, definition.taxonomy.instances.labels
+        ).write_csv(folder / INITIAL_PAIRS_FILE)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -941,9 +1102,19 @@ SYMBOL_KINDS = STATIC_KINDS + (
     *PLACE_STATIC_KINDS,
     PLACE_SCALAR_KIND,
     PLACE_EVENT_TYPE_KIND,
+    PAIR_FLUENT_KIND,
 )
 EVENT_TYPE_KINDS = ("event_type", "event_type_category", PLACE_EVENT_TYPE_KIND)
-LITERAL_KINDS = ("feature", "threshold", "fluent", "numeric_threshold", "comparison", "constraint")
+LITERAL_KINDS = (
+    "feature",
+    "threshold",
+    "fluent",
+    "numeric_threshold",
+    "comparison",
+    "constraint",
+    *PAIR_KINDS,
+)
+CONDITION_KINDS = ("feature", "fluent", "numeric", *PAIR_KINDS)
 SCOPES = ("entity", "binding", "place", "place_binding")
 ENTITY_COLUMNS = ("label", "leaf")
 
@@ -958,12 +1129,19 @@ class EventTypeRecord:
     kind: str
     arity: int
     requirement: str
-    precondition: tuple[Literal, ...]
+    precondition: tuple[Literal | PairLiteral, ...]
     effects: tuple[Effect, ...]
 
     @property
     def roles(self) -> tuple[str, ...]:
         return ROLES[: self.arity]
+
+    @property
+    def reads_pairs(self) -> bool:
+        """Whether the precondition or a condition holds a pair literal (stage c2a)."""
+        return any(lit.pair for lit in self.precondition) or any(
+            lit.pair for effect in self.effects for lit in effect.condition
+        )
 
     @property
     def is_category(self) -> bool:
@@ -1041,9 +1219,21 @@ class RuntimeDefinition:
     place_binding_rules: tuple[RuleSpec, ...] = ()
     place_matrices: RuleMatrices | None = None
     place_binding_matrices: RuleMatrices | None = None
+    pair_fluents: tuple[PairFluent, ...] = ()
+    """The pair fluents (stage c2a), in symbol order, with their profiles."""
+    initial_pairs: tuple[np.ndarray, ...] | None = None
+    """One Boolean matrix per pair fluent, ``(entities, entities)``: the pairs of
+    ``initial_pairs.csv``; None when no initial pairs were given (a fixture gives them apart)."""
+    spatial: dict[str, dict[str, Any]] | None = None
+    """The ``spatial`` block (F6), or None."""
+    spatial_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_entity_index", {v: i for i, v in enumerate(self.entity_labels)})
+        object.__setattr__(
+            self, "_pair_index", {f.label: i for i, f in enumerate(self.pair_fluents)}
+        )
+        object.__setattr__(self, "_pair_cones", _pair_cones(self))
         object.__setattr__(self, "_event_types", {et.label: et for et in self.event_types})
         object.__setattr__(self, "_base_index", {v: i for i, v in enumerate(self.base_fluents)})
         object.__setattr__(
@@ -1065,9 +1255,37 @@ class RuntimeDefinition:
             self.initial_numeric,
             self.place_free_values,
             self.place_scalar_values,
+            *(self.initial_pairs or ()),
         ):
             if arr is not None:
                 arr.setflags(write=False)
+
+    @property
+    def has_pair_fluents(self) -> bool:
+        return bool(self.pair_fluents)
+
+    @property
+    def pair_labels(self) -> tuple[str, ...]:
+        return tuple(f.label for f in self.pair_fluents)
+
+    def is_pair_fluent(self, label: str) -> bool:
+        return label in self._pair_index  # type: ignore[attr-defined]
+
+    def pair_index(self, label: str) -> int:
+        try:
+            return self._pair_index[label]  # type: ignore[attr-defined]
+        except KeyError:
+            raise WorldError(f"{label} is not a pair fluent of the definition") from None
+
+    def pair_fluent(self, label: str) -> PairFluent:
+        return self.pair_fluents[self.pair_index(label)]
+
+    def pair_cone(self, fluent: str) -> tuple[tuple[str, str], ...]:
+        """The rows and columns of its own entity a fluent reads through the pair literals of
+        its rule, directly or through other derived fluents (stage c2a): ``("row", "PAIRFL.1")``
+        for ``SOME.PAIRFL.1`` and ``("column", "PAIRFL.1")`` for ``SOMEOF.PAIRFL.1``; empty for
+        a base fluent, a numeric fluent, or a rule that reads no pair literal."""
+        return self._pair_cones.get(fluent, ())  # type: ignore[attr-defined]
 
     @property
     def entity_count(self) -> int:
@@ -1159,6 +1377,35 @@ def _fluent_cones(definition: RuntimeDefinition) -> dict[str, tuple[str, ...]]:
     return cones
 
 
+def _pair_cones(definition: RuntimeDefinition) -> dict[str, tuple[tuple[str, str], ...]]:
+    """Each derived fluent's pair reads (``pair_cone``), through the rules it depends on."""
+    literal_of = {spec.key: spec.reads for spec in definition.literals}
+    rules = {rule.output: rule for rule in definition.entity_rules}
+    cones: dict[str, tuple[tuple[str, str], ...]] = {}
+    pair_order = {f.label: i for i, f in enumerate(definition.pair_fluents)}
+
+    def cone_of(label: str) -> tuple[tuple[str, str], ...]:
+        if label in cones:
+            return cones[label]
+        if label not in rules or label not in definition.derived_fluents:
+            return ()
+        found: set[tuple[str, str]] = set()
+        for key in rules[label].inputs:
+            reads = literal_of[key]
+            if reads["kind"] == PAIR_SOME:
+                found.add(("row", reads["pair_fluent"]))
+            elif reads["kind"] == PAIR_SOMEOF:
+                found.add(("column", reads["pair_fluent"]))
+            elif reads["kind"] in ("fluent", "numeric_threshold"):
+                found.update(cone_of(reads["fluent"]))
+        cones[label] = tuple(sorted(found, key=lambda r: (pair_order[r[1]], r[0])))
+        return cones[label]
+
+    for label in definition.derived_fluents:
+        cone_of(label)
+    return cones
+
+
 def _expect(condition: bool, message: str) -> None:
     if not condition:
         raise DefinitionError(message)
@@ -1183,21 +1430,35 @@ def runtime_definition(
     record: Mapping[str, Any],
     entities: Sequence[Mapping[str, Any]] | pl.DataFrame,
     places: Sequence[Mapping[str, Any]] | pl.DataFrame | None = None,
+    initial_pairs: Sequence[Mapping[str, Any]]
+    | Sequence[Sequence[str]]
+    | pl.DataFrame
+    | None = None,
 ) -> RuntimeDefinition:
     """Build the runtime's definition from a definition record (the contents of
     ``definition.json``), an entities table (the rows of ``entities.csv``, or the same rows
-    without the fluent columns), and, for a world with places, the places table (the rows of
-    ``places.csv``). Checks the identity and every reference between the tables."""
+    without the fluent columns), for a world with places the places table (the rows of
+    ``places.csv``), and, for a world with pair fluents (stage c2a), the initial pairs (the rows
+    of ``initial_pairs.csv``, or triples; None when a caller gives the initial pairs apart, as
+    a fixture does). Checks the identity and every reference between the tables."""
     rows = entities.to_dicts() if isinstance(entities, pl.DataFrame) else list(entities)
     place_rows = places.to_dicts() if isinstance(places, pl.DataFrame) else list(places or [])
+    pair_rows = (
+        initial_pairs.to_dicts()
+        if isinstance(initial_pairs, pl.DataFrame)
+        else (None if initial_pairs is None else list(initial_pairs))
+    )
     try:
-        return _runtime_definition(record, rows, place_rows)
+        return _runtime_definition(record, rows, place_rows, pair_rows)
     except (KeyError, TypeError) as error:
         raise DefinitionError(f"the definition record is malformed: {error!r}") from None
 
 
 def _runtime_definition(
-    record: Mapping[str, Any], rows: Sequence[Mapping[str, Any]], place_rows: Sequence
+    record: Mapping[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    place_rows: Sequence,
+    pair_rows: Sequence | None = None,
 ) -> RuntimeDefinition:
     _expect(
         record["version"] == DEFINITION_VERSION,
@@ -1229,6 +1490,7 @@ def _runtime_definition(
     place_derived: list[str] = []
     place_scalars: list[str] = []
     place_event_types: list[str] = []
+    pair_fluents: list[PairFluent] = []
     for symbol in record["symbols"]:
         label, kind = str(symbol["label"]), str(symbol["kind"])
         _expect(kind in SYMBOL_KINDS, f"the symbol {label} has the unknown kind {kind!r}")
@@ -1244,6 +1506,21 @@ def _runtime_definition(
             place_scalars.append(label)
         elif kind == PLACE_EVENT_TYPE_KIND:
             place_event_types.append(label)
+        elif kind == PAIR_FLUENT_KIND:
+            _expect(
+                symbol.get("fluent") is True
+                and symbol.get("derived") is False
+                and int(symbol.get("arity", 0)) == 2,
+                f"the pair fluent {label} is a base fluent of arity 2",
+            )
+            try:
+                pair_fluents.append(PairFluent.from_record(symbol))
+            except (KeyError, TypeError, ValueError, WorldError) as error:
+                raise DefinitionError(f"the pair fluent {label} is malformed: {error}") from None
+            _expect(
+                not pair_fluents[-1].total,
+                f"the pair fluent {label} is total; a location fluent comes in stage c3",
+            )
         elif kind == "fluent":
             rate = symbol.get("initial_rate")
             if symbol["derived"]:
@@ -1287,6 +1564,11 @@ def _runtime_definition(
     _expect(
         not has_places or place_rows is not None,
         "the definition has places, but no places table was given",
+    )
+    pair_labels = [f.label for f in pair_fluents]
+    _expect(
+        pair_labels == [f"PAIRFL.{i}" for i in range(1, len(pair_labels) + 1)],
+        "the pair fluents are not PAIRFL.1 to PAIRFL.<k> in order",
     )
 
     # Literals.
@@ -1367,6 +1649,25 @@ def _runtime_definition(
             float(entry["low"])
             if entry["high"] is not None:
                 float(entry["high"])
+        elif kind in PAIR_KINDS:
+            _expect(
+                entry.get("pair_fluent") in pair_labels,
+                f"the literal {key} reads {entry.get('pair_fluent')}, which is not a pair fluent",
+            )
+            if kind in TWO_ARGUMENT_KINDS:
+                _expect(
+                    role == "binding"
+                    and entry.get("first") in ROLES
+                    and entry.get("second") in ROLES
+                    and entry.get("first") != entry.get("second"),
+                    f"the literal {key} is a {kind} literal, which names two roles of a binding",
+                )
+            else:
+                _expect(
+                    role in (None, *ROLES),
+                    f"the literal {key} has the role {role!r}; a {kind} literal belongs to the "
+                    f"entity scope (role null) or names one role",
+                )
         else:
             _expect(
                 role == "binding", f"the literal {key} reads a constraint with the role {role!r}"
@@ -1474,8 +1775,11 @@ def _runtime_definition(
                 requirement in constraint_outputs,
                 f"the requirement {requirement} of {label} has no binding rule",
             )
-        precondition = []
+        precondition: list[Literal | PairLiteral] = []
         for lit in entry["precondition"]["literals"]:
+            if lit.get("kind") in PAIR_KINDS:
+                precondition.append(_pair_literal(label, lit, arity, pair_fluents, "precondition"))
+                continue
             _expect(
                 lit["role"] in ROLES[:arity],
                 f"the precondition of {label} reads the role {lit['role']!r}",
@@ -1507,11 +1811,32 @@ def _runtime_definition(
             precondition.append(Literal(str(lit["role"]), str(lit["fluent"]), bool(lit["value"])))
         effects = []
         for effect in entry["effects"]:
+            second: str | None = None
+            if effect.get("kind") == PAIR_KIND:
+                _expect(
+                    effect.get("pair_fluent") in pair_labels,
+                    f"an effect of {label} writes {effect.get('pair_fluent')}, which is not a "
+                    f"pair fluent",
+                )
+                _expect(
+                    effect.get("first") in ROLES[:arity]
+                    and effect.get("second") in ROLES[:arity]
+                    and effect["first"] != effect["second"],
+                    f"the pair effect of {label} on {effect.get('pair_fluent')} names the roles "
+                    f"{effect.get('first')!r} and {effect.get('second')!r}",
+                )
+                role_of_effect, fluent_of_effect = str(effect["first"]), str(effect["pair_fluent"])
+                second = str(effect["second"])
+                value: bool | float = bool(effect["value"])
+            else:
+                role_of_effect, fluent_of_effect = str(effect["role"]), str(effect["fluent"])
             _expect(
-                effect["role"] in ROLES[:arity],
-                f"an effect of {label} writes the role {effect['role']!r}",
+                role_of_effect in ROLES[:arity],
+                f"an effect of {label} writes the role {role_of_effect!r}",
             )
-            if "amount" in effect:
+            if second is not None:
+                pass
+            elif "amount" in effect:
                 _expect(
                     effect["fluent"] in numeric_fluents,
                     f"an effect of {label} adds to {effect['fluent']}, which is not a numeric "
@@ -1526,15 +1851,18 @@ def _runtime_definition(
                 _expect(
                     amount > 0, f"a numeric effect of {label} has a constant that is not above 0"
                 )
-                value: bool | float = amount if effect["operator"] == "+=" else -amount
+                value = amount if effect["operator"] == "+=" else -amount
             else:
                 _expect(
                     effect["fluent"] in base_fluents,
                     f"an effect of {label} writes {effect['fluent']}, which is not a base fluent",
                 )
                 value = bool(effect["value"])
-            condition = []
+            condition: list[ConditionLiteral | PairLiteral] = []
             for lit in (effect.get("condition") or {}).get("literals", ()):
+                if lit.get("kind") in PAIR_KINDS:
+                    condition.append(_pair_literal(label, lit, arity, pair_fluents, "condition"))
+                    continue
                 key = f"{lit.get('role')}.{lit.get('symbol')}"
                 _expect(
                     lit["role"] in ROLES[:arity],
@@ -1567,11 +1895,12 @@ def _runtime_definition(
                         ConditionLiteral(str(lit["role"]), str(lit["symbol"]), bool(lit["value"]))
                     )
             _expect(
-                len({(c.role, c.symbol) for c in condition}) == len(condition),
+                len({(c.role, c.symbol) for c in condition if not c.pair})
+                == sum(1 for c in condition if not c.pair),
                 f"the condition of an effect of {label} reads a symbol twice",
             )
             effects.append(
-                Effect(str(effect["role"]), str(effect["fluent"]), value, tuple(condition))
+                Effect(role_of_effect, fluent_of_effect, value, tuple(condition), second)
             )
         event_types.append(
             EventTypeRecord(
@@ -1672,6 +2001,41 @@ def _runtime_definition(
     else:
         _expect(not place_rows, "a places table was given, but the definition has no places")
 
+    # The spatial block (F6).
+    spatial = None
+    spatial_id = None
+    if "spatial" in record or "spatial_id" in record:
+        _expect(
+            "spatial" in record and "spatial_id" in record,
+            "a definition with a spatial block carries both spatial and spatial_id",
+        )
+        spatial = check_spatial_block(record["spatial"], pair_labels)
+        spatial_id = spatial_identity(spatial)
+        _expect(
+            record["spatial_id"] == spatial_id,
+            f"the definition says its spatial block hashes to {record['spatial_id']}, but it "
+            f"hashes to {spatial_id}",
+        )
+
+    # The initial pairs (stage c2a).
+    initial_pairs = None
+    if pair_rows is not None:
+        _expect(
+            pair_fluents or not pair_rows,
+            "initial pairs were given, but the definition has no pair fluents",
+        )
+        entity_index = {label: i for i, label in enumerate(labels)}
+        try:
+            initial_pairs = matrices_from_rows(pair_rows, pair_fluents, entity_index)
+        except WorldError as error:
+            raise DefinitionError(str(error)) from None
+        from semantic_world.world.pair_fluents import profile_violations
+
+        for fluent, matrix in zip(pair_fluents, initial_pairs, strict=True):
+            violations = profile_violations(fluent, matrix)
+            if violations:
+                raise DefinitionError(f"the initial pairs break a profile: {violations[0]}")
+
     definition = RuntimeDefinition(
         record=dict(record),
         rule_set_id=identity,
@@ -1708,8 +2072,37 @@ def _runtime_definition(
         place_binding_rules=tuple(place_binding_rules),
         place_matrices=matrices["place"],
         place_binding_matrices=matrices["place_binding"],
+        pair_fluents=tuple(pair_fluents),
+        initial_pairs=initial_pairs,
+        spatial=spatial,
+        spatial_id=spatial_id,
     )
     return definition
+
+
+def _pair_literal(
+    label: str, lit: Mapping[str, Any], arity: int, pair_fluents: Sequence[PairFluent], where: str
+) -> PairLiteral:
+    """A pair literal of an event-type record, checked: a pair fluent of the definition, roles
+    of the event type, and ``SAME`` on a functional pair fluent."""
+    try:
+        literal = PairLiteral.from_record(lit)
+    except (KeyError, TypeError, ValueError) as error:
+        raise DefinitionError(
+            f"a pair literal of the {where} of {label} is malformed: {error}"
+        ) from None
+    by_label = {f.label: f for f in pair_fluents}
+    _expect(
+        literal.pair_fluent in by_label,
+        f"the {where} of {label} reads {literal.pair_fluent}, which is not a pair fluent",
+    )
+    for role in literal.roles:
+        _expect(role in ROLES[:arity], f"the {where} of {label} reads the role {role!r}")
+    _expect(
+        literal.kind != PAIR_SAME or by_label[literal.pair_fluent].functional,
+        f"the {where} of {label} reads {literal.key}, but {literal.pair_fluent} is not functional",
+    )
+    return literal
 
 
 def _bit_matrix(rows: Sequence[Mapping[str, Any]], columns: Sequence[str]) -> np.ndarray:
@@ -1748,7 +2141,15 @@ def load_definition(folder: str | Path) -> RuntimeDefinition:
         if not places_path.is_file():
             raise DefinitionError(f"{places_path} is missing: the definition has places")
         places = pl.read_csv(places_path, schema_overrides={"label": pl.Utf8, "leaf": pl.Utf8})
-    return runtime_definition(record, entities, places)
+    initial_pairs = None
+    if any(s.get("kind") == PAIR_FLUENT_KIND for s in record.get("symbols", ())):
+        pairs_path = folder / INITIAL_PAIRS_FILE
+        if not pairs_path.is_file():
+            raise DefinitionError(f"{pairs_path} is missing: the definition has pair fluents")
+        initial_pairs = pl.read_csv(
+            pairs_path, schema_overrides={c: pl.Utf8 for c in ("pair_fluent", "first", "second")}
+        )
+    return runtime_definition(record, entities, places, initial_pairs)
 
 
 __all__ = [
@@ -1760,7 +2161,9 @@ __all__ = [
     "RuntimeDefinition",
     "build_definition",
     "check_definition",
+    "check_spatial_block",
     "constraint_literals",
+    "spatial_identity",
     "entities_frame",
     "load_definition",
     "runtime_definition",

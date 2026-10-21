@@ -41,15 +41,23 @@ from semantic_world.taxonomy.rules import MAX_TRIES, Rule, _draw, input_key
 from semantic_world.world.config import Config, EffectsConfig, PreconditionsConfig
 from semantic_world.world.constraints import Constraint
 from semantic_world.world.dynamics import (
+    PAIR_KIND,
+    PAIR_SAME,
+    PAIR_SOME,
+    PAIR_SOMEOF,
+    PROFILE_ORIGIN,
     ROLES,
+    AnyLiteral,
     ConditionLiteral,
     Effect,
     Literal,
+    PairLiteral,
     precondition_text,
 )
 from semantic_world.world.event_file import EventFile, ExplicitEventType
 from semantic_world.world.fluents import Fluents
 from semantic_world.world.numeric import NumericFluents, drawn, empty_numeric
+from semantic_world.world.pair_fluents import PairFluent, PairFluents, empty_pair_fluents
 from semantic_world.world.statics import StaticWorld
 from semantic_world.world.streams import WorldStreams
 
@@ -146,7 +154,8 @@ class EventType:
     category), in feature order."""
     constraints: tuple[str, ...]
     """The labels of the constraints whose conjunction is the requirement."""
-    precondition: tuple[Literal, ...] = ()
+    precondition: tuple[AnyLiteral, ...] = ()
+    """The precondition literals, the compiled literals of stage c2a (origin ``profile``) last."""
     effects: tuple[Effect, ...] = ()
     explicit: bool = False
 
@@ -295,6 +304,109 @@ def build_event_types(statics: StaticWorld) -> EventTypes:
 
 
 # ---------------------------------------------------------------------------------------------
+# Pair literals and effects: what they name (stage c2a)
+# ---------------------------------------------------------------------------------------------
+
+
+def _ordered(fluent: PairFluent, first: str, second: str) -> tuple[str, ...]:
+    """The two roles of a pair, in the fluent's canonical order: as given, or sorted for a
+    symmetric pair fluent, whose two directions are one pair."""
+    return tuple(sorted((first, second))) if fluent.symmetric else (first, second)
+
+
+def pair_literal_key(literal: PairLiteral, fluent: PairFluent) -> tuple:
+    """What a pair literal is about, so that two literals about the same thing compare equal:
+    a pair (both directions of a symmetric one), the row of a role (``SOME``; ``SOMEOF`` of a
+    symmetric pair fluent names the same set), the column of a role (``SOMEOF``), or the rows of
+    two roles (``SAME``, in either order)."""
+    if literal.kind == PAIR_KIND:
+        assert literal.second is not None
+        return ("pair", fluent.label, _ordered(fluent, literal.first, literal.second))
+    if literal.kind == PAIR_SOME:
+        return ("row", fluent.label, literal.first)
+    if literal.kind == PAIR_SOMEOF:
+        return ("row" if fluent.symmetric else "column", fluent.label, literal.first)
+    assert literal.second is not None
+    return ("same", fluent.label, frozenset((literal.first, literal.second)))
+
+
+def pair_literal_names(literal: PairLiteral, fluent: PairFluent) -> set[tuple]:
+    """The pairs, rows, and columns a pair literal names (the rule of F5 that a condition names
+    no pair or row the precondition names): ``SAME`` names the rows of both roles."""
+    if literal.kind == PAIR_SAME:
+        return {("row", fluent.label, literal.first), ("row", fluent.label, literal.second)}
+    return {pair_literal_key(literal, fluent)}
+
+
+def pair_effect_key(effect: Effect, fluent: PairFluent) -> tuple:
+    """The pair a pair effect writes, as ``pair_literal_key`` names it."""
+    assert effect.second is not None
+    return ("pair", fluent.label, _ordered(fluent, effect.role, effect.second))
+
+
+def compiled_literals(effect: Effect, fluent: PairFluent) -> list[PairLiteral]:
+    """The compiled precondition literals (F4) of an add effect: ``NOT PAIRFL.k(second,
+    first)`` for an asymmetric pair fluent, ``NOT SOME.PAIRFL.k(first)`` for a functional one,
+    and ``NOT SOME.PAIRFL.k(second)`` too for a symmetric functional one; none for a delete or
+    for a general pair fluent that is not functional. Each carries the origin ``profile``."""
+    if not effect.pair or not effect.value:
+        return []
+    assert effect.second is not None
+    found: list[PairLiteral] = []
+    if fluent.asymmetric:
+        found.append(
+            PairLiteral(PAIR_KIND, fluent.label, effect.second, effect.role, False, PROFILE_ORIGIN)
+        )
+    if fluent.functional:
+        found.append(PairLiteral(PAIR_SOME, fluent.label, effect.role, None, False, PROFILE_ORIGIN))
+        if fluent.symmetric:
+            found.append(
+                PairLiteral(PAIR_SOME, fluent.label, effect.second, None, False, PROFILE_ORIGIN)
+            )
+    return found
+
+
+def pair_literal_achievable(
+    literal: PairLiteral, fluent: PairFluent, adds: set[str], deletes: set[str]
+) -> bool:
+    """Whether a pair literal can hold in some state ("Achievable" of the specification): a
+    positive literal when its pair fluent has a positive initial rate or some effect adds a
+    pair of it; a negative one when some initial state lacks the pair (an initial rate below 1,
+    or a functional pair fluent, in which every other pair of a row is absent) or some effect
+    deletes a pair of it. ``SAME`` on a symmetric functional pair fluent is never achievable:
+    two entities with the same partner would give that partner two partners."""
+    if literal.kind == PAIR_SAME and fluent.symmetric and fluent.functional:
+        return not literal.value
+    if literal.value:
+        return fluent.initial_rate > 0.0 or fluent.label in adds
+    return fluent.initial_rate < 1.0 or fluent.functional or fluent.label in deletes
+
+
+def add_compiled_literals(
+    precondition: Sequence[AnyLiteral], effects: Sequence[Effect], pair_fluents: PairFluents
+) -> tuple[AnyLiteral, ...]:
+    """The precondition with the compiled literals of every add effect appended, in effect
+    order, a literal already present (by what it names, whatever its origin) not added twice."""
+    present = {
+        pair_literal_key(lit, pair_fluents[lit.pair_fluent]): lit.value
+        for lit in precondition
+        if isinstance(lit, PairLiteral)
+    }
+    found = list(precondition)
+    for effect in effects:
+        if not effect.pair or effect.condition:
+            continue
+        fluent = pair_fluents[effect.fluent]
+        for literal in compiled_literals(effect, fluent):
+            key = pair_literal_key(literal, fluent)
+            if key in present:
+                continue
+            present[key] = literal.value
+            found.append(literal)
+    return tuple(found)
+
+
+# ---------------------------------------------------------------------------------------------
 # Preconditions and effects
 # ---------------------------------------------------------------------------------------------
 
@@ -308,7 +420,7 @@ class _Draft:
     own_literals: list[Literal] = field(default_factory=list)
     explicit: ExplicitEventType | None = None
     effects: tuple[Effect, ...] = ()
-    precondition: tuple[Literal, ...] = ()
+    precondition: tuple[AnyLiteral, ...] = ()
     own_effect_keys: set[tuple[str, str]] = field(default_factory=set)
     own_literal_keys: set[tuple[str, str]] = field(default_factory=set)
 
@@ -330,12 +442,14 @@ class _Dynamics:
         derived_initial: Mapping[str, np.ndarray],
         statics: StaticWorld | None = None,
         numeric: NumericFluents | None = None,
+        pair_fluents: PairFluents | None = None,
     ) -> None:
         self.static = event_types
         self.statics = statics
         self.fluents = fluents
         self.numeric = numeric if numeric is not None else empty_numeric(0)
         self.numeric_labels = self.numeric.labels
+        self.pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
         self.effects_config: EffectsConfig = config.event_types.effects
         self.preconditions_config: PreconditionsConfig = config.event_types.preconditions
         self.rng_effects = streams.effects
@@ -513,7 +627,20 @@ class _Dynamics:
                 )
         return None
 
-    def literal_achievable(self, literal: Literal, achievable: set[tuple[str, bool]]) -> bool:
+    def pair_adds_and_deletes(self) -> tuple[set[str], set[str]]:
+        """The pair fluents some effect adds a pair of, and those some effect deletes one of."""
+        adds = {e.fluent for d in self.drafts.values() for e in d.effects if e.pair and e.value}
+        deletes = {
+            e.fluent for d in self.drafts.values() for e in d.effects if e.pair and not e.value
+        }
+        return adds, deletes
+
+    def literal_achievable(self, literal: AnyLiteral, achievable: set[tuple[str, bool]]) -> bool:
+        if isinstance(literal, PairLiteral):
+            adds, deletes = self.pair_adds_and_deletes()
+            return pair_literal_achievable(
+                literal, self.pair_fluents[literal.pair_fluent], adds, deletes
+            )
         if literal.numeric:
             assert literal.threshold is not None
             return self.numeric_achievable(literal.fluent, literal.value, literal.threshold)
@@ -584,7 +711,7 @@ class _Dynamics:
             (e.fluent, e.value)
             for draft in self.drafts.values()
             for e in draft.effects
-            if not e.numeric
+            if not e.numeric and not e.pair
         }
         return sorted(values)
 
@@ -663,7 +790,9 @@ class _Dynamics:
         nothing: an own effect is redrawn, an inherited one dropped. Returns whether anything
         changed."""
         required = {
-            (lit.role, lit.fluent): lit.value for lit in draft.precondition if not lit.numeric
+            (lit.role, lit.fluent): lit.value
+            for lit in draft.precondition
+            if not lit.numeric and not lit.pair
         }
         changed = False
         kept: dict[tuple[str, str], Effect] = {(e.role, e.fluent): e for e in draft.effects}
@@ -701,14 +830,12 @@ class _Dynamics:
         self, draft: _Draft, achievable: set[tuple[str, bool]], produced: list[tuple[str, bool]]
     ) -> bool:
         changed = False
-        kept: dict[tuple[str, str], Literal] = {
-            (lit.role, lit.fluent): lit for lit in draft.precondition
-        }
+        kept: dict[tuple, AnyLiteral] = {_literal_slot(lit): lit for lit in draft.precondition}
         for literal in list(draft.precondition):
             if self.literal_achievable(literal, achievable):
                 continue
             changed = True
-            key = (literal.role, literal.fluent)
+            key = _literal_slot(literal)
             del kept[key]
             if key not in draft.own_literal_keys:
                 self.stats["literals_dropped_unachievable"] += 1
@@ -747,6 +874,11 @@ class _Dynamics:
                     f"{label} is a category of event types; give the entry to a leaf",
                 )
             for lit in entry.precondition or ():
+                if isinstance(lit, PairLiteral):
+                    self._check_explicit_pair_literal(
+                        source, f"{entry.field}.precondition", et, lit
+                    )
+                    continue
                 self._check_role(source, f"{entry.field}.precondition", et, lit.role, lit.key)
                 if lit.numeric:
                     if lit.fluent not in self.numeric:
@@ -762,10 +894,14 @@ class _Dynamics:
                     raise ConfigError(
                         source, f"{entry.field}.precondition", f"reads unknown fluent {lit.fluent}"
                     )
-            seen_effects: dict[tuple[str, str], bool | float] = {}
+            seen_effects: dict[tuple, bool | float] = {}
             for i, effect in enumerate(entry.effects or ()):
                 where = f"{entry.field}.effects[{i}]"
                 self._check_role(source, where, et, effect.role, effect.key)
+                if effect.pair:
+                    self._check_explicit_pair_effect(source, where, et, effect, seen_effects)
+                    self._check_explicit_condition(source, where, et, effect)
+                    continue
                 if effect.numeric:
                     if effect.fluent not in self.numeric:
                         raise ConfigError(
@@ -787,9 +923,9 @@ class _Dynamics:
                     )
                 seen_effects[key] = effect.value
                 self._check_explicit_condition(source, where, et, effect)
-            seen_literals: dict[tuple[str, str], bool] = {}
+            seen_literals: dict[tuple, bool] = {}
             for lit in entry.precondition or ():
-                key = (lit.role, lit.fluent)
+                key = _literal_slot(lit, self.pair_fluents)
                 if key in seen_literals and (lit.numeric or seen_literals[key] != lit.value):
                     raise ConfigError(
                         source,
@@ -798,10 +934,24 @@ class _Dynamics:
                         if lit.numeric
                         else f"holds {lit.key} and its negation",
                     )
+                if key in seen_literals:
+                    raise ConfigError(
+                        source, f"{entry.field}.precondition", f"holds {lit.key} twice"
+                    )
                 seen_literals[key] = lit.value
             if entry.precondition is not None and entry.effects is not None:
                 for effect in entry.effects:
-                    if (
+                    if effect.pair:
+                        slot = pair_effect_key(effect, self.pair_fluents[effect.fluent])
+                        if seen_literals.get(slot) == effect.value:
+                            raise ConfigError(
+                                source,
+                                entry.field,
+                                f"the effect {effect.text} {'adds' if effect.value else 'deletes'} "
+                                f"a pair whose {'presence' if effect.value else 'absence'} the "
+                                f"precondition already requires, so it changes nothing",
+                            )
+                    elif (
                         not effect.numeric
                         and seen_literals.get((effect.role, effect.fluent)) == effect.value
                     ):
@@ -812,7 +962,16 @@ class _Dynamics:
                             f"already requires, so it changes nothing",
                         )
                     for lit in effect.condition:
-                        if lit.kind != "feature" and (lit.role, lit.symbol) in seen_literals:
+                        if isinstance(lit, PairLiteral):
+                            self._check_pair_condition_against(
+                                source,
+                                entry.field,
+                                effect,
+                                lit,
+                                entry.precondition,
+                                "already",
+                            )
+                        elif lit.kind != "feature" and (lit.role, lit.symbol) in seen_literals:
                             raise ConfigError(
                                 source,
                                 entry.field,
@@ -827,8 +986,23 @@ class _Dynamics:
         """The rules of a condition that need no other draw: every literal names a role of the
         event type and a known symbol, no symbol twice, and no literal on the effect's own fluent
         with its value (the effect would change nothing)."""
-        keys: set[tuple[str, str]] = set()
+        keys: set[tuple] = set()
         for lit in effect.condition:
+            if isinstance(lit, PairLiteral):
+                self._check_explicit_pair_literal(source, where, et, lit)
+                fluent = self.pair_fluents[lit.pair_fluent]
+                key = pair_literal_key(lit, fluent)
+                if key in keys:
+                    raise ConfigError(source, where, f"the condition reads {lit.key} twice")
+                keys.add(key)
+                if effect.pair and key == pair_effect_key(effect, self.pair_fluents[effect.fluent]):
+                    raise ConfigError(
+                        source,
+                        where,
+                        f"the condition reads {lit.key}, the pair the effect writes: the effect "
+                        f"would change the pair, or leave it as it is, either way",
+                    )
+                continue
             self._check_role(source, where, et, lit.role, lit.key)
             if lit.kind == "numeric":
                 if lit.symbol not in self.numeric:
@@ -850,6 +1024,151 @@ class _Dynamics:
                     f"effect's value the effect would change nothing, and with the other value "
                     f"the fluent has the effect's value after the event either way",
                 )
+
+    def _check_explicit_pair_literal(
+        self, source: str, where: str, et: EventType, lit: PairLiteral
+    ) -> None:
+        """A pair literal of an explicit entry: a known pair fluent, roles of the event type,
+        and ``SAME`` on a functional pair fluent only."""
+        if lit.pair_fluent not in self.pair_fluents:
+            raise ConfigError(
+                source,
+                where,
+                f"{lit.key} reads unknown pair fluent {lit.pair_fluent}; the event file's "
+                f"pair_fluents block defines "
+                f"{', '.join(self.pair_fluents.labels) or 'no pair fluent'}",
+            )
+        for role in lit.roles:
+            self._check_role(source, where, et, role, lit.key)
+        fluent = self.pair_fluents[lit.pair_fluent]
+        if lit.kind == PAIR_SAME and not fluent.functional:
+            raise ConfigError(
+                source,
+                where,
+                f"{lit.key}: SAME needs a functional pair fluent, and {fluent.label} is not",
+            )
+
+    def _check_explicit_pair_effect(
+        self,
+        source: str,
+        where: str,
+        et: EventType,
+        effect: Effect,
+        seen: dict[tuple, bool | float],
+    ) -> None:
+        """A pair effect of an explicit entry: a known pair fluent, roles of the event type, no
+        delete on a total pair fluent, no conditional add on an asymmetric or functional pair
+        fluent (its compiled literals would not be a plain precondition, F4), and no second
+        effect on the same pair (both directions of a symmetric one)."""
+        if effect.fluent not in self.pair_fluents:
+            raise ConfigError(
+                source,
+                where,
+                f"writes unknown pair fluent {effect.fluent}; the event file's pair_fluents "
+                f"block defines {', '.join(self.pair_fluents.labels) or 'no pair fluent'}",
+            )
+        assert effect.second is not None
+        self._check_role(source, where, et, effect.second, effect.key)
+        fluent = self.pair_fluents[effect.fluent]
+        if fluent.total and not effect.value:
+            raise ConfigError(
+                source,
+                where,
+                f"{effect.text} deletes a pair of the total pair fluent {fluent.label}",
+            )
+        if effect.condition and effect.value and (fluent.asymmetric or fluent.functional):
+            raise ConfigError(
+                source,
+                where,
+                f"{effect.text} is a conditional add on the "
+                f"{'asymmetric' if fluent.asymmetric else 'functional'} pair fluent "
+                f"{fluent.label}; its compiled literals would not be a plain precondition, so a "
+                f"conditional add needs a general pair fluent that is not functional",
+            )
+        key = pair_effect_key(effect, fluent)
+        if key in seen:
+            raise ConfigError(
+                source,
+                where,
+                f"contradicts an earlier effect on {effect.key}"
+                if seen[key] != effect.value
+                else f"writes {effect.key} twice"
+                + (
+                    " (both directions of a symmetric pair are one pair)"
+                    if fluent.symmetric
+                    else ""
+                ),
+            )
+        seen[key] = effect.value
+
+    def _check_pair_condition_against(
+        self,
+        source: str,
+        where: str,
+        effect: Effect,
+        lit: PairLiteral,
+        precondition: Sequence[AnyLiteral],
+        word: str,
+    ) -> None:
+        """The rule of F5: a pair condition literal names no pair or row that the precondition
+        names (compiled literals included)."""
+        fluent = self.pair_fluents[lit.pair_fluent]
+        names = pair_literal_names(lit, fluent)
+        for other in precondition:
+            if not isinstance(other, PairLiteral):
+                continue
+            shared = names & pair_literal_names(other, self.pair_fluents[other.pair_fluent])
+            if shared:
+                raise ConfigError(
+                    source,
+                    where,
+                    f"the condition of {effect.text} reads {lit.key}, which names a "
+                    f"{'row' if shared and next(iter(shared))[0] == 'row' else 'pair or column'} "
+                    f"the precondition {word} names ({other.key})",
+                )
+
+    def compile_profile_literals(self) -> None:
+        """Append the compiled literals (F4) to every event type with an add effect on a pair
+        fluent; an explicit entry whose compiled literals contradict its own precondition is an
+        error naming the file and the entry."""
+        for draft in self.drafts.values():
+            if not any(e.pair for e in draft.effects):
+                continue
+            before = draft.precondition
+            keys = {
+                pair_literal_key(lit, self.pair_fluents[lit.pair_fluent]): lit
+                for lit in before
+                if isinstance(lit, PairLiteral)
+            }
+            for effect in draft.effects:
+                if not effect.pair or effect.condition or not effect.value:
+                    continue
+                fluent = self.pair_fluents[effect.fluent]
+                for literal in compiled_literals(effect, fluent):
+                    other = keys.get(pair_literal_key(literal, fluent))
+                    if other is not None and other.value != literal.value:
+                        assert self.event_file is not None and draft.explicit is not None
+                        raise ConfigError(
+                            self.event_file.source,
+                            draft.explicit.field,
+                            f"the effect {effect.text} needs the compiled literal {literal.text} "
+                            f"to keep the profile of {fluent.label}, which contradicts the "
+                            f"precondition literal {other.text}: the event type could never "
+                            f"happen",
+                        )
+            draft.precondition = add_compiled_literals(before, draft.effects, self.pair_fluents)
+            if draft.explicit is not None and draft.explicit.effects is not None:
+                for effect in draft.effects:
+                    for lit in effect.condition:
+                        if isinstance(lit, PairLiteral):
+                            self._check_pair_condition_against(
+                                self.event_file.source,  # type: ignore[union-attr]
+                                f"{draft.explicit.field}.effects",
+                                effect,
+                                lit,
+                                draft.precondition,
+                                "or its compiled literals",
+                            )
 
     def _check_threshold(
         self, source: str, where: str, fluent: str, threshold: float | None
@@ -895,8 +1214,10 @@ class _Dynamics:
                             f"the condition literal {lit.text} is not achievable: no entity "
                             f"starts with that value and no effect or drift produces it",
                         )
+                    if isinstance(lit, PairLiteral):
+                        continue
                     if lit.kind != "feature" and (lit.role, lit.symbol) in {
-                        (p.role, p.fluent) for p in draft.precondition
+                        (p.role, p.fluent) for p in draft.precondition if not p.pair
                     }:
                         raise ConfigError(
                             self.event_file.source,
@@ -914,8 +1235,10 @@ class _Dynamics:
                     )
 
     def _condition_literal_achievable(
-        self, lit: ConditionLiteral, achievable: set[tuple[str, bool]]
+        self, lit: ConditionLiteral | PairLiteral, achievable: set[tuple[str, bool]]
     ) -> bool:
+        if isinstance(lit, PairLiteral):
+            return self.literal_achievable(lit, achievable)
         if lit.kind == "feature":
             return True
         if lit.numeric:
@@ -1141,6 +1464,7 @@ class _Dynamics:
                     changed |= self.fix_unachievable(draft, achievable, produced)
             if not changed:
                 break
+        self.compile_profile_literals()
         self.draw_conditions()
         self.check_explicit_achievable()
         event_types = tuple(
@@ -1178,18 +1502,39 @@ def generate_event_types(
     event_file: EventFile | None,
     derived_initial: Mapping[str, np.ndarray],
     numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> EventTypes:
     """Event types with their requirements, preconditions, and effects."""
     static = build_event_types(statics)
     return _Dynamics(
-        static, fluents, config, streams, event_file, derived_initial, statics, numeric
+        static,
+        fluents,
+        config,
+        streams,
+        event_file,
+        derived_initial,
+        statics,
+        numeric,
+        pair_fluents,
     ).run()
+
+
+def _literal_slot(literal: AnyLiteral, pair_fluents: PairFluents | None = None) -> tuple:
+    """The slot a precondition literal fills: ``(role, fluent)`` for a Boolean or numeric
+    literal, and what the literal names for a pair literal (with the pair fluents, so that both
+    directions of a symmetric pair are one slot; without them, the literal's key)."""
+    if isinstance(literal, PairLiteral):
+        if pair_fluents is not None and literal.pair_fluent in pair_fluents:
+            return pair_literal_key(literal, pair_fluents[literal.pair_fluent])
+        return ("pair_literal", literal.key)
+    return (literal.role, literal.fluent)
 
 
 def condition_keys(effects: Sequence[Effect]) -> set[tuple[str, str]]:
     """The ``(role, fluent)`` pairs that the conditions of the effects read (Boolean or
     numeric): a precondition literal on one of them would fix what the condition asks, so none
-    is drawn there."""
+    is drawn there. A pair condition literal (stage c2a) names its pair fluent, which no Boolean
+    literal can name."""
     return {
         (lit.role, lit.symbol)
         for effect in effects
@@ -1259,9 +1604,13 @@ def redraw_preconditions(
             literal = feature_literals.get(feature)
             if literal is not None and feature in et.features and ok(literal):
                 inherited.setdefault((literal.role, literal.fluent), literal)
-        empty = {(e.role, e.fluent, e.value) for e in et.effects if not e.numeric}
+        empty = {(e.role, e.fluent, e.value) for e in et.effects if not e.numeric and not e.pair}
         read = condition_keys(et.effects)
-        kept = dict(inherited)
+        kept: dict[tuple, AnyLiteral] = dict(inherited)
+        # The compiled literals of stage c2a (origin profile) stay with the event type.
+        for lit in et.precondition:
+            if isinstance(lit, PairLiteral) and lit.compiled:
+                kept[("compiled", lit.key)] = lit
         n = _draw(rng, cfg.literals)
         for _ in range(n):
             for _ in range(MAX_TRIES):
@@ -1337,6 +1686,7 @@ def check_dynamics(
     initial_present: set[tuple[str, bool]],
     features: Sequence[str] | None = None,
     numeric: NumericFluents | None = None,
+    pair_fluents: PairFluents | None = None,
 ) -> None:
     """The invariants of "Preconditions", "Effects", and "Conditional effects": no effect on a
     derived fluent, no contradiction (whatever the conditions), no empty effect, every literal
@@ -1347,11 +1697,19 @@ def check_dynamics(
     otherwise. Tests and the generator both call it. Whether some able binding satisfies the
     static literals needs the static side; the generator checks it when it draws."""
     produced = {
-        (e.fluent, e.value) for et in event_types.event_types for e in et.effects if not e.numeric
+        (e.fluent, e.value)
+        for et in event_types.event_types
+        for e in et.effects
+        if not e.numeric and not e.pair
     }
     achievable = produced | initial_present
     signs = produced_numeric(event_types)
     numeric = numeric if numeric is not None else empty_numeric(0)
+    pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
+    adds = {e.fluent for et in event_types.event_types for e in et.effects if e.pair and e.value}
+    deletes = {
+        e.fluent for et in event_types.event_types for e in et.effects if e.pair and not e.value
+    }
 
     def numeric_ok(fluent: str, above: bool, threshold: float | None) -> bool:
         return (
@@ -1360,12 +1718,49 @@ def check_dynamics(
             and numeric.achievable(fluent, above, threshold, signs)
         )
 
+    def pair_ok(lit: PairLiteral) -> bool:
+        return lit.pair_fluent in pair_fluents and pair_literal_achievable(
+            lit, pair_fluents[lit.pair_fluent], adds, deletes
+        )
+
     for et in event_types.event_types:
-        effect_keys: dict[tuple[str, str], bool | float] = {}
-        precondition_keys = {(lit.role, lit.fluent) for lit in et.precondition}
+        effect_keys: dict[tuple, bool | float] = {}
+        precondition_keys = {(lit.role, lit.fluent) for lit in et.precondition if not lit.pair}
+        pair_precondition: dict[tuple, PairLiteral] = {}
+        pair_names: set[tuple] = set()
+        for lit in et.precondition:
+            if not isinstance(lit, PairLiteral):
+                continue
+            if lit.pair_fluent not in pair_fluents:
+                raise ValueError(f"{et.label}: the literal {lit.text} reads an unknown pair fluent")
+            fluent = pair_fluents[lit.pair_fluent]
+            for role in lit.roles:
+                if role not in et.roles:
+                    raise ValueError(f"{et.label}: the literal {lit.text} uses a role it has not")
+            if lit.kind == PAIR_SAME and not fluent.functional:
+                raise ValueError(
+                    f"{et.label}: the literal {lit.text} reads SAME on a pair fluent that is not "
+                    f"functional"
+                )
+            key = pair_literal_key(lit, fluent)
+            if key in pair_precondition:
+                raise ValueError(
+                    f"{et.label}: the precondition reads {lit.key} twice"
+                    if pair_precondition[key].value == lit.value
+                    else f"{et.label}: the precondition holds {lit.key} and its negation"
+                )
+            pair_precondition[key] = lit
+            pair_names |= pair_literal_names(lit, fluent)
+            if not pair_ok(lit):
+                raise ValueError(f"{et.label}: the literal {lit.text} is not achievable")
         for effect in et.effects:
             if effect.role not in et.roles:
                 raise ValueError(f"{et.label}: the effect {effect.text} uses a role it has not")
+            if effect.pair:
+                _check_pair_effect(
+                    et, effect, pair_fluents, effect_keys, pair_precondition, pair_names, pair_ok
+                )
+                continue
             if effect.numeric:
                 if effect.fluent not in numeric:
                     raise ValueError(
@@ -1379,8 +1774,13 @@ def check_dynamics(
             if key in effect_keys:
                 raise ValueError(f"{et.label}: two effects write {effect.key}")
             effect_keys[key] = effect.value
-            seen: set[tuple[str, str]] = set()
+            seen: set[tuple] = set()
             for lit in effect.condition:
+                if isinstance(lit, PairLiteral):
+                    _check_pair_condition_literal(
+                        et, effect, lit, pair_fluents, pair_names, seen, pair_ok
+                    )
+                    continue
                 if lit.role not in et.roles:
                     raise ValueError(
                         f"{et.label}: the condition of {effect.text} uses a role it has not"
@@ -1426,6 +1826,8 @@ def check_dynamics(
                 seen.add((lit.role, lit.symbol))
         literal_keys: dict[tuple[str, str], bool] = {}
         for lit in et.precondition:
+            if lit.pair:
+                continue
             if lit.role not in et.roles:
                 raise ValueError(f"{et.label}: the literal {lit.text} uses a role it has not")
             key = (lit.role, lit.fluent)
@@ -1441,12 +1843,113 @@ def check_dynamics(
             if (lit.fluent, lit.value) not in achievable:
                 raise ValueError(f"{et.label}: the literal {lit.text} is not achievable")
         for key, value in effect_keys.items():
+            if key[0] == "pair":
+                continue
             if not key[1].startswith("NUMFL.") and literal_keys.get(key) == value:
                 raise ValueError(f"{et.label}: the effect on {key[0]}.{key[1]} changes nothing")
 
 
+def _check_pair_effect(
+    et: EventType,
+    effect: Effect,
+    pair_fluents: PairFluents,
+    effect_keys: dict[tuple, bool | float],
+    pair_precondition: Mapping[tuple, PairLiteral],
+    pair_names: set[tuple],
+    pair_ok,
+) -> None:
+    """The invariants of a pair effect (stage c2a): a known pair fluent, roles of the event
+    type, no delete on a total pair fluent, no second effect on the same pair (both directions
+    of a symmetric one), no add whose precondition requires the pair and no delete whose
+    precondition requires its absence, no conditional add on an asymmetric or functional pair
+    fluent, the compiled literals of an add present in the precondition, and every pair
+    condition literal well formed."""
+    if effect.fluent not in pair_fluents:
+        raise ValueError(f"{et.label}: the effect {effect.text} writes an unknown pair fluent")
+    fluent = pair_fluents[effect.fluent]
+    assert effect.second is not None
+    if effect.second not in et.roles:
+        raise ValueError(f"{et.label}: the effect {effect.text} uses a role it has not")
+    if fluent.total and not effect.value:
+        raise ValueError(
+            f"{et.label}: the effect {effect.text} deletes a pair of a total pair fluent"
+        )
+    key = pair_effect_key(effect, fluent)
+    if key in effect_keys:
+        raise ValueError(f"{et.label}: two effects write {effect.key}")
+    effect_keys[key] = effect.value
+    required = pair_precondition.get(key)
+    if required is not None and required.value == effect.value:
+        raise ValueError(f"{et.label}: the effect {effect.text} changes nothing")
+    if effect.condition and effect.value and (fluent.asymmetric or fluent.functional):
+        raise ValueError(
+            f"{et.label}: the effect {effect.text} is a conditional add on an asymmetric or "
+            f"functional pair fluent"
+        )
+    if not effect.condition:
+        for literal in compiled_literals(effect, fluent):
+            present = pair_precondition.get(pair_literal_key(literal, fluent))
+            if present is None or present.value != literal.value:
+                raise ValueError(
+                    f"{et.label}: the effect {effect.text} lacks its compiled literal "
+                    f"{literal.text}"
+                )
+    seen: set[tuple] = set()
+    for lit in effect.condition:
+        if isinstance(lit, PairLiteral):
+            _check_pair_condition_literal(et, effect, lit, pair_fluents, pair_names, seen, pair_ok)
+        elif lit.role not in et.roles:
+            raise ValueError(f"{et.label}: the condition of {effect.text} uses a role it has not")
+
+
+def _check_pair_condition_literal(
+    et: EventType,
+    effect: Effect,
+    lit: PairLiteral,
+    pair_fluents: PairFluents,
+    pair_names: set[tuple],
+    seen: set[tuple],
+    pair_ok,
+) -> None:
+    """The invariants of a pair condition literal (F5): a known pair fluent, roles of the event
+    type, ``SAME`` on a functional pair fluent, achievable, no literal twice, naming no pair or
+    row the precondition names, and not the pair the effect itself writes."""
+    if lit.pair_fluent not in pair_fluents:
+        raise ValueError(f"{et.label}: the condition of {effect.text} reads an unknown pair fluent")
+    fluent = pair_fluents[lit.pair_fluent]
+    for role in lit.roles:
+        if role not in et.roles:
+            raise ValueError(f"{et.label}: the condition of {effect.text} uses a role it has not")
+    if lit.kind == PAIR_SAME and not fluent.functional:
+        raise ValueError(
+            f"{et.label}: the condition literal {lit.text} reads SAME on a pair fluent that is "
+            f"not functional"
+        )
+    if not pair_ok(lit):
+        raise ValueError(f"{et.label}: the condition literal {lit.text} is not achievable")
+    key = pair_literal_key(lit, fluent)
+    if key in seen:
+        raise ValueError(f"{et.label}: the condition of {effect.text} reads {lit.key} twice")
+    seen.add(key)
+    if pair_literal_names(lit, fluent) & pair_names:
+        raise ValueError(
+            f"{et.label}: the condition of {effect.text} reads {lit.key}, which names a pair or "
+            f"a row the precondition names"
+        )
+    if effect.pair and key == pair_effect_key(effect, pair_fluents[effect.fluent]):
+        raise ValueError(
+            f"{et.label}: the condition of {effect.text} reads the pair the effect writes"
+        )
+
+
 __all__ = [
     "CONSTRAINT_PREFIX",
+    "add_compiled_literals",
+    "compiled_literals",
+    "pair_effect_key",
+    "pair_literal_achievable",
+    "pair_literal_key",
+    "pair_literal_names",
     "FEATURE_PREFIX",
     "ONE_PLACE",
     "REQUIREMENT_PREFIX",

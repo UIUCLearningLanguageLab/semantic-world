@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_02_effect_sets",
  "description": "An effect sets a fluent: EVENTTYPE1.1 sets BOOLFL.1 of INSTANCE.1.1.1 from 0 to 1.",
- "rule_set_id": "300cebf58433fd185f3c9abd7faf907f16cde874feaa291759978eaa25587a21",
+ "rule_set_id": "db87b9dce357591d5b52dee4b1b0c34b45eb0f0e316f7b2577afe5478ae8ab00",
  "definition": {
   "version": 1,
-  "rule_set_id": "300cebf58433fd185f3c9abd7faf907f16cde874feaa291759978eaa25587a21",
+  "rule_set_id": "db87b9dce357591d5b52dee4b1b0c34b45eb0f0e316f7b2577afe5478ae8ab00",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -41,7 +41,16 @@
    },
    {"label": "EVENTTYPE1.6", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
    {"label": "EVENTTYPE1.7", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
-   {"label": "EVENTTYPE1.8", "kind": "event_type", "derived": false, "fluent": false, "arity": 1}
+   {"label": "EVENTTYPE1.8", "kind": "event_type", "derived": false, "fluent": false, "arity": 1},
+   {"label": "PAIRFL.1", "kind": "pair_fluent", "derived": false, "fluent": true, "arity": 2, "symmetry": "symmetric", "functional": false, "total": false, "initial_rate": 0.0},
+   {"label": "PAIRFL.2", "kind": "pair_fluent", "derived": false, "fluent": true, "arity": 2, "symmetry": "asymmetric", "functional": false, "total": false, "initial_rate": 0.0},
+   {"label": "PAIRFL.3", "kind": "pair_fluent", "derived": false, "fluent": true, "arity": 2, "symmetry": "symmetric", "functional": true, "total": false, "initial_rate": 0.0},
+   {"label": "BOOLFL.4", "kind": "fluent", "derived": true, "fluent": true, "arity": 1, "initial_rate": null},
+   {"label": "EVENTTYPE2.2", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "EVENTTYPE2.3", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "EVENTTYPE2.4", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "EVENTTYPE2.5", "kind": "event_type", "derived": false, "fluent": false, "arity": 2},
+   {"label": "EVENTTYPE2.6", "kind": "event_type", "derived": false, "fluent": false, "arity": 2}
   ],
   "literals": [
    {"index": 0, "key": "PROPERTY.1", "kind": "feature", "role": null, "feature": "PROPERTY.1"},
@@ -53,7 +62,8 @@
    {"index": 6, "key": "agent.SCALARDIM.1-patient.SCALARDIM.1>0.0000", "kind": "comparison", "role": "binding", "agent_scalar": "SCALARDIM.1", "patient_scalar": "SCALARDIM.1", "operator": ">", "low": 0.0, "high": null},
    {"index": 7, "key": "CONSTRAINT.EVENTTYPE1.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.1"},
    {"index": 8, "key": "CONSTRAINT.EVENTTYPE1.2", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE1.2"},
-   {"index": 9, "key": "CONSTRAINT.EVENTTYPE2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1"}
+   {"index": 9, "key": "CONSTRAINT.EVENTTYPE2.1", "kind": "constraint", "role": "binding", "constraint": "CONSTRAINT.EVENTTYPE2.1"},
+   {"index": 10, "key": "SOME.PAIRFL.1", "kind": "pair_some", "role": null, "pair_fluent": "PAIRFL.1"}
   ],
   "rules": [
    {"output": "PROPERTY.2", "scope": "entity", "family": "hand", "inputs": [0], "truth_table": "10", "expression": "NOT PROPERTY.1"},
@@ -69,7 +79,13 @@
    {"output": "REQUIREMENT.EVENTTYPE1.5", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
    {"output": "REQUIREMENT.EVENTTYPE1.6", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
    {"output": "REQUIREMENT.EVENTTYPE1.7", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
-   {"output": "REQUIREMENT.EVENTTYPE1.8", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
+   {"output": "REQUIREMENT.EVENTTYPE1.8", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "BOOLFL.4", "scope": "entity", "family": "hand", "inputs": [10], "truth_table": "01", "expression": "SOME.PAIRFL.1"},
+   {"output": "REQUIREMENT.EVENTTYPE2.2", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE2.3", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE2.4", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE2.5", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"},
+   {"output": "REQUIREMENT.EVENTTYPE2.6", "scope": "binding", "family": "requirement", "inputs": [], "truth_table": "1", "expression": "TRUE"}
   ],
   "layers": [
    {
@@ -77,11 +93,13 @@
     "layer": 1,
     "terms": [
      {"literals": [0], "complemented": [true], "threshold": 1},
-     {"literals": [1, 2], "complemented": [false, false], "threshold": 2}
+     {"literals": [1, 2], "complemented": [false, false], "threshold": 2},
+     {"literals": [10], "complemented": [false], "threshold": 1}
     ],
     "outputs": [
      {"output": "PROPERTY.2", "terms": [0], "threshold": 1},
-     {"output": "BOOLFL.3", "terms": [1], "threshold": 1}
+     {"output": "BOOLFL.3", "terms": [1], "threshold": 1},
+     {"output": "BOOLFL.4", "terms": [2], "threshold": 1}
     ]
    },
    {
@@ -91,6 +109,11 @@
      {"literals": [3], "complemented": [false], "threshold": 1},
      {"literals": [4], "complemented": [false], "threshold": 1},
      {"literals": [3, 5, 6], "complemented": [false, true, false], "threshold": 3},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
+     {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
      {"literals": [], "complemented": [], "threshold": 0},
@@ -107,7 +130,12 @@
      {"output": "REQUIREMENT.EVENTTYPE1.5", "terms": [5], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE1.6", "terms": [6], "threshold": 1},
      {"output": "REQUIREMENT.EVENTTYPE1.7", "terms": [7], "threshold": 1},
-     {"output": "REQUIREMENT.EVENTTYPE1.8", "terms": [8], "threshold": 1}
+     {"output": "REQUIREMENT.EVENTTYPE1.8", "terms": [8], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.2", "terms": [9], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.3", "terms": [10], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.4", "terms": [11], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.5", "terms": [12], "threshold": 1},
+     {"output": "REQUIREMENT.EVENTTYPE2.6", "terms": [13], "threshold": 1}
     ]
    },
    {
@@ -313,6 +341,108 @@
       }
      }
     ]
+   },
+   {
+    "label": "EVENTTYPE2.2",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.2", "expression": "TRUE"},
+    "precondition": {"literals": [], "expression": "TRUE"},
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.1", "first": "agent", "second": "patient", "value": true, "expression": "PAIRFL.1(agent, patient) := 1"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE2.3",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.3", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair", "pair_fluent": "PAIRFL.1", "first": "agent", "second": "patient", "value": true}
+     ],
+     "expression": "PAIRFL.1(agent, patient)"
+    },
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.1", "first": "agent", "second": "patient", "value": false, "expression": "PAIRFL.1(agent, patient) := 0"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE2.4",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.4", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair", "pair_fluent": "PAIRFL.2", "first": "patient", "second": "agent", "value": false, "origin": "profile"}
+     ],
+     "expression": "NOT PAIRFL.2(patient, agent)"
+    },
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.2", "first": "agent", "second": "patient", "value": true, "expression": "PAIRFL.2(agent, patient) := 1"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE2.5",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.5", "expression": "TRUE"},
+    "precondition": {
+     "literals": [
+      {"kind": "pair_some", "pair_fluent": "PAIRFL.3", "role": "agent", "value": false, "origin": "profile"},
+      {"kind": "pair_some", "pair_fluent": "PAIRFL.3", "role": "patient", "value": false, "origin": "profile"}
+     ],
+     "expression": "NOT SOME.PAIRFL.3(agent) AND NOT SOME.PAIRFL.3(patient)"
+    },
+    "effects": [
+     {"kind": "pair", "pair_fluent": "PAIRFL.3", "first": "agent", "second": "patient", "value": true, "expression": "PAIRFL.3(agent, patient) := 1"}
+    ]
+   },
+   {
+    "label": "EVENTTYPE2.6",
+    "kind": "event_type",
+    "arity": 2,
+    "roles": ["agent", "patient"],
+    "parent": null,
+    "level": 1,
+    "features": [],
+    "explicit": true,
+    "requirement": {"constraints": [], "output": "REQUIREMENT.EVENTTYPE2.6", "expression": "TRUE"},
+    "precondition": {"literals": [], "expression": "TRUE"},
+    "effects": [
+     {
+      "role": "patient",
+      "fluent": "BOOLFL.2",
+      "value": true,
+      "expression": "when PAIRFL.1(agent, patient) then patient.BOOLFL.2 := 1",
+      "condition": {
+       "literals": [
+        {"kind": "pair", "pair_fluent": "PAIRFL.1", "first": "agent", "second": "patient", "value": true}
+       ],
+       "expression": "PAIRFL.1(agent, patient)"
+      }
+     }
+    ]
    }
   ]
  },
@@ -327,6 +457,7 @@
   "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.0},
   "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.0}
  },
+ "initial_pairs": [],
  "steps": [
   {
    "events": [
@@ -366,6 +497,39 @@
      {"agent": "INSTANCE.1.1.1"},
      {"agent": "INSTANCE.1.1.2"},
      {"agent": "INSTANCE.1.2.1"}
+    ],
+    "EVENTTYPE2.2": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
+    ],
+    "EVENTTYPE2.3": [],
+    "EVENTTYPE2.4": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
+    ],
+    "EVENTTYPE2.5": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
+    ],
+    "EVENTTYPE2.6": [
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.1.2"},
+     {"agent": "INSTANCE.1.1.1", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.1.2", "patient": "INSTANCE.1.2.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.1"},
+     {"agent": "INSTANCE.1.2.1", "patient": "INSTANCE.1.1.2"}
     ]
    },
    "derived": {"INSTANCE.1.1.1": [], "INSTANCE.1.1.2": [], "INSTANCE.1.2.1": []},
@@ -374,7 +538,8 @@
     "INSTANCE.1.1.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.25},
     "INSTANCE.1.1.2": {"NUMFL.1": 0.0, "NUMFL.2": 0.25},
     "INSTANCE.1.2.1": {"NUMFL.1": 0.0, "NUMFL.2": 0.25}
-   }
+   },
+   "pairs": []
   }
  ],
  "error": null

@@ -200,7 +200,7 @@ One row per feature: the proportion of instances with the feature, its entropy, 
 
 ### `summary.yaml` and `config.yaml`
 
-`summary.yaml` gives counts, the mean number of true features per instance, constant features, duplicate leaves and instances, and any warnings. `config.yaml` records the complete resolved configuration and every random seed. Running the generator on an output folder's `config.yaml` reproduces the run exactly.
+`summary.yaml` gives counts, the mean number of true features per instance, constant features, duplicate leaves and instances, the superordinates' similarity range (`similarity_min` and `similarity_max`, written at 6 decimals since stage c2a of the world-and-language refactor, as the CSVs are, because the range comes from a matrix product that differs between machines in the 14th digit; Jon's ruling WM.61), and any warnings. `config.yaml` records the complete resolved configuration and every random seed. Running the generator on an output folder's `config.yaml` reproduces the run exactly.
 
 ### `rule_matrices.json`
 

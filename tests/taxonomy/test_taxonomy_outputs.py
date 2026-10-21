@@ -334,6 +334,30 @@ def test_summary_yaml(default_result: TaxonomyResult, default_folder: Path) -> N
     assert summary["warnings"] == []
 
 
+def test_the_similarity_range_is_written_at_6_decimals_and_a_zero_as_positive_zero(
+    tmp_path: Path,
+) -> None:
+    """Jon's rulings WM.61 and its extension (October 21, 2026): the range is rounded to 6
+    decimals when written, and a rounded zero is ``0.0``, never ``-0.0``, whose sign would
+    depend on the last-digit noise the rounding removes. The tiny taxonomies' range is about
+    -1.24e-17."""
+    from semantic_world.taxonomy.analysis import rounded_similarity
+
+    for value in (-1e-17, -1.2412670766236365e-17, 1e-17, -4e-7, 4e-7):
+        rounded = rounded_similarity(value)
+        assert rounded == 0.0 and math.copysign(1.0, rounded) == 1.0
+    assert rounded_similarity(-0.07165743639000198) == -0.071657
+    assert rounded_similarity(-0.5) == -0.5
+    folder = generate(load_config(DATA / "tiny.yaml")).write(tmp_path / "tiny")
+    text = (folder / "summary.yaml").read_text(encoding="utf-8")
+    assert "-0.0" not in text
+    summary = yaml.safe_load(text)
+    for key in ("similarity_min", "similarity_max"):
+        value = summary["superordinates"][key]
+        assert value == round(value, 6)
+        assert math.copysign(1.0, value) == 1.0 or value != 0.0
+
+
 # ---------------------------------------------------------------------------------------------
 # Similarity statistics
 # ---------------------------------------------------------------------------------------------

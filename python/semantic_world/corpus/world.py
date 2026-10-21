@@ -100,6 +100,13 @@ def load_world(config: Config | WorldSource) -> World:
     view of it. A run folder is checked against the regenerated world."""
     source = config.world if isinstance(config, Config) else config
     result = define(source.config)
+    if len(result.pair_fluents):
+        raise CorpusError(
+            f"the world {source.config.name} has pair fluents "
+            f"({', '.join(result.pair_fluents.labels)}), which the corpus cannot state yet: pair "
+            f"fluents enter the corpus in stage c4 of docs/specs/WORLD_PHASE_C.md. Use a world "
+            f"whose event file defines no pair fluents."
+        )
     if source.kind == "run":
         check_run_folder(result, source.path)
     return World(result, source)

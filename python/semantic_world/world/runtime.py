@@ -24,6 +24,17 @@ most one), then the drift, each clamped to the range, in float64. ``apply_step``
 the values after the effects and before the drift, which histories record. The comparisons of
 "Phase (b): the world" (``greater``, ``above``, ``below``, ``increase``, ``decrease``) are judged
 on demand by direct arithmetic on the values, for entities or category means.
+
+Since stage c2a (``docs/specs/WORLD_PHASE_C.md``, "The runtime") a state also holds, for each
+pair fluent, the set of its pairs among the entities, as a Boolean matrix whose rows are the
+entities and whose columns are the fluent's targets (entities; places for a location fluent in
+stage c3). ``derive`` computes the pair literals ``SOME`` and ``SOMEOF`` before the matrices;
+``legal`` judges the pair literals of a precondition over the binding; ``apply`` writes the pairs
+its effects add or delete, both directions of a symmetric pair, and checks every profile after
+the step (:class:`ProfileViolationError`, which a correct definition never raises). An event reads
+the pairs, rows, and columns its precondition and conditions read, through the cones of derived
+fluents, and writes the pairs its effects write; two events interfere when one writes a pair the
+other writes or reads, a row or a column counting as every pair in it.
 """
 
 from __future__ import annotations
@@ -34,10 +45,22 @@ from dataclasses import dataclass
 import numpy as np
 
 from semantic_world.world.definition import EventTypeRecord, RuntimeDefinition
-from semantic_world.world.dynamics import Effect
-from semantic_world.world.errors import IllegalEventError, InterferenceError, WorldError
+from semantic_world.world.dynamics import (
+    PAIR_KIND,
+    PAIR_SOME,
+    PAIR_SOMEOF,
+    Effect,
+    PairLiteral,
+)
+from semantic_world.world.errors import (
+    IllegalEventError,
+    InterferenceError,
+    ProfileViolationError,
+    WorldError,
+)
 from semantic_world.world.matrices import AgreementReport, check_agreement
 from semantic_world.world.numeric import clamp
+from semantic_world.world.pair_fluents import matrices_from_rows, pair_rows, profile_violations
 from semantic_world.world.places import EVERYPLACE
 
 Binding = tuple[int, ...]
@@ -58,12 +81,15 @@ PLACE_CATEGORY_PREFIX = "PLACECATEGORY."
 @dataclass(frozen=True)
 class State:
     """The base fluents of every entity at one time point: ``values``, shape ``(entities, base
-    fluents)`` with 0 and 1, and ``numeric``, shape ``(entities, numeric fluents)`` in float64
-    (stage b2; a world without numeric fluents has an empty second axis). The arrays are
-    read-only; ``apply`` returns a new state."""
+    fluents)`` with 0 and 1, ``numeric``, shape ``(entities, numeric fluents)`` in float64
+    (stage b2; a world without numeric fluents has an empty second axis), and ``pairs`` (stage
+    c2a), one Boolean matrix per pair fluent in symbol order, shape ``(entities, entities)``
+    for a pair fluent between entities (an empty tuple in a world without pair fluents). The
+    arrays are read-only; ``apply`` returns a new state."""
 
     values: np.ndarray
     numeric: np.ndarray = None  # type: ignore[assignment]
+    pairs: tuple[np.ndarray, ...] = ()
 
     def __post_init__(self) -> None:
         values = np.array(self.values, dtype=np.uint8, copy=True)
@@ -87,6 +113,19 @@ class State:
             raise WorldError("a state holds finite numeric values only")
         numeric.setflags(write=False)
         object.__setattr__(self, "numeric", numeric)
+        pairs = []
+        for matrix in self.pairs:
+            matrix = np.array(matrix, dtype=bool, copy=True)
+            if matrix.ndim != 2 or matrix.shape[0] != values.shape[0]:
+                raise WorldError(
+                    f"the pairs of a state are 2-D matrices with one row per entity, got "
+                    f"{matrix.shape} beside {values.shape}"
+                )
+            if matrix.shape[0] == matrix.shape[1] and np.diagonal(matrix).any():
+                raise WorldError("a pair fluent never holds between an entity and itself")
+            matrix.setflags(write=False)
+            pairs.append(matrix)
+        object.__setattr__(self, "pairs", tuple(pairs))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, State):
@@ -96,11 +135,22 @@ class State:
             and bool(np.array_equal(self.values, other.values))
             and self.numeric.shape == other.numeric.shape
             and bool(np.array_equal(self.numeric, other.numeric))
+            and len(self.pairs) == len(other.pairs)
+            and all(
+                a.shape == b.shape and bool(np.array_equal(a, b))
+                for a, b in zip(self.pairs, other.pairs, strict=True)
+            )
         )
 
     def __hash__(self) -> int:
         return hash(
-            (self.values.shape, self.values.tobytes(), self.numeric.shape, self.numeric.tobytes())
+            (
+                self.values.shape,
+                self.values.tobytes(),
+                self.numeric.shape,
+                self.numeric.tobytes(),
+                tuple((m.shape, m.tobytes()) for m in self.pairs),
+            )
         )
 
     @classmethod
@@ -109,12 +159,14 @@ class State:
         definition: RuntimeDefinition,
         true: Mapping[str, Iterable[str]],
         numeric: Mapping[str, Mapping[str, float]] | None = None,
+        pairs: Sequence[Sequence[str]] | None = None,
     ) -> State:
         """A state from the base fluents that are true, as ``{entity label: [fluent labels]}``,
-        and the numeric values as ``{entity label: {fluent label: value}}`` (the entities
-        table's initial values when None, and every entity and fluent must be given otherwise).
-        Every entity of the definition must be listed in ``true``; a fluent not listed is
-        false."""
+        the numeric values as ``{entity label: {fluent label: value}}`` (the entities table's
+        initial values when None, and every entity and fluent must be given otherwise), and the
+        pairs that hold (stage c2a) as ``(pair fluent, first, second)`` label triples, every
+        ordered pair listed (the initial pairs of the definition when None). Every entity of
+        the definition must be listed in ``true``; a fluent not listed is false."""
         values = np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8)
         missing = [label for label in definition.entity_labels if label not in true]
         if missing:
@@ -127,11 +179,13 @@ class State:
                         f"{fluent} is not a base fluent; a state holds base fluents only"
                     )
                 values[row, definition.base_fluent_index(fluent)] = 1
+        pair_matrices = _pairs_of(definition, pairs)
         if numeric is None:
-            return cls(values, _initial_numeric(definition))
+            return cls(values, _initial_numeric(definition), pair_matrices)
         matrix = np.zeros((definition.entity_count, len(definition.numeric_fluents)))
         if not numeric:
-            return cls(values, matrix)  # every numeric fluent at 0, for a caller that fills them
+            # every numeric fluent at 0, for a caller that fills them
+            return cls(values, matrix, pair_matrices)
         for i, label in enumerate(definition.entity_labels):
             entry = numeric.get(label)
             if entry is None:
@@ -143,7 +197,17 @@ class State:
             for fluent in entry:
                 if not definition.is_numeric_fluent(fluent):
                     raise WorldError(f"{fluent} is not a numeric fluent of the definition")
-        return cls(values, matrix)
+        return cls(values, matrix, pair_matrices)
+
+    def pairs_record(self, definition: RuntimeDefinition) -> list[list[str]]:
+        """Every pair that holds, as ``[pair fluent, first, second]`` label triples, by pair
+        fluent in symbol order, then by first and second in entity order; both directions of a
+        symmetric pair. The form of a fixture's ``pairs`` and a history's ``initial_pairs``."""
+        _check_state(definition, self)
+        return [
+            list(row)
+            for row in pair_rows(definition.pair_fluents, self.pairs, definition.entity_labels)
+        ]
 
     def true_fluents(self, definition: RuntimeDefinition) -> dict[str, list[str]]:
         """The base fluents that are true, as ``{entity label: [fluent labels]}``, every entity
@@ -169,12 +233,39 @@ def _initial_numeric(definition: RuntimeDefinition) -> np.ndarray:
     return definition.initial_numeric
 
 
+def _initial_pairs(definition: RuntimeDefinition) -> tuple[np.ndarray, ...]:
+    """The definition's initial pairs, or no pair at all when none were given (a fixture's
+    definition, whose initial pairs come apart from the record)."""
+    if not definition.pair_fluents:
+        return ()
+    if definition.initial_pairs is None:
+        n = definition.entity_count
+        return tuple(np.zeros((n, n), dtype=bool) for _ in definition.pair_fluents)
+    return definition.initial_pairs
+
+
+def _pairs_of(
+    definition: RuntimeDefinition, pairs: Sequence[Sequence[str]] | None
+) -> tuple[np.ndarray, ...]:
+    """The pair matrices from label triples (the definition's initial pairs when None)."""
+    if pairs is None:
+        return _initial_pairs(definition)
+    if not definition.pair_fluents:
+        if list(pairs):
+            raise WorldError("the state lists pairs, but the definition has no pair fluents")
+        return ()
+    entity_index = {label: i for i, label in enumerate(definition.entity_labels)}
+    return matrices_from_rows(pairs, definition.pair_fluents, entity_index, "the state's pairs")
+
+
 def initial_state(definition: RuntimeDefinition) -> State:
     """The state at ``TIME.1`` of every episode: the initial base fluents and numeric values of
-    the entities table."""
+    the entities table, and the initial pairs of ``initial_pairs.csv`` (stage c2a)."""
     if definition.initial_values is None:
         raise WorldError("the definition's entities table carries no initial fluents")
-    return State(definition.initial_values, _initial_numeric(definition))
+    return State(
+        definition.initial_values, _initial_numeric(definition), _initial_pairs(definition)
+    )
 
 
 @dataclass(frozen=True)
@@ -363,6 +454,18 @@ def _check_state(definition: RuntimeDefinition, state: State) -> None:
             f"the state's numeric part has shape {state.numeric.shape}; the definition needs "
             f"{numeric}"
         )
+    if len(state.pairs) != len(definition.pair_fluents):
+        raise WorldError(
+            f"the state holds the pairs of {len(state.pairs)} pair fluents; the definition has "
+            f"{len(definition.pair_fluents)}"
+        )
+    n = definition.entity_count
+    for fluent, matrix in zip(definition.pair_fluents, state.pairs, strict=True):
+        if matrix.shape != (n, n):
+            raise WorldError(
+                f"the pairs of {fluent.label} have shape {matrix.shape}; the definition needs "
+                f"{(n, n)}"
+            )
 
 
 def _entity_rows(definition: RuntimeDefinition, entities: Sequence[int] | None) -> np.ndarray:
@@ -394,6 +497,12 @@ def derive(
         elif reads["kind"] == "numeric_threshold":
             column = state.numeric[rows, definition.numeric_index(reads["fluent"])]
             literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
+        elif reads["kind"] == PAIR_SOME:
+            matrix = state.pairs[definition.pair_index(reads["pair_fluent"])]
+            literals[:, i] = matrix[rows].any(axis=1).astype(np.uint8)
+        elif reads["kind"] == PAIR_SOMEOF:
+            matrix = state.pairs[definition.pair_index(reads["pair_fluent"])]
+            literals[:, i] = matrix[:, rows].any(axis=0).astype(np.uint8)
     outputs = definition.entity_matrices.evaluate(literals)
     fluent = (
         np.stack([outputs[label] for label in definition.derived_fluents], axis=1)
@@ -641,6 +750,10 @@ def check_definition_agreement(
             elif reads["kind"] == "numeric_threshold" and definition.initial_numeric is not None:
                 column = state.numeric[:, definition.numeric_index(reads["fluent"])]
                 literals[:, i] = (column > reads["threshold"]).astype(np.uint8)
+            elif reads["kind"] in (PAIR_SOME, PAIR_SOMEOF) and definition.initial_pairs is not None:
+                matrix = definition.initial_pairs[definition.pair_index(reads["pair_fluent"])]
+                axis = 1 if reads["kind"] == PAIR_SOME else 0
+                literals[:, i] = matrix.any(axis=axis).astype(np.uint8)
     entity_report = check_agreement(definition.entity_matrices, definition.entity_rules, literals)
     n = definition.entity_count
     agents = np.repeat(np.arange(n), n)
@@ -681,11 +794,15 @@ def _precondition_holds(
     facts = (
         derive(definition, state, needed)
         if any(
-            not lit.numeric and not definition.is_base_fluent(lit.fluent) for lit in et.precondition
+            not lit.numeric and not lit.pair and not definition.is_base_fluent(lit.fluent)
+            for lit in et.precondition
         )
         else None
     )
     for lit in et.precondition:
+        if isinstance(lit, PairLiteral):
+            holds &= pair_literal_holds(definition, state, lit, et.roles, array)
+            continue
         rows = array[:, et.roles.index(lit.role)]
         if lit.numeric:
             column = state.numeric[rows, definition.numeric_index(lit.fluent)]
@@ -699,6 +816,43 @@ def _precondition_holds(
             values = facts.fluent[positions, definition.derived_fluent_index(lit.fluent)]
         holds &= values == int(lit.value)
     return holds
+
+
+def pair_literal_holds(
+    definition: RuntimeDefinition,
+    state: State,
+    lit: PairLiteral,
+    roles: Sequence[str],
+    array: np.ndarray,
+) -> np.ndarray:
+    """Whether a pair literal holds for each binding of ``array`` (one column per role) in the
+    state: ``PAIRFL.k(x, y)`` when the pair holds; ``SOME.PAIRFL.k(x)`` when the row of ``x``
+    holds a pair; ``SOMEOF.PAIRFL.k(x)`` when its column does; ``SAME.PAIRFL.k(x, y)`` when
+    some ``z`` has both ``(x, z)`` and ``(y, z)``. A symmetric pair fluent holds both directions
+    of every pair, so a literal about it reads both. A negated literal holds when the positive
+    one does not."""
+    matrix = state.pairs[definition.pair_index(lit.pair_fluent)]
+    first = array[:, roles.index(lit.first)]
+    if lit.kind == PAIR_KIND:
+        assert lit.second is not None
+        second = array[:, roles.index(lit.second)]
+        positive = matrix[first, second]
+    elif lit.kind == PAIR_SOME:
+        positive = matrix[first].any(axis=1)
+    elif lit.kind == PAIR_SOMEOF:
+        positive = matrix[:, first].any(axis=0)
+    else:
+        assert lit.second is not None
+        second = array[:, roles.index(lit.second)]
+        positive = (matrix[first] & matrix[second]).any(axis=1)
+    return positive if lit.value else ~positive
+
+
+def _pair_literal_value(
+    definition: RuntimeDefinition, state: State, lit: PairLiteral, roles: Sequence[str], binding
+) -> bool:
+    array = np.asarray([binding], dtype=np.intp)
+    return bool(pair_literal_holds(definition, state, lit, roles, array)[0])
 
 
 def legal(
@@ -802,6 +956,13 @@ def _check_legal(
     if not _precondition_holds(definition, state, et, array)[0]:
         facts = derive(definition, state, list(event.binding))
         for lit in et.precondition:
+            if isinstance(lit, PairLiteral):
+                if not _pair_literal_value(definition, state, lit, et.roles, event.binding):
+                    raise IllegalEventError(
+                        f"{text} is illegal: the precondition literal {lit.text} does not hold"
+                        + (" (a compiled literal of the profile)" if lit.compiled else "")
+                    )
+                continue
             row = et.roles.index(lit.role)
             entity = event.binding[row]
             if lit.numeric:
@@ -824,43 +985,120 @@ def _check_legal(
         raise AssertionError("the precondition fails but every literal holds")
 
 
-def _writes(event: Event, et: EventTypeRecord) -> dict[tuple[int, str], bool | float]:
-    """The base fluents the event may write, ``{(entity, fluent): value}`` (a numeric effect's
-    signed constant for a numeric fluent): every effect counts, whether or not its condition
-    holds in the state."""
-    return {
-        (event.binding[et.roles.index(effect.role)], effect.fluent): effect.value
-        for effect in et.effects
-    }
+Key = tuple
+"""A fact an event reads or writes: ``(entity, fluent)`` for a base Boolean or numeric fluent,
+and ``(pair fluent, first, second)`` for one ordered pair of a pair fluent (stage c2a)."""
+
+
+def _pair_keys(
+    definition: RuntimeDefinition, effect: Effect, event: Event, et: EventTypeRecord
+) -> list[Key]:
+    """The ordered pairs a pair effect writes: the pair between its roles, and its reverse for a
+    symmetric pair fluent."""
+    assert effect.second is not None
+    first = event.binding[et.roles.index(effect.role)]
+    second = event.binding[et.roles.index(effect.second)]
+    keys: list[Key] = [(effect.fluent, first, second)]
+    if definition.pair_fluent(effect.fluent).symmetric:
+        keys.append((effect.fluent, second, first))
+    return keys
+
+
+def _writes(
+    event: Event, et: EventTypeRecord, definition: RuntimeDefinition | None = None
+) -> dict[Key, bool | float]:
+    """The facts the event may write, ``{key: value}`` (a numeric effect's signed constant for a
+    numeric fluent; an ordered pair, and its reverse for a symmetric pair fluent, for a pair
+    effect): every effect counts, whether or not its condition holds in the state."""
+    found: dict[Key, bool | float] = {}
+    for effect in et.effects:
+        if effect.pair:
+            assert definition is not None
+            for key in _pair_keys(definition, effect, event, et):
+                found[key] = effect.value
+        else:
+            found[(event.binding[et.roles.index(effect.role)], effect.fluent)] = effect.value
+    return found
+
+
+def _pair_reads(
+    definition: RuntimeDefinition, lit: PairLiteral, roles: Sequence[str], binding: Binding
+) -> list[Key]:
+    """The ordered pairs a pair literal reads, every pair of a row or a column counted: the pair
+    (both directions for a symmetric pair fluent), the row of the role (``SOME``), the column
+    (``SOMEOF``), or the rows of both roles (``SAME``)."""
+    fluent = definition.pair_fluent(lit.pair_fluent)
+    first = binding[roles.index(lit.first)]
+    if lit.kind == PAIR_KIND:
+        assert lit.second is not None
+        second = binding[roles.index(lit.second)]
+        keys: list[Key] = [(fluent.label, first, second)]
+        if fluent.symmetric:
+            keys.append((fluent.label, second, first))
+        return keys
+    if lit.kind == PAIR_SOME:
+        return _row_keys(definition, fluent.label, first)
+    if lit.kind == PAIR_SOMEOF:
+        return _column_keys(definition, fluent.label, first)
+    assert lit.second is not None
+    second = binding[roles.index(lit.second)]
+    return _row_keys(definition, fluent.label, first) + _row_keys(definition, fluent.label, second)
+
+
+def _row_keys(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
+    return [(fluent, entity, z) for z in range(definition.entity_count) if z != entity]
+
+
+def _column_keys(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
+    return [(fluent, z, entity) for z in range(definition.entity_count) if z != entity]
+
+
+def _cone_reads(definition: RuntimeDefinition, fluent: str, entity: int) -> list[Key]:
+    """What a literal on a fluent of an entity reads: the base fluents of its cone, and, through
+    the pair literals of its rule, the rows and columns of the entity (stage c2a)."""
+    keys: list[Key] = [(entity, base) for base in definition.cone(fluent)]
+    for kind, pair_fluent in definition.pair_cone(fluent):
+        if kind == "row":
+            keys.extend(_row_keys(definition, pair_fluent, entity))
+        else:
+            keys.extend(_column_keys(definition, pair_fluent, entity))
+    return keys
 
 
 def _reads_by_reader(
     definition: RuntimeDefinition, event: Event, et: EventTypeRecord
-) -> dict[tuple[int, str], str]:
-    """The base fluents the event's precondition and its effects' conditions read, through the
-    cone of every derived fluent: ``{(entity, base fluent): reader}``, the reader being ``"the
-    precondition"`` or ``"a condition"`` (the precondition when both read). A static literal of
-    a condition reads nothing that an event can write."""
-    found: dict[tuple[int, str], str] = {}
+) -> dict[Key, str]:
+    """The facts the event's precondition and its effects' conditions read, through the cone of
+    every derived fluent: ``{key: reader}``, the reader being ``"the precondition"`` or ``"a
+    condition"`` (the precondition when both read). A static literal of a condition reads
+    nothing that an event can write. A pair literal reads its pair (both directions of a
+    symmetric one), or every pair of the row or the column it names (stage c2a)."""
+    found: dict[Key, str] = {}
     for effect in et.effects:
         for lit in effect.condition:
+            if isinstance(lit, PairLiteral):
+                for key in _pair_reads(definition, lit, et.roles, event.binding):
+                    found[key] = "a condition"
+                continue
             if lit.kind == "feature":
                 continue
             entity = event.binding[et.roles.index(lit.role)]
-            for base in definition.cone(lit.symbol):
-                found[(entity, base)] = "a condition"
+            for key in _cone_reads(definition, lit.symbol, entity):
+                found[key] = "a condition"
     for lit in et.precondition:
+        if isinstance(lit, PairLiteral):
+            for key in _pair_reads(definition, lit, et.roles, event.binding):
+                found[key] = "the precondition"
+            continue
         entity = event.binding[et.roles.index(lit.role)]
-        for base in definition.cone(lit.fluent):
-            found[(entity, base)] = "the precondition"
+        for key in _cone_reads(definition, lit.fluent, entity):
+            found[key] = "the precondition"
     return found
 
 
-def _reads(
-    definition: RuntimeDefinition, event: Event, et: EventTypeRecord
-) -> set[tuple[int, str]]:
-    """The base fluents the event's precondition and its effects' conditions read, through the
-    cone of every derived fluent: ``{(entity, base fluent)}``."""
+def _reads(definition: RuntimeDefinition, event: Event, et: EventTypeRecord) -> set[Key]:
+    """The facts the event's precondition and its effects' conditions read, through the cone of
+    every derived fluent."""
     return set(_reads_by_reader(definition, event, et))
 
 
@@ -878,6 +1116,10 @@ def _condition_holds(
     effect without a condition always holds."""
     statics = static_facts(definition)
     for lit in effect.condition:
+        if isinstance(lit, PairLiteral):
+            if not _pair_literal_value(definition, state, lit, et.roles, event.binding):
+                return False
+            continue
         row = et.roles.index(lit.role)
         entity = event.binding[row]
         if lit.numeric:
@@ -898,26 +1140,39 @@ def _condition_holds(
     return True
 
 
-def _fired(
-    definition: RuntimeDefinition, state: State, event: Event, et: EventTypeRecord
-) -> dict[tuple[int, str], bool | float]:
-    """The base fluents the event writes in ``state``: its effects whose conditions hold there,
-    judged before any effect of the step (a numeric effect's value is its signed constant)."""
-    facts = None
-    if any(
-        lit.kind == "fluent" and not definition.is_base_fluent(lit.symbol)
+def _needs_derived(definition: RuntimeDefinition, et: EventTypeRecord) -> bool:
+    return any(
+        not lit.pair and lit.kind == "fluent" and not definition.is_base_fluent(lit.symbol)
         for effect in et.effects
         for lit in effect.condition
-    ):
+    )
+
+
+def _fired(
+    definition: RuntimeDefinition, state: State, event: Event, et: EventTypeRecord
+) -> dict[Key, bool | float]:
+    """The facts the event writes in ``state``: its effects whose conditions hold there, judged
+    before any effect of the step (a numeric effect's value is its signed constant; a pair
+    effect's both directions for a symmetric pair fluent)."""
+    facts = None
+    if _needs_derived(definition, et):
         facts = derive(definition, state, list(event.binding))
-    return {
-        (event.binding[et.roles.index(effect.role)], effect.fluent): effect.value
-        for effect in et.effects
-        if _condition_holds(definition, state, event, et, effect, facts)
-    }
+    found: dict[Key, bool | float] = {}
+    for effect in et.effects:
+        if not _condition_holds(definition, state, event, et, effect, facts):
+            continue
+        if effect.pair:
+            for key in _pair_keys(definition, effect, event, et):
+                found[key] = effect.value
+        else:
+            found[(event.binding[et.roles.index(effect.role)], effect.fluent)] = effect.value
+    return found
 
 
-def _fact(definition: RuntimeDefinition, key: tuple[int, str]) -> str:
+def _fact(definition: RuntimeDefinition, key: Key) -> str:
+    if len(key) == 3:
+        labels = definition.entity_labels
+        return f"{key[0]} between {labels[key[1]]} and {labels[key[2]]}"
     return f"{key[1]} of {definition.entity_labels[key[0]]}"
 
 
@@ -929,7 +1184,7 @@ def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
     if a == b:
         return True
     et_a, et_b = definition.event_type(a.event_type), definition.event_type(b.event_type)
-    writes_a, writes_b = set(_writes(a, et_a)), set(_writes(b, et_b))
+    writes_a, writes_b = set(_writes(a, et_a, definition)), set(_writes(b, et_b, definition))
     if writes_a & writes_b:
         return True
     return bool(writes_a & _reads(definition, b, et_b)) or bool(
@@ -971,7 +1226,7 @@ def apply_step(
     types = [_check_event(definition, event) for event in events]
     for event, et in zip(events, types, strict=True):
         _check_legal(definition, state, event, et)
-    writes = [_writes(event, et) for event, et in zip(events, types, strict=True)]
+    writes = [_writes(event, et, definition) for event, et in zip(events, types, strict=True)]
     reads = [
         _reads_by_reader(definition, event, et) for event, et in zip(events, types, strict=True)
     ]
@@ -997,9 +1252,14 @@ def apply_step(
                     )
     values = np.array(state.values, dtype=np.uint8, copy=True)
     numeric = np.array(state.numeric, dtype=np.float64, copy=True)
+    pairs = [np.array(matrix, dtype=bool, copy=True) for matrix in state.pairs]
     low, high = definition.range_bounds
     for event, et in zip(events, types, strict=True):
-        for (entity, fluent), value in _fired(definition, state, event, et).items():
+        for key, value in _fired(definition, state, event, et).items():
+            if len(key) == 3:
+                pairs[definition.pair_index(key[0])][key[1], key[2]] = bool(value)
+                continue
+            entity, fluent = key
             if definition.is_numeric_fluent(fluent):
                 j = definition.numeric_index(fluent)
                 numeric[entity, j] = clamp(
@@ -1010,7 +1270,29 @@ def apply_step(
     after_effects = np.array(numeric, copy=True)
     if numeric.shape[1] and drift:
         numeric = np.minimum(np.maximum(numeric + definition.drift_vector[None, :], low), high)
-    return StepResult(State(values, numeric), after_effects)
+    _check_profiles(definition, pairs, events)
+    return StepResult(State(values, numeric, tuple(pairs)), after_effects)
+
+
+def _check_profiles(
+    definition: RuntimeDefinition, pairs: Sequence[np.ndarray], events: Sequence[Event]
+) -> None:
+    """Every profile holds after the step; otherwise :class:`ProfileViolationError` names the
+    pair fluent, the pairs, and the events. The compiled literals (F4) make a violation
+    impossible for a correct definition."""
+    for fluent, matrix in zip(definition.pair_fluents, pairs, strict=True):
+        violations = profile_violations(fluent, matrix)
+        if violations:
+            labels = definition.entity_labels
+            held = ", ".join(
+                f"({labels[int(i)]}, {labels[int(j)]})"
+                for i, j in zip(*np.nonzero(matrix), strict=True)
+            )
+            raise ProfileViolationError(
+                f"after the step the profile of {fluent.label} does not hold: {violations[0]}; "
+                f"its pairs are {held or 'none'}; the events were "
+                f"{', '.join(e.describe(definition) for e in events) or 'none'}"
+            )
 
 
 def fired_effects(definition: RuntimeDefinition, state: State, event: Event) -> tuple[Effect, ...]:
@@ -1267,6 +1549,7 @@ __all__ = [
     "State",
     "StaticFacts",
     "StepResult",
+    "Key",
     "able",
     "able_table",
     "above",
@@ -1286,6 +1569,7 @@ __all__ = [
     "legal",
     "legal_bindings",
     "is_place_class",
+    "pair_literal_holds",
     "members",
     "place_able_table",
     "place_categories",

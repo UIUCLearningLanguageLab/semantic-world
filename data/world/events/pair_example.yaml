@@ -1,0 +1,49 @@
+# A worked example of an event file with pair fluents (docs/specs/WORLD_PHASE_C.md, "Explicit
+# event files"; stage c2a). Over abstract labels, it defines four pair fluents between entities,
+# one of each symmetry and two of them functional, and five event types that read and write them:
+# EVENTTYPE2.1.1 ("approach") makes the agent near the patient, a symmetric add that writes both
+# directions; EVENTTYPE2.1.2 ("follow") needs nearness and makes the patient the agent's one
+# followed partner, a functional add whose compiled literal NOT SOME.PAIRFL.3(agent) keeps the
+# profile, and marks the patient as not awake when the patient has something above it;
+# EVENTTYPE2.2.1 ("mount") needs the two to follow the same partner and the agent awake, and puts
+# the agent above the patient in the asymmetric functional PAIRFL.4, whose compiled literals are
+# NOT PAIRFL.4(patient, agent) and NOT SOME.PAIRFL.4(agent); EVENTTYPE2.2.2 ("leave") needs
+# nearness and something below the agent in PAIRFL.2, deletes the nearness (both directions),
+# and sets a fluent of the patient when the patient is above the agent; EVENTTYPE1.1 ("rest")
+# needs the agent to follow someone. The requirements are explicit and always hold, so every
+# ordered pair is able and legality is the preconditions' alone. Event types not listed are
+# sampled, and so are their requirements. Use it with the tiny world: data/world/tiny_pairs.yaml
+# names it as event_types.event_file, relative to the configuration file's folder.
+
+pair_fluents:
+  PAIRFL.1: {symmetry: symmetric, functional: false, initial_rate: 0.2}    # say, near
+  PAIRFL.2: {symmetry: asymmetric, functional: false, initial_rate: 0.1}   # say, above (initial pairs only)
+  PAIRFL.3: {symmetry: general, functional: true, initial_rate: 0.2}       # say, follows
+  PAIRFL.4: {symmetry: asymmetric, functional: true, initial_rate: 0.0}    # say, carries (no initial pairs)
+fluents:
+  BOOLFL.1: {initial_rate: 0.8}        # say, awake
+event_types:
+  EVENTTYPE2.1.1:                                                          # approach
+    requirement: "TRUE"
+    precondition: "NOT PAIRFL.1(agent, patient)"
+    effects: ["PAIRFL.1(agent, patient) := 1"]
+  EVENTTYPE2.1.2:                                                          # follow
+    requirement: "TRUE"
+    precondition: "PAIRFL.1(agent, patient)"
+    effects:
+      - "PAIRFL.3(agent, patient) := 1"
+      - "when SOME.PAIRFL.2(patient) then patient.BOOLFL.1 := 0"
+  EVENTTYPE2.2.1:                                                          # mount
+    requirement: "TRUE"
+    precondition: "SAME.PAIRFL.3(agent, patient) AND agent.BOOLFL.1"
+    effects: ["PAIRFL.4(agent, patient) := 1"]
+  EVENTTYPE2.2.2:                                                          # leave
+    requirement: "TRUE"
+    precondition: "PAIRFL.1(agent, patient) AND SOMEOF.PAIRFL.2(agent)"
+    effects:
+      - "PAIRFL.1(agent, patient) := 0"
+      - "when PAIRFL.2(patient, agent) then patient.BOOLFL.2 := 1"
+  EVENTTYPE1.1:                                                            # rest
+    requirement: "TRUE"
+    precondition: "SOME.PAIRFL.3(agent)"
+    effects: ["agent.BOOLFL.3 := 1"]

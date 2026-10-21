@@ -5,9 +5,12 @@ An episode draws its participants as corpus scenes draw them: a seed instance, t
 ``scene.size`` others without replacement, each weighted by the thematic relatedness and the
 taxonomic similarity of its leaf and the seed's leaf, and a constant. It starts from the
 participants' initial values in ``entities.csv``, or redraws them at each fluent's initial rate
-(``scene.initial: redraw``). It runs a drawn number of steps. At each step a Poisson number of
-events is drawn one at a time by the selection policy among the events that are legal in the
-state and do not interfere with the events already chosen; then the runtime applies the step.
+(``scene.initial: redraw``); in a world with pair fluents (stage c2a) it keeps the initial pairs
+among its participants and no other pair (WM.38), or redraws them at each pair fluent's rate
+after every other draw of its part. It runs a drawn number of steps. At each step a Poisson
+number of events is drawn one at a time by the selection policy among the events that are legal
+in the state and do not interfere with the events already chosen; then the runtime applies the
+step.
 When no event is legal at a time point, the episode ends there, quiescent.
 
 Every episode draws from its own part of a stream, named by its label, so it depends only on the
@@ -36,14 +39,17 @@ from semantic_world.world.errors import WorldError
 from semantic_world.world.history import (
     DRIFT,
     EPISODES_FILE,
+    AnyChange,
     Change,
     History,
     HistoryEvent,
     Step,
     changes_of,
     numeric_changes_of,
+    pair_changes_of,
     write_histories,
 )
+from semantic_world.world.pair_fluents import draw_initial_pairs, pair_rows
 from semantic_world.world.policies import DEFAULT_POLICY, StepContext, policy
 from semantic_world.world.runtime import (
     Event,
@@ -350,9 +356,11 @@ class EpisodeGenerator:
         if definition.initial_values is not None:
             self.start = initial_state(definition)
         elif self.settings.initial == "redraw":
+            n = definition.entity_count
             self.start = State(
-                np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8),
-                np.zeros((definition.entity_count, len(definition.numeric_fluents))),
+                np.zeros((n, len(definition.base_fluents)), dtype=np.uint8),
+                np.zeros((n, len(definition.numeric_fluents))),
+                tuple(np.zeros((n, n), dtype=bool) for _ in definition.pair_fluents),
             )
         else:
             raise WorldError(
@@ -394,10 +402,15 @@ class EpisodeGenerator:
     def _initial(self, rng: np.random.Generator, participants: tuple[int, ...]) -> State:
         """The participants' initial values: the definition's, or redrawn (``scene.initial:
         redraw``), the Boolean fluents at their initial rates and then the numeric fluents from
-        their initial distributions, participant by participant."""
-        if self.settings.initial == "keep":
-            return self.start
+        their initial distributions, participant by participant. The pairs (stage c2a): the
+        initial pairs among the participants, every other pair dropped (an episode keeps the
+        pairs among its participants, WM.38); under ``redraw``, drawn again among the
+        participants (in entity order) at each pair fluent's rate by the procedure of the initial
+        pairs, after every other draw of the episode's part."""
         definition = self.definition
+        pairs = self._participant_pairs(participants)
+        if self.settings.initial == "keep":
+            return State(self.start.values, self.start.numeric, pairs)
         values = np.array(self.start.values, dtype=np.uint8, copy=True)
         numeric = np.array(self.start.numeric, dtype=np.float64, copy=True)
         for entity in participants:
@@ -407,7 +420,25 @@ class EpisodeGenerator:
             for j, fluent in enumerate(definition.numeric_fluents):
                 low, high = definition.numeric_ranges[fluent]
                 numeric[entity, j] = definition.numeric_initial[fluent].draw(rng, low, high, 1)[0]
-        return State(values, numeric)
+        if definition.pair_fluents:
+            rows = np.array(sorted(participants), dtype=np.intp)
+            redrawn = []
+            for fluent in definition.pair_fluents:
+                local = draw_initial_pairs(fluent, rows.size, rng)
+                matrix = np.zeros((definition.entity_count, definition.entity_count), dtype=bool)
+                matrix[np.ix_(rows, rows)] = local
+                redrawn.append(matrix)
+            pairs = tuple(redrawn)
+        return State(values, numeric, pairs)
+
+    def _participant_pairs(self, participants: tuple[int, ...]) -> tuple[np.ndarray, ...]:
+        """The definition's initial pairs restricted to the participants."""
+        if not self.definition.pair_fluents:
+            return ()
+        mask = np.zeros(self.definition.entity_count, dtype=bool)
+        mask[list(participants)] = True
+        keep = np.outer(mask, mask)
+        return tuple(matrix & keep for matrix in self.start.pairs)
 
     def _legal(self, state: State, participants: tuple[int, ...]) -> dict[str, list]:
         return {
@@ -439,6 +470,11 @@ class EpisodeGenerator:
             }
             if definition.numeric_fluents
             else {}
+        )
+        initial_pairs = (
+            tuple(pair_rows(definition.pair_fluents, state.pairs, labels))
+            if definition.pair_fluents
+            else None
         )
         recorded: list[Step] = []
         quiescent = False
@@ -477,6 +513,7 @@ class EpisodeGenerator:
                             + _event_numeric_changes(
                                 definition, state, result.after_effects, event, event_label
                             )
+                            + pair_changes_of(definition, state, after, event)
                         ),
                     )
                 )
@@ -503,6 +540,7 @@ class EpisodeGenerator:
             f"TIME.{len(recorded) + 1}",
             quiescent,
             initial_numeric,
+            initial_pairs,
         )
 
     def run(
@@ -526,13 +564,13 @@ class EpisodeGenerator:
 
 def _event_changes(
     definition: RuntimeDefinition, before: State, after: State, event: Event
-) -> list[Change]:
+) -> list[AnyChange]:
     """The base Boolean fluents the event changed: of the fluents it writes, those whose value
     differs between the states (non-interfering events write distinct fluents, so each change
     has one event)."""
     et = definition.event_type(event.event_type)
-    entities = sorted({event.binding[et.roles.index(e.role)] for e in et.effects})
-    written = {(event.binding[et.roles.index(e.role)], e.fluent) for e in et.effects}
+    entities = sorted({event.binding[et.roles.index(e.role)] for e in et.effects if not e.pair})
+    written = {(event.binding[et.roles.index(e.role)], e.fluent) for e in et.effects if not e.pair}
     return [
         change
         for change in changes_of(definition, before, after, entities)

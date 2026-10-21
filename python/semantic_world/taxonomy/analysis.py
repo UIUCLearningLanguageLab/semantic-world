@@ -295,6 +295,15 @@ def _duplicates(rows: np.ndarray) -> int:
     return count
 
 
+def rounded_similarity(value: float) -> float:
+    """A similarity of the superordinates as ``summary.yaml`` writes it: rounded to 6 decimals,
+    as the CSVs are (Jon's ruling WM.61, October 21, 2026: the range comes from a matrix
+    product, which differs between machines in the 14th digit; the value the bound is checked
+    against is not rounded), and a rounded zero written as ``0.0``, never ``-0.0``, whose sign
+    would depend on exactly the noise the rounding removes (Jon's ruling of the same day)."""
+    return round(float(value), 6) + 0.0
+
+
 def summary_stats(
     rules: RuleSet, tree: Tree, instances: Instances, warnings: tuple[str, ...]
 ) -> dict[str, Any]:
@@ -314,6 +323,8 @@ def summary_stats(
         else np.zeros((0, 0), dtype=np.uint8)
     )
     similarity = tree.superordinate_similarity
+    if similarity is not None:
+        similarity = (rounded_similarity(similarity[0]), rounded_similarity(similarity[1]))
     return {
         "categories": len(tree.categories),
         "leaves": len(tree.leaves),

@@ -17,7 +17,10 @@ precondition literals, and condition literals: each a stream of its own, so that
 whose preconditions are redrawn draws from its own parts, ``world:preconditions:<label>`` and
 ``world:numeric_preconditions:<label>``. Stage c1 adds ``world:places`` (the seed of the place
 taxonomy run, when the configuration gives none) and ``world:place_event_types`` (the
-requirements of the place event types, and the samples of their capacities' local test).
+requirements of the place event types, and the samples of their capacities' local test). Stage
+c2a adds ``world:pair_fluents`` (the profiles and initial rates of the pair fluents, drawn in
+stage c2b; nothing is drawn from it in c2a, where an event file gives them) and
+``world:pair_initial`` (the initial pairs of each pair fluent between entities).
 """
 
 from __future__ import annotations
@@ -46,11 +49,15 @@ STREAM_NAMES = (
     "episodes",
     "places",
     "place_event_types",
+    "pair_fluents",
+    "pair_initial",
 )
 """The order is the order of creation: the two place streams of stage c1 (``world:places``, the
 place taxonomy's seed, and ``world:place_event_types``, the requirements of the place event types
 and the samples of their capacities' local test) come after every earlier stream, so that with
-``places: null`` every earlier draw is unchanged."""
+``places: null`` every earlier draw is unchanged; the two pair streams of stage c2a
+(``world:pair_fluents``, ``world:pair_initial``) come after them, so that a world without pair
+fluents is byte-identical to the world of stage c1."""
 
 
 class WorldStreams:
@@ -74,6 +81,8 @@ class WorldStreams:
     episodes: np.random.Generator
     places: np.random.Generator
     place_event_types: np.random.Generator
+    pair_fluents: np.random.Generator
+    pair_initial: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

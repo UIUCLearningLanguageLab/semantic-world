@@ -224,15 +224,15 @@ def test_relabeled_outputs_equal_the_a5a_outputs_label_for_label(name: str, tmp_
     # The summary's counts.
     expected_summary = yaml.safe_load((golden / "summary.yaml").read_text())
     summary = yaml.safe_load((folder / "summary.yaml").read_text())
-    for key in (
-        "categories",
-        "leaves",
-        "instances",
-        "duplicate_leaves",
-        "duplicate_instances",
-        "superordinates",
-    ):
+    for key in ("categories", "leaves", "instances", "duplicate_leaves", "duplicate_instances"):
         assert expected_summary[key] == summary[key], key
+    # The similarity range is written at 6 decimals since stage c2a (WM.61); the golden folders
+    # hold the full-precision values.
+    expected_range = dict(expected_summary["superordinates"])
+    for key in ("similarity_min", "similarity_max"):
+        if expected_range[key] is not None:
+            expected_range[key] = round(expected_range[key], 6)
+    assert expected_range == summary["superordinates"]
     for old, new in RENAMED_TYPES.items():
         assert expected_summary["mean_true_features_per_instance"][old] == pytest.approx(
             summary["mean_true_features_per_instance"][new]
