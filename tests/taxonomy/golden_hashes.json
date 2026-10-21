@@ -92,7 +92,7 @@
   "rule_matrices.json": "ad2de3087a6be28f3213f2d99d34c4d64b58fa85685738472e298bbc62139122",
   "rules.yaml": "52ee56d5379873fe3daee6024c64e6c8d9b4e3991014a546da1b1220f87fb297",
   "similarity.csv": "d41844b20d106c07114d637f5d67511094aec4a3ad0fe09f834ca70baf635f63",
-  "summary.yaml": "533afa3b720b85d83bbae737d8eedc08b672e7e36d1290b18d29f51f238355b8",
+  "summary.yaml": "5c063bc56776f668a57052513c2d24a45ad152206d770cd59e92ace4086b07e5",
   "tree.csv": "026c1ced1a73307f14625e706675f7f422f37fe708dcc04c727842a211c3c5c9"
  },
  "tiny_relations": {
@@ -108,7 +108,7 @@
   "rule_matrices.json": "c5ffcc064c256ebb433f7b73decf19debb2d9f64ebf2492a71572a7c81ebdda2",
   "rules.yaml": "d432300f120e89f5ea473cb0de4dab6e03f399c83735e86bd5ecdbdbe8baa9f3",
   "similarity.csv": "e5341a391b9e015f6bbdcf2caa9283c9e6331b608e53cbf27ed14fd621f9bce8",
-  "summary.yaml": "9ca1f375d6c11af3e801204d8b451251f322fd949bb93e46dd799b5dfb453ac9",
+  "summary.yaml": "2d1e22f4bd9fced3fdfc1642aaea8f456e38ac761c84859477eac8cba6ef9805",
   "tree.csv": "026c1ced1a73307f14625e706675f7f422f37fe708dcc04c727842a211c3c5c9"
  }
 }
