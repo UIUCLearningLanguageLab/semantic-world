@@ -9,9 +9,14 @@ when the file is applied, in ``event_types.py``; every error names the file and 
 Since stage c2a (``docs/specs/WORLD_PHASE_C.md``, "Explicit event files") an event file may
 define pair fluents between entities (``pair_fluents: {PAIRFL.1: {symmetry, functional,
 initial_rate}}``), read pair literals in preconditions and conditions, add or delete pairs in
-effects, and give the ``spatial`` block (a detector and its parameters for a pair fluent). A
-location fluent (``total: true``), a ``place_event_types`` entry, and a ``locations`` key come in
-stage c3 and are errors here.
+effects, and give the ``spatial`` block (a detector and its parameters for a pair fluent). Since
+stage c3a (``docs/specs/WORLD_PHASE_C.md``, "Explicit event files") an event file may give
+``place_event_types`` entries, ``PLACEEVENTTYPE.<n>: {kind: move | act, requirement,
+precondition, effects, location}``, which make a place event type performable: a move adds the
+agent's location pair, an act needs it (``place_dynamics.py``). A location fluent is never
+defined in an event file (``total: true`` is an error): the configuration's
+``pair_fluents.locations`` makes them, with the fixed profile; ``location`` names the one an
+entry uses, and may be left out when the world has one.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ from semantic_world.world.dynamics import AnyLiteral, Effect, Literal, PairLiter
 from semantic_world.world.pair_fluents import SYMMETRIES
 
 _EVENT_TYPE = re.compile(r"^EVENTTYPE1\.\d+$|^EVENTTYPE2\.\d+(\.\d+)*$")
+_PLACE_EVENT_TYPE = re.compile(r"^PLACEEVENTTYPE\.\d+$")
+PLACE_KINDS = ("move", "act")
 _FLUENT = re.compile(r"^BOOLFL\.\d+$")
 _NUMERIC = re.compile(r"^NUMFL\.\d+$")
 _PAIR = re.compile(r"^PAIRFL\.\d+$")
@@ -63,6 +70,28 @@ class ExplicitEventType:
 
 
 @dataclass(frozen=True)
+class ExplicitPlaceEventType:
+    """A ``place_event_types`` entry (stage c3a): a move or an act at a place."""
+
+    label: str
+    kind: str
+    """``move`` or ``act``."""
+    requirement: Expr | None
+    """A requirement over ``agent.`` literals and ``patient.PLACE...`` literals, or None (the
+    drawn requirement stays)."""
+    requirement_text: str | None
+    precondition: tuple[AnyLiteral, ...] | None
+    """Further precondition literals (the agent's fluents, ``SOME`` and ``SOMEOF`` of the
+    agent's pair fluents between entities, ``SOMEOF`` of the place on the location fluent), or
+    None; the act's location literal and the move's compiled literal are added."""
+    effects: tuple[Effect, ...] | None
+    """Further effects on the agent's fluents, or None; the move's add is added."""
+    location: str | None
+    """The location fluent the entry uses, or None for the world's one."""
+    field: str
+
+
+@dataclass(frozen=True)
 class EventFile:
     fluents: dict[str, float]
     """Named Boolean fluents and their initial rates."""
@@ -77,6 +106,8 @@ class EventFile:
     spatial: dict[str, dict[str, Any]] | None = None
     """The ``spatial`` block (F6): for a pair fluent, ``{detector, parameters}``; None when the
     file gives none."""
+    place_event_types: dict[str, ExplicitPlaceEventType] = field(default_factory=dict)
+    """The ``place_event_types`` entries (stage c3a), in the file's order."""
 
 
 def load_event_file(path: str | Path) -> EventFile:
@@ -96,13 +127,12 @@ def event_file_from_mapping(data: Any, *, source: str = "<mapping>") -> EventFil
     if data is None:
         data = {}
     root = _Node(source, "", data)
-    for key in ("place_event_types", "locations"):
-        if key in root.data:
-            raise root.error(
-                key,
-                f"{key} in an event file comes in stage c3; stage c2a defines pair fluents "
-                f"between entities only",
-            )
+    if "locations" in root.data:
+        raise root.error(
+            "locations",
+            "location fluents are not defined in an event file: the configuration's "
+            "pair_fluents.locations makes them, with the fixed profile",
+        )
     fluents: dict[str, float] = {}
     numeric: dict[str, dict[str, Any]] = {}
     pair_fluents = _read_pair_fluents(root)
@@ -138,14 +168,45 @@ def event_file_from_mapping(data: Any, *, source: str = "<mapping>") -> EventFil
         event_types[label] = _read_event_type(label, entry)
         entry.finish()
     types_node.finish()
+    place_event_types = _read_place_event_types(root)
     root.finish()
-    return EventFile(fluents, event_types, source, numeric, pair_fluents, spatial)
+    return EventFile(
+        fluents, event_types, source, numeric, pair_fluents, spatial, place_event_types
+    )
+
+
+def _read_place_event_types(root: _Node) -> dict[str, ExplicitPlaceEventType]:
+    """The ``place_event_types`` block (stage c3a)."""
+    node = root.mapping("place_event_types")
+    found: dict[str, ExplicitPlaceEventType] = {}
+    for label in list(node.data):
+        if not isinstance(label, str) or not _PLACE_EVENT_TYPE.match(label):
+            raise node.error(label, "expected a place event type label PLACEEVENTTYPE.<n>")
+        entry = node.mapping(label)
+        kind = entry.choice("kind", _MISSING, PLACE_KINDS)
+        location = entry.string("location", None, nullable=True)
+        if location is not None and not _PAIR.match(location):
+            raise entry.error("location", "expected a location fluent label PAIRFL.<n>")
+        base = _read_event_type(label, entry)
+        entry.finish()
+        found[label] = ExplicitPlaceEventType(
+            label,
+            kind,
+            base.requirement,
+            base.requirement_text,
+            base.precondition,
+            base.effects,
+            location,
+            entry.path,
+        )
+    node.finish()
+    return found
 
 
 def _read_pair_fluents(root: _Node) -> dict[str, dict[str, Any]]:
     """The ``pair_fluents`` block: ``PAIRFL.<n>: {symmetry: symmetric | asymmetric | general,
     functional: bool, initial_rate}``, in label order. ``total: true`` (a location fluent) is an
-    error until stage c3."""
+    error: the configuration's ``pair_fluents.locations`` makes the location fluents (stage c3a)."""
     node = root.mapping("pair_fluents")
     found: dict[str, dict[str, Any]] = {}
     for label in list(node.data):
@@ -156,8 +217,8 @@ def _read_pair_fluents(root: _Node) -> dict[str, dict[str, Any]]:
             if entry.get("total") is not False:
                 raise entry.error(
                     "total",
-                    "a total pair fluent is a location fluent, which comes in stage c3; a pair "
-                    "fluent between entities is never total",
+                    "a total pair fluent is a location fluent, which the configuration's "
+                    "pair_fluents.locations makes; a pair fluent between entities is never total",
                 )
             entry.get("total")
         found[label] = {

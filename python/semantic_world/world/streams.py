@@ -25,7 +25,9 @@ stage c2b; nothing is drawn from it in c2a, where an event file gives them) and
 ``event_types.preconditions.pair_share``; a never-legal event type's redraw uses its own part,
 ``world:pair_preconditions:<label>``), ``world:pair_effects`` (the pair effects that replace
 effects of two-place event types at ``event_types.effects.pair_share``), and
-``world:pair_conditions`` (the pair condition literals of the kind ``pair``).
+``world:pair_conditions`` (the pair condition literals of the kind ``pair``). Stage c3a adds
+``world:habitats`` (each entity's initial place on each location fluent, drawn with the habitat
+weights of WM.39); stage c3b adds ``world:place_dynamics`` after it (WM.64).
 """
 
 from __future__ import annotations
@@ -59,6 +61,7 @@ STREAM_NAMES = (
     "pair_preconditions",
     "pair_effects",
     "pair_conditions",
+    "habitats",
 )
 """The order is the order of creation: the two place streams of stage c1 (``world:places``, the
 place taxonomy's seed, and ``world:place_event_types``, the requirements of the place event types
@@ -68,7 +71,10 @@ and the samples of their capacities' local test) come after every earlier stream
 fluents is byte-identical to the world of stage c1; and the three pair streams of stage c2b
 (``world:pair_preconditions``, ``world:pair_effects``, ``world:pair_conditions``) come last, so
 that a world whose configuration draws no pair fluent is byte-identical to the world of stage
-c2a. Stage c3 adds ``world:place_dynamics`` and ``world:habitats`` after them."""
+c2a; and ``world:habitats`` (stage c3a: the initial places) comes last, so that a world without
+location fluents, which draws nothing from it, is byte-identical to the world of stage c2b apart
+from ``config.yaml``, which lists its seed. Stage c3b adds ``world:place_dynamics`` after it
+(WM.64)."""
 
 
 class WorldStreams:
@@ -97,6 +103,7 @@ class WorldStreams:
     pair_preconditions: np.random.Generator
     pair_effects: np.random.Generator
     pair_conditions: np.random.Generator
+    habitats: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

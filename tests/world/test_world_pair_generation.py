@@ -345,8 +345,9 @@ def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
 
 
 def test_the_pair_fluents_block_is_validated() -> None:
+    # stage c3a: location fluents need places
     with pytest.raises(ConfigError, match="locations"):
-        config_from_mapping({"pair_fluents": {"locations": 1}}, source="<test>")
+        config_from_mapping({"places": None, "pair_fluents": {"locations": 1}}, source="<test>")
     with pytest.raises(ConfigError, match="PAIRFL.1 to PAIRFL.2"):
         config_from_mapping(
             {"pair_fluents": {"count": 2, "fluents": {"PAIRFL.3": {}}}}, source="<test>"
@@ -388,7 +389,8 @@ def test_the_pair_fluents_block_is_validated() -> None:
 
 
 def test_the_three_new_streams_come_after_every_existing_stream() -> None:
-    assert STREAM_NAMES[-5:] == (
+    # stage c3a's world:habitats follows them (test_world_locations.py)
+    assert STREAM_NAMES[-6:-1] == (
         "pair_fluents",
         "pair_initial",
         "pair_preconditions",
@@ -396,7 +398,7 @@ def test_the_three_new_streams_come_after_every_existing_stream() -> None:
         "pair_conditions",
     )
     seeds = WorldStreams(1).seeds()
-    assert list(seeds)[-3:] == [
+    assert list(seeds)[-4:-1] == [
         "world:pair_preconditions",
         "world:pair_effects",
         "world:pair_conditions",

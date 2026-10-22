@@ -150,4 +150,89 @@ def two_place_constraint(
     )
 
 
-__all__ = ["one_place_rule", "two_place_constraint"]
+def _place_threshold(
+    scalar_label: str,
+    threshold: float,
+    scalars: ScalarsConfig,
+    prefix: str,
+    source: str,
+    field: str,
+) -> Threshold:
+    """A threshold on a place scalar (``PLACESCALARDIM.<n>``), stage c3a."""
+    head, _, number = scalar_label.partition(".")
+    count = scalars.count
+    if head != prefix or not number.isdigit() or not 1 <= int(number) <= count:
+        raise ConfigError(
+            source,
+            field,
+            f"unknown place scalar {scalar_label}; the places have {count} scalars ({prefix}.1 "
+            f"and on)",
+        )
+    return Threshold(int(number), threshold, model_quantile_of(scalars, threshold), prefix)
+
+
+def place_requirement(
+    entry,
+    features: FeatureSet,
+    scalars: ScalarsConfig,
+    place_features: FeatureSet,
+    place_scalars: ScalarsConfig,
+    source: str,
+) -> Constraint:
+    """The requirement of a place event type from its event-file entry (stage c3a): one
+    constraint over ``agent.`` literals (the entity's static features and scalar thresholds)
+    and ``patient.`` literals (the place's features and place-scalar thresholds), or a
+    comparison ``agent.SCALARDIM.i - patient.PLACESCALARDIM.j > low``."""
+    field = f"{entry.field}.requirement"
+    assert entry.requirement is not None
+    prefix = place_features.scalar_prefix
+    literals: list[ConstraintLiteral] = []
+    for atom in entry.requirement.atoms():
+        if isinstance(atom, Cmp):
+            role_a, a = _split_role(atom.agent, source, field)
+            role_p, p = _split_role(atom.patient, source, field)
+            if role_a != "agent" or role_p != "patient":
+                raise ConfigError(
+                    source, field, f"a comparison is agent.SCALARDIM.i - patient.{prefix}.j"
+                )
+            ta = _threshold(a, 0.0, scalars, source, field)
+            tp = _place_threshold(p, 0.0, place_scalars, prefix, source, field)
+            literals.append(ScalarComparison(ta.scalar, tp.scalar, atom.low, atom.high, prefix))
+        elif isinstance(atom, Gt):
+            role, label = _split_role(atom.scalar, source, field)
+            if role == "agent":
+                literals.append(
+                    RoleThreshold(role, _threshold(label, atom.threshold, scalars, source, field))
+                )
+            else:
+                literals.append(
+                    RoleThreshold(
+                        role,
+                        _place_threshold(
+                            label, atom.threshold, place_scalars, prefix, source, field
+                        ),
+                    )
+                )
+        else:
+            role, label = _split_role(atom.name, source, field)
+            pool = features if role == "agent" else place_features
+            if role == "patient" and label not in place_features:
+                raise ConfigError(
+                    source,
+                    field,
+                    f"unknown place feature {label}; the patient of a place event type is a "
+                    f"place, whose features are PLACEPROPERTY and PLACEPART",
+                )
+            literals.append(RoleFeature(role, _static_feature(label, pool, source, field)))
+    table = entry.requirement.truth_table([item.key for item in literals])
+    return Constraint(
+        f"{constraint_label(entry.label)}.1",
+        "explicit",
+        tuple(literals),
+        table,
+        entry.requirement,
+        dnf_literal_count(table),
+    )
+
+
+__all__ = ["one_place_rule", "place_requirement", "two_place_constraint"]

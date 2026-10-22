@@ -404,7 +404,13 @@ def test_interference_through_a_derived_fluent_cone() -> None:
         fixture["definition"], fixture["entities"], fixture.get("places")
     )
     assert definition.cone("BOOLFL.3") == ("BOOLFL.1", "BOOLFL.2")
-    state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
+    state = State.from_true(
+        definition,
+        fixture["initial"],
+        fixture.get("initial_numeric"),
+        fixture.get("initial_pairs"),
+        fixture.get("initial_places"),
+    )
     reader = Event.from_labels(definition, "EVENTTYPE1.2", {"agent": "INSTANCE.1.1.2"})
     writer = Event.from_labels(definition, "EVENTTYPE1.3", {"agent": "INSTANCE.1.1.2"})
     assert legal(definition, state, reader.event_type, [reader.binding])[0]

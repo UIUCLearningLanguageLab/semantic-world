@@ -84,6 +84,8 @@ QUANTIFIER_WEIGHTS = {
 ``no`` is ``none``, because YAML reads a bare ``no`` as the boolean false."""
 PARTICIPANT_WEIGHTS = ("thematic", "taxonomic", "constant")
 INITIAL_MODES = ("keep", "redraw")
+PLACES_MODES = ("episode", "all")
+LOCATION_MODES = ("world", "seed")
 CONTENT_KIND_WEIGHTS = ("proportional", "equal")
 CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
 SIDES = ("before", "after")
@@ -319,6 +321,15 @@ class SceneConfig:
     initial: str
     """``keep``: every scene starts from the entities' initial values. ``redraw``: each scene
     draws its participants' initial values afresh, at each fluent's initial rate."""
+    extra_places: int = 1
+    """The places drawn beside the participants' places in a world with location fluents
+    (stage c3a of ``docs/specs/WORLD_PHASE_C.md``, "Episodes"); read and validated here, used
+    once the corpus runs on such a world (stage c4)."""
+    places: str = "episode"
+    """``episode``: the participants' places plus the extra places; ``all``: every place."""
+    initial_location: str = "world"
+    """``world``: each participant's own initial place; ``seed``: the seed entity's place for
+    every participant."""
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -332,6 +343,9 @@ class SceneConfig:
             "participant_weights": dict(self.participant_weights),
             "policy": self.policy,
             "initial": self.initial,
+            "extra_places": self.extra_places,
+            "places": self.places,
+            "initial_location": self.initial_location,
         }
 
 
@@ -831,6 +845,9 @@ def _read_scene(node: _Node) -> SceneConfig:
         participant_weights={k: float(participants.get(k, 0.0)) for k in PARTICIPANT_WEIGHTS},
         policy=node.choice("policy", DEFAULT_POLICY, policy_names()),
         initial=node.choice("initial", "keep", INITIAL_MODES),
+        extra_places=node.int("extra_places", 1, min=0),
+        places=node.choice("places", "episode", PLACES_MODES),
+        initial_location=node.choice("initial_location", "world", LOCATION_MODES),
     )
     node.finish()
     return config

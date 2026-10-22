@@ -27,14 +27,22 @@ on demand by direct arithmetic on the values, for entities or category means.
 
 Since stage c2a (``docs/specs/WORLD_PHASE_C.md``, "The runtime") a state also holds, for each
 pair fluent, the set of its pairs among the entities, as a Boolean matrix whose rows are the
-entities and whose columns are the fluent's targets (entities; places for a location fluent in
-stage c3). ``derive`` computes the pair literals ``SOME`` and ``SOMEOF`` before the matrices;
+entities and whose columns are the fluent's targets (entities; places for a location fluent,
+stage c3a). ``derive`` computes the pair literals ``SOME`` and ``SOMEOF`` before the matrices;
 ``legal`` judges the pair literals of a precondition over the binding; ``apply`` writes the pairs
 its effects add or delete, both directions of a symmetric pair, and checks every profile after
 the step (:class:`ProfileViolationError`, which a correct definition never raises). An event reads
 the pairs, rows, and columns its precondition and conditions read, through the cones of derived
 fluents, and writes the pairs its effects write; two events interfere when one writes a pair the
 other writes or reads, a row or a column counting as every pair in it.
+
+Since stage c3a a location fluent (a total pair fluent, from entities to places) has a matrix of
+shape ``(entities, places)``: ``PAIRFL.k(agent, patient)`` and ``SOMEOF.PAIRFL.k(patient)`` are
+judged for a place event type's binding, an entity and a place, and ``SAME.PAIRFL.k(agent,
+patient)`` for two entities (at the same place); ``apply`` applies an add on a location fluent
+as the total functional replacement, deleting the old pair of the row in the same step, and
+checks that every entity is at exactly one place; for non-interference the add writes the whole
+row of its entity, and ``SOMEOF`` of a place reads the place's column.
 """
 
 from __future__ import annotations
@@ -84,8 +92,9 @@ class State:
     fluents)`` with 0 and 1, ``numeric``, shape ``(entities, numeric fluents)`` in float64
     (stage b2; a world without numeric fluents has an empty second axis), and ``pairs`` (stage
     c2a), one Boolean matrix per pair fluent in symbol order, shape ``(entities, entities)``
-    for a pair fluent between entities (an empty tuple in a world without pair fluents). The
-    arrays are read-only; ``apply`` returns a new state."""
+    for a pair fluent between entities and ``(entities, places)`` for a location fluent (stage
+    c3a); an empty tuple in a world without pair fluents. The arrays are read-only; ``apply``
+    returns a new state."""
 
     values: np.ndarray
     numeric: np.ndarray = None  # type: ignore[assignment]
@@ -129,8 +138,6 @@ class State:
                     f"the pairs of a state are 2-D matrices with one row per entity, got "
                     f"{matrix.shape} beside {values.shape}"
                 )
-            if matrix.shape[0] == matrix.shape[1] and np.diagonal(matrix).any():
-                raise WorldError("a pair fluent never holds between an entity and itself")
             matrix.setflags(write=False)
             pairs.append(matrix)
         object.__setattr__(self, "pairs", tuple(pairs))
@@ -168,13 +175,18 @@ class State:
         true: Mapping[str, Iterable[str]],
         numeric: Mapping[str, Mapping[str, float]] | None = None,
         pairs: Sequence[Sequence[str]] | None = None,
+        places: Mapping[str, Mapping[str, str]] | None = None,
     ) -> State:
         """A state from the base fluents that are true, as ``{entity label: [fluent labels]}``,
         the numeric values as ``{entity label: {fluent label: value}}`` (the entities table's
-        initial values when None, and every entity and fluent must be given otherwise), and the
+        initial values when None, and every entity and fluent must be given otherwise), the
         pairs that hold (stage c2a) as ``(pair fluent, first, second)`` label triples, every
-        ordered pair listed (the initial pairs of the definition when None). Every entity of
-        the definition must be listed in ``true``; a fluent not listed is false."""
+        ordered pair listed (the initial pairs of the definition when None; a location fluent's
+        pair names a place second), and the places (stage c3a) as ``{entity label: {location
+        fluent: place label}}``: an entity whose place neither ``pairs`` nor ``places`` gives
+        keeps its initial place of the entities table, and an entity with no place at all is an
+        error. Every entity of the definition must be listed in ``true``; a fluent not listed is
+        false."""
         values = np.zeros((definition.entity_count, len(definition.base_fluents)), dtype=np.uint8)
         missing = [label for label in definition.entity_labels if label not in true]
         if missing:
@@ -187,7 +199,7 @@ class State:
                         f"{fluent} is not a base fluent; a state holds base fluents only"
                     )
                 values[row, definition.base_fluent_index(fluent)] = 1
-        pair_matrices = _pairs_of(definition, pairs)
+        pair_matrices = _pairs_of(definition, pairs, places)
         if numeric is None:
             return cls(values, _initial_numeric(definition), pair_matrices)
         matrix = np.zeros((definition.entity_count, len(definition.numeric_fluents)))
@@ -209,13 +221,35 @@ class State:
 
     def pairs_record(self, definition: RuntimeDefinition) -> list[list[str]]:
         """Every pair that holds, as ``[pair fluent, first, second]`` label triples, by pair
-        fluent in symbol order, then by first and second in entity order; both directions of a
-        symmetric pair. The form of a fixture's ``pairs`` and a history's ``initial_pairs``."""
+        fluent in symbol order, then by first and second in entity order (in place order for the
+        second argument of a location fluent, stage c3a); both directions of a symmetric pair.
+        The form of a fixture's ``pairs`` and, for the pair fluents between entities, of a
+        history's ``initial_pairs``."""
         _check_state(definition, self)
         return [
             list(row)
-            for row in pair_rows(definition.pair_fluents, self.pairs, definition.entity_labels)
+            for row in pair_rows(
+                definition.pair_fluents,
+                self.pairs,
+                definition.entity_labels,
+                definition.place_labels,
+            )
         ]
+
+    def places_record(self, definition: RuntimeDefinition) -> dict[str, dict[str, str]]:
+        """Every entity's place on every location fluent (stage c3a), as ``{entity label:
+        {location fluent: place label}}``; empty in a world without location fluents."""
+        _check_state(definition, self)
+        found: dict[str, dict[str, str]] = {}
+        for fluent, matrix in zip(definition.pair_fluents, self.pairs, strict=True):
+            if not fluent.total:
+                continue
+            for i, label in enumerate(definition.entity_labels):
+                where = np.flatnonzero(matrix[i])
+                if where.size != 1:
+                    raise WorldError(f"{label} is at {where.size} places on {fluent.label}")
+                found.setdefault(label, {})[fluent.label] = definition.place_labels[int(where[0])]
+        return found
 
     def true_fluents(self, definition: RuntimeDefinition) -> dict[str, list[str]]:
         """The base fluents that are true, as ``{entity label: [fluent labels]}``, every entity
@@ -243,27 +277,78 @@ def _initial_numeric(definition: RuntimeDefinition) -> np.ndarray:
 
 def _initial_pairs(definition: RuntimeDefinition) -> tuple[np.ndarray, ...]:
     """The definition's initial pairs, or no pair at all when none were given (a fixture's
-    definition, whose initial pairs come apart from the record)."""
+    definition, whose initial pairs come apart from the record); a location fluent without
+    initial places (stage c3a) is then an empty matrix, which no state may keep."""
     if not definition.pair_fluents:
         return ()
     if definition.initial_pairs is None:
         n = definition.entity_count
-        return tuple(np.zeros((n, n), dtype=bool) for _ in definition.pair_fluents)
+        return tuple(
+            np.zeros((n, definition.pair_targets(f.label)), dtype=bool)
+            for f in definition.pair_fluents
+        )
     return definition.initial_pairs
 
 
 def _pairs_of(
-    definition: RuntimeDefinition, pairs: Sequence[Sequence[str]] | None
+    definition: RuntimeDefinition,
+    pairs: Sequence[Sequence[str]] | None,
+    places: Mapping[str, Mapping[str, str]] | None = None,
 ) -> tuple[np.ndarray, ...]:
-    """The pair matrices from label triples (the definition's initial pairs when None)."""
-    if pairs is None:
-        return _initial_pairs(definition)
-    if not definition.pair_fluents:
-        if list(pairs):
-            raise WorldError("the state lists pairs, but the definition has no pair fluents")
-        return ()
-    entity_index = {label: i for i, label in enumerate(definition.entity_labels)}
-    return matrices_from_rows(pairs, definition.pair_fluents, entity_index, "the state's pairs")
+    """The pair matrices from label triples (the definition's initial pairs when None) and,
+    for the location fluents (stage c3a), the places given apart, an entity's row filled from
+    the definition's initial places when neither gives it."""
+    if pairs is None and places is None:
+        found = _initial_pairs(definition)
+    else:
+        if not definition.pair_fluents:
+            if list(pairs or ()) or places:
+                raise WorldError("the state lists pairs, but the definition has no pair fluents")
+            return ()
+        entity_index = {label: i for i, label in enumerate(definition.entity_labels)}
+        place_index = {label: i for i, label in enumerate(definition.place_labels)}
+        matrices = list(
+            matrices_from_rows(
+                pairs or [],
+                definition.pair_fluents,
+                entity_index,
+                "the state's pairs",
+                place_index,
+            )
+        )
+        for entity, at in (places or {}).items():
+            if entity not in entity_index:
+                raise WorldError(f"the state's places name {entity}, which is not an entity")
+            for fluent, place in at.items():
+                if (
+                    not definition.is_pair_fluent(fluent)
+                    or not definition.pair_fluent(fluent).total
+                ):
+                    raise WorldError(
+                        f"the state's places name {fluent}, which is not a location fluent"
+                    )
+                if place not in place_index:
+                    raise WorldError(f"the state's places name {place}, which is not a place")
+                k = definition.pair_index(fluent)
+                matrices[k][entity_index[entity], :] = False
+                matrices[k][entity_index[entity], place_index[place]] = True
+        found = tuple(matrices)
+    # every entity is at exactly one place: a row no one gave keeps the definition's place
+    filled = list(found)
+    for k, fluent in enumerate(definition.pair_fluents):
+        if not fluent.total:
+            continue
+        matrix = np.array(filled[k], dtype=bool, copy=True)
+        empty = ~matrix.any(axis=1)
+        if empty.any():
+            if definition.initial_pairs is None:
+                raise WorldError(
+                    f"{definition.entity_labels[int(np.flatnonzero(empty)[0])]} has no place on "
+                    f"{fluent.label}, and the definition carries no initial places"
+                )
+            matrix[empty] = definition.initial_pairs[k][empty]
+        filled[k] = matrix
+    return tuple(filled)
 
 
 def initial_state(definition: RuntimeDefinition) -> State:
@@ -287,32 +372,54 @@ class Event:
     def from_labels(
         cls, definition: RuntimeDefinition, event_type: str, binding: Mapping[str, str]
     ) -> Event:
-        roles = definition.event_type(event_type).roles
+        """An event from a binding of labels; the patient of a place event type (stage c3a) is
+        a place label, read as a place index."""
+        et = definition.event_type(event_type)
+        roles = et.roles
         if set(binding) != set(roles):
             raise WorldError(
                 f"{event_type} has the roles {', '.join(roles)}, but the binding names "
                 f"{', '.join(binding) or 'none'}"
             )
-        return cls(event_type, tuple(definition.entity_index(binding[role]) for role in roles))
+        return cls(
+            event_type,
+            tuple(
+                definition.place_index(binding[role])
+                if et.place and role == "patient"
+                else definition.entity_index(binding[role])
+                for role in roles
+            ),
+        )
 
     def binding_labels(self, definition: RuntimeDefinition) -> dict[str, str]:
-        roles = definition.event_type(self.event_type).roles
+        et = definition.event_type(self.event_type)
         return {
-            role: definition.entity_labels[i] for role, i in zip(roles, self.binding, strict=True)
+            role: definition.place_labels[i]
+            if et.place and role == "patient"
+            else definition.entity_labels[i]
+            for role, i in zip(et.roles, self.binding, strict=True)
         }
 
     def describe(self, definition: RuntimeDefinition) -> str:
-        """``EVENTTYPE2.1.2(agent=INSTANCE.1.1.1, patient=INSTANCE.1.2.1)``."""
+        """``EVENTTYPE2.1.2(agent=INSTANCE.1.1.1, patient=INSTANCE.1.2.1)``; the patient of a
+        place event type is a place label."""
 
-        def name(i: int) -> str:
-            return definition.entity_labels[i] if 0 <= i < definition.entity_count else str(i)
+        def name(i: int, place: bool = False) -> str:
+            labels = definition.place_labels if place else definition.entity_labels
+            return labels[i] if 0 <= i < len(labels) else str(i)
 
         try:
-            roles = definition.event_type(self.event_type).roles
+            et = definition.event_type(self.event_type)
+            roles = et.roles
+            place = et.place
         except WorldError:
             roles = ()
+            place = False
         if len(roles) == len(self.binding):
-            inside = ", ".join(f"{r}={name(i)}" for r, i in zip(roles, self.binding, strict=True))
+            inside = ", ".join(
+                f"{r}={name(i, place and r == 'patient')}"
+                for r, i in zip(roles, self.binding, strict=True)
+            )
         else:
             inside = ", ".join(name(i) for i in self.binding)
         return f"{self.event_type}({inside})"
@@ -468,12 +575,21 @@ def _check_state(definition: RuntimeDefinition, state: State) -> None:
             f"{len(definition.pair_fluents)}"
         )
     n = definition.entity_count
+    # The irreflexive check (a pair fluent between entities never holds between an entity and
+    # itself) needs the fluent, because a location matrix of a world with as many places as
+    # entities is square too (stage c3a); it runs once per state object, since the runtime
+    # checks one state many times in a step (every event type's legal bindings).
+    checked = definition.cache.get("checked_state") is state
     for fluent, matrix in zip(definition.pair_fluents, state.pairs, strict=True):
-        if matrix.shape != (n, n):
+        shape = (n, definition.pair_targets(fluent.label))
+        if matrix.shape != shape:
             raise WorldError(
                 f"the pairs of {fluent.label} have shape {matrix.shape}; the definition needs "
-                f"{(n, n)}"
+                f"{shape}"
             )
+        if not checked and not fluent.total and np.diagonal(matrix).any():
+            raise WorldError(f"{fluent.label} never holds between an entity and itself")
+    definition.cache["checked_state"] = state
 
 
 def _entity_rows(definition: RuntimeDefinition, entities: Sequence[int] | None) -> np.ndarray:
@@ -798,7 +914,7 @@ def _precondition_holds(
     holds = np.ones(array.shape[0], dtype=bool)
     if not et.precondition or array.shape[0] == 0:
         return holds
-    needed = np.unique(array)
+    needed = np.unique(array[:, :1] if et.place else array)
     facts = (
         derive(definition, state, needed)
         if any(
@@ -932,16 +1048,27 @@ def _check_event(definition: RuntimeDefinition, event: Event) -> EventTypeRecord
         raise IllegalEventError(
             f"{text} is illegal: {et.label} is a category of event types, not an event type"
         )
-    if et.place:
-        raise WorldError(
-            f"{et.label} is a place event type, which has no precondition or effects in stage "
-            f"c1; no event of it can be applied"
+    if et.place and not et.performable:
+        raise IllegalEventError(
+            f"{text} is illegal: {et.label} is a place event type with a requirement alone (no "
+            f"move or act), so no event of it can be applied"
         )
     if len(event.binding) != et.arity:
         raise IllegalEventError(
             f"{text} is illegal: {et.label} has the roles {', '.join(et.roles)}, but the "
             f"binding names {len(event.binding)} entities"
         )
+    if et.place:
+        agent, place = event.binding
+        if not 0 <= int(agent) < definition.entity_count:
+            raise IllegalEventError(
+                f"{text} is illegal: entity index {agent} is outside the entities table"
+            )
+        if not 0 <= int(place) < definition.place_count:
+            raise IllegalEventError(
+                f"{text} is illegal: place index {place} is outside the places table"
+            )
+        return et
     for i in event.binding:
         if not 0 <= int(i) < definition.entity_count:
             raise IllegalEventError(
@@ -962,7 +1089,7 @@ def _check_legal(
             f"{text} is illegal: its requirement {et.requirement} does not hold"
         )
     if not _precondition_holds(definition, state, et, array)[0]:
-        facts = derive(definition, state, list(event.binding))
+        facts = derive(definition, state, _entities_of(et, event.binding))
         for lit in et.precondition:
             if isinstance(lit, PairLiteral):
                 if not _pair_literal_value(definition, state, lit, et.roles, event.binding):
@@ -995,31 +1122,42 @@ def _check_legal(
 
 Key = tuple
 """A fact an event reads or writes: ``(entity, fluent)`` for a base Boolean or numeric fluent,
-``(pair fluent, first, second)`` for one ordered pair of a pair fluent (stage c2a), and, since
-stage c2b's follow-up (Jon's ruling 3 of October 21, 2026), ``("row", pair fluent, entity)``
-for every pair of a row and ``("column", pair fluent, entity)`` for every pair of a column, so
-that a row or a column is one entry of a read or write set rather than every pair in it;
-``overlaps`` says when two keys share a fact."""
+``(pair fluent, first, second)`` for one ordered pair of a pair fluent (stage c2a; the second
+argument of a location fluent's pair is a place index, stage c3a), and, since stage c2b's
+follow-up (Jon's ruling 3 of October 21, 2026), ``("row", pair fluent, entity)`` for every pair
+of a row and ``("column", pair fluent, entity)`` for every pair of a column, so that a row or a
+column is one entry of a read or write set rather than every pair in it; since stage c3a also
+``("place_column", location fluent, place)`` for every pair of a place's column (what ``SOMEOF``
+of a place reads). A move writes the row of its agent on its location fluent. ``overlaps`` says
+when two keys share a fact."""
 ROW = "row"
 COLUMN = "column"
+PLACE_COLUMN = "place_column"
+_TAGS = (ROW, COLUMN, PLACE_COLUMN)
 
 
 def overlaps(a: Key, b: Key) -> bool:
     """Whether two keys share a fact: equal keys; a pair and the row of its first argument or
-    the column of its second; a row and a column of one pair fluent of two different entities
-    (they share the pair from the one to the other). Two different rows, or two different
-    columns, share nothing, and a base fluent shares nothing with a pair."""
+    the column of its second (the place's column, for a location fluent); a row and a column of
+    one pair fluent of two different entities (they share the pair from the one to the other);
+    and a row and a place's column of one location fluent (they share the pair from the entity
+    to the place). Two different rows, or two different columns, share nothing, and a base
+    fluent shares nothing with a pair."""
     if a == b:
         return True
     if len(a) != 3 or len(b) != 3:
         return False
-    if a[0] in (ROW, COLUMN):
-        if b[0] in (ROW, COLUMN):
-            return a[0] != b[0] and a[1] == b[1] and a[2] != b[2]
+    if a[0] in _TAGS:
+        if b[0] in _TAGS:
+            if a[0] == b[0] or a[1] != b[1]:
+                return False
+            if PLACE_COLUMN in (a[0], b[0]):
+                return ROW in (a[0], b[0])
+            return a[2] != b[2]
         return overlaps(b, a)
     if b[0] == ROW:
         return b[1] == a[0] and b[2] == a[1]
-    if b[0] == COLUMN:
+    if b[0] in (COLUMN, PLACE_COLUMN):
         return b[1] == a[0] and b[2] == a[2]
     return False
 
@@ -1039,15 +1177,23 @@ def _any_overlap(writes: Iterable[Key], reads: Iterable[Key]) -> bool:
 
 
 def _pair_keys(
-    definition: RuntimeDefinition, effect: Effect, event: Event, et: EventTypeRecord
+    definition: RuntimeDefinition,
+    effect: Effect,
+    event: Event,
+    et: EventTypeRecord,
+    for_interference: bool = False,
 ) -> list[Key]:
     """The ordered pairs a pair effect writes: the pair between its roles, and its reverse for a
-    symmetric pair fluent."""
+    symmetric pair fluent. For non-interference (``for_interference``), an add on a location
+    fluent writes the whole row of its agent (the total functional replacement, stage c3a)."""
     assert effect.second is not None
     first = event.binding[et.roles.index(effect.role)]
     second = event.binding[et.roles.index(effect.second)]
+    fluent = definition.pair_fluent(effect.fluent)
+    if fluent.total and for_interference:
+        return [(ROW, effect.fluent, first)]
     keys: list[Key] = [(effect.fluent, first, second)]
-    if definition.pair_fluent(effect.fluent).symmetric:
+    if fluent.symmetric:
         keys.append((effect.fluent, second, first))
     return keys
 
@@ -1062,7 +1208,7 @@ def _writes(
     for effect in et.effects:
         if effect.pair:
             assert definition is not None
-            for key in _pair_keys(definition, effect, event, et):
+            for key in _pair_keys(definition, effect, event, et, for_interference=True):
                 found[key] = effect.value
         else:
             found[(event.binding[et.roles.index(effect.role)], effect.fluent)] = effect.value
@@ -1074,7 +1220,8 @@ def _pair_reads(
 ) -> list[Key]:
     """The ordered pairs a pair literal reads, every pair of a row or a column counted: the pair
     (both directions for a symmetric pair fluent), the row of the role (``SOME``), the column
-    (``SOMEOF``), or the rows of both roles (``SAME``)."""
+    (``SOMEOF``; a place's column on a location fluent, stage c3a), or the rows of both roles
+    (``SAME``)."""
     fluent = definition.pair_fluent(lit.pair_fluent)
     first = binding[roles.index(lit.first)]
     if lit.kind == PAIR_KIND:
@@ -1087,6 +1234,8 @@ def _pair_reads(
     if lit.kind == PAIR_SOME:
         return _row_keys(definition, fluent.label, first)
     if lit.kind == PAIR_SOMEOF:
+        if fluent.total:
+            return [(PLACE_COLUMN, fluent.label, first)]
         return _column_keys(definition, fluent.label, first)
     assert lit.second is not None
     second = binding[roles.index(lit.second)]
@@ -1183,6 +1332,12 @@ def interferes_sets(a: InterferenceSets, b: InterferenceSets) -> bool:
     )
 
 
+def _entities_of(et: EventTypeRecord, binding: Binding) -> list[int]:
+    """The entities of a binding: the agent alone for a place event type, whose patient is a
+    place (stage c3a)."""
+    return list(binding[:1]) if et.place else list(binding)
+
+
 def _condition_holds(
     definition: RuntimeDefinition,
     state: State,
@@ -1237,7 +1392,7 @@ def _fired(
     effect's both directions for a symmetric pair fluent)."""
     facts = None
     if _needs_derived(definition, et):
-        facts = derive(definition, state, list(event.binding))
+        facts = derive(definition, state, _entities_of(et, event.binding))
     found: dict[Key, bool | float] = {}
     for effect in et.effects:
         if not _condition_holds(definition, state, event, et, effect, facts):
@@ -1251,10 +1406,22 @@ def _fired(
 
 
 def _fact(definition: RuntimeDefinition, key: Key) -> str:
+    labels = definition.entity_labels
     if len(key) == 3:
-        labels = definition.entity_labels
-        return f"{key[0]} between {labels[key[1]]} and {labels[key[2]]}"
-    return f"{key[1]} of {definition.entity_labels[key[0]]}"
+        if key[0] == ROW:
+            what = "the place" if definition.pair_fluent(key[1]).total else "the row"
+            return f"{what} of {labels[key[2]]} on {key[1]}"
+        if key[0] == COLUMN:
+            return f"the column of {labels[key[2]]} on {key[1]}"
+        if key[0] == PLACE_COLUMN:
+            return f"the column of {definition.place_labels[key[2]]} on {key[1]}"
+        second = (
+            definition.place_labels[key[2]]
+            if definition.pair_fluent(key[0]).total
+            else labels[key[2]]
+        )
+        return f"{key[0]} between {labels[key[1]]} and {second}"
+    return f"{key[1]} of {labels[key[0]]}"
 
 
 def interferes(definition: RuntimeDefinition, a: Event, b: Event) -> bool:
@@ -1340,7 +1507,12 @@ def apply_step(
     for found in fired:
         for key, value in found.items():
             if len(key) == 3:
-                pairs[definition.pair_index(key[0])][key[1], key[2]] = bool(value)
+                k = definition.pair_index(key[0])
+                if definition.pair_fluents[k].total:
+                    # the total functional replacement (stage c3a): the add of a location pair
+                    # deletes the old pair of the row in the same step
+                    pairs[k][key[1], :] = False
+                pairs[k][key[1], key[2]] = bool(value)
                 continue
             entity, fluent = key
             if definition.is_numeric_fluent(fluent):
@@ -1373,8 +1545,9 @@ def _check_profiles(
         violations = profile_violations(fluent, matrix)
         if violations:
             labels = definition.entity_labels
+            targets = definition.place_labels if fluent.total else labels
             held = ", ".join(
-                f"({labels[int(i)]}, {labels[int(j)]})"
+                f"({labels[int(i)]}, {targets[int(j)]})"
                 for i, j in zip(*np.nonzero(matrix), strict=True)
             )
             raise ProfileViolationError(
@@ -1394,7 +1567,7 @@ def fired_effects(definition: RuntimeDefinition, state: State, event: Event) -> 
         for effect in et.effects
         for lit in effect.condition
     ):
-        facts = derive(definition, state, list(event.binding))
+        facts = derive(definition, state, _entities_of(et, event.binding))
     return tuple(
         effect
         for effect in et.effects
@@ -1639,6 +1812,7 @@ __all__ = [
     "StaticFacts",
     "StepResult",
     "Key",
+    "PLACE_COLUMN",
     "able",
     "able_table",
     "above",

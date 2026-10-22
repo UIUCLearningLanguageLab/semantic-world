@@ -40,6 +40,7 @@ WORLD_NAMES = [
     "tiny_full",
     pytest.param("default_full", marks=SLOW),
     "tiny_pairs",
+    "tiny_place_chain",
 ]
 
 

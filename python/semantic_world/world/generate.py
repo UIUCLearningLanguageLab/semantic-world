@@ -36,11 +36,18 @@ from semantic_world.world.event_types import (
     EventTypes,
     check_dynamics,
     generate_event_types,
+    produced_numeric,
     redraw_preconditions,
 )
 from semantic_world.world.fluents import Fluents, derived_initial_values, generate_fluents
+from semantic_world.world.locations import with_location_fluents
 from semantic_world.world.numeric import NumericFluents, generate_numeric_fluents
 from semantic_world.world.pair_fluents import PairFluents, generate_pair_fluents
+from semantic_world.world.place_dynamics import (
+    apply_place_dynamics,
+    check_place_dynamics,
+    place_signs,
+)
 from semantic_world.world.places import (
     PLACE_CAPACITIES_FILE,
     PLACES_DIR,
@@ -92,8 +99,9 @@ class WorldResult:
 
     @property
     def pair_fluents(self) -> PairFluents:
-        """The pair fluents between entities and their initial pairs (stage c2a), from the
-        event file; none without one."""
+        """The pair fluents and their initial pairs (stage c2a): the pair fluents between
+        entities, drawn (stage c2b) or from the event file, then the location fluents (stage
+        c3a) with the initial places."""
         return self.definition.pair_fluents
 
     def derived_frames(self) -> dict[str, pl.DataFrame]:
@@ -168,7 +176,7 @@ def define(config: Config) -> WorldResult:
         event_file = load_event_file(path)
     streams = WorldStreams(config.seed)
     statics = build_statics(taxonomy, config, streams, event_file)
-    places = generate_places(config, taxonomy, streams)
+    places = generate_places(config, taxonomy, streams, event_file)
     pair_fluents = generate_pair_fluents(
         len(taxonomy.instances),
         streams,
@@ -176,6 +184,17 @@ def define(config: Config) -> WorldResult:
         explicit_source=event_file.source if event_file is not None else None,
         config=config.pair_fluents,
     )
+    if config.pair_fluents.locations:
+        assert places is not None and config.places is not None  # the configuration checks it
+        pair_fluents = with_location_fluents(
+            pair_fluents,
+            config.pair_fluents.locations,
+            places.requirement.values(),
+            len(taxonomy.instances),
+            places.count,
+            config.places.habitat_strength,
+            streams.habitats,
+        )
     spatial = event_file.spatial if event_file is not None else None
     numeric = generate_numeric_fluents(
         config,
@@ -200,6 +219,18 @@ def define(config: Config) -> WorldResult:
     initial_present = _initial_present(fluents, derived_initial)
     features = tuple(f.label for f in taxonomy.features.features)
     _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
+    # the moves and acts of the event file's place_event_types entries (stage c3a)
+    places = apply_place_dynamics(
+        places,
+        event_file,
+        fluents,
+        numeric,
+        pair_fluents,
+        initial_present,
+        [e for et in event_types.event_types for e in et.effects],
+        produced_numeric(event_types),
+    )
+    _check_places(places, event_types, fluents, initial_present, numeric, pair_fluents)
     definition = build_definition(
         statics, fluents, event_types, numeric, places, pair_fluents, spatial
     )
@@ -242,6 +273,7 @@ def define(config: Config) -> WorldResult:
             pair_parts,
         )
         _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
+        _check_places(places, event_types, fluents, initial_present, numeric, pair_fluents)
         definition = build_definition(
             statics, fluents, event_types, numeric, places, pair_fluents, spatial
         )
@@ -283,6 +315,28 @@ def _check(
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
 
 
+def _check_places(
+    places: Places | None,
+    event_types: EventTypes,
+    fluents: Fluents,
+    initial_present: set,
+    numeric: NumericFluents | None,
+    pair_fluents: PairFluents | None,
+) -> None:
+    try:
+        check_place_dynamics(
+            places,
+            fluents,
+            initial_present,
+            [e for et in event_types.event_types for e in et.effects],
+            produced_numeric(event_types) | place_signs(places),
+            numeric,
+            pair_fluents,
+        )
+    except ValueError as error:
+        raise WorldError(f"the place event types break a rule of the dynamics: {error}") from None
+
+
 def statistics_episodes(
     definition: Definition,
     statics: StaticWorld,
@@ -297,14 +351,18 @@ def statistics_episodes(
         EpisodeGenerator,
         Relatedness,
     )
-    from semantic_world.world.runtime import able_table
+    from semantic_world.world.runtime import able_table, place_able_table
 
     runtime = definition.runtime()
+    strength = config.places.habitat_strength if config.places is not None else 1.0
     generator = EpisodeGenerator(
-        runtime, Relatedness.from_statics(statics, runtime), record_legal=True
+        runtime,
+        Relatedness.from_statics(statics, runtime),
+        record_legal=True,
+        habitat_strength=strength,
     )
     histories = generator.run(config.seed, STATS_EPISODES, STATS_STREAM)
-    able = able_table(runtime)
+    able = {**place_able_table(runtime), **able_table(runtime)}
     never_able = [label for label in generator.performable if not able[label].any()]
     return episode_stats(histories, generator.performable, redraws, never_able)
 

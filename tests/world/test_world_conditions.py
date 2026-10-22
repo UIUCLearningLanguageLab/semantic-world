@@ -481,7 +481,13 @@ def test_the_hand_world_interference_through_a_condition_names_the_condition() -
     definition = runtime_definition(
         fixture["definition"], fixture["entities"], fixture.get("places")
     )
-    state = State.from_true(definition, fixture["initial"], fixture.get("initial_numeric"))
+    state = State.from_true(
+        definition,
+        fixture["initial"],
+        fixture.get("initial_numeric"),
+        fixture.get("initial_pairs"),
+        fixture.get("initial_places"),
+    )
     reader = Event.from_labels(definition, "EVENTTYPE1.5", {"agent": "INSTANCE.1.1.1"})
     writer = Event.from_labels(definition, "EVENTTYPE1.3", {"agent": "INSTANCE.1.1.1"})
     for order in ([reader, writer], [writer, reader]):

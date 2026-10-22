@@ -8,7 +8,7 @@ The specifications in `docs/specs/` are a different kind of document. Specificat
 
 | Guide | Program | Status |
 | --- | --- | --- |
-| [`WORLD.md`](WORLD.md) | The world package: entities, fluents (Boolean and numeric), event types with requirements, preconditions, and effects, comparisons, places and place event types, episodes, histories, and views | Phases (a) and (b) complete; phase (c) begun (stage c1, places; stage c2a, pair fluents from an event file; stage c2b, generated pair fluents in `tiny_full.yaml` and `default_full.yaml`) |
+| [`WORLD.md`](WORLD.md) | The world package: entities, fluents (Boolean and numeric), event types with requirements, preconditions, and effects, comparisons, places and place event types, episodes, histories, and views | Phases (a) and (b) complete; phase (c) begun (stage c1, places; stage c2a, pair fluents from an event file; stage c2b, generated pair fluents in `tiny_full.yaml` and `default_full.yaml`; stage c3a, locations as given by hand, in `tiny_place_chain.yaml`) |
 | [`TAXONOMY.md`](TAXONOMY.md) | The taxonomy generator: categories, instances, features, rules, and scalar dimensions (the part of a world that is fixed), for entities or for places | Complete |
 | [`CORPUS.md`](CORPUS.md) | The corpus generator: documents in an artificial language about a world, their renderings, test sets, and spoken word forms | Complete |
 | [`WORDFORMS.md`](WORDFORMS.md) | The word-form pipeline: spoken word forms, synthesis, auditory front ends, and sound embeddings | Stages 1–7 complete |
@@ -33,8 +33,8 @@ python -m semantic_world.corpus render runs/corpus/default_seed1 --wordforms run
 
 | Step | Output folder | What the step writes | Time at default scale |
 | --- | --- | --- | --- |
-| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the place taxonomy run, the definition, the entities and the places, the derived values, and the world's statistics | 7 seconds (6.9 s in stage c2b, 6.8 s in stage c2a, 6.4 s in stage c1, 6.3 s in stage b3b, 6.1 s in stage b3a, 6.7 s in stage b2, 7.6 s in stage b1, 7.8 s in stage a8); 7 seconds for `default_full.yaml`, the default world with four pair fluents (`WORLD.md`, "The full worlds") |
-| `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request | 2.4 minutes (142 s in stages c2b and c2a, 134 s in stage c1, 141 s in stage b3b, 133 s in stage b3a, 158 s in stage b2, 157 s in stage b1, 158 s in stage a8) |
+| `define` | `runs/world/default_seed1/` | The embedded taxonomy run, the place taxonomy run, the definition, the entities and the places, the derived values, and the world's statistics | 7 seconds (6.9 s in stage c3a, 6.9 s in stage c2b, 6.8 s in stage c2a, 6.4 s in stage c1, 6.3 s in stage b3b, 6.1 s in stage b3a, 6.7 s in stage b2, 7.6 s in stage b1, 7.8 s in stage a8); 7 seconds for `default_full.yaml`, the default world with four pair fluents (`WORLD.md`, "The full worlds") |
+| `generate` | `runs/corpus/default_seed1/` | Documents, the four renderings, test sets, statistics, and the word-form request | 2.4 minutes (142 s in stage c3a, 142 s in stages c2b and c2a, 134 s in stage c1, 141 s in stage b3b, 133 s in stage b3a, 158 s in stage b2, 157 s in stage b1, 158 s in stage a8) |
 | `wordforms all` | `runs/wordforms/corpus_default_seed1/` | Word forms, audio, auditory front ends, sound embeddings, and their evaluation | about 30 minutes |
 | `render` | `runs/corpus/default_seed1/` | The spelled rendering (`corpus.txt`) and the word columns of `lexicon.csv` | 3 seconds |
 

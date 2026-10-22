@@ -485,7 +485,9 @@ def test_quiescence_ends_an_episode() -> None:
     # without the event types that are always legal (EVENTTYPE1.4 and EVENTTYPE1.5 since b1,
     # EVENTTYPE1.6 and EVENTTYPE1.8 since b2; EVENTTYPE1.7 needs NUMFL.1 above 0.5, which the
     # fixed initial value 0 never gives; EVENTTYPE2.2, 2.4, 2.5, and 2.6 since c2a, legal for
-    # every ordered pair when no pair holds, while EVENTTYPE2.3 needs a pair)
+    # every ordered pair when no pair holds, while EVENTTYPE2.3 needs a pair; and since c3a the
+    # place event types and EVENTTYPE2.7, legal with everyone at one place, with the location
+    # fluent they read, which a definition without initial places cannot run episodes on)
     always = {
         "EVENTTYPE1.3",
         "EVENTTYPE1.4",
@@ -496,12 +498,17 @@ def test_quiescence_ends_an_episode() -> None:
         "EVENTTYPE2.4",
         "EVENTTYPE2.5",
         "EVENTTYPE2.6",
+        "EVENTTYPE2.7",
+        "PLACEEVENTTYPE.1",
+        "PLACEEVENTTYPE.2",
+        "PLACEEVENTTYPE.3",
+        "PAIRFL.4",
     }
     record["symbols"] = [s for s in record["symbols"] if s["label"] not in always]
     record["event_types"] = [e for e in record["event_types"] if e["label"] not in always]
     entities = [{**row, "PROPERTY.1": 1} for row in fixture["entities"]]
     rehashed = fixture_record("quiet", "", record, entities, {}, [], None)["definition"]
-    definition = runtime_definition(rehashed, entities)
+    definition = runtime_definition(rehashed, entities, fixture.get("places"))
     initial = {label: ["BOOLFL.1"] for label in definition.entity_labels}
     from semantic_world.world.runtime import State
 

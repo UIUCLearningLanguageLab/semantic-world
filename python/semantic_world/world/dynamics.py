@@ -69,6 +69,13 @@ PAIR_KIND_OF_PREFIX = {None: PAIR_KIND, "SOME": PAIR_SOME, "SOMEOF": PAIR_SOMEOF
 PAIR_PREFIX_OF_KIND = {kind: prefix for prefix, kind in PAIR_KIND_OF_PREFIX.items()}
 TWO_ARGUMENT_KINDS = (PAIR_KIND, PAIR_SAME)
 PROFILE_ORIGIN = "profile"
+MOVE_ORIGIN = "move"
+"""The origin of a move's compiled literal ``NOT PAIRFL.k(agent, patient)`` (stage c3a, WM.53):
+an entity never moves to where it is."""
+ACT_ORIGIN = "act"
+"""The origin of an act's precondition literal ``PAIRFL.k(agent, patient)`` (stage c3a): an act
+happens at the agent's place."""
+ORIGINS = (PROFILE_ORIGIN, MOVE_ORIGIN, ACT_ORIGIN)
 
 
 def _operator(above: bool) -> str:
@@ -237,8 +244,10 @@ class PairLiteral:
     ``pair_some``, ``pair_someof``, or ``pair_same``; ``first`` is the role of the first argument
     (the only one of ``SOME`` and ``SOMEOF``) and ``second`` the role of the second argument, or
     None; ``value`` is True for the positive literal and False for its negation; ``origin`` is
-    None for a literal the file or the generator gave, and ``profile`` for a compiled literal
-    (F4). ``role`` and ``fluent`` name the first role and the pair fluent, so that code that
+    None for a literal the file or the generator gave, ``profile`` for a compiled literal
+    (F4), and since stage c3a ``move`` for a move's ``NOT PAIRFL.k(agent, patient)`` and ``act``
+    for an act's ``PAIRFL.k(agent, patient)`` on a location fluent. ``role`` and ``fluent``
+    name the first role and the pair fluent, so that code that
     counts literals by role reads a pair literal as the other kinds."""
 
     kind: str

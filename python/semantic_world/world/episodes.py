@@ -13,6 +13,16 @@ in the state and do not interfere with the events already chosen; then the runti
 step.
 When no event is legal at a time point, the episode ends there, quiescent.
 
+In a world with location fluents (stage c3a) an episode also has places: the distinct places of
+its participants at ``TIME.1`` plus ``scene.extra_places`` (default 1) places drawn uniformly
+from the others, or every place with ``scene.places: all``; a place event type's bindings range
+over them. Each participant starts at its place of ``entities.csv``; ``scene.initial: redraw``
+redraws the participants' places with the habitat weights, after every other redraw; and
+``scene.initial_location: seed`` starts every participant at the seed entity's place, the
+episode's places being that place and the extra places. The new draws (the redrawn places,
+then the extra places) come after every existing draw of the episode's part, and only in a
+world with location fluents, so the episodes of every other world are unchanged.
+
 Every episode draws from its own part of a stream, named by its label, so it depends only on the
 master seed, its number, its seed instance, and the scene settings. The scene settings live in
 the corpus configuration; ``simulate`` takes their defaults, or reads the ``scene`` block of a
@@ -49,6 +59,7 @@ from semantic_world.world.history import (
     pair_changes_of,
     write_histories,
 )
+from semantic_world.world.locations import DEFAULT_HABITAT_STRENGTH, draw_places, habitat_weights
 from semantic_world.world.pair_fluents import draw_initial_pairs, pair_rows
 from semantic_world.world.policies import DEFAULT_POLICY, StepContext, policy
 from semantic_world.world.runtime import (
@@ -57,6 +68,7 @@ from semantic_world.world.runtime import (
     apply_step,
     initial_state,
     legal_bindings,
+    place_able_table,
 )
 from semantic_world.world.statics import StaticWorld
 
@@ -67,6 +79,12 @@ STATS_STREAM = "world:stats"
 STATS_EPISODES = 1000
 PARTICIPANT_WEIGHTS = ("thematic", "taxonomic", "constant")
 INITIAL_MODES = ("keep", "redraw")
+PLACES_MODES = ("episode", "all")
+"""``scene.places`` (stage c3a): the participants' places plus the extra places, or every
+place."""
+LOCATION_MODES = ("world", "seed")
+"""``scene.initial_location`` (stage c3a): each participant's own initial place, or the seed
+entity's place for every participant."""
 THEMATIC_FILE = "thematic.csv"
 
 
@@ -90,6 +108,10 @@ class EpisodeSettings:
     """A weight per event type; an event type left out has the weight 1."""
     policy: str = DEFAULT_POLICY
     initial: str = "keep"
+    extra_places: int = 1
+    """The places drawn beside the participants' places (stage c3a)."""
+    places: str = "episode"
+    initial_location: str = "world"
 
     def __post_init__(self) -> None:
         if self.participant_weights is None:
@@ -100,6 +122,12 @@ class EpisodeSettings:
             object.__setattr__(self, "event_type_weights", {})
         if self.initial not in INITIAL_MODES:
             raise WorldError(f"scene.initial must be one of {', '.join(INITIAL_MODES)}")
+        if self.places not in PLACES_MODES:
+            raise WorldError(f"scene.places must be one of {', '.join(PLACES_MODES)}")
+        if self.initial_location not in LOCATION_MODES:
+            raise WorldError(f"scene.initial_location must be one of {', '.join(LOCATION_MODES)}")
+        if self.extra_places < 0:
+            raise WorldError("scene.extra_places is 0 or more")
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -111,6 +139,9 @@ class EpisodeSettings:
             "event_type_weights": dict(self.event_type_weights) or "uniform",
             "policy": self.policy,
             "initial": self.initial,
+            "extra_places": self.extra_places,
+            "places": self.places,
+            "initial_location": self.initial_location,
         }
 
 
@@ -183,6 +214,9 @@ def read_scene_settings(
         event_type_weights=_event_type_weights(node, definition),
         policy=node.choice("policy", DEFAULT_POLICY, _policy_names()),
         initial=node.choice("initial", "keep", INITIAL_MODES),
+        extra_places=node.int("extra_places", 1, min=0),
+        places=node.choice("places", "episode", PLACES_MODES),
+        initial_location=node.choice("initial_location", "world", LOCATION_MODES),
     )
     node.finish()
     return settings
@@ -331,10 +365,15 @@ class EpisodeGenerator:
         settings: EpisodeSettings | None = None,
         initial_rates: Mapping[str, float] | None = None,
         record_legal: bool = False,
+        habitat_strength: float = DEFAULT_HABITAT_STRENGTH,
     ) -> None:
         self.definition = definition
         self.relatedness = relatedness
         self.settings = settings or EpisodeSettings()
+        self.habitat_strength = float(habitat_strength)
+        """``places.habitat_strength`` of the world's configuration (stage c3a): the weights
+        ``scene.initial: redraw`` redraws the participants' places with."""
+        self._habitat_weights: np.ndarray | None = None
         self.initial_rates = dict(
             definition.initial_rates if initial_rates is None else initial_rates
         )
@@ -353,6 +392,8 @@ class EpisodeGenerator:
                     f"scene.initial: redraw needs every base fluent's initial rate; none is "
                     f"known for {missing[0]}"
                 )
+        if definition.has_location_fluents and definition.initial_pairs is None:
+            raise WorldError("the definition carries no initial places; episodes need them")
         if definition.initial_values is not None:
             self.start = initial_state(definition)
         elif self.settings.initial == "redraw":
@@ -360,7 +401,10 @@ class EpisodeGenerator:
             self.start = State(
                 np.zeros((n, len(definition.base_fluents)), dtype=np.uint8),
                 np.zeros((n, len(definition.numeric_fluents))),
-                tuple(np.zeros((n, n), dtype=bool) for _ in definition.pair_fluents),
+                tuple(
+                    np.zeros((n, definition.pair_targets(f.label)), dtype=bool)
+                    for f in definition.pair_fluents
+                ),
             )
         else:
             raise WorldError(
@@ -397,6 +441,68 @@ class EpisodeGenerator:
         drawn = rng.choice(len(weights), size=size, replace=False, p=weights / weights.sum())
         return (seed,) + tuple(int(i) for i in drawn)
 
+    # Places ----------------------------------------------------------------------------------
+
+    @property
+    def habitat_weights(self) -> np.ndarray:
+        """The habitat weights of every entity at every place (stage c3a), from the place event
+        types' requirements of the definition and the habitat strength."""
+        if self._habitat_weights is None:
+            definition = self.definition
+            self._habitat_weights = habitat_weights(
+                place_able_table(definition).values(),
+                (definition.entity_count, definition.place_count),
+                self.habitat_strength,
+            )
+        return self._habitat_weights
+
+    def _location_indices(self) -> list[int]:
+        return [i for i, f in enumerate(self.definition.pair_fluents) if f.total]
+
+    def _redraw_places(
+        self, rng: np.random.Generator, participants: tuple[int, ...], pairs: list[np.ndarray]
+    ) -> None:
+        """Redraw the participants' places (in entity order) on each location fluent in label
+        order, with the habitat weights, after every other redraw."""
+        rows = np.array(sorted(participants), dtype=np.intp)
+        for k in self._location_indices():
+            drawn = draw_places(self.habitat_weights, rng, rows)
+            matrix = np.array(pairs[k], dtype=bool, copy=True)
+            matrix[rows, :] = False
+            matrix[rows, drawn] = True
+            pairs[k] = matrix
+
+    def _seed_places(self, participants: tuple[int, ...], pairs: list[np.ndarray]) -> None:
+        """``scene.initial_location: seed``: every participant at the seed entity's place."""
+        for k in self._location_indices():
+            matrix = np.array(pairs[k], dtype=bool, copy=True)
+            matrix[list(participants), :] = matrix[participants[0], :]
+            pairs[k] = matrix
+
+    def episode_places(
+        self, rng: np.random.Generator, participants: tuple[int, ...], state: State
+    ) -> tuple[int, ...]:
+        """The episode's places (F2): the distinct places of the participants at ``TIME.1``
+        on every location fluent, plus ``scene.extra_places`` places drawn uniformly without
+        replacement from the others (one draw), in place order; every place with
+        ``scene.places: all``; none in a world without location fluents."""
+        definition = self.definition
+        if not definition.has_location_fluents:
+            return ()
+        if self.settings.places == "all":
+            return tuple(range(definition.place_count))
+        found: set[int] = set()
+        for k in self._location_indices():
+            found |= {
+                int(q) for q in np.flatnonzero(state.pairs[k][list(participants)].any(axis=0))
+            }
+        others = [q for q in range(definition.place_count) if q not in found]
+        extra = min(self.settings.extra_places, len(others))
+        if extra > 0:
+            drawn = rng.choice(len(others), size=extra, replace=False)
+            found |= {others[int(i)] for i in drawn}
+        return tuple(sorted(found))
+
     # Steps -----------------------------------------------------------------------------------
 
     def _initial(self, rng: np.random.Generator, participants: tuple[int, ...]) -> State:
@@ -410,7 +516,10 @@ class EpisodeGenerator:
         definition = self.definition
         pairs = self._participant_pairs(participants)
         if self.settings.initial == "keep":
-            return State(self.start.values, self.start.numeric, pairs)
+            if self.settings.initial_location == "seed":
+                pairs = list(pairs)
+                self._seed_places(participants, pairs)
+            return State(self.start.values, self.start.numeric, tuple(pairs))
         values = np.array(self.start.values, dtype=np.uint8, copy=True)
         numeric = np.array(self.start.numeric, dtype=np.float64, copy=True)
         for entity in participants:
@@ -423,26 +532,46 @@ class EpisodeGenerator:
         if definition.pair_fluents:
             rows = np.array(sorted(participants), dtype=np.intp)
             redrawn = []
-            for fluent in definition.pair_fluents:
+            for fluent, matrix in zip(definition.pair_fluents, pairs, strict=True):
+                if fluent.total:
+                    redrawn.append(matrix)  # the places are redrawn after every pair (c3a)
+                    continue
                 local = draw_initial_pairs(fluent, rows.size, rng)
                 matrix = np.zeros((definition.entity_count, definition.entity_count), dtype=bool)
                 matrix[np.ix_(rows, rows)] = local
                 redrawn.append(matrix)
+            if definition.has_location_fluents:
+                self._redraw_places(rng, participants, redrawn)
+                if self.settings.initial_location == "seed":
+                    self._seed_places(participants, redrawn)
             pairs = tuple(redrawn)
         return State(values, numeric, pairs)
 
     def _participant_pairs(self, participants: tuple[int, ...]) -> tuple[np.ndarray, ...]:
-        """The definition's initial pairs restricted to the participants."""
+        """The definition's initial pairs restricted to the participants; a location fluent's
+        matrix (stage c3a) is kept whole, because every entity is somewhere."""
         if not self.definition.pair_fluents:
             return ()
         mask = np.zeros(self.definition.entity_count, dtype=bool)
         mask[list(participants)] = True
         keep = np.outer(mask, mask)
-        return tuple(matrix & keep for matrix in self.start.pairs)
+        return tuple(
+            matrix if fluent.total else matrix & keep
+            for fluent, matrix in zip(self.definition.pair_fluents, self.start.pairs, strict=True)
+        )
 
-    def _legal(self, state: State, participants: tuple[int, ...]) -> dict[str, list]:
+    def _legal(
+        self, state: State, participants: tuple[int, ...], places: tuple[int, ...] = ()
+    ) -> dict[str, list]:
+        definition = self.definition
         return {
-            label: legal_bindings(self.definition, state, label, participants)
+            label: legal_bindings(
+                definition,
+                state,
+                label,
+                participants,
+                places if definition.event_type(label).place else None,
+            )
             for label in self.performable
         }
 
@@ -456,6 +585,7 @@ class EpisodeGenerator:
         low, high = self.settings.steps
         steps = int(rng.integers(low, high + 1))
         state = self._initial(rng, participants)
+        places = self.episode_places(rng, participants, state)
         labels = definition.entity_labels
         initial = {
             labels[p]: tuple(f for j, f in enumerate(definition.base_fluents) if state.values[p, j])
@@ -471,16 +601,23 @@ class EpisodeGenerator:
             if definition.numeric_fluents
             else {}
         )
+        between = [
+            (f, m) for f, m in zip(definition.pair_fluents, state.pairs, strict=True) if not f.total
+        ]
         initial_pairs = (
-            tuple(pair_rows(definition.pair_fluents, state.pairs, labels))
+            tuple(pair_rows([f for f, _ in between], [m for _, m in between], labels))
             if definition.pair_fluents
             else None
         )
+        initial_places = None
+        if definition.has_location_fluents:
+            at = state.places_record(definition)
+            initial_places = {labels[p]: at[labels[p]] for p in participants}
         recorded: list[Step] = []
         quiescent = False
         count = 0
         for k in range(1, steps + 1):
-            legal = self._legal(state, participants)
+            legal = self._legal(state, participants, places)
             if not any(legal.values()):
                 quiescent = True
                 break
@@ -499,8 +636,7 @@ class EpisodeGenerator:
             history_events = []
             for event in events:
                 count += 1
-                et = definition.event_type(event.event_type)
-                binding = {r: labels[i] for r, i in zip(et.roles, event.binding, strict=True)}
+                binding = event.binding_labels(definition)
                 event_label = f"{label}.EVENTINSTANCE.{count}"
                 history_events.append(
                     HistoryEvent(
@@ -541,6 +677,10 @@ class EpisodeGenerator:
             quiescent,
             initial_numeric,
             initial_pairs,
+            tuple(definition.place_labels[q] for q in places)
+            if definition.has_location_fluents
+            else None,
+            initial_places,
         )
 
     def run(
@@ -619,11 +759,17 @@ def simulate(
     The master seed defaults to the run's seed."""
     folder = Path(folder)
     definition = load_definition(folder)
+    config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8")) or {}
     if seed is None:
-        config = yaml.safe_load((folder / "config.yaml").read_text(encoding="utf-8")) or {}
         seed = int(config.get("seed", 1))
+    strength = float((config.get("places") or {}).get("habitat_strength", DEFAULT_HABITAT_STRENGTH))
     generator = EpisodeGenerator(
-        definition, Relatedness.from_run(folder, definition), settings, None, record_legal
+        definition,
+        Relatedness.from_run(folder, definition),
+        settings,
+        None,
+        record_legal,
+        habitat_strength=strength,
     )
     histories = generator.run(seed, episodes)
     path = Path(out) if out is not None else folder / EPISODES_FILE
@@ -634,6 +780,8 @@ def simulate(
 __all__ = [
     "EPISODE_STREAM",
     "INITIAL_MODES",
+    "LOCATION_MODES",
+    "PLACES_MODES",
     "STATS_EPISODES",
     "STATS_STREAM",
     "EpisodeGenerator",
