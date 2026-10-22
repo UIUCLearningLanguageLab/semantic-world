@@ -110,7 +110,11 @@ def chain_folder(chain: WorldResult, tmp_path_factory: pytest.TempPathFactory) -
 
 @pytest.fixture(scope="module")
 def tiny_full() -> WorldResult:
-    return define(load_config(DATA / "tiny_full.yaml"))
+    """The tiny full world without its location fluent (since stage c3b ``tiny_full.yaml`` has
+    one): the world of stage c2b, for the checks of a world without location fluents."""
+    data = yaml.safe_load((DATA / "tiny_full.yaml").read_text(encoding="utf-8"))
+    data["pair_fluents"]["locations"] = 0
+    return define(config_from_mapping(data, source=str(DATA / "tiny_full.yaml")))
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
@@ -217,8 +221,9 @@ def test_location_fluents_need_places_and_default_to_none() -> None:
 
 
 def test_the_habitat_stream_comes_after_every_earlier_stream(chain: WorldResult) -> None:
-    assert STREAM_NAMES[-1] == "habitats" and STREAM_NAMES[-2] == "pair_conditions"
-    assert list(WorldStreams(1).seeds())[-1] == "world:habitats"
+    # stage c3b's world:place_dynamics follows it (test_world_location_generation.py)
+    assert STREAM_NAMES[-2] == "habitats" and STREAM_NAMES[-3] == "pair_conditions"
+    assert list(WorldStreams(1).seeds())[-2] == "world:habitats"
     assert "world:habitats" in chain.stream_seeds
 
 

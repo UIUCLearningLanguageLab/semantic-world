@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_01_no_event",
  "description": "A fluent with no event: a step with no events leaves every base fluent as it was; derived fluents are recomputed and nothing changes.",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_43_someof_of_a_place_in_a_precondition",
  "description": "SOMEOF of a place in a precondition (stage c3a, fixture 11): PLACEEVENTTYPE.3 (join) needs SOMEOF.PAIRFL.4(patient), someone at the place, beside its compiled literal. With everyone at PLACE.1.1 nobody can join PLACE.2.1, which is empty. Step 1 moves INSTANCE.1.1.1 to PLACE.2.1 by PLACEEVENTTYPE.1; then INSTANCE.1.1.2 and INSTANCE.1.2.1 can join PLACE.2.1, and INSTANCE.1.1.1 can join PLACE.1.1. Step 2: INSTANCE.1.1.2 joins PLACE.2.1, and its old place goes.",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

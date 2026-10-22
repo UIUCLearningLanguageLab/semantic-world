@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_28_comparison_at_the_cut",
  "description": "A RANGE comparison at its own point (WM.35, October 15, 2026): ABOVE at a fraction q is strict (the value is more than q of the way through the range) and BELOW inclusive (at most), as the numeric literals > t and <= t are. With no event, the drift takes NUMFL.2 of every entity to 0.25 after the first step, 0.5 after the second, and 0.75 after the third, in exact float64 arithmetic. At 0.25 the value is not ABOVE at 0.25 and is BELOW at 0.25; at 0.75 it is not ABOVE at 0.75 and is BELOW at 0.75; at 0.5 it is ABOVE at 0.25 and not BELOW at 0.25, and BELOW at 0.75 and not ABOVE at 0.75.",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

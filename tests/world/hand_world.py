@@ -252,24 +252,28 @@ def numlit(role, fluent, operator, threshold):
     return {"role": role, "fluent": fluent, "operator": operator, "threshold": threshold}
 
 
-def et(label, arity, constraints, pre_literals, pre_text, effects, kind="event_type"):
-    return {
-        "label": label,
-        "kind": kind,
-        "arity": arity,
-        "roles": ["agent", "patient"][:arity],
-        "parent": None,
-        "level": 1,
-        "features": [],
-        "explicit": True,
-        "requirement": {
+def et(
+    label, arity, constraints, pre_literals, pre_text, effects, kind="event_type", place_kind=None
+):
+    record = {"label": label, "kind": kind}
+    if place_kind is not None:
+        record["place_kind"] = place_kind  # stage c3b, WM.65: a place event type with dynamics
+    record.update(
+        arity=arity,
+        roles=["agent", "patient"][:arity],
+        parent=None,
+        level=1,
+        features=[],
+        explicit=True,
+        requirement={
             "constraints": constraints,
             "output": f"REQUIREMENT.{label}",
             "expression": " AND ".join(constraints) or "TRUE",
         },
-        "precondition": {"literals": pre_literals, "expression": pre_text},
-        "effects": effects,
-    }
+        precondition={"literals": pre_literals, "expression": pre_text},
+        effects=effects,
+    )
+    return record
 
 
 DEFINITION = {
@@ -600,6 +604,7 @@ DEFINITION = {
             "NOT PAIRFL.4(agent, patient)",
             [paireff("PAIRFL.4", "agent", "patient", True)],
             kind="place_event_type",
+            place_kind="move",
         ),
         et(
             "PLACEEVENTTYPE.2",
@@ -609,6 +614,7 @@ DEFINITION = {
             "PAIRFL.4(agent, patient)",
             [eff("agent", "BOOLFL.1", False)],
             kind="place_event_type",
+            place_kind="act",
         ),
         et(
             "PLACEEVENTTYPE.3",
@@ -621,6 +627,7 @@ DEFINITION = {
             "SOMEOF.PAIRFL.4(patient) AND NOT PAIRFL.4(agent, patient)",
             [paireff("PAIRFL.4", "agent", "patient", True)],
             kind="place_event_type",
+            place_kind="move",
         ),
     ],
 }

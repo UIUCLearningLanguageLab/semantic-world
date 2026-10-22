@@ -27,7 +27,14 @@ stage c2b; nothing is drawn from it in c2a, where an event file gives them) and
 effects of two-place event types at ``event_types.effects.pair_share``), and
 ``world:pair_conditions`` (the pair condition literals of the kind ``pair``). Stage c3a adds
 ``world:habitats`` (each entity's initial place on each location fluent, drawn with the habitat
-weights of WM.39); stage c3b adds ``world:place_dynamics`` after it (WM.64).
+weights of WM.39). Stage c3b adds ``world:place_dynamics`` after it (WM.64): the drawn dynamics
+of the place event types without an event-file entry (a move or an act, the location fluent, the
+further precondition literals and effects on the agent with their conditions), drawn in label
+order; a never-legal place event type's redraw uses its own part, ``world:place_dynamics:<label>``.
+The quota ``same_rules`` and the ``SAME`` literals on location fluents of stage c3b draw from parts
+of ``world:pair_preconditions`` of their own (``world:pair_preconditions:same_rules`` and
+``world:pair_preconditions:locations``), so that a world without location fluents reads the stream
+as before.
 """
 
 from __future__ import annotations
@@ -62,6 +69,7 @@ STREAM_NAMES = (
     "pair_effects",
     "pair_conditions",
     "habitats",
+    "place_dynamics",
 )
 """The order is the order of creation: the two place streams of stage c1 (``world:places``, the
 place taxonomy's seed, and ``world:place_event_types``, the requirements of the place event types
@@ -73,8 +81,10 @@ fluents is byte-identical to the world of stage c1; and the three pair streams o
 that a world whose configuration draws no pair fluent is byte-identical to the world of stage
 c2a; and ``world:habitats`` (stage c3a: the initial places) comes last, so that a world without
 location fluents, which draws nothing from it, is byte-identical to the world of stage c2b apart
-from ``config.yaml``, which lists its seed. Stage c3b adds ``world:place_dynamics`` after it
-(WM.64)."""
+from ``config.yaml``, which lists its seed; and ``world:place_dynamics`` (stage c3b: the drawn
+dynamics of the place event types) comes after it (WM.64), so that a world without location
+fluents, which draws nothing from it, is byte-identical to the world of stage c3a apart from
+``config.yaml``."""
 
 
 class WorldStreams:
@@ -104,6 +114,7 @@ class WorldStreams:
     pair_effects: np.random.Generator
     pair_conditions: np.random.Generator
     habitats: np.random.Generator
+    place_dynamics: np.random.Generator
 
     def __init__(self, master_seed: int) -> None:
         self.master_seed = master_seed

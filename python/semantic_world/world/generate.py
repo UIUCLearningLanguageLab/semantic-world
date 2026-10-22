@@ -46,7 +46,9 @@ from semantic_world.world.pair_fluents import PairFluents, generate_pair_fluents
 from semantic_world.world.place_dynamics import (
     apply_place_dynamics,
     check_place_dynamics,
+    draw_place_dynamics,
     place_signs,
+    redraw_place_preconditions,
 )
 from semantic_world.world.places import (
     PLACE_CAPACITIES_FILE,
@@ -213,12 +215,35 @@ def define(config: Config) -> WorldResult:
         pair_fluents=pair_fluents,
     )
     derived_initial = derived_initial_values(fluents, taxonomy, numeric, pair_fluents)
+    # the effects of the event file's place entries are fixed before any draw, so the entity
+    # event types' pools of achievable values count them (stage c3b, WM.66)
+    explicit_place_effects = (
+        [e for entry in event_file.place_event_types.values() for e in (entry.effects or ())]
+        if event_file is not None
+        else []
+    )
     event_types = generate_event_types(
-        statics, fluents, config, streams, event_file, derived_initial, numeric, pair_fluents
+        statics,
+        fluents,
+        config,
+        streams,
+        event_file,
+        derived_initial,
+        numeric,
+        pair_fluents,
+        explicit_place_effects,
     )
     initial_present = _initial_present(fluents, derived_initial)
     features = tuple(f.label for f in taxonomy.features.features)
-    _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
+    _check(
+        event_types,
+        fluents,
+        initial_present,
+        features,
+        numeric,
+        pair_fluents,
+        explicit_place_effects,
+    )
     # the moves and acts of the event file's place_event_types entries (stage c3a)
     places = apply_place_dynamics(
         places,
@@ -229,6 +254,28 @@ def define(config: Config) -> WorldResult:
         initial_present,
         [e for et in event_types.event_types for e in et.effects],
         produced_numeric(event_types),
+    )
+    # the drawn dynamics of the other place event types (stage c3b), from world:place_dynamics
+    places = draw_place_dynamics(
+        places,
+        config,
+        streams.place_dynamics,
+        fluents,
+        numeric,
+        pair_fluents,
+        taxonomy.features,
+        taxonomy.instances.values,
+        initial_present,
+        [e for et in event_types.event_types for e in et.effects],
+    )
+    _check(
+        event_types,
+        fluents,
+        initial_present,
+        features,
+        numeric,
+        pair_fluents,
+        _place_effects(places),
     )
     _check_places(places, event_types, fluents, initial_present, numeric, pair_fluents)
     definition = build_definition(
@@ -241,10 +288,14 @@ def define(config: Config) -> WorldResult:
             for label, entry in event_file.event_types.items()
             if entry.precondition is not None
         }
+        # an explicit place entry's further literals are the file's: never drawn again
+        fixed |= set(event_file.place_event_types)
+    place_labels = set(places.event_type_labels) if places is not None else set()
     redraws: dict[str, int] = {}
     parts: dict[str, np.random.Generator] = {}
     numeric_parts: dict[str, np.random.Generator] = {}
     pair_parts: dict[str, np.random.Generator] = {}
+    place_parts: dict[str, np.random.Generator] = {}
     episodes = statistics_episodes(definition, statics, config, redraws)
     for _ in range(MAX_REDRAW_ROUNDS):
         never = [
@@ -254,25 +305,55 @@ def define(config: Config) -> WorldResult:
         ]
         if not never:
             break
-        for label in never:
+        never_entities = [label for label in never if label not in place_labels]
+        never_places = [label for label in never if label in place_labels]
+        for label in never_entities:
             parts.setdefault(label, streams.part("preconditions", label))
             numeric_parts.setdefault(label, streams.part("numeric_preconditions", label))
             if len(pair_fluents):
                 pair_parts.setdefault(label, streams.part("pair_preconditions", label))
+        for label in never_places:
+            place_parts.setdefault(label, streams.part("place_dynamics", label))
+        for label in never:
             redraws[label] = redraws.get(label, 0) + 1
-        event_types = redraw_preconditions(
+        if never_entities:
+            event_types = redraw_preconditions(
+                event_types,
+                never_entities,
+                fluents,
+                config,
+                parts,
+                derived_initial,
+                numeric,
+                numeric_parts,
+                pair_fluents,
+                pair_parts,
+                _place_effects(places),
+            )
+        if never_places:
+            assert places is not None
+            places = redraw_place_preconditions(
+                places,
+                never_places,
+                config,
+                place_parts,
+                fluents,
+                numeric,
+                pair_fluents,
+                taxonomy.features,
+                taxonomy.instances.values,
+                initial_present,
+                [e for et in event_types.event_types for e in et.effects],
+            )
+        _check(
             event_types,
-            never,
             fluents,
-            config,
-            parts,
-            derived_initial,
+            initial_present,
+            features,
             numeric,
-            numeric_parts,
             pair_fluents,
-            pair_parts,
+            _place_effects(places),
         )
-        _check(event_types, fluents, initial_present, features, numeric, pair_fluents)
         _check_places(places, event_types, fluents, initial_present, numeric, pair_fluents)
         definition = build_definition(
             statics, fluents, event_types, numeric, places, pair_fluents, spatial
@@ -301,6 +382,14 @@ def define(config: Config) -> WorldResult:
     )
 
 
+def _place_effects(places: Places | None) -> list:
+    """Every effect of the place event types (stage c3b, WM.66: the pools of achievable values
+    count them)."""
+    if places is None:
+        return []
+    return [e for et in places.event_types for e in et.effects]
+
+
 def _check(
     event_types: EventTypes,
     fluents: Fluents,
@@ -308,9 +397,12 @@ def _check(
     features: tuple[str, ...],
     numeric: NumericFluents | None = None,
     pair_fluents: PairFluents | None = None,
+    extra_effects=(),
 ) -> None:
     try:
-        check_dynamics(event_types, fluents, initial_present, features, numeric, pair_fluents)
+        check_dynamics(
+            event_types, fluents, initial_present, features, numeric, pair_fluents, extra_effects
+        )
     except ValueError as error:
         raise WorldError(f"the event types break a rule of the dynamics: {error}") from None
 
@@ -364,7 +456,14 @@ def statistics_episodes(
     histories = generator.run(config.seed, STATS_EPISODES, STATS_STREAM)
     able = {**place_able_table(runtime), **able_table(runtime)}
     never_able = [label for label in generator.performable if not able[label].any()]
-    return episode_stats(histories, generator.performable, redraws, never_able)
+    # the move share, the act share, and the two-place share between entities (stage c3b),
+    # only in a world with location fluents
+    place_kinds = (
+        {et.label: et.place_kind for et in runtime.event_types if et.place and et.performable}
+        if runtime.has_location_fluents
+        else None
+    )
+    return episode_stats(histories, generator.performable, redraws, never_able, place_kinds)
 
 
 def _yaml(data: Any) -> str:

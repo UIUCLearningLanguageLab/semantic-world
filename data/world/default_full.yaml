@@ -1,11 +1,13 @@
 # The default world with the phase (c) settings of docs/specs/WORLD_PHASE_C.md, "Configuration":
 # every setting of default.yaml, plus 4 pair fluents between entities and the pair shares of
-# preconditions, effects, and conditions (stage c2b; the location settings come in stage c3).
-# The default corpus keeps running on default.yaml, which has no pair fluents, until stage c4
+# preconditions, effects, and conditions (stage c2b), and 1 location fluent (stage c3b), so that
+# its 4 place event types are moves and acts with drawn dynamics, 2 two-place event types require
+# SAME on the location fluent (the quota same_rules), and the entities start at habitats. The
+# default corpus keeps running on default.yaml, which has no pair fluents, until stage c4
 # extends the corpus's truth oracle to pairs and moves these settings into default.yaml (Jon's
 # ruling WM.63). Until then this file is the reference for the phase (c) defaults, as
 # default.yaml is for every other parameter; the two files differ in the name, the comments,
-# and pair_fluents.count alone.
+# pair_fluents.count, and pair_fluents.locations alone.
 
 name: default_full
 seed: 1
@@ -67,7 +69,7 @@ place_event_types:                            # the place event types (stage c1:
 
 pair_fluents:                                 # the pair fluents between entities (stage c2b)
   count: 4                                    # the specification's default; default.yaml keeps 0 until stage c4 (Jon's ruling WM.63)
-  locations: 0                                # location fluents come in stage c3; the specification's default of 1 waits for them
+  locations: 1                                # the location fluent, PAIRFL.5 (stage c3b): general, functional, and total, from entities to places; default.yaml keeps 0 until stage c4 (WM.63)
   symmetry: {symmetric: 1, asymmetric: 1, general: 1}   # weights over a pair fluent's symmetry
   functional_rate: 0.25                       # the probability that a pair fluent is functional (at most one partner in each row)
   initial_rates: [0.0, 0.05, 0.2]             # each pair fluent's initial rate is drawn from this list

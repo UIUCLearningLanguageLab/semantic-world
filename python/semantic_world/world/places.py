@@ -33,7 +33,7 @@ over the world's bindings.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
@@ -56,6 +56,9 @@ PLACE_EVENT_TYPE_KIND = "place_event_type"
 PLACE_KIND_OF_TYPE = {"property": "place_property", "part": "place_part"}
 """The symbol kinds of the place features, by the taxonomy's feature type."""
 PLACE_SCALAR_KIND = "place_scalar"
+PLACE_KINDS = ("move", "act")
+"""The values of a place event type's ``place_kind`` (stage c3b, WM.65): a move adds the
+location pair, an act requires it."""
 EVERYPLACE = "EVERYPLACE"
 """The comparison class of every place (WM.49), as ``ENTITY`` is of every entity."""
 PLACES_DIR = "places"
@@ -154,30 +157,35 @@ class PlaceEventType:
     def record(self) -> dict[str, Any]:
         """The event-type record of ``definition.json``: a two-place event type whose patient is
         a place, flat (no parent); with an empty precondition and no effects without dynamics
-        (stage c1), and with its precondition and effects, and ``explicit`` true, when an event
-        file made it a move or an act (stage c3a), written as an entity event type's are."""
-        return {
-            "label": self.label,
-            "kind": PLACE_EVENT_TYPE_KIND,
-            "arity": 2,
-            "roles": ["agent", "patient"],
-            "parent": None,
-            "level": 1,
-            "features": [],
-            "explicit": self.explicit,
-            "requirement": {
+        (stage c1), and with its precondition and effects when an event file made it a move or
+        an act (stage c3a, ``explicit`` true) or the generator drew its dynamics (stage c3b),
+        written as an entity event type's are, plus the key ``place_kind`` (``move`` or
+        ``act``, WM.65), which is part of the rule-set identity and absent from a place event
+        type without dynamics."""
+        record: dict[str, Any] = {"label": self.label, "kind": PLACE_EVENT_TYPE_KIND}
+        if self.performable:
+            record["place_kind"] = self.dynamics_kind
+        record.update(
+            arity=2,
+            roles=["agent", "patient"],
+            parent=None,
+            level=1,
+            features=[],
+            explicit=self.explicit,
+            requirement={
                 "constraints": [c.label for c in self.constraints],
                 "output": self.requirement_label,
                 "expression": " AND ".join(c.label for c in self.constraints)
                 if self.constraints
                 else "TRUE",
             },
-            "precondition": {
+            precondition={
                 "literals": [lit.record() for lit in self.precondition],
                 "expression": precondition_text(self.precondition),
             },
-            "effects": [effect.record() for effect in self.effects],
-        }
+            effects=[effect.record() for effect in self.effects],
+        )
+        return record
 
 
 @dataclass(frozen=True)
@@ -202,6 +210,9 @@ class Places:
     actual_patient: np.ndarray
     """Extensional: the place has some entity among the world's entities."""
     warnings: tuple[str, ...]
+    dynamics_stats: dict[str, int] = field(default_factory=dict)
+    """The counts of the drawn place dynamics (stage c3b, ``PLACE_DYNAMICS_STATS`` of
+    ``place_dynamics.py``); empty in a world without location fluents."""
 
     @property
     def labels(self) -> tuple[str, ...]:
@@ -230,6 +241,14 @@ class Places:
     def performable(self) -> tuple[PlaceEventType, ...]:
         """The place event types with dynamics (stage c3a): the moves and the acts."""
         return tuple(et for et in self.event_types if et.performable)
+
+    @property
+    def moves(self) -> tuple[PlaceEventType, ...]:
+        return tuple(et for et in self.event_types if et.move)
+
+    @property
+    def acts(self) -> tuple[PlaceEventType, ...]:
+        return tuple(et for et in self.event_types if et.act)
 
     def holds(self, label: str, agents: np.ndarray, places: np.ndarray) -> np.ndarray:
         """Whether the requirement holds for the aligned bindings ``(agents[k], places[k])`` of
@@ -522,10 +541,16 @@ def place_stat_rows(places: Places, with_density: bool) -> list[dict[str, Any]]:
     return rows
 
 
-def places_stats(places: Places | None) -> dict[str, Any] | None:
+def places_stats(
+    places: Places | None, pair_fluents=None, taxonomy: TaxonomyResult | None = None
+) -> dict[str, Any] | None:
     """The ``places`` block of ``world_stats.yaml``: the places and their categories, the place
     features by kind, the place event types with their constraints by family, and their
-    densities over the world's bindings."""
+    densities over the world's bindings; and, only in a world with location fluents (stage
+    c3b), the place event types by kind (``place_event_types_by_kind``: moves, acts, and
+    those without dynamics), the counts of the drawn dynamics (``dynamics``), and the
+    concentration of habitats (``habitats``, from ``habitat_stats`` in ``locations.py``, when
+    ``pair_fluents`` and the entity ``taxonomy`` are given)."""
     if places is None:
         return None
     features = places.taxonomy.features
@@ -543,7 +568,7 @@ def places_stats(places: Places | None) -> dict[str, Any] | None:
         families[constraint.family] = families.get(constraint.family, 0) + 1
     total = 2 * len(places.event_types)
     approximate = int(places.agent_approximate.sum() + places.patient_approximate.sum())
-    return {
+    block: dict[str, Any] = {
         "places": places.count,
         "categories": len(places.taxonomy.tree.categories),
         "features": by_kind,
@@ -558,6 +583,20 @@ def places_stats(places: Places | None) -> dict[str, Any] | None:
         "approximate_capacities": round(approximate / total, 6) if total else 0.0,
         "warnings": list(places.warnings),
     }
+    locations = [f for f in (pair_fluents.fluents if pair_fluents is not None else ()) if f.total]
+    if locations:
+        from semantic_world.world.locations import habitat_stats
+
+        block["place_event_types_by_kind"] = {
+            "moves": len(places.moves),
+            "acts": len(places.acts),
+            "without_dynamics": sum(1 for et in places.event_types if not et.performable),
+            "explicit": sum(1 for et in places.event_types if et.explicit and et.performable),
+        }
+        block["dynamics"] = dict(places.dynamics_stats)
+        if taxonomy is not None:
+            block["habitats"] = habitat_stats(pair_fluents, taxonomy, places.taxonomy)
+    return block
 
 
 def place_scalars_config(places: Places) -> ScalarsConfig:
@@ -572,6 +611,7 @@ __all__ = [
     "PLACE_CAPACITIES_FILE",
     "PLACE_EVENT_TYPE",
     "PLACE_EVENT_TYPE_KIND",
+    "PLACE_KINDS",
     "PLACE_KIND_OF_TYPE",
     "PLACE_SCALAR_KIND",
     "PlaceEventType",

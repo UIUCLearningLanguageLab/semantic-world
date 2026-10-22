@@ -98,6 +98,96 @@ def with_location_fluents(
     return PairFluents(tuple(fluents), tuple(matrices))
 
 
+def _entropy_bits(counts: np.ndarray) -> float:
+    """The entropy, in bits, of a distribution given by counts; 0 for an empty one."""
+    total = float(counts.sum())
+    if total <= 0:
+        return 0.0
+    p = counts[counts > 0] / total
+    return float(-(p * np.log2(p)).sum())
+
+
+def habitat_stats(pair_fluents: PairFluents, taxonomy, place_taxonomy) -> dict[str, Any]:
+    """The concentration of habitats (stage c3b, ``places.habitats`` of ``world_stats.yaml``),
+    per location fluent in label order: for each place category (in tree order), the share of
+    each entity superordinate's entities that start there (``by_place_category``); the entropy,
+    in bits, of the initial places of each entity category's entities over the places
+    (``entropy_by_category``, in tree order), its mean over the categories of each level of the
+    entity tree (``mean_entropy_by_level``), and the entropy of the uniform draw over the places
+    (``max_entropy``), so that a flat habitat reads as the maximum and a concentrated one as
+    less; and, as the figure review point 2 asks for, the largest absolute deviation of a share
+    from the uniform share (``largest_deviation``: the place category, the superordinate, the
+    share, and the uniform share, the place category's number of places over the places)."""
+    tree, instances = taxonomy.tree, taxonomy.instances
+    place_tree, place_instances = place_taxonomy.tree, place_taxonomy.instances
+    superordinates = [c for c in tree.at_level(1)]
+    found: dict[str, Any] = {}
+    for fluent, matrix in zip(pair_fluents.fluents, pair_fluents.initial_pairs, strict=True):
+        if not fluent.total:
+            continue
+        places = np.argmax(matrix, axis=1)
+        place_count = matrix.shape[1]
+        by_place: dict[str, dict[str, float]] = {}
+        largest: dict[str, Any] | None = None
+        for place_category in place_tree.categories:
+            members = np.array(
+                [
+                    place_tree.ancestor_label(place_tree.categories[k], place_category.level)
+                    == place_category.label
+                    for k in place_instances.leaf_index
+                ],
+                dtype=bool,
+            )
+            uniform = float(members.sum()) / place_count if place_count else 0.0
+            row: dict[str, float] = {}
+            for superordinate in superordinates:
+                entities = np.array(
+                    [
+                        tree.ancestor_label(tree.categories[k], 1) == superordinate.label
+                        for k in instances.leaf_index
+                    ],
+                    dtype=bool,
+                )
+                here = members[places[entities]]
+                share = float(here.mean()) if entities.any() else 0.0
+                row[superordinate.label] = round(share, 6)
+                deviation = abs(share - uniform)
+                if largest is None or deviation > largest["deviation"]:
+                    largest = {
+                        "place_category": place_category.label,
+                        "superordinate": superordinate.label,
+                        "share": round(share, 6),
+                        "uniform_share": round(uniform, 6),
+                        "deviation": round(deviation, 6),
+                        "entities": int(entities.sum()),
+                    }
+            by_place[place_category.label] = row
+        entropy: dict[str, float] = {}
+        by_level: dict[int, list[float]] = {}
+        for category in tree.categories:
+            entities = np.array(
+                [
+                    tree.ancestor_label(tree.categories[k], category.level) == category.label
+                    for k in instances.leaf_index
+                ],
+                dtype=bool,
+            )
+            counts = np.bincount(places[entities], minlength=place_count)
+            bits = _entropy_bits(counts)
+            entropy[category.label] = round(bits, 6)
+            by_level.setdefault(category.level, []).append(bits)
+        found[fluent.label] = {
+            "by_place_category": by_place,
+            "largest_deviation": largest,
+            "entropy_by_category": entropy,
+            "mean_entropy_by_level": {
+                level: round(float(np.mean(values)), 6) for level, values in by_level.items()
+            },
+            "max_entropy": round(float(np.log2(place_count)), 6) if place_count else 0.0,
+        }
+    return found
+
+
 def location_columns(
     pair_fluents: PairFluents, place_labels: Sequence[str]
 ) -> dict[str, list[str]]:
@@ -143,6 +233,7 @@ __all__ = [
     "DEFAULT_HABITAT_STRENGTH",
     "LOCATION_SYMMETRY",
     "draw_places",
+    "habitat_stats",
     "habitat_weights",
     "location_columns",
     "location_fluent",

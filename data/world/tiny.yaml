@@ -1,13 +1,15 @@
 # A world small enough to read by eye: the tiny taxonomy with 1 scalar dimension (12 instances),
 # 4 one-place event types, 4 two-place event types in a tree of 2 superordinates, 4 fluents, and,
-# since stage c1, the tiny place taxonomy (4 places) with 2 place event types. Parameters not
+# since stage c1, the tiny place taxonomy (4 places) with 2 place event types, whose requirements
+# read the place (the agent family at 0, Jon's ruling WM.62 of stage c3b: the tests of habitats
+# and of acts at a place need tiny place requirements that read the place). Parameters not
 # listed keep their defaults (see default.yaml).
 
 name: tiny
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
 places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
-place_event_types: {count: 2}
+place_event_types: {count: 2, constraint_families: {patient: 1, cross: 1, key_lock: 1}}
 
 fluents:
   count: 4

@@ -1,14 +1,16 @@
 # The tiny world with the phase (c) settings of docs/specs/WORLD_PHASE_C.md, "Configuration":
-# the settings of tiny.yaml plus 2 pair fluents between entities (stage c2b; the location
-# settings come in stage c3). The tiny corpus keeps running on tiny.yaml, which has no pair
-# fluents, until stage c4 extends the corpus's truth oracle to pairs and moves these settings
-# into tiny.yaml (Jon's ruling WM.63). Parameters not listed keep their defaults.
+# the settings of tiny.yaml plus 2 pair fluents between entities (stage c2b) and 1 location
+# fluent (stage c3b), so its 2 place event types are a move or an act each, with drawn dynamics.
+# The tiny corpus keeps running on tiny.yaml, which has no pair fluents, until stage c4 extends
+# the corpus's truth oracle to pairs and moves these settings into tiny.yaml (Jon's ruling
+# WM.63). The two files differ in the pair_fluents block alone (a test checks it): the place
+# requirements read the place in both (WM.62). Parameters not listed keep their defaults.
 
 name: tiny_full
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
 places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
-place_event_types: {count: 2}
+place_event_types: {count: 2, constraint_families: {patient: 1, cross: 1, key_lock: 1}}
 
 fluents:
   count: 4
@@ -19,4 +21,4 @@ event_types:
     features: {count: 4, expected_true: 2}
     taxonomy: {superordinates: 2, depth: 2, branching: 2}
 
-pair_fluents: {count: 2}
+pair_fluents: {count: 2, locations: 1}

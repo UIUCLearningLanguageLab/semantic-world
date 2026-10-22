@@ -227,8 +227,8 @@ def test_the_event_file_defines_pair_fluents_and_the_world_has_them(
 
 
 def test_the_pair_streams_come_after_every_earlier_stream(pairs_world: WorldResult) -> None:
-    # stage c2b's three streams follow, then stage c3a's (test_world_pair_generation.py)
-    assert STREAM_NAMES[-8:-4] == ("places", "place_event_types", "pair_fluents", "pair_initial")
+    # stage c2b's three streams follow, then stage c3a's and c3b's (test_world_pair_generation.py)
+    assert STREAM_NAMES[-9:-5] == ("places", "place_event_types", "pair_fluents", "pair_initial")
     assert "world:pair_fluents" in pairs_world.stream_seeds
     assert "world:pair_initial" in pairs_world.stream_seeds
 

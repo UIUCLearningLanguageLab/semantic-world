@@ -69,6 +69,7 @@ from semantic_world.world.pair_fluents import PairFluent, draw_initial_pairs, pr
 from semantic_world.world.runtime import (
     COLUMN,
     ROW,
+    Event,
     InterferenceError,
     State,
     apply,
@@ -126,15 +127,19 @@ def _world(
 
 FORCED_PROFILES = {
     "pair_fluents": {
+        "locations": 0,
         "fluents": {
             "PAIRFL.1": {"symmetry": "asymmetric", "functional": True, "initial_rate": 0.2},
             "PAIRFL.2": {"symmetry": "symmetric", "functional": True, "initial_rate": 0.05},
-        }
+        },
     }
 }
 """Overrides that give the tiny_full world an asymmetric functional and a symmetric functional
 pair fluent, so that the compiled literals, the ``SAME`` rule, and the adds that keep no
-condition are exercised in the fast tier whatever seed 1 draws."""
+condition are exercised in the fast tier whatever seed 1 draws; and no location fluent (since
+stage c3b ``tiny_full.yaml`` has one), so that the forced worlds test the pair fluents between
+entities alone, as this file does, and the location dynamics are tested in
+``test_world_location_generation.py``."""
 FULL_SHARES = {
     "event_types": {
         "preconditions": {"pair_share": 1.0},
@@ -172,6 +177,13 @@ def _random_state(definition: RuntimeDefinition, rng: np.random.Generator) -> St
     )
     pairs = []
     for fluent in definition.pair_fluents:
+        if fluent.total:  # a location fluent (stage c3b): every entity at a uniform place
+            matrix = np.zeros((shape[0], definition.place_count), dtype=bool)
+            matrix[np.arange(shape[0]), rng.integers(0, definition.place_count, size=shape[0])] = (
+                True
+            )
+            pairs.append(matrix)
+            continue
         rate = float(rng.choice([0.0, 0.1, 0.3, 0.6]))
         pairs.append(
             draw_initial_pairs(dataclasses.replace(fluent, initial_rate=rate), shape[0], rng)
@@ -197,15 +209,17 @@ def _brute_pairs(definition: RuntimeDefinition, state: State) -> dict[str, froze
     labels = definition.entity_labels
     return {
         fluent.label: frozenset(
-            (labels[int(i)], labels[int(j)]) for i, j in zip(*np.nonzero(matrix), strict=True)
+            # a location fluent's second argument is a place (stage c3b)
+            (labels[int(i)], (definition.place_labels if fluent.total else labels)[int(j)])
+            for i, j in zip(*np.nonzero(matrix), strict=True)
         )
         for fluent, matrix in zip(definition.pair_fluents, state.pairs, strict=True)
     }
 
 
 def _labels(definition: RuntimeDefinition, label: str, binding: tuple[int, ...]) -> dict:
-    roles = definition.event_type(label).roles
-    return {r: definition.entity_labels[i] for r, i in zip(roles, binding, strict=True)}
+    # a place event's patient is a place (stage c3b: tiny_full has a location fluent)
+    return Event(label, binding).binding_labels(definition)
 
 
 def _records(result: WorldResult) -> list[dict[str, Any]]:
@@ -224,7 +238,9 @@ def _check_acceptance(result: WorldResult) -> None:
     implied by, contradicted by, or implying another literal of it, compiled literals
     included."""
     pair_fluents = result.pair_fluents
-    assert len(pair_fluents) == result.config.pair_fluents.count
+    # since stage c3b tiny_full has a location fluent beside the pair fluents between entities
+    assert len(pair_fluents.between_entities) == result.config.pair_fluents.count
+    assert len(pair_fluents.locations) == result.config.pair_fluents.locations
     adds = {e.fluent for et in result.event_types.leaves for e in et.effects if e.pair and e.value}
     dead = {f.label for f in pair_fluents if f.initial_rate == 0.0 and f.label not in adds}
     for et in result.event_types.leaves:
@@ -248,7 +264,7 @@ def _check_acceptance(result: WorldResult) -> None:
     )
     for fluent, matrix in zip(pair_fluents.fluents, pair_fluents.initial_pairs, strict=True):
         assert profile_violations(fluent, matrix) == []
-        assert not fluent.total
+        assert fluent.total == (fluent in pair_fluents.locations)
     for et in result.event_types.leaves:
         fixed = fixed_pair_literals(et.precondition, pair_fluents, et.roles)
         names = {
@@ -332,13 +348,13 @@ def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
     # default_full.yaml is default.yaml with the specification's count (and tiny_full.yaml is
     # tiny.yaml with 2 pair fluents)
     full = load_config(DATA / "default_full.yaml")
-    assert full.pair_fluents.count == 4
-    assert dataclasses.replace(full.pair_fluents, count=0) == block
+    assert full.pair_fluents.count == 4 and full.pair_fluents.locations == 1  # stage c3b
+    assert dataclasses.replace(full.pair_fluents, count=0, locations=0) == block
     assert {**full.resolved(), "name": "default", "pair_fluents": block.resolved()} == (
         listed.resolved()
     )
     tiny_full = load_config(DATA / "tiny_full.yaml")
-    assert tiny_full.pair_fluents == dataclasses.replace(block, count=2)
+    assert tiny_full.pair_fluents == dataclasses.replace(block, count=2, locations=1)
     assert {**tiny_full.resolved(), "name": "tiny", "pair_fluents": block.resolved()} == (
         load_config(DATA / "tiny.yaml").resolved()
     )
@@ -357,7 +373,7 @@ def test_the_pair_fluents_block_is_validated() -> None:
     config = config_from_mapping({"pair_fluents": {"count": 1, "derived_rules": 5}}, source="<t>")
     assert config.pair_fluents.derived_rules == 5
     no_fluents = _world("tiny_full", fluents={"count": 0})
-    assert no_fluents.fluents.rules == () and len(no_fluents.pair_fluents) == 2
+    assert no_fluents.fluents.rules == () and len(no_fluents.pair_fluents.between_entities) == 2
     with pytest.raises(ConfigError, match="literal_kinds"):
         config_from_mapping({"pair_fluents": {"literal_kinds": {"pairs": 1}}}, source="<test>")
     with pytest.raises(ConfigError, match="symmetry"):
@@ -389,8 +405,9 @@ def test_the_pair_fluents_block_is_validated() -> None:
 
 
 def test_the_three_new_streams_come_after_every_existing_stream() -> None:
-    # stage c3a's world:habitats follows them (test_world_locations.py)
-    assert STREAM_NAMES[-6:-1] == (
+    # stage c3a's world:habitats and stage c3b's world:place_dynamics follow them
+    # (test_world_locations.py, test_world_location_generation.py)
+    assert STREAM_NAMES[-7:-2] == (
         "pair_fluents",
         "pair_initial",
         "pair_preconditions",
@@ -398,7 +415,7 @@ def test_the_three_new_streams_come_after_every_existing_stream() -> None:
         "pair_conditions",
     )
     seeds = WorldStreams(1).seeds()
-    assert list(seeds)[-4:-1] == [
+    assert list(seeds)[-5:-2] == [
         "world:pair_preconditions",
         "world:pair_effects",
         "world:pair_conditions",
@@ -413,13 +430,18 @@ def test_the_three_new_streams_come_after_every_existing_stream() -> None:
 def test_profiles_are_drawn_in_label_order_and_an_override_shifts_no_other_draw(
     tiny_full: WorldResult,
 ) -> None:
-    profiles = [(f.symmetry, f.functional, f.initial_rate) for f in tiny_full.pair_fluents]
-    assert tiny_full.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2")
+    between = tiny_full.pair_fluents.between_entities
+    profiles = [(f.symmetry, f.functional, f.initial_rate) for f in between]
+    assert tuple(f.label for f in between) == ("PAIRFL.1", "PAIRFL.2")
+    assert tiny_full.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3")  # the location
     assert all(rate in (0.0, 0.05, 0.2) for _, _, rate in profiles)
-    # a third pair fluent keeps the first two (the draws are made in label order)
+    # a third pair fluent keeps the first two (the draws are made in label order), and shifts
+    # the location fluent's label (WM.54)
     three = _world("tiny_full", pair_fluents={"count": 3})
-    assert [(f.symmetry, f.functional, f.initial_rate) for f in three.pair_fluents][:2] == profiles
-    assert three.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3")
+    assert [
+        (f.symmetry, f.functional, f.initial_rate) for f in three.pair_fluents.between_entities
+    ][:2] == profiles
+    assert three.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4")
     # an override of PAIRFL.1 replaces its values and leaves PAIRFL.2's draws as they are
     forced = _world(
         "tiny_full",
@@ -429,19 +451,19 @@ def test_profiles_are_drawn_in_label_order_and_an_override_shifts_no_other_draw(
             }
         },
     )
-    first, second = forced.pair_fluents.fluents
+    first, second = forced.pair_fluents.between_entities
     assert (first.symmetry, first.functional, first.initial_rate) == ("general", True, 0.05)
     assert (second.symmetry, second.functional, second.initial_rate) == profiles[1]
     # a partial override replaces that key alone
     partial = _world("tiny_full", pair_fluents={"fluents": {"PAIRFL.1": {"initial_rate": 0.05}}})
     first = partial.pair_fluents.fluents[0]
     assert (first.symmetry, first.functional) == profiles[0][:2] and first.initial_rate == 0.05
-    # the initial pairs come from world:pair_initial by the c2a procedure
-    for fluent, matrix in zip(
-        forced.pair_fluents.fluents, forced.pair_fluents.initial_pairs, strict=True
-    ):
+    # the initial pairs come from world:pair_initial by the c2a procedure (the location fluent's
+    # from world:habitats, stage c3a)
+    between = forced.pair_fluents.between_entities
+    for fluent, matrix in zip(between, forced.pair_fluents.initial_pairs, strict=False):
         rng = WorldStreams(forced.config.seed).pair_initial
-        expected = [draw_initial_pairs(f, matrix.shape[0], rng) for f in forced.pair_fluents]
+        expected = [draw_initial_pairs(f, matrix.shape[0], rng) for f in between]
         assert np.array_equal(matrix, expected[forced.pair_fluents.index(fluent.label)])
 
 
@@ -547,7 +569,8 @@ def test_same_literals_are_drawn_only_on_functional_pair_fluents_that_are_not_sy
         "tiny_full",
         None,
         FULL_SHARES,
-        {"pair_fluents": {"literal_kinds": {"pair": 0, "same": 0, "some": 1}}},
+        # the quota same_rules (stage c3b) would add SAME on the location fluent
+        {"pair_fluents": {"literal_kinds": {"pair": 0, "same": 0, "some": 1}, "same_rules": 0}},
     )
     kinds = {
         lit.kind
@@ -622,12 +645,14 @@ def test_with_the_pair_dynamics_off_the_event_types_are_those_of_the_world_witho
     """The off setting of "Determinism": with the pair shares, the pair condition weight, the
     rule weight, and the quota at 0, the pair fluents exist with their initial pairs, but the
     preconditions, effects, conditions, and derived rules are those of the world with
-    ``pair_fluents.count`` 0, record for record."""
-    without = _world("tiny_full", seed=seed, pair_fluents={"count": 0})
+    ``pair_fluents.count`` 0, record for record. Both worlds are taken without the location
+    fluent of stage c3b, whose dynamics (the drawn moves and acts, the quota ``same_rules``)
+    are location dynamics, tested in ``test_world_location_generation.py``."""
+    without = _world("tiny_full", seed=seed, pair_fluents={"count": 0, "locations": 0})
     off = _world(
         "tiny_full",
         seed=seed,
-        pair_fluents={"rule_weight": 0, "derived_rules": 0},
+        pair_fluents={"rule_weight": 0, "derived_rules": 0, "locations": 0},
         event_types={
             "preconditions": {"pair_share": 0},
             "effects": {
@@ -640,8 +665,8 @@ def test_with_the_pair_dynamics_off_the_event_types_are_those_of_the_world_witho
     assert _records(off) == _records(without)
     assert [r.record() for r in off.fluents.rules] == [r.record() for r in without.fluents.rules]
     assert off.rule_set_id != without.rule_set_id  # the pair symbols are hashed
-    if seed == 1:
-        assert baseline_identity("tiny_full", "pair_dynamics_off") == off.rule_set_id
+    # the snapshot's baseline pair_dynamics_off keeps the location fluent (stage c3b) and is
+    # checked by test_world_off_settings.py
 
 
 # ---------------------------------------------------------------------------------------------
@@ -968,7 +993,7 @@ def test_no_profile_is_broken_in_the_statistics_episodes_and_replay_reproduces_e
                 assert profile_violations(fluent, matrix) == []
         for step, before, after in zip(history.steps, states[:-1], states[1:], strict=True):
             changed = {
-                (f.label, labels[int(i)], labels[int(j)])
+                (f.label, labels[int(i)], (definition.place_labels if f.total else labels)[int(j)])
                 for f, a, b in zip(definition.pair_fluents, before.pairs, after.pairs, strict=True)
                 for i, j in zip(*np.nonzero(a != b), strict=True)
             }
@@ -1008,8 +1033,13 @@ def test_the_statistics_and_figures_name_the_pair_fluents_only_when_present(
         "rules_reading_a_pair_literal",
         "fix_ups",
         "pair_changes_per_event",
+        # the location keys of stage c3b (test_world_location_generation.py)
+        "between_entities",
+        "locations",
+        "place_event_types",
     }
-    assert sum(block["by_symmetry"].values()) == block["count"] == 2
+    assert sum(block["by_symmetry"].values()) == block["count"] == 3
+    assert block["between_entities"] == 2 and block["locations"] == 1
     assert block["initial_pairs"] == sum(int(m.sum()) for m in tiny_full.pair_fluents.initial_pairs)
     literals = block["precondition_literals"]
     assert (
@@ -1021,8 +1051,8 @@ def test_the_statistics_and_figures_name_the_pair_fluents_only_when_present(
     full_folder = tiny_full.write(tmp_path / "tiny_full")
     tiny_folder = tiny.write(tmp_path / "tiny")
     full_figures = world_figures(full_folder)
-    assert full_figures["pair_fluents"]["count"] == 2
-    assert "2 pair fluents" in full_figures["wrote_line"]
+    assert full_figures["pair_fluents"]["count"] == 3
+    assert "3 pair fluents (2 between entities, 1 location fluent)" in full_figures["wrote_line"]
     assert "pair_fluents" not in world_figures(tiny_folder)
     assert "pair fluents" not in world_figures(tiny_folder)["wrote_line"]
     written = yaml.safe_load((full_folder / "world_stats.yaml").read_text(encoding="utf-8"))
@@ -1065,10 +1095,12 @@ def test_default_full_with_count_0_is_the_default_world_of_stage_c2a() -> None:
 
 @SLOW
 def test_with_the_pair_dynamics_off_default_full_has_the_default_event_types() -> None:
+    """Without the location fluent of stage c3b, whose place dynamics the default world lacks
+    (``test_world_location_generation.py`` tests them)."""
     default = define(load_config(DATA / "default.yaml"))
     off = _world(
         "default_full",
-        pair_fluents={"rule_weight": 0, "derived_rules": 0},
+        pair_fluents={"rule_weight": 0, "derived_rules": 0, "locations": 0},
         event_types={
             "preconditions": {"pair_share": 0},
             "effects": {
@@ -1079,7 +1111,8 @@ def test_with_the_pair_dynamics_off_default_full_has_the_default_event_types() -
     )
     assert _records(off) == _records(default)
     assert [r.record() for r in off.fluents.rules] == [r.record() for r in default.fluents.rules]
-    assert baseline_identity("default_full", "pair_dynamics_off") == off.rule_set_id
+    # the snapshot's baseline pair_dynamics_off keeps the location fluent (stage c3b) and is
+    # checked by test_world_off_settings.py
 
 
 # ---------------------------------------------------------------------------------------------
