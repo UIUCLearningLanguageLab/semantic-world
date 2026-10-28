@@ -31,7 +31,11 @@ pair literal at ``pair_share``, where the pair literals a place event type can r
 and ``SOMEOF`` of the agent on the pair fluents between entities and ``SOMEOF`` of the place on
 its location fluent (``random_place_pair_literal``); a condition on a further effect at
 ``conditional_share``, its literals on the agent (a static feature, a Boolean fluent, a numeric
-threshold) or such a pair literal. Every rule the checker holds is a redraw here: a slot taken,
+threshold) or such a pair literal. An explicit entry's condition whose value the precondition
+fixes under the implications of ``fixed_pair_literals`` (an act's location literal fixes
+``SOMEOF`` of the place true, so a condition of an act never reads it) is an error that names
+the file and the entry, as a drawn condition is drawn again for it (Jon's ruling WM.68 of the
+stage c3b follow-up). Every rule the checker holds is a redraw here: a slot taken,
 an effect the precondition makes empty, a literal that is not achievable (over every effect of
 the world, WM.66), a pair literal implied by or contradicting another or the compiled literal,
 a condition that reads what the precondition fixes or names, the fluent the effect sets, or a
@@ -73,6 +77,7 @@ from semantic_world.world.event_file import EventFile, ExplicitPlaceEventType
 from semantic_world.world.event_types import (
     compiled_literals,
     condition_keys,
+    fixed_condition_problem,
     fixed_pair_literals,
     implied_conflict,
     pair_effect_key,
@@ -389,6 +394,12 @@ def _apply_entry(
         act = PairLiteral(PAIR_KIND, location, "agent", "patient", True, ACT_ORIGIN)
         if pair_literal_key(act, fluent) not in seen_literals:
             literals.append(act)
+    # WM.68: no condition whose value the precondition fixes under the implications the
+    # generator uses, the location literal included (an act's fixes SOMEOF of the place true)
+    for i, effect in enumerate(effects):
+        problem = fixed_condition_problem(effect, literals, checker.pair_fluents, ROLES)
+        if problem is not None:
+            fail(problem, f"{entry.field}.effects[{i}]")
     return dataclasses.replace(
         by_label[entry.label],
         precondition=tuple(literals),
@@ -417,8 +428,9 @@ def check_place_dynamics(
     (exactly one add on a location fluent, of the agent at the patient, unconditional, with
     its compiled ``move`` literal) or an act (its location literal, positive, and no location
     effect); every further literal reads the agent, or ``SOMEOF`` of the place, and is
-    achievable; every effect writes the agent's base fluents; no literal twice; and a place
-    event type without dynamics has an empty precondition and no effects."""
+    achievable; every effect writes the agent's base fluents; no literal twice; no condition
+    whose value the precondition fixes under ``fixed_pair_literals`` (WM.68); and a place event
+    type without dynamics has an empty precondition and no effects."""
     if places is None:
         return
     numeric = numeric if numeric is not None else empty_numeric(0)
@@ -479,6 +491,9 @@ def check_place_dynamics(
                         fail(f"the condition of {effect.text} reads what the precondition names")
                 elif lit.kind != "feature" and (lit.role, lit.symbol) in seen_literals:
                     fail(f"the condition of {effect.text} reads what the precondition fixes")
+            problem = fixed_condition_problem(effect, et.precondition, pair_fluents, ROLES)
+            if problem is not None:
+                fail(problem)
         moves = sum(1 for e in et.effects if e.pair and e.value)
         if kind == "move" and moves != 1:
             fail("a move has exactly one add on its location fluent")

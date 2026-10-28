@@ -457,18 +457,31 @@ class PlacesConfig:
 @dataclass(frozen=True)
 class PlaceEventTypesConfig:
     """The ``place_event_types`` block (stage c1): how many, the move share that stage c3b uses,
-    the number of constraints of a requirement, the constraint families, and the rule settings
-    of the constraints (the taxonomy's ``rules`` settings with the overrides applied)."""
+    the number of constraints of a requirement, the constraint families, the rule settings of
+    the constraints (the taxonomy's ``rules`` settings with the overrides applied), and the
+    density band of the requirements (Jon's ruling WM.67 of the stage c3b follow-up)."""
 
     count: int
     move_share: float
     constraints: dict[int, float]
     constraint_families: dict[str, float]
     rules: RuleSampling
+    density: tuple[float, float] | None = None
+    """``[low, high]``: a drawn requirement that holds for a share of the world's bindings (an
+    entity and a place) outside the band is drawn again, as a degenerate one is; None turns the
+    band off, and then only a degenerate requirement is drawn again (the code's default, and
+    ``default.yaml``'s, until stage c4, WM.63)."""
 
     @property
     def labels(self) -> tuple[str, ...]:
         return tuple(f"PLACEEVENTTYPE.{i}" for i in range(1, self.count + 1))
+
+    def density_ok(self, value: float) -> bool:
+        """Whether a requirement's density keeps it: not degenerate (0 or 1), and inside the
+        band when one is set."""
+        if not 0.0 < value < 1.0:
+            return False
+        return self.density is None or self.density[0] <= value <= self.density[1]
 
     def resolved(self) -> dict[str, Any]:
         return {
@@ -477,6 +490,7 @@ class PlaceEventTypesConfig:
             "constraints": dict(self.constraints),
             "constraint_families": dict(self.constraint_families),
             "rules": self.rules.resolved(),
+            "density": None if self.density is None else list(self.density),
         }
 
 
@@ -1054,8 +1068,19 @@ def _read_place_event_types(
     rules_node = node.mapping("rules")
     sampling = _read_sampling(rules_node, taxonomy.rules.sampling)
     rules_node.finish()
+    band = node.get("density", None, nullable=True)
+    if band is not None:
+        if not isinstance(band, list) or len(band) != 2:
+            raise node.error(
+                "density", f"expected a pair [low, high] or null, found {_describe(band)}"
+            )
+        low = float(node.check_number("density", band[0], min=0, max=1))
+        high = float(node.check_number("density", band[1], min=0, max=1))
+        if low > high:
+            raise node.error("density", f"low {low} exceeds high {high}")
+        band = (low, high)
     node.finish()
-    return PlaceEventTypesConfig(count, move_share, constraints, families, sampling)
+    return PlaceEventTypesConfig(count, move_share, constraints, families, sampling, band)
 
 
 def _read_event_types(node: _Node, taxonomy: TaxonomyRunConfig) -> EventTypesConfig:

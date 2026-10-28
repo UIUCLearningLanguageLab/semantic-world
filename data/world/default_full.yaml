@@ -1,13 +1,17 @@
 # The default world with the phase (c) settings of docs/specs/WORLD_PHASE_C.md, "Configuration":
 # every setting of default.yaml, plus 4 pair fluents between entities and the pair shares of
-# preconditions, effects, and conditions (stage c2b), and 1 location fluent (stage c3b), so that
+# preconditions, effects, and conditions (stage c2b), 1 location fluent (stage c3b), so that
 # its 4 place event types are moves and acts with drawn dynamics, 2 two-place event types require
-# SAME on the location fluent (the quota same_rules), and the entities start at habitats. The
-# default corpus keeps running on default.yaml, which has no pair fluents, until stage c4
-# extends the corpus's truth oracle to pairs and moves these settings into default.yaml (Jon's
-# ruling WM.63). Until then this file is the reference for the phase (c) defaults, as
+# SAME on the location fluent (the quota same_rules), and the entities start at habitats, and,
+# since the stage c3b follow-up of October 28, 2026 (Jon's ruling WM.67), the density band of the
+# place requirements (a requirement that holds for fewer than 5% or more than 50% of the bindings
+# of an entity and a place is drawn again) and a habitat strength of 2, so that the habitats are
+# not flat. The default corpus keeps running on default.yaml, which has no pair fluents, until
+# stage c4 extends the corpus's truth oracle to pairs and moves these settings into default.yaml
+# (Jon's ruling WM.63). Until then this file is the reference for the phase (c) defaults, as
 # default.yaml is for every other parameter; the two files differ in the name, the comments,
-# pair_fluents.count, and pair_fluents.locations alone.
+# pair_fluents.count, pair_fluents.locations, places.habitat_strength, and
+# place_event_types.density alone.
 
 name: default_full
 seed: 1
@@ -58,7 +62,7 @@ event_types:
 
 places:                                       # the places (stage c1): a second taxonomy run; null turns places off
   taxonomy: {config: data/taxonomy/places_default.yaml, seed: null}   # a taxonomy configuration with labels.kind: place; null: the seed of the stream world:places
-  habitat_strength: 1.0                       # the weight of an entity's capacities at a place in its initial place (stage c3; 0: uniform)
+  habitat_strength: 2                         # the weight of an entity's capacities at a place in its initial place, (1 + a(x, q)) ^ 2 (stage c3; 0: uniform); default.yaml keeps 1 until stage c4 (WM.63, WM.67)
 
 place_event_types:                            # the place event types (stage c1: requirements only; their moves and acts come in stage c3)
   count: 4
@@ -66,6 +70,7 @@ place_event_types:                            # the place event types (stage c1:
   constraints: {1: 0.6, 2: 0.4}               # weights over the number of constraints of a requirement
   constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}   # the comparison family (an entity scalar against a place scalar) is off by default
   rules: {}                                   # overrides of the taxonomy's rules settings for the constraints
+  density: [0.05, 0.5]                        # the density band of a drawn requirement over the bindings of an entity and a place (WM.67); outside it the requirement is drawn again; default.yaml keeps null until stage c4
 
 pair_fluents:                                 # the pair fluents between entities (stage c2b)
   count: 4                                    # the specification's default; default.yaml keeps 0 until stage c4 (Jon's ruling WM.63)

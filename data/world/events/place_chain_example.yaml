@@ -6,8 +6,12 @@
 # PAIRFL.2(agent, patient), of origin move, stops a move to the agent's own place.
 # PLACEEVENTTYPE.2 ("rest") is an act, able at the places with the first place property, whose
 # precondition literal PAIRFL.2(agent, patient), of origin act, puts it at the agent's place; it
-# puts the agent to sleep when someone is at the place (SOMEOF.PAIRFL.2 of the place, which only
-# a place event type can read). EVENTTYPE2.1.1 ("approach") needs the two at the same place
+# puts the agent to sleep when the agent is near someone (SOME.PAIRFL.1 of the agent, a pair
+# fluent between entities read by a place event type). Until the stage c3b follow-up of October
+# 28, 2026, the condition was SOMEOF.PAIRFL.2(patient), someone at the place: the act's own
+# location literal makes it always true, and Jon's ruling WM.68 refuses a condition whose value
+# the precondition fixes, so the condition was changed to one that can fail, not dropped, to keep
+# an act with a conditional effect in the example. EVENTTYPE2.1.1 ("approach") needs the two at the same place
 # (SAME.PAIRFL.2(agent, patient) on the location fluent) and not yet near, and makes them near
 # (PAIRFL.1, symmetric); EVENTTYPE2.1.2 ("eat") needs the agent awake and near the patient and
 # puts the patient to sleep for good; EVENTTYPE1.1 ("wake") wakes a sleeping agent that is near
@@ -44,4 +48,4 @@ place_event_types:
     kind: act
     requirement: "patient.PLACEPROPERTY.1"
     precondition: "agent.BOOLFL.1"
-    effects: ["when SOMEOF.PAIRFL.2(patient) then agent.BOOLFL.1 := 0"]
+    effects: ["when SOME.PAIRFL.1(agent) then agent.BOOLFL.1 := 0"]

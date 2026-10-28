@@ -345,19 +345,37 @@ def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
     assert (
         listed.event_types.effects.condition_kinds == defaults.event_types.effects.condition_kinds
     )
-    # default_full.yaml is default.yaml with the specification's count (and tiny_full.yaml is
-    # tiny.yaml with 2 pair fluents)
+    # default_full.yaml is default.yaml with the specification's count, the location fluent,
+    # and, since the stage c3b follow-up (WM.67), the density band of the place requirements
+    # and the habitat strength 2 (and tiny_full.yaml is tiny.yaml with 2 pair fluents and the
+    # same three settings)
     full = load_config(DATA / "default_full.yaml")
     assert full.pair_fluents.count == 4 and full.pair_fluents.locations == 1  # stage c3b
     assert dataclasses.replace(full.pair_fluents, count=0, locations=0) == block
-    assert {**full.resolved(), "name": "default", "pair_fluents": block.resolved()} == (
-        listed.resolved()
-    )
+    assert full.place_event_types.density == (0.05, 0.5) and full.places.habitat_strength == 2
+    assert defaults.place_event_types.density is None and defaults.places.habitat_strength == 1
+    assert listed.place_event_types.density is None and listed.places.habitat_strength == 1
+    assert _without_phase_c(full, "default", block) == listed.resolved()
     tiny_full = load_config(DATA / "tiny_full.yaml")
     assert tiny_full.pair_fluents == dataclasses.replace(block, count=2, locations=1)
-    assert {**tiny_full.resolved(), "name": "tiny", "pair_fluents": block.resolved()} == (
-        load_config(DATA / "tiny.yaml").resolved()
-    )
+    assert tiny_full.place_event_types.density == (0.05, 0.5)
+    assert tiny_full.places.habitat_strength == 2
+    assert _without_phase_c(tiny_full, "tiny", block) == load_config(DATA / "tiny.yaml").resolved()
+
+
+def _without_phase_c(full, name: str, block: PairFluentsConfig) -> dict:
+    """The resolved configuration of a full world with the phase (c) settings of WM.63 and
+    WM.67 put back to the code's defaults: the name, the ``pair_fluents`` block, the density
+    band, and the habitat strength (the four places where ``tiny_full.yaml`` and
+    ``default_full.yaml`` differ from ``tiny.yaml`` and ``default.yaml``)."""
+    resolved = full.resolved()
+    return {
+        **resolved,
+        "name": name,
+        "pair_fluents": block.resolved(),
+        "places": {**resolved["places"], "habitat_strength": 1.0},
+        "place_event_types": {**resolved["place_event_types"], "density": None},
+    }
 
 
 def test_the_pair_fluents_block_is_validated() -> None:
@@ -494,10 +512,19 @@ def test_every_configuration_without_pair_fluents_is_the_world_of_stage_c2a(
     assert tiny.event_types.pair_stats == {}
     assert not any(rule.pair_inputs for rule in tiny.fluents.rules)
     assert define(load_config(DATA / "tiny_chain.yaml")).pair_fluents.labels == ()
-    # tiny_full with count 0 is the tiny world
-    off = _world("tiny_full", pair_fluents={"count": 0, "locations": 0})
+    # tiny_full with count 0 and locations 0 was the tiny world until the stage c3b follow-up
+    # (WM.67): it keeps the density band of the place requirements and the habitat strength
+    # (the band changes the place draws, the strength draws nothing without location
+    # fluents), so the tiny world is tiny_full with the band off too
+    off = _world(
+        "tiny_full",
+        pair_fluents={"count": 0, "locations": 0},
+        place_event_types={"density": None},
+    )
     assert off.rule_set_id == tiny.rule_set_id
-    assert baseline_identity("tiny_full", "pair_fluents_off") == tiny.rule_set_id
+    banded = _world("tiny_full", pair_fluents={"count": 0, "locations": 0})
+    assert banded.rule_set_id != tiny.rule_set_id
+    assert baseline_identity("tiny_full", "pair_fluents_off") == banded.rule_set_id
     assert tiny_full.rule_set_id != tiny.rule_set_id
 
 
@@ -1088,9 +1115,20 @@ def test_the_tiny_full_fixtures_are_committed_and_reproducible(tiny_full: WorldR
 
 @SLOW
 def test_default_full_with_count_0_is_the_default_world_of_stage_c2a() -> None:
+    """With the pair fluents off and the density band of the place requirements off too (the
+    stage c3b follow-up, WM.67: the band stays in the baseline ``pair_fluents_off``, which is
+    therefore the default world with the band's place requirements, a world of its own)."""
     default = define(load_config(DATA / "default.yaml"))
     assert "pair_fluents" not in default.stats
-    assert baseline_identity("default_full", "pair_fluents_off") == default.rule_set_id
+    off = _world(
+        "default_full",
+        pair_fluents={"count": 0, "locations": 0},
+        place_event_types={"density": None},
+    )
+    assert off.rule_set_id == default.rule_set_id
+    banded = baseline_identity("default_full", "pair_fluents_off")
+    assert banded != default.rule_set_id
+    assert banded == _world("default_full", pair_fluents={"count": 0, "locations": 0}).rule_set_id
 
 
 @SLOW

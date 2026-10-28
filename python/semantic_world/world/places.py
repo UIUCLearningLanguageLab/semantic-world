@@ -18,9 +18,12 @@ place taxonomy's (place properties and parts, free or determined, and threshold 
 place scalars); a comparison, when its family has weight, compares an entity scalar with a
 place scalar. A requirement that holds for no binding or for every binding of the world (the
 entities paired with the places) is drawn again, as a degenerate two-place event type is by
-default. A place event type has no precondition and no effects until it is made a move or an
-act at a place: since stage c3a an event file's ``place_event_types`` entry gives it its
-dynamics (``place_dynamics.py``), and stage c3b draws them.
+default; and with the band ``place_event_types.density: [low, high]`` (Jon's ruling WM.67 of the
+stage c3b follow-up) so is one whose share of the bindings lies outside the band, up to the same
+number of tries, from the same stream, because requirements that hold for most bindings make
+the habitat weights nearly flat. A place event type has no precondition and no effects until it
+is made a move or an act at a place: since stage c3a an event file's ``place_event_types``
+entry gives it its dynamics (``place_dynamics.py``), and stage c3b draws them.
 
 The capacities: ``CAN.PLACEEVENTTYPE.<n>``, an entity is able to be the agent with some possible
 place, is the agent projection of the requirement, with the place taxonomy's rules as the
@@ -65,8 +68,9 @@ PLACES_DIR = "places"
 PLACES_FILE = "places.csv"
 PLACE_CAPACITIES_FILE = "place_capacities.csv"
 MAX_TRIES = 200
-"""How many times a degenerate requirement (holding for no binding, or for every binding) is
-drawn again before the world keeps the last draw with a warning."""
+"""How many times a degenerate requirement (holding for no binding, or for every binding), or
+one outside the density band, is drawn again before the world keeps the last draw with a
+warning."""
 
 
 def place_event_type_label(index: int) -> str:
@@ -89,6 +93,10 @@ class PlaceEventType:
     holds."""
     tries: int
     """How many draws the requirement took."""
+    in_band: bool = True
+    """Whether the drawn requirement's density is neither degenerate nor outside
+    ``place_event_types.density``: false only for a drawn requirement kept after ``MAX_TRIES``
+    draws (an explicit requirement is never drawn again, so it is always true of one)."""
     precondition: tuple[AnyLiteral, ...] = ()
     """The precondition (stage c3a): empty for a place event type without dynamics; an act's
     location literal ``PAIRFL.k(agent, patient)`` (origin ``act``) or a move's compiled
@@ -213,6 +221,15 @@ class Places:
     dynamics_stats: dict[str, int] = field(default_factory=dict)
     """The counts of the drawn place dynamics (stage c3b, ``PLACE_DYNAMICS_STATS`` of
     ``place_dynamics.py``); empty in a world without location fluents."""
+    density_band: tuple[float, float] | None = None
+    """``place_event_types.density``, or None without a band."""
+
+    @property
+    def outside_band(self) -> tuple[str, ...]:
+        """The place event types whose drawn requirement is still degenerate or outside the
+        band after ``MAX_TRIES`` draws (reported in the statistics only with a band, as the
+        two-place range is)."""
+        return tuple(et.label for et in self.event_types if not et.in_band)
 
     @property
     def labels(self) -> tuple[str, ...]:
@@ -331,7 +348,9 @@ def generate_places(
     """The places of a world, or None with ``places: null``: the place taxonomy run (in memory,
     on the resolved place configuration), then the place event types from
     ``world:place_event_types``, each requirement drawn again while it holds for no binding or
-    for every binding of the world, then the capacities. An event file's ``place_event_types``
+    for every binding of the world, or for a share of the bindings outside the band
+    ``place_event_types.density`` when one is set (WM.67), up to ``MAX_TRIES`` draws, then the
+    capacities. An event file's ``place_event_types``
     entry with a requirement (stage c3a) replaces the drawn requirement of its place event
     type after every draw is made, before the capacities, as an explicit two-place requirement
     replaces an own constraint; the entry's dynamics come after the fluents
@@ -377,6 +396,7 @@ def generate_places(
     requirement: dict[str, np.ndarray] = {}
     warnings: list[str] = []
     bindings = values.shape[0] * place_values.shape[0]
+    band = settings.density
     for index in range(1, settings.count + 1):
         label = place_event_type_label(index)
         tries = 0
@@ -389,8 +409,9 @@ def generate_places(
             )
             matrix = requirement_matrix(constraints, values, scalars, place_values, place_scalars)
             density = float(matrix.mean()) if bindings else math.nan
-            if bindings == 0 or 0.0 < density < 1.0 or tries >= MAX_TRIES:
+            if bindings == 0 or settings.density_ok(density) or tries >= MAX_TRIES:
                 break
+        in_band = label in explicit or bindings == 0 or settings.density_ok(density)
         if label in explicit:
             constraints = (explicit[label],)
             matrix = requirement_matrix(constraints, values, scalars, place_values, place_scalars)
@@ -400,8 +421,22 @@ def generate_places(
                 f"place event type {label} holds for "
                 f"{'no' if density == 0.0 else 'every'} binding after {tries} tries"
             )
+        elif bindings and not settings.density_ok(density):
+            assert band is not None
+            warnings.append(
+                f"place event type {label} holds for {density:.4f} of the bindings, outside the "
+                f"density band [{band[0]}, {band[1]}], after {tries} tries"
+            )
         event_types.append(
-            PlaceEventType(label, index, constraints, density, tries, explicit=label in explicit)
+            PlaceEventType(
+                label,
+                index,
+                constraints,
+                density,
+                tries,
+                in_band=in_band,
+                explicit=label in explicit,
+            )
         )
         requirement[label] = matrix
     n, m, k = values.shape[0], place_values.shape[0], len(event_types)
@@ -433,6 +468,7 @@ def generate_places(
         actual_agent,
         actual_patient,
         tuple(warnings),
+        density_band=band,
     )
 
 
@@ -546,7 +582,10 @@ def places_stats(
 ) -> dict[str, Any] | None:
     """The ``places`` block of ``world_stats.yaml``: the places and their categories, the place
     features by kind, the place event types with their constraints by family, and their
-    densities over the world's bindings; and, only in a world with location fluents (stage
+    densities over the world's bindings (with a density band, WM.67, also the band and the
+    place event types still outside it, ``outside_density`` and ``outside_density_labels``,
+    as the ``relations`` block reports the two-place range); and, only in a world with location
+    fluents (stage
     c3b), the place event types by kind (``place_event_types_by_kind``: moves, acts, and
     those without dynamics), the counts of the drawn dynamics (``dynamics``), and the
     concentration of habitats (``habitats``, from ``habitat_stats`` in ``locations.py``, when
@@ -583,6 +622,11 @@ def places_stats(
         "approximate_capacities": round(approximate / total, 6) if total else 0.0,
         "warnings": list(places.warnings),
     }
+    if places.density_band is not None:
+        # the band (WM.67), as relations.outside_density reports the two-place range
+        block["density_band"] = list(places.density_band)
+        block["outside_density"] = len(places.outside_band)
+        block["outside_density_labels"] = list(places.outside_band)
     locations = [f for f in (pair_fluents.fluents if pair_fluents is not None else ()) if f.total]
     if locations:
         from semantic_world.world.locations import habitat_stats

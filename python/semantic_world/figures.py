@@ -100,10 +100,12 @@ stage c2a, and every world without pair fluents is its own baseline), and the pa
 initial pairs but no entity event type reads or writes them, and in a world without location
 fluents the event types and the derived rules are promised to be those of the world without
 pair fluents; with location fluents the place event types keep their drawn dynamics, which
-are location dynamics), and the location fluents (stage c3b: ``tiny_full`` and ``default_full`` with
-``locations`` 0 are promised byte-identical to the full worlds of stage c2b, because every draw
-of stage c3b happens only in a world with location fluents; a world without them is its own
-baseline)."""
+are location dynamics), and the location fluents (stage c3b: with ``locations`` 0 no draw of
+stage c3b happens, so a world without location fluents is its own baseline; ``tiny_full`` and
+``default_full`` with ``locations`` 0 were the full worlds of stage c2b until the follow-up of
+October 28, 2026, whose density band and habitat strength (WM.67) the full worlds keep with
+``locations`` 0, so their ``locations_off`` baselines are the stage c2b worlds with the band's
+place requirements, not the stage c2b worlds)."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -261,6 +263,16 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
             "constraint_families": dict(places.get("constraint_families", {})),
             "density": _rate(place_densities) if place_densities else None,
             "approximate_capacities": places.get("approximate_capacities"),
+            # the density band of the requirements (WM.67), only in a world that sets one, so
+            # that the figures of every other world do not move
+            **(
+                {
+                    "density_band": list(places["density_band"]),
+                    "outside_density": places["outside_density"],
+                }
+                if "density_band" in places
+                else {}
+            ),
             # the location figures (stage c3b), only in a world with location fluents, so
             # that the figures of every other world do not move
             **(

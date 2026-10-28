@@ -554,6 +554,39 @@ def precondition_literal_fits_conditions(
     return not (set(fixed) & condition_pair_keys(effects, pair_fluents))
 
 
+def fixed_condition_problem(
+    effect: Effect,
+    precondition: Sequence[AnyLiteral],
+    pair_fluents: PairFluents,
+    roles: Sequence[str] = ROLES,
+) -> str | None:
+    """Why a condition of the effect is refused under Jon's ruling WM.68 (the stage c3b
+    follow-up of October 28, 2026), or None: a pair condition literal whose value the
+    precondition fixes under the implications of ``fixed_pair_literals`` (the compiled literals
+    included; an act's location literal fixes ``SOMEOF`` of the place true) would be redundant
+    with its value or never fire with the other, so the effect would be unconditional either
+    way. The generator draws such a condition again; an event file's entry with one is an error
+    that names the file and the entry, and ``check_dynamics`` and ``check_place_dynamics`` hold
+    the rule as an invariant."""
+    pair_literals = [lit for lit in precondition if isinstance(lit, PairLiteral)]
+    if not pair_literals or not any(isinstance(lit, PairLiteral) for lit in effect.condition):
+        return None
+    fixed = fixed_pair_literals(pair_literals, pair_fluents, roles)
+    for lit in effect.condition:
+        if not isinstance(lit, PairLiteral) or lit.pair_fluent not in pair_fluents:
+            continue
+        key = pair_literal_key(lit, pair_fluents[lit.pair_fluent])
+        if key in fixed:
+            value = fixed[key]
+            return (
+                f"the condition of {effect.text} reads {lit.key}, whose value the precondition "
+                f"fixes ({'true' if value else 'false'}, by "
+                f"{' AND '.join(p.text for p in pair_literals)}), so the effect would be "
+                f"{'unconditional' if value == lit.value else 'never applied'}"
+            )
+    return None
+
+
 def implied_conflict(
     candidate: PairLiteral,
     kept: Sequence[AnyLiteral],
@@ -1891,6 +1924,12 @@ class _Dynamics:
             draft = self.drafts[label]
             for i, effect in enumerate(entry.effects or ()):
                 where = f"{entry.field}.effects[{i}]"
+                # WM.68: over the precondition with its compiled literals
+                problem = fixed_condition_problem(
+                    effect, draft.precondition, self.pair_fluents, draft.event_type.roles
+                )
+                if problem is not None:
+                    raise ConfigError(self.event_file.source, where, problem)
                 for lit in effect.condition:
                     if not self._condition_literal_achievable(lit, achievable):
                         raise ConfigError(
@@ -2611,8 +2650,9 @@ def check_dynamics(
     derived fluent, no contradiction (whatever the conditions), no empty effect, every literal
     achievable, every role valid; every condition literal a known fluent or static feature (when
     ``features`` lists them) of a role of the event type, no symbol twice in a condition, no
-    fluent literal on a fluent the precondition fixes or on the fluent the effect sets, and every
-    fluent literal achievable. Raises :class:`ValueError` naming the event type
+    fluent literal on a fluent the precondition fixes or on the fluent the effect sets, no pair
+    condition literal whose value the precondition fixes under ``fixed_pair_literals`` (WM.68),
+    and every fluent literal achievable. Raises :class:`ValueError` naming the event type
     otherwise. Tests and the generator both call it. Whether some able binding satisfies the
     static literals needs the static side; the generator checks it when it draws. A literal's
     achievability counts every effect of the world (stage c3b, WM.66): ``extra_effects`` are
@@ -2739,6 +2779,9 @@ def check_dynamics(
                         f"{et.label}: the condition of {effect.text} reads {lit.key} twice"
                     )
                 seen.add((lit.role, lit.symbol))
+            problem = fixed_condition_problem(effect, et.precondition, pair_fluents, et.roles)
+            if problem is not None:
+                raise ValueError(f"{et.label}: {problem}")
         literal_keys: dict[tuple[str, str], bool] = {}
         for lit in et.precondition:
             if lit.pair:
@@ -2872,6 +2915,7 @@ __all__ = [
     "compiled_literals",
     "condition_pair_keys",
     "condition_pair_names",
+    "fixed_condition_problem",
     "fixed_pair_literals",
     "implied_conflict",
     "keeps_no_condition",

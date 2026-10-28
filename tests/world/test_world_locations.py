@@ -519,9 +519,9 @@ def test_the_records_hold_the_moves_and_the_acts(
         f"{LOCATION}(agent, patient)",
     ]
     assert rest.precondition[1].origin == "act"
-    assert [e.text for e in rest.effects] == [
-        f"when SOMEOF.{LOCATION}(patient) then agent.BOOLFL.1 := 0"
-    ]
+    # since the stage c3b follow-up (WM.68) the condition reads SOME of the agent on the pair
+    # fluent between entities; SOMEOF of the place would be fixed true by the act's literal
+    assert [e.text for e in rest.effects] == [f"when SOME.{NEAR}(agent) then agent.BOOLFL.1 := 0"]
     approach = runtime.event_type(APPROACH)
     assert approach.precondition[0].text == f"SAME.{LOCATION}(agent, patient)"
     assert chain.places is not None
@@ -704,7 +704,8 @@ def test_episodes_keep_every_entity_at_one_place_and_the_chain_in_order(
                     assert definition.place_index(event.patient) == _place_of(
                         definition, before, agent
                     )  # type: ignore[arg-type]
-                    assert np.array_equal(before.pairs[k], after.pairs[k])
+                    # an act moves nobody; another event of the step may be a move
+                    assert np.array_equal(before.pairs[k][agent], after.pairs[k][agent])
                 elif event.type == APPROACH:
                     counts["approaches"] += 1
                     patient = definition.entity_index(event.patient)  # type: ignore[arg-type]
@@ -1004,6 +1005,43 @@ BROKEN = [
         },
         APPROACH,
         "only a move",
+    ),
+    # Jon's ruling WM.68 (the stage c3b follow-up of October 28, 2026): a condition whose value
+    # the precondition fixes under the implications of fixed_pair_literals is an error, for a
+    # place entry (the act's location literal fixes SOMEOF of the place true: the chain
+    # example's rest until the follow-up; a move's compiled literal is negative and fixes
+    # nothing, and the other implications reach only literals a place event type cannot read)
+    # and for an entity entry (PAIRFL.1(agent, patient) fixes SOME.PAIRFL.1(agent) true without
+    # naming the row) alike
+    (
+        "place_condition_fixed_by_the_act_literal",
+        _with_place(
+            {
+                "kind": "act",
+                "requirement": "patient.PLACEPROPERTY.1",
+                "precondition": "agent.BOOLFL.1",
+                "effects": [f"when SOMEOF.{LOCATION}(patient) then agent.BOOLFL.1 := 0"],
+            },
+            REST,
+        ),
+        REST,
+        "whose value the precondition fixes",
+    ),
+    (
+        "entity_condition_fixed_by_the_precondition",
+        {
+            **json.loads(json.dumps(BASE)),
+            "event_types": {
+                **BASE["event_types"],
+                EAT: {
+                    "requirement": "TRUE",
+                    "precondition": f"agent.BOOLFL.1 AND {NEAR}(agent, patient)",
+                    "effects": [f"when SOME.{NEAR}(agent) then patient.BOOLFL.1 := 0"],
+                },
+            },
+        },
+        EAT,
+        "whose value the precondition fixes",
     ),
 ]
 

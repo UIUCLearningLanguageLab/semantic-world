@@ -11,8 +11,10 @@ runs ``data/world/default_full.yaml`` and its seeds 1 to 5. Every acceptance che
 entity at exactly one place at every time point, every move to the bound place and nothing else,
 no move to the agent's own place, every act at the agent's place, ``legal`` and ``derive``
 against the brute-force evaluator in random states, applying together against one at a time in
-every order, no profile broken in the statistics episodes, and replay. Every test writes to its
-own temporary folder, and every bound is stated from the configuration.
+every order, no profile broken in the statistics episodes, and replay. The follow-up of October
+28, 2026, adds the density band of the place requirements (``place_event_types.density``, Jon's
+ruling WM.67) and the expected-share habitat test on seeds 1 to 5 of ``default_full``. Every test
+writes to its own temporary folder, and every bound is stated from the configuration.
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, _initial_present, define
 from semantic_world.world.history import replay
 from semantic_world.world.identity import rule_set_id
+from semantic_world.world.locations import habitat_weights
 from semantic_world.world.pair_fluents import draw_initial_pairs, profile_violations
 from semantic_world.world.place_dynamics import (
     PLACE_DYNAMICS_STATS,
@@ -60,6 +63,7 @@ from semantic_world.world.place_dynamics import (
     random_place_pair_literal,
     redraw_place_preconditions,
 )
+from semantic_world.world.places import MAX_TRIES
 from semantic_world.world.runtime import (
     Event,
     State,
@@ -245,8 +249,16 @@ def test_the_full_worlds_have_one_location_fluent_and_the_tiny_requirements_read
         config = load_config(DATA / f"{name}.yaml")
         assert config.pair_fluents.locations == 1
         assert config.pair_fluents.same_rules == 2
+        # the follow-up of October 28, 2026 (WM.67): the band and the strength
+        assert config.place_event_types is not None and config.places is not None
+        assert config.place_event_types.density == (0.05, 0.5)
+        assert config.places.habitat_strength == 2
     for name in ("tiny", "default"):
-        assert load_config(DATA / f"{name}.yaml").pair_fluents.locations == 0
+        config = load_config(DATA / f"{name}.yaml")
+        assert config.pair_fluents.locations == 0
+        assert config.place_event_types is not None and config.places is not None
+        assert config.place_event_types.density is None
+        assert config.places.habitat_strength == 1
     tiny = load_config(DATA / "tiny.yaml")
     assert tiny.place_event_types is not None
     assert tiny.place_event_types.constraint_families.get("agent", 0) == 0
@@ -491,6 +503,121 @@ def test_the_place_draws_leave_the_entity_event_types_and_every_other_draw_uncha
         et.move
         for et in tiny_full.places.event_types  # type: ignore[union-attr]
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# The density band of the place requirements (WM.67, the follow-up of October 28, 2026)
+# ---------------------------------------------------------------------------------------------
+
+
+def _densities(result: WorldResult) -> dict[str, float]:
+    assert result.places is not None
+    return {
+        et.label: float(result.places.requirement[et.label].mean())
+        for et in result.places.event_types
+    }
+
+
+def test_every_drawn_place_requirement_lies_in_the_band(tiny_full: WorldResult) -> None:
+    """With a band every drawn requirement's share of the bindings lies in it (the share is
+    recomputed from the matrix, not read off the record), the statistics report the band with
+    no place event type outside it, and a narrower band on more place event types still holds
+    and records the extra draws under ``tries``."""
+    band = tiny_full.config.place_event_types.density  # type: ignore[union-attr]
+    assert band == (0.05, 0.5)
+    for label, density in _densities(tiny_full).items():
+        assert band[0] <= density <= band[1], label
+    stats = tiny_full.stats["places"]
+    assert stats["density_band"] == [0.05, 0.5]
+    assert stats["outside_density"] == 0 and stats["outside_density_labels"] == []
+    assert stats["warnings"] == []
+    narrow = _world("tiny_full", place_event_types={"count": 8, "density": [0.2, 0.3]})
+    for label, density in _densities(narrow).items():
+        assert 0.2 <= density <= 0.3, label
+    tries = narrow.stats["places"]["tries"]
+    assert all(1 <= t <= MAX_TRIES for t in tries.values()) and max(tries.values()) > 1
+    assert narrow.stats["places"]["outside_density"] == 0
+
+
+def test_a_world_without_a_band_draws_its_place_requirements_as_before(
+    tiny_full: WorldResult,
+) -> None:
+    """With ``density: null`` only a degenerate requirement is drawn again, so the place event
+    types of ``tiny_full`` without the band are those of ``tiny.yaml``, requirement for
+    requirement (the same place settings and the same stream; the pair streams come after),
+    and ``tiny.yaml``'s own identity is the snapshot's (``tests/figures``). The band's
+    statistics keys are absent, and the code's default is no band."""
+    tiny = define(load_config(DATA / "tiny.yaml"))
+    without = _world("tiny_full", place_event_types={"density": None})
+    assert without.config.place_event_types.density is None  # type: ignore[union-attr]
+    assert config_from_mapping({}, source="<test>").place_event_types.density is None
+    assert [et.constraints for et in without.places.event_types] == [  # type: ignore[union-attr]
+        et.constraints
+        for et in tiny.places.event_types  # type: ignore[union-attr]
+    ]
+    assert _densities(without) == _densities(tiny)
+    for key in ("density_band", "outside_density", "outside_density_labels"):
+        assert key not in without.stats["places"] and key not in tiny.stats["places"]
+    # the band moved the tiny_full place requirements (one of them held for 0.917 of the
+    # bindings without it)
+    assert _densities(without) != _densities(tiny_full)
+
+
+def test_an_explicit_requirement_outside_the_band_is_kept(tmp_path: Path) -> None:
+    """An event file's requirement replaces the drawn one after the draws and is never drawn
+    again, whatever its density; the drawn requirements of the other place event types keep
+    the band."""
+    file = tmp_path / "wide.yaml"
+    file.write_text(
+        yaml.safe_dump(
+            {"place_event_types": {"PLACEEVENTTYPE.1": {"kind": "move", "requirement": "TRUE"}}}
+        ),
+        encoding="utf-8",
+    )
+    result = _world("tiny_full", event_types={"event_file": str(file)})
+    assert result.places is not None
+    first, second = result.places.event_types
+    assert first.explicit and first.density == 1.0 and first.in_band
+    assert not second.explicit and 0.05 <= second.density <= 0.5 and second.in_band
+    stats = result.stats["places"]
+    assert stats["outside_density"] == 0 and stats["warnings"] == []
+
+
+def test_a_band_no_draw_can_meet_is_reported_with_a_warning() -> None:
+    """A band between 0 and the smallest non-zero share of the 48 bindings (1/48) can hold for
+    no drawn requirement: each place event type takes ``MAX_TRIES`` draws, keeps the last, and
+    is reported under ``outside_density`` with a warning, as the two-place range reports its
+    event types; a degenerate last draw gets the degenerate warning and counts as outside."""
+    result = _world("tiny_full", place_event_types={"density": [0.001, 0.002]})
+    assert result.places is not None
+    stats = result.stats["places"]
+    labels = [et.label for et in result.places.event_types]
+    assert stats["outside_density"] == len(labels) and stats["outside_density_labels"] == labels
+    assert all(t == MAX_TRIES for t in stats["tries"].values())
+    assert len(stats["warnings"]) == len(labels)
+    for et, warning in zip(result.places.event_types, stats["warnings"], strict=True):
+        assert not et.in_band and et.label in warning and "200 tries" in warning
+        assert ("outside the density band" in warning) != (et.density in (0.0, 1.0))
+    # the world is still built and checked: every place event type is a move or an act
+    assert all(et.performable for et in result.places.event_types)
+
+
+def test_the_band_is_validated() -> None:
+    with pytest.raises(ConfigError, match="density"):
+        config_from_mapping({"place_event_types": {"density": [0.5, 0.2]}}, source="<test>")
+    with pytest.raises(ConfigError, match="density"):
+        config_from_mapping({"place_event_types": {"density": [0.1]}}, source="<test>")
+    with pytest.raises(ConfigError, match="density"):
+        config_from_mapping({"place_event_types": {"density": [0.1, 1.5]}}, source="<test>")
+    config = config_from_mapping({"place_event_types": {"density": [0.1, 0.4]}}, source="<test>")
+    assert config.place_event_types.density == (0.1, 0.4)  # type: ignore[union-attr]
+    assert config.place_event_types.resolved()["density"] == [0.1, 0.4]  # type: ignore[union-attr]
+    assert (
+        config_from_mapping(
+            {"place_event_types": {"density": None}}, source="<test>"
+        ).place_event_types.density
+        is None
+    )  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -965,56 +1092,109 @@ def test_the_location_statistics_are_written_only_with_location_fluents(
     assert "move_share" not in off.stats["episodes"]
 
 
+def _expected_habitat_shares(
+    result: WorldResult,
+) -> tuple[dict[str, dict[str, float]], dict[str, int], dict[str, float]]:
+    """The expected share of each entity superordinate's entities at each place category, from
+    the habitat weights: for each entity, its probability of each place is its weight over the
+    sum of its row, and a superordinate's expected share at a place category is the mean of its
+    entities' probabilities over the category's places. Returns the shares (place category to
+    superordinate to share), the superordinates' sizes, and the uniform shares."""
+    assert result.places is not None and result.config.places is not None
+    places = result.places
+    n, m = len(result.taxonomy.instances), places.count
+    weights = habitat_weights(
+        places.requirement.values(), (n, m), result.config.places.habitat_strength
+    )
+    probabilities = weights / weights.sum(axis=1, keepdims=True)
+    tree, instances = result.taxonomy.tree, result.taxonomy.instances
+    place_tree, place_instances = places.taxonomy.tree, places.taxonomy.instances
+    superordinate_of = np.array(
+        [tree.ancestor_label(tree.categories[k], 1) for k in instances.leaf_index]
+    )
+    shares: dict[str, dict[str, float]] = {}
+    uniform: dict[str, float] = {}
+    sizes = {c.label: int((superordinate_of == c.label).sum()) for c in tree.at_level(1)}
+    for place_category in place_tree.categories:
+        members = np.array(
+            [
+                place_tree.ancestor_label(place_tree.categories[k], place_category.level)
+                == place_category.label
+                for k in place_instances.leaf_index
+            ]
+        )
+        uniform[place_category.label] = float(members.sum()) / m
+        row: dict[str, float] = {}
+        for superordinate in tree.at_level(1):
+            entities = superordinate_of == superordinate.label
+            row[superordinate.label] = float(probabilities[entities][:, members].sum(axis=1).mean())
+        shares[place_category.label] = row
+    return shares, sizes, uniform
+
+
+FLAT_SEEDS = {1: 0.65, 2: 0.52, 4: 0.60}
+"""The seeds of ``default_full`` on which the expected-share criterion does not hold at
+``habitat_strength`` 2 with the band, with the largest expected deviation as a fraction of its
+margin (the follow-up of October 28, 2026): a finding, recorded in the stage's proposal file,
+not tuned further (Jon's instruction); each is a strict expected failure, so that the test
+turns when the configuration or the bound changes."""
+
+
 @SLOW
-@pytest.mark.xfail(
-    strict=True,
-    reason="a finding of stage c3b, recorded in its proposal file (open question 7): on seed 1 "
-    "of default_full the largest deviation of a share from the uniform share is 0.119 (56 "
-    "entities), under the margin of three binomial standard deviations (0.149); the habitat "
-    "weights (1 + a) ^ 1 vary little, because a(x, q) is 2 or 3 for most bindings. The bound is "
-    "kept, not lowered; the test turns when the configuration or the bound changes.",
+@pytest.mark.parametrize(
+    "seed",
+    [
+        pytest.param(
+            seed,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason=f"the largest expected deviation on seed {seed} of default_full is "
+                f"{FLAT_SEEDS[seed]:.2f} of its margin (stage c3b follow-up, open question 7)",
+            ),
+        )
+        if seed in FLAT_SEEDS
+        else seed
+        for seed in SEEDS
+    ],
 )
-def test_the_default_habitats_are_not_flat(default_full: WorldResult) -> None:
-    """Review point 2: some place category's share of some entity superordinate's entities
-    differs from the uniform share (the category's places over the places) by more than three
-    binomial standard deviations of a uniform draw of that many entities, the bound stated
-    from the configuration (12 places, the superordinates' sizes) and not from the run."""
-    location = _location_of(default_full)
-    habitats = default_full.stats["places"]["habitats"][location]
-    place_count = default_full.places.count  # type: ignore[union-attr]
-    tree = default_full.places.taxonomy.tree  # type: ignore[union-attr]
-    members = {
-        c.label: sum(
-            1
-            for k in default_full.places.taxonomy.instances.leaf_index  # type: ignore[union-attr]
-            if tree.ancestor_label(tree.categories[k], c.level) == c.label
-        )
-        for c in tree.categories
-    }
-    entity_tree = default_full.taxonomy.tree
-    sizes = {
-        c.label: sum(
-            1
-            for k in default_full.taxonomy.instances.leaf_index
-            if entity_tree.ancestor_label(entity_tree.categories[k], 1) == c.label
-        )
-        for c in entity_tree.at_level(1)
-    }
+def test_the_default_habitats_are_not_flat(seed: int) -> None:
+    """Review point 2, under Jon's ruling WM.67 (the follow-up of October 28, 2026): on every
+    seed from 1 to 5 of ``default_full``, some place category's expected share of some entity
+    superordinate's entities, computed from the habitat weights rather than from one sampled
+    draw, differs from the uniform share (the category's places over the places) by more than
+    three binomial standard deviations of a uniform draw of that many entities; the bound is
+    stated from the configuration (12 places, the superordinates' sizes), never from the run."""
+    result = _world("default_full", seed=seed)
+    assert result.config.places is not None and result.config.places.habitat_strength == 2
+    shares, sizes, uniform = _expected_habitat_shares(result)
     beyond = 0
-    for place_category, row in habitats["by_place_category"].items():
-        uniform = members[place_category] / place_count
+    largest = 0.0
+    for place_category, row in shares.items():
         for superordinate, share in row.items():
             n = sizes[superordinate]
-            margin = 3 * math.sqrt(uniform * (1 - uniform) / n)
-            beyond += abs(share - uniform) > margin
-    assert beyond > 0, habitats["largest_deviation"]
-    assert habitats["largest_deviation"]["deviation"] > 0
+            u = uniform[place_category]
+            margin = 3 * math.sqrt(u * (1 - u) / n)
+            ratio = abs(share - u) / margin
+            largest = max(largest, ratio)
+            beyond += ratio > 1
+    assert beyond > 0, f"seed {seed}: the largest expected deviation is {largest:.2f} of its margin"
+    # the sampled shares of the run are reported beside the expected ones
+    location = _location_of(result)
+    habitats = result.stats["places"]["habitats"][location]
+    assert set(habitats["by_place_category"]) == set(shares)
 
 
-def test_tiny_and_tiny_full_differ_in_the_pair_fluents_block_alone() -> None:
+def test_tiny_and_tiny_full_differ_in_the_phase_c_settings_alone() -> None:
+    """``tiny_full.yaml`` is ``tiny.yaml`` plus the ``pair_fluents`` block (WM.63) and, since
+    the follow-up of October 28, 2026, the density band and the habitat strength (WM.67)."""
     tiny = load_config(DATA / "tiny.yaml")
     full = load_config(DATA / "tiny_full.yaml")
     assert full.pair_fluents != tiny.pair_fluents
-    assert {**full.resolved(), "name": "tiny", "pair_fluents": tiny.pair_fluents.resolved()} == (
-        tiny.resolved()
-    )
+    resolved = full.resolved()
+    assert {
+        **resolved,
+        "name": "tiny",
+        "pair_fluents": tiny.pair_fluents.resolved(),
+        "places": {**resolved["places"], "habitat_strength": 1.0},
+        "place_event_types": {**resolved["place_event_types"], "density": None},
+    } == tiny.resolved()
