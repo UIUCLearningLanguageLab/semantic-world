@@ -109,6 +109,7 @@ from semantic_world.world.pair_fluents import (
 from semantic_world.world.places import (
     PLACE_EVENT_TYPE_KIND,
     PLACE_KIND_OF_TYPE,
+    PLACE_KINDS,
     PLACE_SCALAR_KIND,
     PLACES_FILE,
     Places,
@@ -1155,6 +1156,9 @@ class EventTypeRecord:
     requirement: str
     precondition: tuple[Literal | PairLiteral, ...]
     effects: tuple[Effect, ...]
+    place_kind: str | None = None
+    """``move`` or ``act`` for a place event type with dynamics (stage c3b, WM.65), as its
+    record writes it; None otherwise. The loader checks that it agrees with the record."""
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -2020,11 +2024,46 @@ def _runtime_definition(
             effects.append(
                 Effect(role_of_effect, fluent_of_effect, value, tuple(condition), second)
             )
-        event_types.append(
-            EventTypeRecord(
-                label, str(entry["kind"]), arity, requirement, tuple(precondition), tuple(effects)
-            )
+        record_item = EventTypeRecord(
+            label,
+            str(entry["kind"]),
+            arity,
+            requirement,
+            tuple(precondition),
+            tuple(effects),
+            None if entry.get("place_kind") is None else str(entry["place_kind"]),
         )
+        # the place_kind key (stage c3b, WM.65): present exactly for a place event type with
+        # dynamics, and agreeing with its record (a move has its add on a location fluent, an
+        # act its location literal)
+        if is_place and record_item.performable:
+            _expect(
+                record_item.place_kind in PLACE_KINDS,
+                f"the place event type {label} has dynamics but no place_kind of "
+                f"{' or '.join(PLACE_KINDS)}, found {entry.get('place_kind')!r}",
+            )
+            actual = "move" if record_item.move else "act"
+            described = (
+                "a move (it adds a location pair)"
+                if actual == "move"
+                else "an act (it requires a location pair and adds none)"
+            )
+            _expect(
+                record_item.place_kind == actual,
+                f"the place event type {label} is written as {record_item.place_kind!r}, but "
+                f"its record is {described}",
+            )
+        else:
+            _expect(
+                "place_kind" not in entry,
+                f"{label} carries a place_kind, but "
+                + (
+                    "it is a place event type without dynamics"
+                    if is_place
+                    else "it is not a place event type"
+                ),
+            )
+        event_types.append(record_item)
 
     # Entities.
     _expect(len(rows) > 0, "the entities table is empty")

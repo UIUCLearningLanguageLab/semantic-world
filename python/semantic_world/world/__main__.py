@@ -112,6 +112,12 @@ def _define(args: argparse.Namespace) -> int:
         )
     if len(result.pair_fluents):
         places += f", {len(result.pair_fluents)} pair fluents"
+        locations = len(result.pair_fluents.locations)
+        if locations:  # the location fluents apart (stage c3b)
+            places += (
+                f" ({len(result.pair_fluents.between_entities)} between entities, "
+                f"{locations} location fluent{'s' if locations != 1 else ''})"
+            )
     print(
         f"wrote {folder}: {len(result.taxonomy.instances)} entities, {len(result.fluents)} fluents "
         f"({len(result.fluents.derived)} derived), {len(result.numeric)} numeric fluents, "

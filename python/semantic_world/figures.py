@@ -73,10 +73,12 @@ OFF_SETTINGS: dict[str, dict[str, Any]] = {
     "fluents_off": {"fluents": {"count": 0}},
     "two_place_off": {"event_types": {"binary": None}},
     "numeric_fluents_off": {"numeric_fluents": {"count": 0}},
-    "places_off": {"places": None, "place_event_types": None},
+    # places off turns the location fluents off with them (stage c3b: the full worlds have one)
+    "places_off": {"places": None, "place_event_types": None, "pair_fluents": {"locations": 0}},
     "pair_fluents_off": {"pair_fluents": {"count": 0, "locations": 0}},
+    "locations_off": {"pair_fluents": {"locations": 0}},
     "pair_dynamics_off": {
-        "pair_fluents": {"rule_weight": 0, "derived_rules": 0},
+        "pair_fluents": {"rule_weight": 0, "derived_rules": 0, "same_rules": 0},
         "event_types": {
             "preconditions": {"pair_share": 0},
             "effects": {
@@ -93,10 +95,17 @@ numeric fluents (stage b2, promised byte-identical to the b1 world), places (sta
 byte-identical to the world before places, after the rounding of drawn reals), pair fluents
 (stage c2b: ``default_full`` with ``count`` 0 is promised byte-identical to the default world of
 stage c2a, and every world without pair fluents is its own baseline), and the pair dynamics
-(stage c2b: with the pair shares, the pair condition weight, the rule weight, and the quota at
-0, the pair fluents exist with their initial pairs but nothing reads or writes them, and the
-event types and the derived rules are promised to be those of the world without pair
-fluents)."""
+(stage c2b: with the pair shares, the pair condition weight, the rule weight, and the quotas
+``derived_rules`` and, since stage c3b, ``same_rules`` at 0, the pair fluents exist with their
+initial pairs but no entity event type reads or writes them, and in a world without location
+fluents the event types and the derived rules are promised to be those of the world without
+pair fluents; with location fluents the place event types keep their drawn dynamics, which
+are location dynamics), and the location fluents (stage c3b: with ``locations`` 0 no draw of
+stage c3b happens, so a world without location fluents is its own baseline; ``tiny_full`` and
+``default_full`` with ``locations`` 0 were the full worlds of stage c2b until the follow-up of
+October 28, 2026, whose density band and habitat strength (WM.67) the full worlds keep with
+``locations`` 0, so their ``locations_off`` baselines are the stage c2b worlds with the band's
+place requirements, not the stage c2b worlds)."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -254,6 +263,32 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
             "constraint_families": dict(places.get("constraint_families", {})),
             "density": _rate(place_densities) if place_densities else None,
             "approximate_capacities": places.get("approximate_capacities"),
+            # the density band of the requirements (WM.67), only in a world that sets one, so
+            # that the figures of every other world do not move
+            **(
+                {
+                    "density_band": list(places["density_band"]),
+                    "outside_density": places["outside_density"],
+                }
+                if "density_band" in places
+                else {}
+            ),
+            # the location figures (stage c3b), only in a world with location fluents, so
+            # that the figures of every other world do not move
+            **(
+                {
+                    "by_kind": dict(places["place_event_types_by_kind"]),
+                    "dynamics": dict(places.get("dynamics", {})),
+                    "habitats": json.loads(json.dumps(places.get("habitats", {}))),
+                    # the first location fluent's habitats, reachable by a dotted key (a
+                    # label with a period cannot be a step of one)
+                    "habitat": json.loads(
+                        json.dumps(next(iter(places.get("habitats", {}).values()), {}))
+                    ),
+                }
+                if "place_event_types_by_kind" in places
+                else {}
+            ),
         },
         "fix_ups": dict(stats["fix_ups"]),
         "enabling_graph": dict(stats["enabling_graph"]),
@@ -274,6 +309,12 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
                 "quiescent_share",
                 "precondition_redraws",
                 "never_legal",
+                # the shares of stage c3b, only with location fluents
+                *(
+                    ("move_share", "act_share", "two_place_share_entities")
+                    if "move_share" in episodes
+                    else ()
+                ),
             )
         },
     }
@@ -293,8 +334,22 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
             "rules_reading_a_pair_literal": pair_block["rules_reading_a_pair_literal"],
             "fix_ups": dict(pair_block["fix_ups"]),
             "changes_per_event": pair_block["pair_changes_per_event"],
+            # the location counts (stage c3b), only with location fluents
+            **(
+                {
+                    "between_entities": pair_block["between_entities"],
+                    "locations": pair_block["locations"],
+                    "place_event_types": json.loads(
+                        json.dumps(pair_block.get("place_event_types", {}))
+                    ),
+                }
+                if "locations" in pair_block
+                else {}
+            ),
             "profiles": ", ".join(
-                f"`{label}` ({row['symmetry']}{', functional' if row['functional'] else ''}, "
+                f"`{label}` (the location fluent: general, functional, and total)"
+                if row["initial_rate"] is None
+                else f"`{label}` ({row['symmetry']}{', functional' if row['functional'] else ''}, "
                 f"rate {row['initial_rate']})"
                 for label, row in pair_block["fluents"].items()
             ),
@@ -310,6 +365,12 @@ def world_figures(folder: str | Path) -> dict[str, Any]:
     )
     if pair_block:
         place_text += f", {pair_block['count']} pair fluents"
+        if pair_block.get("locations"):
+            place_text += (
+                f" ({pair_block['between_entities']} between entities, "
+                f"{pair_block['locations']} location fluent"
+                f"{'s' if pair_block['locations'] != 1 else ''})"
+            )
     figures["wrote_line"] = (
         f"{entities} entities, {figures['fluents_total']} fluents "
         f"({figures['fluents']['derived']} derived), {figures['numeric']['count']} numeric "

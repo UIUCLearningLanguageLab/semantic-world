@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_20_comparison_category_mean",
  "description": "A category mean as an argument (stage b2): CATEGORY.1.1 holds INSTANCE.1.1.1 (1.0) and INSTANCE.1.1.2 (0.5), so its mean is 0.75; CATEGORY.1 holds all three entities, mean 0.583333...; CATEGORY.1.2 holds INSTANCE.1.2.1 alone, mean 0.25. The mean of CATEGORY.1.1 is greater than INSTANCE.1.2.1 and than the mean of CATEGORY.1.2, and the mean of CATEGORY.1 is greater than the mean of CATEGORY.1.2. Against ENTITY (mean 0.583333..., standard deviation 0.311805...), the mean of CATEGORY.1.1 is above at z = 0.5 (bound 0.739236) and not at z = 1 (bound 0.895138).",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

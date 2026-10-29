@@ -2,9 +2,9 @@
 # (stage c3a): the tiny taxonomies, 1 pair fluent between entities (PAIRFL.1, defined by the event
 # file), 1 location fluent (PAIRFL.2, made by the configuration with the fixed profile), 2 place
 # event types made a move and an act by the file, and no generated pair draws (the pair shares,
-# the pair condition weight, the derived-rule quota, and the rule weight at 0, as in tiny_pairs.yaml),
-# so that generation adds nothing to what the file gives. The world of the acceptance checks of
-# stage c3a (tests/world/test_world_locations.py).
+# the pair condition weight, the derived-rule quota, and the rule weight at 0, as in tiny_pairs.yaml,
+# and, since stage c3b, the quota same_rules at 0), so that generation adds nothing to what the
+# file gives. The world of the acceptance checks of stage c3a (tests/world/test_world_locations.py).
 
 name: tiny_place_chain
 seed: 1
@@ -26,4 +26,4 @@ event_types:
     condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0}
   event_file: events/place_chain_example.yaml
 
-pair_fluents: {count: 1, locations: 1, derived_rules: 0, rule_weight: 0}
+pair_fluents: {count: 1, locations: 1, same_rules: 0, derived_rules: 0, rule_weight: 0}

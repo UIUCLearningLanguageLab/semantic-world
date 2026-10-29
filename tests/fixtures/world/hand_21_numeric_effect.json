@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_21_numeric_effect",
  "description": "A numeric effect (stage b2): EVENTTYPE1.6 adds 0.5 to NUMFL.1 of INSTANCE.1.1.1, which starts at 0.25, so it is 0.75 after the step; NUMFL.1 does not drift. NUMFL.2 of every entity rises from 0 to 0.25 by the drift. EVENTTYPE1.7 is legal for nobody before the step (no NUMFL.1 is above 0.5) and for INSTANCE.1.1.1 after it. The history would record the effect's change (0.25 to 0.75, caused by the event) and three drift changes. INSTANCE.1.1.1 is GREATER than INSTANCE.1.1.2 on NUMFL.1 at both time points (0.25 and 0.75 against 0), and INSTANCE.1.1.2 and INSTANCE.1.2.1 tie at 0.",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

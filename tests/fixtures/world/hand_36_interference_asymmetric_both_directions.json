@@ -2,10 +2,10 @@
  "version": 1,
  "name": "hand_36_interference_asymmetric_both_directions",
  "description": "Interference: (a, p) and (p, a) added together to an asymmetric pair fluent (stage c2a, fixture 14): EVENTTYPE2.4 (INSTANCE.1.1.1, INSTANCE.1.1.2) writes PAIRFL.2 from INSTANCE.1.1.1 to INSTANCE.1.1.2 and reads the reverse pair through its compiled literal NOT PAIRFL.2(patient, agent); EVENTTYPE2.4 (INSTANCE.1.1.2, INSTANCE.1.1.1) writes that reverse pair. Both are legal in the empty state; applying them together is an interference error, so the asymmetric profile can never be broken in one step.",
- "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+ "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
  "definition": {
   "version": 1,
-  "rule_set_id": "b23bc272e64971c8b9ef9ade5e68b5710f15a0fa9a491772ac8215e811010681",
+  "rule_set_id": "6cf1c0625fb3146dbfcda942ab0b758fe29b73f5a1f02b2af425937ada632843",
   "symbols": [
    {"label": "PROPERTY.1", "kind": "property", "derived": false, "fluent": false, "arity": 1},
    {"label": "PROPERTY.2", "kind": "property", "derived": true, "fluent": false, "arity": 1},
@@ -506,6 +506,7 @@
    {
     "label": "PLACEEVENTTYPE.1",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -526,6 +527,7 @@
    {
     "label": "PLACEEVENTTYPE.2",
     "kind": "place_event_type",
+    "place_kind": "act",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,
@@ -546,6 +548,7 @@
    {
     "label": "PLACEEVENTTYPE.3",
     "kind": "place_event_type",
+    "place_kind": "move",
     "arity": 2,
     "roles": ["agent", "patient"],
     "parent": null,

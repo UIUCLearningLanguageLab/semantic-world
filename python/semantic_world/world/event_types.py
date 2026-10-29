@@ -241,6 +241,10 @@ class EventTypes:
     pair_stats: dict[str, int] = field(default_factory=dict)
     """Counts of the pair draws and redraws of stage c2b (``pair_fluents.fix_ups`` of
     ``world_stats.yaml``); empty in a world without pair fluents."""
+    same_quota: dict[str, PairLiteral] = field(default_factory=dict)
+    """The ``SAME`` literals on a location fluent the quota ``pair_fluents.same_rules`` gave,
+    by event type (stage c3b, WM.52): kept through the redraws of never-legal event types, as
+    the compiled literals are."""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_constraints", {c.label: c for c in self.constraints})
@@ -550,6 +554,39 @@ def precondition_literal_fits_conditions(
     return not (set(fixed) & condition_pair_keys(effects, pair_fluents))
 
 
+def fixed_condition_problem(
+    effect: Effect,
+    precondition: Sequence[AnyLiteral],
+    pair_fluents: PairFluents,
+    roles: Sequence[str] = ROLES,
+) -> str | None:
+    """Why a condition of the effect is refused under Jon's ruling WM.68 (the stage c3b
+    follow-up of October 28, 2026), or None: a pair condition literal whose value the
+    precondition fixes under the implications of ``fixed_pair_literals`` (the compiled literals
+    included; an act's location literal fixes ``SOMEOF`` of the place true) would be redundant
+    with its value or never fire with the other, so the effect would be unconditional either
+    way. The generator draws such a condition again; an event file's entry with one is an error
+    that names the file and the entry, and ``check_dynamics`` and ``check_place_dynamics`` hold
+    the rule as an invariant."""
+    pair_literals = [lit for lit in precondition if isinstance(lit, PairLiteral)]
+    if not pair_literals or not any(isinstance(lit, PairLiteral) for lit in effect.condition):
+        return None
+    fixed = fixed_pair_literals(pair_literals, pair_fluents, roles)
+    for lit in effect.condition:
+        if not isinstance(lit, PairLiteral) or lit.pair_fluent not in pair_fluents:
+            continue
+        key = pair_literal_key(lit, pair_fluents[lit.pair_fluent])
+        if key in fixed:
+            value = fixed[key]
+            return (
+                f"the condition of {effect.text} reads {lit.key}, whose value the precondition "
+                f"fixes ({'true' if value else 'false'}, by "
+                f"{' AND '.join(p.text for p in pair_literals)}), so the effect would be "
+                f"{'unconditional' if value == lit.value else 'never applied'}"
+            )
+    return None
+
+
 def implied_conflict(
     candidate: PairLiteral,
     kept: Sequence[AnyLiteral],
@@ -575,6 +612,7 @@ def random_pair_literal(
     rng: np.random.Generator,
     pair_fluents: PairFluents,
     literal_kinds: Mapping[str, float],
+    location_rng: np.random.Generator | None = None,
 ) -> PairLiteral | None:
     """One drawn pair literal over the roles (stage c2b), unchecked: its kind from
     ``literal_kinds`` (``pair``, ``same``, or ``some``, the last covering ``SOME`` and
@@ -582,15 +620,29 @@ def random_pair_literal(
     pair fluent that is not symmetric, on which it could never hold), then its direction
     (``pair``: which role comes first), or its form and role (``some``: ``SOME`` or ``SOMEOF``,
     then the role), and its polarity, each uniformly. A one-place event type draws ``some``
-    literals on its agent only. None when no kind with a positive weight can be drawn."""
+    literals on its agent only. None when no kind with a positive weight can be drawn.
+
+    With ``location_rng`` (stage c3b, a part of ``world:pair_preconditions`` of its own) and
+    location fluents in the world, the ``same`` kind covers the location fluents too, for a
+    two-place event type: ``location_rng`` draws uniformly over the functional pair fluents
+    between entities that are not symmetric and the location fluents, and when the draw falls
+    on a location fluent the literal is ``SAME.PAIRFL.k(agent, patient)`` on it, its polarity
+    from ``location_rng``; otherwise the pair fluent and the polarity come from ``rng`` as
+    before. A world without location fluents never reads ``location_rng``, so its draws are
+    those of stage c2b."""
     fluents = list(pair_fluents.between_entities)
-    if not fluents:
+    locations = list(pair_fluents.locations) if location_rng is not None else []
+    if not fluents and not locations:
         return None
     same_pool = [f for f in fluents if f.functional and not f.symmetric]
     if len(roles) == 1:
-        kinds = {k: w for k, w in literal_kinds.items() if k == "some" and w > 0}
+        kinds = {k: w for k, w in literal_kinds.items() if k == "some" and w > 0 and fluents}
     else:
-        kinds = {k: w for k, w in literal_kinds.items() if w > 0 and (k != "same" or same_pool)}
+        kinds = {
+            k: w
+            for k, w in literal_kinds.items()
+            if w > 0 and (k == "same" and (same_pool or locations) or k != "same" and fluents)
+        }
     if not kinds:
         return None
     kind = _draw(rng, kinds)
@@ -599,6 +651,13 @@ def random_pair_literal(
         first, second = (roles[0], roles[1]) if rng.integers(2) == 0 else (roles[1], roles[0])
         return PairLiteral(PAIR_KIND, fluent.label, first, second, bool(rng.integers(2)))
     if kind == "same":
+        if locations:
+            assert location_rng is not None
+            index = int(location_rng.integers(len(same_pool) + len(locations)))
+            if index >= len(same_pool):
+                fluent = locations[index - len(same_pool)]
+                value = bool(location_rng.integers(2))
+                return PairLiteral(PAIR_SAME, fluent.label, roles[0], roles[1], value)
         fluent = same_pool[int(rng.integers(len(same_pool)))]
         return PairLiteral(PAIR_SAME, fluent.label, roles[0], roles[1], bool(rng.integers(2)))
     fluent = fluents[int(rng.integers(len(fluents)))]
@@ -679,6 +738,9 @@ class _Draft:
     """The slots (``_effect_slot``) of the event type's own effects."""
     own_literal_keys: set[tuple] = field(default_factory=set)
     """The slots (``_literal_slot``) of the event type's own precondition literals."""
+    quota_literal_keys: set[tuple] = field(default_factory=set)
+    """The slots of the ``SAME`` literals the quota ``same_rules`` gave (stage c3b): never
+    redrawn or dropped, as the compiled literals are not."""
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -699,9 +761,14 @@ class _Dynamics:
         statics: StaticWorld | None = None,
         numeric: NumericFluents | None = None,
         pair_fluents: PairFluents | None = None,
+        extra_effects: Sequence[Effect] = (),
     ) -> None:
         self.static = event_types
         self.statics = statics
+        self.extra_effects: tuple[Effect, ...] = tuple(extra_effects)
+        """Effects of the world that are not the entity event types' (stage c3b, WM.66: the
+        effects of the event file's place entries, fixed before any draw), which the pools of
+        achievable values count beside the drafts' effects."""
         self.fluents = fluents
         self.numeric = numeric if numeric is not None else empty_numeric(0)
         self.numeric_labels = self.numeric.labels
@@ -718,6 +785,15 @@ class _Dynamics:
         self.rng_pair_preconditions = streams.pair_preconditions
         self.rng_pair_effects = streams.pair_effects
         self.rng_pair_conditions = streams.pair_conditions
+        self.rng_location_same: np.random.Generator | None = (
+            streams.part("pair_preconditions", "locations") if self.pair_fluents.locations else None
+        )
+        """The part of ``world:pair_preconditions`` that decides whether a drawn ``SAME``
+        literal is on a location fluent (stage c3b); None without location fluents."""
+        self.rng_same_rules = streams.part("pair_preconditions", "same_rules")
+        """The part of ``world:pair_preconditions`` the quota ``same_rules`` draws from (stage
+        c3b); read only in a world with location fluents."""
+        self.same_quota: dict[str, PairLiteral] = {}
         self.event_file = event_file
         self.base_labels = fluents.base_labels
         self.all_labels = fluents.labels
@@ -763,6 +839,15 @@ class _Dynamics:
                 "pair_deletes_redrawn_dead": 0,
                 "pair_deletes_dropped_dead": 0,
                 "pair_effects_redrawn_reverse": 0,
+                **(
+                    {
+                        "same_location_replacements": 0,
+                        "same_rules_added": 0,
+                        "same_rules_short": 0,
+                    }
+                    if self.pair_fluents.locations
+                    else {}
+                ),
             }
             if len(self.pair_fluents)
             else {}
@@ -782,7 +867,9 @@ class _Dynamics:
         them, and the deletes drawn again (own) or dropped (inherited) because their pair
         fluent can never hold (Jon's rulings 1 and 2 of October 21, 2026), and the drawn adds
         rejected because the event type already adds the reverse pair of an asymmetric pair
-        fluent."""
+        fluent; and, only with location fluents (stage c3b), the drawn literals replaced by
+        ``SAME`` on a location fluent at the share, the event types the quota ``same_rules``
+        gave such a literal, and the quota's shortfall when fewer event types qualified."""
         self.condition_draws: dict[str, int] = {"drawn": 0, "conditional": 0}
         """The effects a condition was drawn for, and how many of them got one (Jon's ruling 2
         on stage b1: the share counts drawn effects; ``world_stats.yaml`` reports it beside the
@@ -837,7 +924,7 @@ class _Dynamics:
         from ``world:pair_effects``; nothing is drawn for a one-place event type, with the share
         at 0, or without pair fluents."""
         share = self.effects_config.pair_share
-        if len(roles) != 2 or not len(self.pair_fluents) or share <= 0:
+        if len(roles) != 2 or not self.pair_fluents.between_entities or share <= 0:
             return effect
         self.pair_stats["effect_replacement_draws"] += 1
         if self.rng_pair_effects.random() < share:
@@ -872,14 +959,15 @@ class _Dynamics:
             return effect
         return None
 
+    def all_effects(self) -> list[Effect]:
+        """Every effect of the world known to the draws: the drafts' and the extra ones."""
+        found = [e for draft in self.drafts.values() for e in draft.effects]
+        found.extend(self.extra_effects)
+        return found
+
     def produced_numeric(self) -> set[tuple[str, int]]:
         """``(fluent, +1 or -1)`` for every numeric effect of every event type."""
-        return {
-            (e.fluent, 1 if e.amount > 0 else -1)
-            for draft in self.drafts.values()
-            for e in draft.effects
-            if e.numeric
-        }
+        return {(e.fluent, 1 if e.amount > 0 else -1) for e in self.all_effects() if e.numeric}
 
     def numeric_achievable(self, fluent: str, above: bool, threshold: float) -> bool:
         return self.numeric.achievable(fluent, above, threshold, self.produced_numeric())
@@ -929,6 +1017,7 @@ class _Dynamics:
         forbidden: set[tuple],
         effects: Sequence[Effect],
         kept: Sequence[AnyLiteral] = (),
+        location_rng: np.random.Generator | None = None,
     ) -> PairLiteral | None:
         """A pair literal of a precondition (stage c2b), drawn from ``rng`` by
         ``random_pair_literal`` and drawn again while it is not achievable, fills a slot the
@@ -939,7 +1028,7 @@ class _Dynamics:
         adds, deletes = self.pair_adds_and_deletes()
         kinds = self.pair_config.literal_kinds
         for _ in range(MAX_TRIES):
-            literal = random_pair_literal(roles, rng, self.pair_fluents, kinds)
+            literal = random_pair_literal(roles, rng, self.pair_fluents, kinds, location_rng)
             if literal is None:
                 return None
             fluent = self.pair_fluents[literal.pair_fluent]
@@ -956,6 +1045,8 @@ class _Dynamics:
                 self.pair_stats["pair_literals_redrawn"] += 1
                 self.pair_stats["pair_literals_redrawn_implied"] += 1
                 continue
+            if literal.kind == PAIR_SAME and fluent.total:
+                self.pair_stats["same_location_replacements"] += 1
             return literal
         return None
 
@@ -977,7 +1068,9 @@ class _Dynamics:
         self.pair_stats["precondition_replacement_draws"] += 1
         if rng.random() < share:
             self.pair_stats["precondition_replacements"] += 1
-            candidate = self._pair_literal(roles, rng, forbidden, effects, kept)
+            candidate = self._pair_literal(
+                roles, rng, forbidden, effects, kept, self.rng_location_same
+            )
             if candidate is not None:
                 return candidate
             self.pair_stats["precondition_replacements_failed"] += 1
@@ -1032,10 +1125,9 @@ class _Dynamics:
 
     def pair_adds_and_deletes(self) -> tuple[set[str], set[str]]:
         """The pair fluents some effect adds a pair of, and those some effect deletes one of."""
-        adds = {e.fluent for d in self.drafts.values() for e in d.effects if e.pair and e.value}
-        deletes = {
-            e.fluent for d in self.drafts.values() for e in d.effects if e.pair and not e.value
-        }
+        effects = self.all_effects()
+        adds = {e.fluent for e in effects if e.pair and e.value}
+        deletes = {e.fluent for e in effects if e.pair and not e.value}
         return adds, deletes
 
     def literal_achievable(self, literal: AnyLiteral, achievable: set[tuple[str, bool]]) -> bool:
@@ -1115,13 +1207,9 @@ class _Dynamics:
     # Preconditions ----------------------------------------------------------------------------
 
     def produced(self) -> list[tuple[str, bool]]:
-        """``(fluent, value)`` for every Boolean effect of every event type."""
-        values = {
-            (e.fluent, e.value)
-            for draft in self.drafts.values()
-            for e in draft.effects
-            if not e.numeric and not e.pair
-        }
+        """``(fluent, value)`` for every Boolean effect of every event type (and of the extra
+        effects, WM.66)."""
+        values = {(e.fluent, e.value) for e in self.all_effects() if not e.numeric and not e.pair}
         return sorted(values)
 
     def achievable(self) -> set[tuple[str, bool]]:
@@ -1313,8 +1401,10 @@ class _Dynamics:
         for literal in list(draft.precondition):
             if self.literal_achievable(literal, achievable):
                 continue
-            changed = True
             key = _literal_slot(literal, self.pair_fluents)
+            if key in draft.quota_literal_keys:
+                continue  # SAME on a location fluent is always achievable; never redrawn
+            changed = True
             del kept[key]
             if key not in draft.own_literal_keys:
                 self.stats["literals_dropped_unachievable"] += 1
@@ -1385,7 +1475,7 @@ class _Dynamics:
             if not isinstance(literal, PairLiteral):
                 continue
             key = _literal_slot(literal, self.pair_fluents)
-            if key not in kept:
+            if key not in kept or key in draft.quota_literal_keys:
                 continue
             others = [lit for lit in kept.values() if lit is not literal]
             others += self.virtual_compiled(_Draft(draft.event_type, effects=draft.effects))
@@ -1834,6 +1924,12 @@ class _Dynamics:
             draft = self.drafts[label]
             for i, effect in enumerate(entry.effects or ()):
                 where = f"{entry.field}.effects[{i}]"
+                # WM.68: over the precondition with its compiled literals
+                problem = fixed_condition_problem(
+                    effect, draft.precondition, self.pair_fluents, draft.event_type.roles
+                )
+                if problem is not None:
+                    raise ConfigError(self.event_file.source, where, problem)
                 for lit in effect.condition:
                     if not self._condition_literal_achievable(lit, achievable):
                         raise ConfigError(
@@ -2015,7 +2111,9 @@ class _Dynamics:
             "feature": self.feature_labels,
             "fluent": self.all_labels,
             "numeric": self.numeric_labels,
-            "pair": self.pair_fluents.labels,
+            # a pair condition reads a pair fluent between entities (a location fluent is read
+            # in preconditions alone, stage c3b)
+            "pair": tuple(f.label for f in self.pair_fluents.between_entities),
         }
         weights = {
             kind: weight
@@ -2159,6 +2257,66 @@ class _Dynamics:
                 self.condition_draws["conditional"] += 1
             draft.effects = tuple(effects)
 
+    # The quota same_rules (stage c3b) --------------------------------------------------------
+
+    def apply_same_quota(self) -> None:
+        """Give ``pair_fluents.same_rules`` two-place event types the precondition literal
+        ``SAME.PAIRFL.k(agent, patient)`` on a location fluent (WM.52), drawn from the part
+        ``world:pair_preconditions:same_rules``: the event types are drawn uniformly without
+        replacement among the two-place leaves without an explicit precondition that have an
+        able binding, lack such a literal, and whose other literals and conditions leave it
+        free (it names no row a pair condition names, and neither implies nor contradicts
+        another literal), in label order; each gets its location fluent drawn uniformly. The
+        quota does nothing without location fluents, and records its shortfall when fewer
+        event types qualify."""
+        quota = self.pair_config.same_rules
+        locations = list(self.pair_fluents.locations)
+        if quota <= 0 or not locations:
+            return
+        rng = self.rng_same_rules
+        candidates: list[_Draft] = []
+        for draft in self.drafts.values():
+            et = draft.event_type
+            if et.arity != 2 or et.category:
+                continue
+            if draft.explicit is not None and draft.explicit.precondition is not None:
+                continue
+            if not self.able_bindings(et).any():
+                continue
+            if any(
+                isinstance(lit, PairLiteral)
+                and lit.kind == PAIR_SAME
+                and self.pair_fluents[lit.pair_fluent].total
+                for lit in draft.precondition
+            ):
+                continue
+            probes = [
+                PairLiteral(PAIR_SAME, f.label, et.roles[0], et.roles[1], True) for f in locations
+            ]
+            kept = list(draft.precondition) + self.virtual_compiled(draft)
+            if all(
+                precondition_literal_fits_conditions(
+                    probe, draft.effects, self.pair_fluents, et.roles
+                )
+                and not implied_conflict(probe, kept, self.pair_fluents, et.roles)
+                for probe in probes
+            ):
+                candidates.append(draft)
+        count = min(quota, len(candidates))
+        self.pair_stats["same_rules_short"] = quota - count
+        if count == 0:
+            return
+        chosen = sorted(int(i) for i in rng.choice(len(candidates), size=count, replace=False))
+        for index in chosen:
+            draft = candidates[index]
+            fluent = locations[int(rng.integers(len(locations)))]
+            literal = PairLiteral(PAIR_SAME, fluent.label, draft.roles[0], draft.roles[1], True)
+            key = _literal_slot(literal, self.pair_fluents)
+            draft.precondition = draft.precondition + (literal,)
+            draft.quota_literal_keys.add(key)
+            self.same_quota[draft.event_type.label] = literal
+            self.pair_stats["same_rules_added"] += 1
+
     # The whole procedure ----------------------------------------------------------------------
 
     def run(self) -> EventTypes:
@@ -2169,6 +2327,7 @@ class _Dynamics:
         self.draw_preconditions()
         for draft in self.drafts.values():
             self.resolve_preconditions(draft)
+        self.apply_same_quota()
         for _ in range(MAX_FIX_ROUNDS):
             changed = False
             for draft in self.drafts.values():
@@ -2212,6 +2371,7 @@ class _Dynamics:
             dict(self.stats),
             dict(self.condition_draws),
             dict(self.pair_stats),
+            dict(self.same_quota),
         )
 
 
@@ -2224,8 +2384,11 @@ def generate_event_types(
     derived_initial: Mapping[str, np.ndarray],
     numeric: NumericFluents | None = None,
     pair_fluents: PairFluents | None = None,
+    extra_effects: Sequence[Effect] = (),
 ) -> EventTypes:
-    """Event types with their requirements, preconditions, and effects."""
+    """Event types with their requirements, preconditions, and effects. ``extra_effects`` are
+    effects of the world that are not the entity event types' (stage c3b, WM.66: the event
+    file's place entries'), which the pools of achievable values count."""
     static = build_event_types(statics)
     return _Dynamics(
         static,
@@ -2237,6 +2400,7 @@ def generate_event_types(
         statics,
         numeric,
         pair_fluents,
+        extra_effects,
     ).run()
 
 
@@ -2285,6 +2449,7 @@ def redraw_preconditions(
     numeric_parts: Mapping[str, np.random.Generator] | None = None,
     pair_fluents: PairFluents | None = None,
     pair_parts: Mapping[str, np.random.Generator] | None = None,
+    extra_effects: Sequence[Effect] = (),
 ) -> EventTypes:
     """The event types with the own precondition literals of the named event types drawn
     again, each from its own generator (the part ``world:preconditions:<label>``,
@@ -2296,14 +2461,16 @@ def redraw_preconditions(
     compiled literals; a literal that would make one of the event type's own effects empty,
     that duplicates an inherited or a compiled one, that fixes a fluent one of the event type's
     conditions reads, or (a pair literal) that names what a pair condition names or fixes a
-    pair condition's value, is drawn again. No other event type changes."""
+    pair condition's value, is drawn again. No other event type changes. ``extra_effects`` (stage
+    c3b, WM.66: the place event types' effects) widen the pool of achievable values; the
+    ``SAME`` literal the quota ``same_rules`` gave stays, as the compiled literals do, and the
+    part draws ``SAME`` on a location fluent at the share as the first draw did."""
     cfg = config.event_types.preconditions
     numeric = numeric if numeric is not None else empty_numeric(fluents.initial_values.shape[0])
     pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
-    adds = {e.fluent for et in event_types.event_types for e in et.effects if e.pair and e.value}
-    deletes = {
-        e.fluent for et in event_types.event_types for e in et.effects if e.pair and not e.value
-    }
+    all_effects = [e for et in event_types.event_types for e in et.effects] + list(extra_effects)
+    adds = {e.fluent for e in all_effects if e.pair and e.value}
+    deletes = {e.fluent for e in all_effects if e.pair and not e.value}
     achievable: set[tuple[str, bool]] = set()
     for i, fluent in enumerate(fluents.base):
         for value in np.unique(fluents.initial_values[:, i]):
@@ -2312,16 +2479,9 @@ def redraw_preconditions(
         for value in np.unique(column):
             achievable.add((label, bool(value)))
     # the Boolean values effects produce; a pair effect produces no fluent value (stage c2b)
-    produced = sorted(
-        {
-            (e.fluent, e.value)
-            for et in event_types.event_types
-            for e in et.effects
-            if not e.numeric and not e.pair
-        }
-    )
+    produced = sorted({(e.fluent, e.value) for e in all_effects if not e.numeric and not e.pair})
     achievable |= set(produced)
-    signs = produced_numeric(event_types)
+    signs = {(e.fluent, 1 if e.amount > 0 else -1) for e in all_effects if e.numeric}
 
     def ok(literal: Literal) -> bool:
         if literal.numeric:
@@ -2351,10 +2511,14 @@ def redraw_preconditions(
         empty_pairs = {(_effect_slot(e, pair_fluents), e.value) for e in et.effects if e.pair}
         read = condition_keys(et.effects)
         kept: dict[tuple, AnyLiteral] = dict(inherited)
-        # The compiled literals of stage c2a (origin profile) stay with the event type.
+        # The compiled literals of stage c2a (origin profile) stay with the event type, and so
+        # does the quota's SAME literal (stage c3b).
         for lit in et.precondition:
             if isinstance(lit, PairLiteral) and lit.compiled:
                 kept[_literal_slot(lit, pair_fluents)] = lit
+        quota = event_types.same_quota.get(label)
+        if quota is not None:
+            kept[_literal_slot(quota, pair_fluents)] = quota
 
         pair_draw = (pair_fluents, config, et.roles, pair_rng)
         pair_sets = (adds, deletes, empty_pairs)
@@ -2428,7 +2592,9 @@ def _redraw_pair(
     if rng.random() >= cfg.pair_share:
         return None
     for _ in range(MAX_TRIES):
-        candidate = random_pair_literal(roles, rng, pair_fluents, config.pair_fluents.literal_kinds)
+        candidate = random_pair_literal(
+            roles, rng, pair_fluents, config.pair_fluents.literal_kinds, rng
+        )
         if candidate is None:
             return None
         fluent = pair_fluents[candidate.pair_fluent]
@@ -2478,29 +2644,27 @@ def check_dynamics(
     features: Sequence[str] | None = None,
     numeric: NumericFluents | None = None,
     pair_fluents: PairFluents | None = None,
+    extra_effects: Sequence[Effect] = (),
 ) -> None:
     """The invariants of "Preconditions", "Effects", and "Conditional effects": no effect on a
     derived fluent, no contradiction (whatever the conditions), no empty effect, every literal
     achievable, every role valid; every condition literal a known fluent or static feature (when
     ``features`` lists them) of a role of the event type, no symbol twice in a condition, no
-    fluent literal on a fluent the precondition fixes or on the fluent the effect sets, and every
-    fluent literal achievable. Raises :class:`ValueError` naming the event type
+    fluent literal on a fluent the precondition fixes or on the fluent the effect sets, no pair
+    condition literal whose value the precondition fixes under ``fixed_pair_literals`` (WM.68),
+    and every fluent literal achievable. Raises :class:`ValueError` naming the event type
     otherwise. Tests and the generator both call it. Whether some able binding satisfies the
-    static literals needs the static side; the generator checks it when it draws."""
-    produced = {
-        (e.fluent, e.value)
-        for et in event_types.event_types
-        for e in et.effects
-        if not e.numeric and not e.pair
-    }
+    static literals needs the static side; the generator checks it when it draws. A literal's
+    achievability counts every effect of the world (stage c3b, WM.66): ``extra_effects`` are
+    the effects of event types outside ``event_types``, the place event types'."""
+    all_effects = [e for et in event_types.event_types for e in et.effects] + list(extra_effects)
+    produced = {(e.fluent, e.value) for e in all_effects if not e.numeric and not e.pair}
     achievable = produced | initial_present
-    signs = produced_numeric(event_types)
+    signs = {(e.fluent, 1 if e.amount > 0 else -1) for e in all_effects if e.numeric}
     numeric = numeric if numeric is not None else empty_numeric(0)
     pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
-    adds = {e.fluent for et in event_types.event_types for e in et.effects if e.pair and e.value}
-    deletes = {
-        e.fluent for et in event_types.event_types for e in et.effects if e.pair and not e.value
-    }
+    adds = {e.fluent for e in all_effects if e.pair and e.value}
+    deletes = {e.fluent for e in all_effects if e.pair and not e.value}
 
     def numeric_ok(fluent: str, above: bool, threshold: float | None) -> bool:
         return (
@@ -2615,6 +2779,9 @@ def check_dynamics(
                         f"{et.label}: the condition of {effect.text} reads {lit.key} twice"
                     )
                 seen.add((lit.role, lit.symbol))
+            problem = fixed_condition_problem(effect, et.precondition, pair_fluents, et.roles)
+            if problem is not None:
+                raise ValueError(f"{et.label}: {problem}")
         literal_keys: dict[tuple[str, str], bool] = {}
         for lit in et.precondition:
             if lit.pair:
@@ -2748,6 +2915,7 @@ __all__ = [
     "compiled_literals",
     "condition_pair_keys",
     "condition_pair_names",
+    "fixed_condition_problem",
     "fixed_pair_literals",
     "implied_conflict",
     "keeps_no_condition",

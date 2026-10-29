@@ -24,7 +24,11 @@ pair literals of preconditions by kind, role, polarity, and kind of event type, 
 literals by origin, the pair effects by value, the pair condition literals, the derived rules
 that read a pair literal, the pair draws and redraws, and the episodes' pair changes per event;
 it is written only when the world has pair fluents, so that the statistics of every other world
-are as before.
+are as before. In a world with location fluents (stage c3b) the ``places`` block gains the place
+event types by kind, the counts of the drawn dynamics, and the concentration of habitats; the
+``pair_fluents`` block counts the location fluents apart and the place event types' literals
+and effects; and the episodes report the move share, the act share, and the two-place share
+counting the place event types apart; every such key is written only with location fluents.
 """
 
 from __future__ import annotations
@@ -131,11 +135,17 @@ def episode_stats(
     event_types: Sequence[str],
     redraws: Mapping[str, int] | None = None,
     never_able: Sequence[str] = (),
+    place_kinds: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """The statistics of a set of histories with legal counts recorded: per event type, the share
     of steps with a legal binding and the share at which it occurred; the mean number of changes
     per event; the share of quiescent episodes; the precondition redraws; and the event types
-    never legal, each with its reason."""
+    never legal, each with its reason. With ``place_kinds`` (the kind, ``move`` or ``act``, of
+    every performable place event type; stage c3b, given only in a world with location
+    fluents) also the share of events that are moves (``move_share``), the share that are acts
+    (``act_share``), and the two-place share counting the place event types apart
+    (``two_place_share_entities``: the share of events of two-place event types between
+    entities), beside ``two_place_share``, which counts every event with a patient."""
     steps = [step for history in histories for step in history.steps]
     total = len(steps)
     legal_steps = dict.fromkeys(event_types, 0)
@@ -161,6 +171,16 @@ def episode_stats(
         if any(h.initial_pairs is not None for h in histories)
         else {}
     )
+    shares: dict[str, float] = {}
+    if place_kinds is not None:
+        moves = sum(1 for e in events if place_kinds.get(e.type) == "move")
+        acts = sum(1 for e in events if place_kinds.get(e.type) == "act")
+        between = sum(1 for e in events if e.patient is not None and e.type not in place_kinds)
+        shares = {
+            "move_share": _share(moves, len(events)),
+            "act_share": _share(acts, len(events)),
+            "two_place_share_entities": _share(between, len(events)),
+        }
     return {
         "count": len(histories),
         "steps": total,
@@ -179,6 +199,7 @@ def episode_stats(
         "two_place_share": round(sum(1 for e in events if e.patient is not None) / len(events), 6)
         if events
         else 0.0,
+        **shares,
         **pairs,
         "precondition_redraws": dict(redraws or {}),
         "never_legal": reasons,
@@ -306,14 +327,72 @@ def numeric_stats(
     }
 
 
+def _place_dynamics_stats(places: Places, pair_fluents: PairFluents) -> dict[str, Any]:
+    """The literals and effects of the place event types with dynamics (stage c3b): the
+    precondition literals by kind, role, and polarity (the pair literals, and the Boolean and
+    numeric literals on the agent), the compiled literals by origin (``move`` and ``act``),
+    the effects by kind (the moves' adds on a location fluent, the Boolean and numeric effects
+    on the agent), and the condition literals by kind."""
+    kinds = ("pair", "pair_some", "pair_someof", "pair_same")
+    literals: dict[str, Any] = {
+        "total": 0,
+        "by_kind": {"boolean": 0, "numeric": 0, **dict.fromkeys(kinds, 0)},
+        "by_role": {"agent": 0, "patient": 0},
+        "by_polarity": {"positive": 0, "negative": 0},
+    }
+    compiled: dict[str, Any] = {"total": 0, "by_origin": {}}
+    effects: dict[str, Any] = {
+        "total": 0,
+        "by_kind": {"location": 0, "boolean": 0, "numeric": 0},
+        "conditional": 0,
+    }
+    conditions: dict[str, Any] = {
+        "total": 0,
+        "by_kind": {"feature": 0, "fluent": 0, "numeric": 0, **dict.fromkeys(kinds, 0)},
+        "by_role": {"agent": 0, "patient": 0},
+    }
+    for et in places.performable:
+        for lit in et.precondition:
+            if lit.pair and lit.compiled:
+                compiled["total"] += 1
+                compiled["by_origin"][lit.origin] = compiled["by_origin"].get(lit.origin, 0) + 1
+                continue
+            literals["total"] += 1
+            literals["by_kind"][
+                lit.kind if lit.pair else "numeric" if lit.numeric else "boolean"
+            ] += 1
+            literals["by_role"][lit.role] += 1
+            literals["by_polarity"]["positive" if lit.value else "negative"] += 1
+        for effect in et.effects:
+            effects["total"] += 1
+            effects["by_kind"][
+                "location" if effect.pair else "numeric" if effect.numeric else "boolean"
+            ] += 1
+            if effect.condition:
+                effects["conditional"] += 1
+            for lit in effect.condition:
+                conditions["total"] += 1
+                conditions["by_kind"][lit.kind] += 1
+                conditions["by_role"][lit.role] += 1
+    return {
+        "precondition_literals": literals,
+        "compiled_literals": compiled,
+        "effects": effects,
+        "condition_literals": conditions,
+    }
+
+
 def pair_fluent_stats(
     pair_fluents: PairFluents | None,
     event_types: EventTypes,
     fluents: Fluents,
     episodes: dict[str, Any] | None = None,
+    places: Places | None = None,
 ) -> dict[str, Any] | None:
     """The ``pair_fluents`` block of ``world_stats.yaml`` (stage c2b), or None without pair
-    fluents."""
+    fluents. In a world with location fluents (stage c3b) the block also counts the location
+    fluents apart from the pair fluents between entities (``between_entities``, ``locations``)
+    and the place event types' literals and effects (``place_event_types``)."""
     if pair_fluents is None or not len(pair_fluents):
         return None
     leaves = event_types.leaves
@@ -380,8 +459,14 @@ def pair_fluent_stats(
             "initial_rate": fluent.initial_rate,
             "initial_pairs": int(matrix.sum()),
         }
+    locations = len(pair_fluents.locations)
     return {
         "count": len(pair_fluents),
+        **(
+            {"between_entities": len(pair_fluents.between_entities), "locations": locations}
+            if locations
+            else {}
+        ),
         "by_symmetry": by_symmetry,
         "functional": sum(1 for f in pair_fluents if f.functional),
         "fluents": rows,
@@ -393,6 +478,11 @@ def pair_fluent_stats(
         "rules_reading_a_pair_literal": sum(1 for rule in fluents.rules if rule.pair_inputs),
         "fix_ups": dict(event_types.pair_stats),
         "pair_changes_per_event": (episodes or {}).get("pair_changes_per_event"),
+        **(
+            {"place_event_types": _place_dynamics_stats(places, pair_fluents)}
+            if locations and places is not None
+            else {}
+        ),
     }
 
 
@@ -501,9 +591,15 @@ def world_stats(
         "absorbing_fluents": absorbing_fluents(event_types, fluents),
         "numeric_fluents": numeric_stats(numeric, event_types, fluents),
         "relations": relation_stats(statics) if statics is not None else None,
-        "places": places_stats(places),
+        "places": places_stats(
+            places, pair_fluents, statics.taxonomy if statics is not None else None
+        ),
         **(
-            {"pair_fluents": pair_fluent_stats(pair_fluents, event_types, fluents, episodes)}
+            {
+                "pair_fluents": pair_fluent_stats(
+                    pair_fluents, event_types, fluents, episodes, places
+                )
+            }
             if pair_fluents is not None and len(pair_fluents)
             else {}
         ),
