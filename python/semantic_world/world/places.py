@@ -223,6 +223,9 @@ class Places:
     ``place_dynamics.py``); empty in a world without location fluents."""
     density_band: tuple[float, float] | None = None
     """``place_event_types.density``, or None without a band."""
+    habitat_strength: float = 1.0
+    """``places.habitat_strength``: the exponent of the habitat weights (stage c3a), kept here
+    so that the statistics can compute the expected habitats from the requirements (WM.69)."""
 
     @property
     def outside_band(self) -> tuple[str, ...]:
@@ -469,6 +472,7 @@ def generate_places(
         actual_patient,
         tuple(warnings),
         density_band=band,
+        habitat_strength=config.places.habitat_strength,
     )
 
 
@@ -589,7 +593,9 @@ def places_stats(
     c3b), the place event types by kind (``place_event_types_by_kind``: moves, acts, and
     those without dynamics), the counts of the drawn dynamics (``dynamics``), and the
     concentration of habitats (``habitats``, from ``habitat_stats`` in ``locations.py``, when
-    ``pair_fluents`` and the entity ``taxonomy`` are given)."""
+    ``pair_fluents`` and the entity ``taxonomy`` are given: the sampled shares and entropies,
+    and under WM.69 the expected effect sizes at the leaf level, from the requirements and
+    the habitat strength)."""
     if places is None:
         return None
     features = places.taxonomy.features
@@ -639,7 +645,13 @@ def places_stats(
         }
         block["dynamics"] = dict(places.dynamics_stats)
         if taxonomy is not None:
-            block["habitats"] = habitat_stats(pair_fluents, taxonomy, places.taxonomy)
+            block["habitats"] = habitat_stats(
+                pair_fluents,
+                taxonomy,
+                places.taxonomy,
+                places.requirement.values(),
+                places.habitat_strength,
+            )
     return block
 
 

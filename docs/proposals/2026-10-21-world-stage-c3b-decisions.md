@@ -142,6 +142,7 @@ None of these changes the design; each is recorded for Jon's eye.
 5. **A drawn place event type never reads `SAME`** on a location fluent, by stage c3a's rule that `SAME` is read between two entities; a world where a move depends on who is at the destination needs `SOMEOF` of the place, which moves draw.
 6. **The habitat entropy** is reported per entity category over the places (the entropy of the category's entities' initial places), with the mean by level and the uniform draw's entropy beside it; the specification's "mean entropy of entities' initial places by entity category" could also be read as a mean over location fluents, which the default world's one location fluent makes the same.
 7. **The default habitats are nearly flat (review point 2): a finding, not tuned.** (Ruled on October 28, 2026, WM.67, below.) The acceptance test (`test_the_default_habitats_are_not_flat`, the slow tier) asks that some place category's share of some entity superordinate's entities differ from the uniform share (the category's places over the 12 places) by more than three binomial standard deviations of a uniform draw of that many entities, the bound stated from the configuration. On seed 1 of `default_full` no cell does: the largest deviation is 0.119 (`PLACECATEGORY.2.1` holds 0.286 of `CATEGORY.2`'s 56 entities against a uniform 0.167), under its margin of 0.149; 3 of the 24 cells at the leaf level of the place tree lie beyond two standard deviations (about one would by chance); a chi-square over the 6 leaf place categories and the 4 entity superordinates is 30.3 on 15 degrees of freedom (significant at 5%, not at 1%), and over the 2 place superordinates 4.9 on 3; the mean entropy of the superordinates' initial places is 3.45 bits against 3.58 for a uniform draw. The cause is in the weights: `(1 + a(x, q)) ^ 1` with `a(x, q)` the number of the 4 place event types able for the binding, and `a` is 2 or 3 for 75% of the bindings (121 bindings at 0, 720 at 1, 1,137 at 2, 1,430 at 3, of 3,408), so the weights range from 1 to 4 with a mean coefficient of variation of 0.10 within an entity's row. The habitats are concentrated in the direction the capacities point, but not beyond the sampling margin of 284 entities. Following the rule that a failing bound is a finding to report and not a number to lower, the test keeps its bound and is marked an expected failure (`xfail(strict=True)`, so that it turns when the configuration or the bound changes), and the stage reports that this acceptance criterion did not hold on `default_full` seed 1. Levers for Jon, none pulled here: a higher `places.habitat_strength` (3 would spread the weights from 1 to 64), sparser place requirements (`place_event_types.constraints` weighted toward 2, or `rules` with more `AND`), or more place event types; or a joint statistic (the chi-square above) as the reading of "not flat".
+8. **Strong kind-level habitats** (deferred by Jon's ruling WM.69 of October 28, 2026). The habitats of the full worlds are real but modest: an entity's leaf category explains about half of the variance of `a(x, q)`, and the median leaf category's favorite kind of place gets 1.3 to 1.8 times its uniform share at strength 2. Habitats that are strong at the level of a kind would need place requirements that read the features defining a kind of entity (so that every member of the kind is able at the same places), or more place event types (so that `a(x, q)` has more levels to separate the kinds). Either changes what a place requirement is or the default count, so it is a design question for a later stage, not for stage c3b.
 
 ## Notes for stage c4
 
@@ -248,5 +249,68 @@ The full check list of `CLAUDE.md`, run on October 28, 2026, at the end of the f
 
 ### Questions for Jon after the follow-up
 
-1. **The habitat criterion.** At strength 2 with the band the expected-share criterion holds on 2 of 5 seeds, and no strength up to 4 makes it hold on seeds 2 and 4 (the table above); the three failing seeds are strict expected failures, not a lowered bound. Should "not flat" be read at the leaf level, as a joint statistic, or as an entropy bound, rather than per cell at the superordinate level? Until then `pytest --all` reports three expected failures and nothing else.
+1. **The habitat criterion.** (Ruled on October 28, 2026, WM.69, below.) At strength 2 with the band the expected-share criterion holds on 2 of 5 seeds, and no strength up to 4 makes it hold on seeds 2 and 4 (the table above); the three failing seeds are strict expected failures, not a lowered bound. Should "not flat" be read at the leaf level, as a joint statistic, or as an entropy bound, rather than per cell at the superordinate level? Until then `pytest --all` reports three expected failures and nothing else.
 2. **The band's edges.** The band is inclusive at both ends (a density of exactly 0.5 passes, as `tiny_full`'s second requirement does), as the two-place `DensityConfig.inside` is; a degenerate density is always outside.
+
+## Jon's ruling of October 28, 2026, on the habitat criterion (WM.69)
+
+A second follow-up session on the branch `world-c3b`, from ce25239, on the first follow-up's question 1. Jon's ruling: the habitats are real but modest, and stage c3b tests their mechanism, not their significance. No world identity changes in this follow-up (the expected figures are computed from the weights, not drawn), and no test is an expected failure.
+
+### The measurements behind WM.69
+
+Jon's measurement, with Claude (chat), on seeds 1 to 5 of `default_full` from the habitat weights: an entity's leaf category explains 48% to 58% of the variance of `a(x, q)`; at strength 2 the median leaf category's favorite place leaf category gets 1.3 to 1.8 times its uniform share, the strongest up to 2.4 times; but with about 7 entities per leaf category no test against a uniform draw, per cell or a joint chi-square at the 99th percentile, at the leaf or the superordinate level, holds on every seed, even at strength 3.
+
+The same quantities as this follow-up computes them (`expected_leaf_habitats` in `locations.py`, and the test's own computation, which agrees): for each entity leaf category, its expected distribution over the six place leaf categories is the mean over its entities of their probabilities (each entity's weight over the sum of its row) summed over each place leaf category's two places; the ratio is the category's largest expected share over that place leaf category's uniform share (2 of 12 places, one sixth); the entropy is of that distribution, in bits, against 2.585 for the uniform draw grouped by place leaf category. The median and the largest ratio over the leaf categories, and the mean entropy, for strengths 0 to 3 on seeds 1 to 5, all with the band `[0.05, 0.5]`:
+
+| Seed | Strength 0 | Strength 1 | Strength 2 (the full worlds) | Strength 3 |
+| --- | --- | --- | --- | --- |
+| 1 | median 1.00, largest 1.00, 2.585 bits | 1.24, 1.63, 2.556 | 1.49, 2.44, 2.485 | 1.70, 3.24, 2.393 |
+| 2 | 1.00, 1.00, 2.585 | 1.16, 1.25, 2.574 | 1.32, 1.50, 2.536 | 1.47, 1.69, 2.477 |
+| 3 | 1.00, 1.00, 2.585 | 1.37, 1.67, 2.548 | 1.75, 2.44, 2.450 | 2.09, 3.18, 2.319 |
+| 4 | 1.00, 1.00, 2.585 | 1.21, 1.39, 2.556 | 1.39, 1.69, 2.493 | 1.54, 1.91, 2.424 |
+| 5 | 1.00, 1.00, 2.585 | 1.41, 1.50, 2.538 | 1.83, 1.95, 2.409 | 2.17, 2.40, 2.240 |
+
+On every seed the mean entropy is exactly the uniform entropy at strength 0 and strictly falls from strength to strength, the ratios rise with the strength, and every entity's expected places are ordered by its capacities at strength 2 (a place with more able place event types never gets a lower probability, since the weight is a rising function of `a(x, q)` for a strength above 0).
+
+### The tests under WM.69
+
+`test_the_default_habitats_are_not_flat` keeps its name and its place (`tests/world/test_world_location_generation.py`, the slow tier, seeds 1 to 5 of `default_full`) and asserts the ruling's properties from its own computation of the expected habitats: at strength 0 every probability is one over the places, every ratio is 1, and the mean leaf entropy is the uniform entropy; the mean leaf entropy strictly falls over the strengths 0, 1, 2, and 3 and is below the uniform entropy at the configured strength 2; every entity's expected place distribution at strength 2 is ordered by its capacities, strictly where the capacities differ; and the figures written by the run (`expected_by_leaf`) agree with the test's computation to six decimals. No bound is fitted to a run, and `FLAT_SEEDS` with its three strict expected failures is gone, as is the helper `_expected_habitat_shares`. A fast-tier test on `tiny_full` (`test_the_expected_leaf_habitats_are_flat_at_strength_0_and_concentrated_at_2`) checks `expected_leaf_habitats` itself: flat weights give every ratio 1 and the uniform entropy, which equals the entropy of the place leaf categories' sizes; the configured weights give ratios of at least 1 with the median no larger than the largest, a mean entropy no larger than the uniform entropy, and a category and a place category that are leaves; and the run's figures are the function's value on the configured weights. The statistics test's set of habitat keys gains `expected_by_leaf`. Stage c3a's test of the chain example (`test_habitats_follow_the_weights_with_the_default_strength`) already checked the ordering by capacities on the hand world; the new test checks it on every seed of `default_full`.
+
+### The figures added
+
+`places.habitats.<fluent>.expected_by_leaf` of `world_stats.yaml`, written only in a world with location fluents, the same for every location fluent of a world (every one draws from the same weights): `level` (the leaf level of the entity tree), `favorite_ratio` (`median`, `largest`, and the `category` and `place_category` of the largest), and `entropy` (`mean` and `uniform`). `figures.py` copies them with the other habitat figures under `places.habitats` and `places.habitat`, so `python -m semantic_world.figures snapshot` added 42 figures and changed none (24 lines added to `tests/figures/snapshot.yaml`, none removed): 14 under `tiny_full` (`favorite_ratio` median 1.4, largest 1.6 for `CATEGORY.1.2` at `PLACECATEGORY.2`; `entropy` mean 0.851 against 1.0), 14 under `default_full` (median 1.49, largest 2.44 for `CATEGORY.4.2.4` at `PLACECATEGORY.2.2`; mean 2.49 against 2.58), and 14 under `tiny_place_chain` (median and largest 1.2 for `CATEGORY.2.2` at `PLACECATEGORY.2`; mean 0.971 against 1.0). `figures guides` filled six new figures in `WORLD.md`'s "Habitats" row of "The full worlds"; no existing figure moved, and the identities of every world and baseline are what the first follow-up left (`tiny_full` `2f80537bb72b`, `default_full` `baa625dfd0fb`, `tiny_place_chain` `d16dc0ffcf17`; `tiny`, `default`, and `tiny_pairs` untouched, their runs not rerun). `Places` carries `habitat_strength` so that the statistics can compute the weights; the fixtures do not change.
+
+### Engineering choice of the second follow-up
+
+7. **The expected figures from the weights** (WM.E325). The effect sizes are computed from the requirements and the strength, not from the drawn places, so that they are what the tests assert and no draw moves; they are placed inside each location fluent's `habitats` block beside the sampled figures rather than at the top of `places`, so that `figures.py` needs no new key and the figures stay absent from every world without location fluents. The ratio reads the place leaf categories rather than the places, as the ruling says, because a kind of place is what a habitat is about; the uniform entropy is the entropy of the uniform draw grouped by place leaf category, which is the mean at strength 0 whatever the sizes of the place leaves (and `log2` of their number when they are of one size, as in the default and tiny place taxonomies).
+
+### Run times of the second follow-up
+
+Measured on October 28, 2026, with nothing else running (the second of two runs for `default_full`):
+
+| Step | Second follow-up | First follow-up | Change |
+| --- | --- | --- | --- |
+| `define data/world/default_full.yaml` | 8.4 s | 8.3 s | unchanged within noise: the expected figures are one matrix product per entity leaf category |
+| `define data/world/tiny_place_chain.yaml` | 1.9 s | 1.9 s | unchanged |
+
+No step grew by more than half; the default world and the corpora were not rerun (their outputs are unchanged, since `habitat_stats` runs only with location fluents).
+
+### Test results of the second follow-up
+
+The full check list of `CLAUDE.md`, run on October 28, 2026, at the end of the second follow-up:
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` | passed (the Rust crates are untouched) |
+| `ruff check python tests` | passed (`ruff format --check` too) |
+| `pytest -n auto` (the fast tier) | passed: 2,063 tests in 2 minutes 29 seconds of wall time, run alone, nothing skipped, nothing expected to fail (2,062 in the first follow-up: the fast-tier test of `expected_leaf_habitats` is new) |
+| `pytest --all -n auto` (both tiers) | passed: 2,380 tests in 8 minutes 33 seconds of wall time, nothing skipped, nothing expected to fail (2,376 passed and 3 expected failures in the first follow-up: the three strict expected failures are gone, and the five seeds of the habitat test pass, each in one world definition with four strengths). A first run of the habitat tests found only a bug of the test itself (a `zip` of two lists of different lengths), not of the properties |
+
+### Documents changed by the second follow-up
+
+- `docs/DECISIONS.md`: WM.69 after WM.68 (proposed by Claude (chat), decided by Jon, status Decided), and WM.E325 after WM.E324. Appended; no existing row edited.
+- `docs/specs/WORLD_PHASE_C.md`: an as-built note of WM.69 on the c3b entry of "Build stages" (the criterion as read, the measurements, the tests, the figures, and the deferred question), and a sentence on the note of "Initial places (habitats)" pointing to it.
+- `docs/guides/WORLD.md`: the `places` block of `world_stats.yaml` (the `expected_by_leaf` keys) and the "Habitats" row of "The full worlds" (the six new figures), and the run time of `default_full`.
+- `docs/guides/README.md`: the status of `WORLD.md` and the run time of `default_full`.
+- `CLAUDE.md`: the fast tier's time.
+- This file: the deferred open question 8, question 1 of the first follow-up marked as ruled, and the sections from "Jon's ruling of October 28, 2026, on the habitat criterion (WM.69)" on.

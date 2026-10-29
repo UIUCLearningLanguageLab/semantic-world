@@ -107,7 +107,62 @@ def _entropy_bits(counts: np.ndarray) -> float:
     return float(-(p * np.log2(p)).sum())
 
 
-def habitat_stats(pair_fluents: PairFluents, taxonomy, place_taxonomy) -> dict[str, Any]:
+def _leaf_members(tree, instances) -> list[tuple[str, np.ndarray]]:
+    """Each leaf category of a taxonomy, in tree order, with the bool mask of its instances."""
+    leaf_of = np.array([tree.categories[k].label for k in instances.leaf_index])
+    return [(leaf.label, leaf_of == leaf.label) for leaf in tree.leaves]
+
+
+def expected_leaf_habitats(weights: np.ndarray, taxonomy, place_taxonomy) -> dict[str, Any]:
+    """The expected habitats at the leaf level, from the habitat weights rather than from one
+    draw (Jon's ruling WM.69, the stage c3b follow-up of October 28, 2026): each entity's
+    probability of each place is its weight over the sum of its row, and an entity leaf
+    category's expected distribution over the place leaf categories is the mean, over its
+    entities, of their probabilities summed over each place leaf category's places. Returns,
+    for the entity leaf categories, the median and the largest ratio of a category's favorite
+    place leaf category (the one with its largest expected share) to that category's uniform
+    share (its places over the places), with the pair that gives the largest; the mean of the
+    categories' expected entropies over the place leaf categories, in bits; and the entropy of
+    the uniform draw grouped by place leaf category (``uniform_entropy``: the mean entropy at
+    strength 0, and the largest the mean can be when the place leaves are of one size)."""
+    probabilities = weights / weights.sum(axis=1, keepdims=True)
+    place_leaves = _leaf_members(place_taxonomy.tree, place_taxonomy.instances)
+    members = np.array([mask for _, mask in place_leaves], dtype=float)  # (place leaves, places)
+    uniform = members.sum(axis=1) / weights.shape[1]
+    ratios: list[tuple[float, str, str]] = []
+    entropies: list[float] = []
+    for label, entities in _leaf_members(taxonomy.tree, taxonomy.instances):
+        if not entities.any():
+            continue
+        distribution = (probabilities[entities] @ members.T).mean(axis=0)
+        favorite = int(np.argmax(distribution))
+        ratios.append(
+            (float(distribution[favorite] / uniform[favorite]), label, place_leaves[favorite][0])
+        )
+        entropies.append(_entropy_bits(distribution))
+    largest = max(ratios) if ratios else (0.0, "", "")
+    return {
+        "level": int(max((c.level for c in taxonomy.tree.leaves), default=0)),
+        "favorite_ratio": {
+            "median": round(float(np.median([r for r, _, _ in ratios])), 6) if ratios else 0.0,
+            "largest": round(largest[0], 6),
+            "category": largest[1],
+            "place_category": largest[2],
+        },
+        "entropy": {
+            "mean": round(float(np.mean(entropies)), 6) if entropies else 0.0,
+            "uniform": round(_entropy_bits(uniform), 6),
+        },
+    }
+
+
+def habitat_stats(
+    pair_fluents: PairFluents,
+    taxonomy,
+    place_taxonomy,
+    requirements: Iterable[np.ndarray] = (),
+    strength: float = DEFAULT_HABITAT_STRENGTH,
+) -> dict[str, Any]:
     """The concentration of habitats (stage c3b, ``places.habitats`` of ``world_stats.yaml``),
     per location fluent in label order: for each place category (in tree order), the share of
     each entity superordinate's entities that start there (``by_place_category``); the entropy,
@@ -117,10 +172,14 @@ def habitat_stats(pair_fluents: PairFluents, taxonomy, place_taxonomy) -> dict[s
     (``max_entropy``), so that a flat habitat reads as the maximum and a concentrated one as
     less; and, as the figure review point 2 asks for, the largest absolute deviation of a share
     from the uniform share (``largest_deviation``: the place category, the superordinate, the
-    share, and the uniform share, the place category's number of places over the places)."""
+    share, and the uniform share, the place category's number of places over the places). Under
+    WM.69 also the expected effect sizes at the leaf level (``expected_by_leaf``, from
+    :func:`expected_leaf_habitats` on the weights of the ``requirements`` and the ``strength``),
+    the same for every location fluent, because every one draws from the same weights."""
     tree, instances = taxonomy.tree, taxonomy.instances
     place_tree, place_instances = place_taxonomy.tree, place_taxonomy.instances
     superordinates = [c for c in tree.at_level(1)]
+    requirements = list(requirements)
     found: dict[str, Any] = {}
     for fluent, matrix in zip(pair_fluents.fluents, pair_fluents.initial_pairs, strict=True):
         if not fluent.total:
@@ -184,6 +243,9 @@ def habitat_stats(pair_fluents: PairFluents, taxonomy, place_taxonomy) -> dict[s
                 level: round(float(np.mean(values)), 6) for level, values in by_level.items()
             },
             "max_entropy": round(float(np.log2(place_count)), 6) if place_count else 0.0,
+            "expected_by_leaf": expected_leaf_habitats(
+                habitat_weights(requirements, matrix.shape, strength), taxonomy, place_taxonomy
+            ),
         }
     return found
 
@@ -233,6 +295,7 @@ __all__ = [
     "DEFAULT_HABITAT_STRENGTH",
     "LOCATION_SYMMETRY",
     "draw_places",
+    "expected_leaf_habitats",
     "habitat_stats",
     "habitat_weights",
     "location_columns",

@@ -616,6 +616,10 @@ tiny_full:
             CATEGORY.2: 1.459148, CATEGORY.2.1: 1.584963, CATEGORY.2.2: 0.918296}
           mean_entropy_by_level: {'1': 1.188722, '2': 1.084963}
           max_entropy: 2.0
+          expected_by_leaf:
+            level: 2
+            favorite_ratio: {median: 1.4, largest: 1.6, category: CATEGORY.1.2, place_category: PLACECATEGORY.2}
+            entropy: {mean: 0.850729, uniform: 1.0}
       habitat:
         by_place_category:
           PLACECATEGORY.1: {CATEGORY.1: 0.0, CATEGORY.2: 0.333333}
@@ -626,6 +630,10 @@ tiny_full:
           CATEGORY.2.1: 1.584963, CATEGORY.2.2: 0.918296}
         mean_entropy_by_level: {'1': 1.188722, '2': 1.084963}
         max_entropy: 2.0
+        expected_by_leaf:
+          level: 2
+          favorite_ratio: {median: 1.4, largest: 1.6, category: CATEGORY.1.2, place_category: PLACECATEGORY.2}
+          entropy: {mean: 0.850729, uniform: 1.0}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
       effects_dropped_no_slot: 0, effects_redrawn: 2, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
       literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
@@ -873,6 +881,10 @@ default_full:
             CATEGORY.4.3.3: 2.251629}
           mean_entropy_by_level: {'1': 3.28096, '2': 2.901891, '3': 2.227576}
           max_entropy: 3.584963
+          expected_by_leaf:
+            level: 3
+            favorite_ratio: {median: 1.490825, largest: 2.440589, category: CATEGORY.4.2.4, place_category: PLACECATEGORY.2.2}
+            entropy: {mean: 2.485226, uniform: 2.584963}
       habitat:
         by_place_category:
           PLACECATEGORY.1: {CATEGORY.1: 0.650485, CATEGORY.2: 0.553571, CATEGORY.3: 0.580645, CATEGORY.4: 0.555556}
@@ -902,6 +914,10 @@ default_full:
           CATEGORY.4.3.3: 2.251629}
         mean_entropy_by_level: {'1': 3.28096, '2': 2.901891, '3': 2.227576}
         max_entropy: 3.584963
+        expected_by_leaf:
+          level: 3
+          favorite_ratio: {median: 1.490825, largest: 2.440589, category: CATEGORY.4.2.4, place_category: PLACECATEGORY.2.2}
+          entropy: {mean: 2.485226, uniform: 2.584963}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 6,
       effects_dropped_no_slot: 0, effects_redrawn: 5, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
       literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 1, conditions_dropped: 0,
@@ -1276,6 +1292,10 @@ tiny_place_chain:
             CATEGORY.2: 1.918296, CATEGORY.2.1: 1.584963, CATEGORY.2.2: 1.584963}
           mean_entropy_by_level: {'1': 1.584963, '2': 1.251629}
           max_entropy: 2.0
+          expected_by_leaf:
+            level: 2
+            favorite_ratio: {median: 1.2, largest: 1.2, category: CATEGORY.2.2, place_category: PLACECATEGORY.2}
+            entropy: {mean: 0.970951, uniform: 1.0}
       habitat:
         by_place_category:
           PLACECATEGORY.1: {CATEGORY.1: 0.666667, CATEGORY.2: 0.5}
@@ -1286,6 +1306,10 @@ tiny_place_chain:
           CATEGORY.2.1: 1.584963, CATEGORY.2.2: 1.584963}
         mean_entropy_by_level: {'1': 1.584963, '2': 1.251629}
         max_entropy: 2.0
+        expected_by_leaf:
+          level: 2
+          favorite_ratio: {median: 1.2, largest: 1.2, category: CATEGORY.2.2, place_category: PLACECATEGORY.2}
+          entropy: {mean: 0.970951, uniform: 1.0}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
       effects_dropped_no_slot: 0, effects_redrawn: 1, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
       literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,

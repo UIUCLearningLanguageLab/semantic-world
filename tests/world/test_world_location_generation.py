@@ -13,8 +13,11 @@ no move to the agent's own place, every act at the agent's place, ``legal`` and 
 against the brute-force evaluator in random states, applying together against one at a time in
 every order, no profile broken in the statistics episodes, and replay. The follow-up of October
 28, 2026, adds the density band of the place requirements (``place_event_types.density``, Jon's
-ruling WM.67) and the expected-share habitat test on seeds 1 to 5 of ``default_full``. Every test
-writes to its own temporary folder, and every bound is stated from the configuration.
+ruling WM.67), and Jon's ruling WM.69 of the same day reads "the default habitats are not flat"
+as properties of the expected habitats that hold without a fitted bound on seeds 1 to 5 of
+``default_full`` (the mean leaf entropy below the uniform entropy and falling with the strength,
+the weights ordered by the capacities), with the effect sizes as figures. Every test writes to
+its own temporary folder, and every bound is stated from the configuration.
 """
 
 from __future__ import annotations
@@ -55,7 +58,7 @@ from semantic_world.world.fluents import derived_initial_values
 from semantic_world.world.generate import WorldResult, _initial_present, define
 from semantic_world.world.history import replay
 from semantic_world.world.identity import rule_set_id
-from semantic_world.world.locations import habitat_weights
+from semantic_world.world.locations import expected_leaf_habitats, habitat_weights
 from semantic_world.world.pair_fluents import draw_initial_pairs, profile_violations
 from semantic_world.world.place_dynamics import (
     PLACE_DYNAMICS_STATS,
@@ -1069,6 +1072,7 @@ def test_the_location_statistics_are_written_only_with_location_fluents(
         "entropy_by_category",
         "mean_entropy_by_level",
         "max_entropy",
+        "expected_by_leaf",
     }
     assert math.isclose(habitats["max_entropy"], math.log2(tiny_full.places.count))  # type: ignore[union-attr]
     for row in habitats["by_place_category"].values():
@@ -1092,96 +1096,137 @@ def test_the_location_statistics_are_written_only_with_location_fluents(
     assert "move_share" not in off.stats["episodes"]
 
 
-def _expected_habitat_shares(
-    result: WorldResult,
-) -> tuple[dict[str, dict[str, float]], dict[str, int], dict[str, float]]:
-    """The expected share of each entity superordinate's entities at each place category, from
-    the habitat weights: for each entity, its probability of each place is its weight over the
-    sum of its row, and a superordinate's expected share at a place category is the mean of its
-    entities' probabilities over the category's places. Returns the shares (place category to
-    superordinate to share), the superordinates' sizes, and the uniform shares."""
-    assert result.places is not None and result.config.places is not None
+def _entropy_bits(distribution: np.ndarray) -> float:
+    p = distribution[distribution > 0] / distribution.sum()
+    return float(-(p * np.log2(p)).sum())
+
+
+def _expected_leaf_habitats(
+    result: WorldResult, strength: float
+) -> tuple[np.ndarray, list[float], list[float], float]:
+    """The expected habitats at the leaf level, computed here from the habitat weights (not by
+    ``expected_leaf_habitats``): each entity's probability of each place is its weight over
+    the sum of its row; an entity leaf category's expected distribution over the place leaf
+    categories is the mean over its entities of their probabilities summed over each place leaf
+    category's places. Returns the probabilities, each entity leaf category's expected entropy
+    in bits and the ratio of its favorite place leaf category to that category's uniform share,
+    and the entropy of the uniform draw grouped by place leaf category."""
+    assert result.places is not None
     places = result.places
     n, m = len(result.taxonomy.instances), places.count
-    weights = habitat_weights(
-        places.requirement.values(), (n, m), result.config.places.habitat_strength
-    )
+    weights = habitat_weights(places.requirement.values(), (n, m), strength)
     probabilities = weights / weights.sum(axis=1, keepdims=True)
     tree, instances = result.taxonomy.tree, result.taxonomy.instances
     place_tree, place_instances = places.taxonomy.tree, places.taxonomy.instances
-    superordinate_of = np.array(
-        [tree.ancestor_label(tree.categories[k], 1) for k in instances.leaf_index]
-    )
-    shares: dict[str, dict[str, float]] = {}
-    uniform: dict[str, float] = {}
-    sizes = {c.label: int((superordinate_of == c.label).sum()) for c in tree.at_level(1)}
-    for place_category in place_tree.categories:
-        members = np.array(
-            [
-                place_tree.ancestor_label(place_tree.categories[k], place_category.level)
-                == place_category.label
-                for k in place_instances.leaf_index
-            ]
-        )
-        uniform[place_category.label] = float(members.sum()) / m
-        row: dict[str, float] = {}
-        for superordinate in tree.at_level(1):
-            entities = superordinate_of == superordinate.label
-            row[superordinate.label] = float(probabilities[entities][:, members].sum(axis=1).mean())
-        shares[place_category.label] = row
-    return shares, sizes, uniform
+    place_leaf_of = np.array([place_tree.categories[k].label for k in place_instances.leaf_index])
+    members = np.array([place_leaf_of == leaf.label for leaf in place_tree.leaves], dtype=float)
+    uniform = members.sum(axis=1) / m
+    leaf_of = np.array([tree.categories[k].label for k in instances.leaf_index])
+    entropies: list[float] = []
+    ratios: list[float] = []
+    for leaf in tree.leaves:
+        distribution = (probabilities[leaf_of == leaf.label] @ members.T).mean(axis=0)
+        assert math.isclose(distribution.sum(), 1.0)
+        entropies.append(_entropy_bits(distribution))
+        favorite = int(np.argmax(distribution))
+        ratios.append(float(distribution[favorite] / uniform[favorite]))
+    return probabilities, entropies, ratios, _entropy_bits(uniform)
 
 
-FLAT_SEEDS = {1: 0.65, 2: 0.52, 4: 0.60}
-"""The seeds of ``default_full`` on which the expected-share criterion does not hold at
-``habitat_strength`` 2 with the band, with the largest expected deviation as a fraction of its
-margin (the follow-up of October 28, 2026): a finding, recorded in the stage's proposal file,
-not tuned further (Jon's instruction); each is a strict expected failure, so that the test
-turns when the configuration or the bound changes."""
+STRENGTHS = [0.0, 1.0, 2.0, 3.0]
+"""The habitat strengths over which the expected mean leaf entropy must strictly fall (WM.69);
+the full worlds are at 2."""
 
 
 @SLOW
-@pytest.mark.parametrize(
-    "seed",
-    [
-        pytest.param(
-            seed,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=f"the largest expected deviation on seed {seed} of default_full is "
-                f"{FLAT_SEEDS[seed]:.2f} of its margin (stage c3b follow-up, open question 7)",
-            ),
-        )
-        if seed in FLAT_SEEDS
-        else seed
-        for seed in SEEDS
-    ],
-)
+@pytest.mark.parametrize("seed", SEEDS)
 def test_the_default_habitats_are_not_flat(seed: int) -> None:
-    """Review point 2, under Jon's ruling WM.67 (the follow-up of October 28, 2026): on every
-    seed from 1 to 5 of ``default_full``, some place category's expected share of some entity
-    superordinate's entities, computed from the habitat weights rather than from one sampled
-    draw, differs from the uniform share (the category's places over the places) by more than
-    three binomial standard deviations of a uniform draw of that many entities; the bound is
-    stated from the configuration (12 places, the superordinates' sizes), never from the run."""
+    """Review point 2 as Jon's ruling WM.69 reads it (the stage c3b follow-up of October 28,
+    2026): the habitats are real but modest, and the stage tests their mechanism, not their
+    significance. On every seed from 1 to 5 of ``default_full``, the expected mean entropy of
+    each entity leaf category's initial places over the place leaf categories is exactly the
+    uniform entropy at strength 0, strictly falls as the strength rises over 0, 1, 2, and 3,
+    and is below the uniform entropy at the configured strength 2; and each entity's expected
+    place distribution is ordered by its capacities (a place with more able place event types
+    never gets a lower weight). The figures of ``world_stats.yaml`` (``expected_by_leaf``)
+    agree with the computation here at the configured strength. No bound is fitted to a run."""
     result = _world("default_full", seed=seed)
-    assert result.config.places is not None and result.config.places.habitat_strength == 2
-    shares, sizes, uniform = _expected_habitat_shares(result)
-    beyond = 0
-    largest = 0.0
-    for place_category, row in shares.items():
-        for superordinate, share in row.items():
-            n = sizes[superordinate]
-            u = uniform[place_category]
-            margin = 3 * math.sqrt(u * (1 - u) / n)
-            ratio = abs(share - u) / margin
-            largest = max(largest, ratio)
-            beyond += ratio > 1
-    assert beyond > 0, f"seed {seed}: the largest expected deviation is {largest:.2f} of its margin"
-    # the sampled shares of the run are reported beside the expected ones
-    location = _location_of(result)
-    habitats = result.stats["places"]["habitats"][location]
-    assert set(habitats["by_place_category"]) == set(shares)
+    assert result.config.places is not None and result.config.places.habitat_strength == 2.0
+    assert result.places is not None
+    means: list[float] = []
+    uniform_entropy = None
+    for strength in STRENGTHS:
+        probabilities, entropies, ratios, uniform = _expected_leaf_habitats(result, strength)
+        uniform_entropy = uniform
+        means.append(float(np.mean(entropies)))
+        assert all(ratio >= 1.0 - 1e-12 for ratio in ratios)
+        if strength == 0.0:
+            assert np.allclose(probabilities, 1.0 / result.places.count)
+            assert all(math.isclose(ratio, 1.0) for ratio in ratios)
+    assert uniform_entropy is not None
+    assert math.isclose(means[0], uniform_entropy), "strength 0 gives the uniform entropy"
+    for lower, higher in itertools.pairwise(means):
+        assert higher < lower, f"seed {seed}: the mean leaf entropy does not fall: {means}"
+    assert means[STRENGTHS.index(2.0)] < uniform_entropy
+    # the weights are ordered by the capacities at the configured strength
+    able = sum(np.asarray(matrix, dtype=int) for matrix in result.places.requirement.values())
+    probabilities, entropies, ratios, _ = _expected_leaf_habitats(result, 2.0)
+    for x in range(able.shape[0]):
+        order = np.argsort(able[x], kind="stable")
+        assert np.all(np.diff(probabilities[x][order]) >= -1e-15)
+        for q in range(able.shape[1]):
+            for r in range(able.shape[1]):
+                if able[x, q] > able[x, r]:
+                    assert probabilities[x, q] > probabilities[x, r]
+    # the figures are these numbers
+    expected = result.stats["places"]["habitats"][_location_of(result)]["expected_by_leaf"]
+    assert expected["level"] == max(c.level for c in result.taxonomy.tree.leaves)
+    assert math.isclose(expected["entropy"]["mean"], float(np.mean(entropies)), abs_tol=1e-6)
+    assert math.isclose(expected["entropy"]["uniform"], uniform_entropy, abs_tol=1e-6)
+    assert math.isclose(
+        expected["favorite_ratio"]["median"], float(np.median(ratios)), abs_tol=1e-6
+    )
+    assert math.isclose(expected["favorite_ratio"]["largest"], max(ratios), abs_tol=1e-6)
+
+
+def test_the_expected_leaf_habitats_are_flat_at_strength_0_and_concentrated_at_2(
+    tiny_full: WorldResult,
+) -> None:
+    """The effect-size figures of WM.69 on the tiny full world: flat weights give every ratio
+    1 and the uniform entropy; the configured weights give ratios of at least 1, a median no
+    larger than the largest, and a mean entropy no larger than the uniform entropy; and the
+    figures written by the run are those of the configured weights."""
+    assert tiny_full.places is not None and tiny_full.config.places is not None
+    places = tiny_full.places
+    shape = (len(tiny_full.taxonomy.instances), places.count)
+    flat = expected_leaf_habitats(
+        habitat_weights(places.requirement.values(), shape, 0.0),
+        tiny_full.taxonomy,
+        places.taxonomy,
+    )
+    assert flat["favorite_ratio"]["median"] == flat["favorite_ratio"]["largest"] == 1.0
+    assert flat["entropy"]["mean"] == flat["entropy"]["uniform"]
+    assert flat["level"] == 2
+    place_tree, place_instances = places.taxonomy.tree, places.taxonomy.instances
+    place_leaf_of = np.array([place_tree.categories[k].label for k in place_instances.leaf_index])
+    sizes = np.array([(place_leaf_of == leaf.label).sum() for leaf in place_tree.leaves])
+    assert math.isclose(
+        flat["entropy"]["uniform"], _entropy_bits(sizes / sizes.sum()), abs_tol=1e-6
+    )
+    configured = expected_leaf_habitats(
+        habitat_weights(
+            places.requirement.values(), shape, tiny_full.config.places.habitat_strength
+        ),
+        tiny_full.taxonomy,
+        places.taxonomy,
+    )
+    ratio = configured["favorite_ratio"]
+    assert 1.0 <= ratio["median"] <= ratio["largest"]
+    assert ratio["category"] in {c.label for c in tiny_full.taxonomy.tree.leaves}
+    assert ratio["place_category"] in {c.label for c in places.taxonomy.tree.leaves}
+    assert configured["entropy"]["mean"] <= configured["entropy"]["uniform"]
+    written = tiny_full.stats["places"]["habitats"][_location_of(tiny_full)]["expected_by_leaf"]
+    assert written == configured
 
 
 def test_tiny_and_tiny_full_differ_in_the_phase_c_settings_alone() -> None:
