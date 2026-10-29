@@ -51,9 +51,18 @@ def test_default_values() -> None:
         "patient_projection",
         "scalar",
         "numeric",
+        "pair",
+        "same",
+        "place_category",
+        "place_is",
+        "place_has",
+        "place_scalar",
+        "place_event",
+        "place_patient_projection",
     ]
     assert lexicon.named_proportion["patient_projection"] == 0.25
-    assert all(v == 1.0 for k, v in lexicon.named_proportion.items() if k != "patient_projection")
+    quarter = ("patient_projection", "place_patient_projection")
+    assert all(v == 1.0 for k, v in lexicon.named_proportion.items() if k not in quarter)
     assert (lexicon.synonym_rate, lexicon.homonym_rate, lexicon.homonym_same_pos) == (0, 0, 0.5)
     assert lexicon.can_words == "shared"
     documents = config.documents

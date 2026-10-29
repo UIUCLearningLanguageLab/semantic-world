@@ -44,6 +44,7 @@ from semantic_world.corpus.propositions import (
     COMPARISON,
     EVENT,
     INSTANCE,
+    PAIR_STATE,
     STATE,
     STATE_KIND,
     VERB,
@@ -114,7 +115,13 @@ def test_state_and_change_sentences_are_true_of_their_history(cases, runs, name)
         assert form["level"] == proposition.level and form["time"] == proposition.time
         assert form["tense"] == "past" and "aspect" not in form and "event" not in form
         predicate = proposition.predicate
-        if proposition.level in (STATE, CHANGE) and not predicate.numeric:
+        if predicate.kind == PAIR_STATE:
+            # a pair change (stage c4b): the pair fluent and its second argument, an entity or
+            # a place, as a mention
+            assert proposition.level == CHANGE and predicate.label.startswith("PAIRFL.")
+            assert form["predicate"]["kind"] == PAIR_STATE
+            assert form["predicate"]["patient"]["instance"] == predicate.patient
+        elif proposition.level in (STATE, CHANGE) and not predicate.numeric:
             assert form["predicate"] == {"kind": STATE_KIND, "label": predicate.label}
             assert predicate.label.startswith("BOOLFL.")
         elif proposition.level == CHANGE:
@@ -163,12 +170,18 @@ def test_result_sentences_state_a_change_the_events_own_effect_made(cases, runs,
             scene = scenes[event.scene]
             fluent, direction = proposition.predicate.label, proposition.predicate.direction
             subject = proposition.subject
-            assert oracle.made_by(scene, event.step, subject, fluent, event.label, direction)
+            # a pair change (stage c4b) names its second argument, which the oracle reads
+            second = (
+                proposition.predicate.patient if proposition.predicate.kind == PAIR_STATE else None
+            )
+            assert oracle.made_by(
+                scene, event.step, subject, fluent, event.label, direction, second
+            )
             assert oracle.change(sentence.logical_form, scene)
             # the grounding names an event of the step whose own effect made it
             caused_by = proposition.grounding["caused_by"]
             assert caused_by is not None and caused_by.startswith(event.scene + ".EVENTINSTANCE.")
-            assert oracle.made_by(scene, event.step, subject, fluent, caused_by, direction)
+            assert oracle.made_by(scene, event.step, subject, fluent, caused_by, direction, second)
             results += 1
             derived += fluent in corpus.planner.world.derived_fluents
     assert results > 20

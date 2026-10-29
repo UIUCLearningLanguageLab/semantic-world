@@ -95,6 +95,8 @@ from semantic_world.corpus.propositions import (
     INSTANCE,
     LEVELS,
     LOWERS,
+    PAIR_STATE,
+    PLACE_EVENT,
     PRECONDITION,
     PROGRESSIVE,
     QUANTIFIERS,
@@ -311,8 +313,9 @@ def _sentences(documents: Sequence[Document]) -> dict[str, Any]:
     }
 
 
-def _states(documents: Sequence[Document]) -> dict[str, Any]:
-    """The state, change, and blocked sentences of the narratives."""
+def _states(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
+    """The state, change, and blocked sentences of the narratives, with (stage c4b) the pair
+    states and changes, the location sentences, and the narrated moves and acts."""
     sentences = [s for d in documents for s in d.sentences]
     sections = Counter(s.section for s in sentences)
     blocked = [s for s in sentences if s.section == BLOCKED]
@@ -324,6 +327,20 @@ def _states(documents: Sequence[Document]) -> dict[str, Any]:
     numeric_changes = sum(
         s.proposition.level == CHANGE and s.proposition.predicate.numeric for s in sentences
     )
+    # the pair states and changes (stage c4b, Jon's ruling 3 of WM.72): a pair fluent between
+    # entities or a location fluent, at a time point (HOLDS) or as a change with become
+    # (BECOME), and the location sentences among them; and the narrated moves and acts
+    world = planner.world
+    pairs = [s for s in sentences if s.proposition.predicate.kind == PAIR_STATE]
+    pair_states = sum(s.proposition.level == STATE for s in pairs)
+    pair_changes = sum(s.proposition.level == CHANGE for s in pairs)
+    locations = [s for s in pairs if world.is_location_fluent(s.proposition.predicate.label)]
+    place_events = [
+        s
+        for s in sentences
+        if s.section == EVENT_SECTION and s.proposition.predicate.kind == PLACE_EVENT
+    ]
+    kinds = Counter(world.place_event_kind(s.proposition.predicate.label) for s in place_events)
     return {
         "initial_state_sentences": sections[INITIAL_STATE],
         "result_sentences": sections[RESULT],
@@ -333,6 +350,13 @@ def _states(documents: Sequence[Document]) -> dict[str, Any]:
         "blocked_negative_share": _share(negative, len(blocked)),
         "numeric_state_sentences": numeric_states,
         "numeric_change_sentences": numeric_changes,
+        "pair_state_sentences": pair_states,
+        "pair_change_sentences": pair_changes,
+        "location_sentences": len(locations),
+        "location_state_sentences": sum(s.proposition.level == STATE for s in locations),
+        "location_change_sentences": sum(s.proposition.level == CHANGE for s in locations),
+        "move_sentences": kinds["move"],
+        "act_sentences": kinds["act"],
     }
 
 
@@ -419,14 +443,20 @@ def _tokens(planner: Planner, documents: Sequence[Document]) -> tuple[dict[str, 
 
 def _mentions(documents: Sequence[Document]) -> dict[str, Any]:
     kinds: Counter = Counter()
-    undistinguished = 0
+    place_kinds: Counter = Counter()
+    undistinguished = place_undistinguished = 0
     for document in documents:
         for sentence in document.sentences:
-            undistinguished += sum(mark is False for mark in sentence.distinguished)
-            for phrase in sentence.sentence.phrases:
+            for phrase, mark in zip(sentence.sentence.phrases, sentence.distinguished, strict=True):
                 if phrase.kind != INSTANCE_NP:
                     continue
+                if phrase.place:
+                    # a mention of a place (stage c4b), never a pronoun
+                    place_kinds[str(phrase.determiner)] += 1
+                    place_undistinguished += mark is False
+                    continue
                 kinds["pronoun" if phrase.pronoun else str(phrase.determiner)] += 1
+                undistinguished += mark is False
     definite = kinds["the"]
     return {
         "instance_mentions": int(sum(kinds.values())),
@@ -435,19 +465,37 @@ def _mentions(documents: Sequence[Document]) -> dict[str, Any]:
         "pronouns": kinds["pronoun"],
         "definite_not_distinguished": undistinguished,
         "definite_not_distinguished_share": _share(undistinguished, definite),
+        "place_mentions": int(sum(place_kinds.values())),
+        "place_indefinite": place_kinds["a"],
+        "place_definite": place_kinds["the"],
+        "place_definite_not_distinguished": place_undistinguished,
+        "place_definite_not_distinguished_share": _share(place_undistinguished, place_kinds["the"]),
     }
 
 
 def _scenes(planner: Planner) -> dict[str, Any]:
+    world = planner.world
     scenes = planner.scenes
     steps = [step for scene in scenes for step in scene.steps]
     events = [event for step in steps for event in step.events]
-    # a pair change (stage c4a) is neither a Boolean nor a numeric change; the counts of pair
-    # changes, moves, and acts are stage c4c's
     changes = sum(1 for event in events for c in event.changes if not c.numeric and not c.pair)
     numeric_changes = sum(1 for event in events for c in event.changes if c.numeric)
     drift_changes = sum(len(step.drift) for step in steps)
     quiescent = sum(scene.quiescent for scene in scenes)
+    # the place events and the pair changes (stage c4b, Jon's ruling 3 of WM.72): the moves and
+    # the acts at a place among the events, and the pair changes, a move's two changes (the old
+    # place deleted, the new one added) counted as one move
+    kinds = Counter(
+        world.place_event_kind(event.type)
+        for event in events
+        if world.is_place_event_type(event.type)
+    )
+    pair_changes = sum(
+        1
+        for event in events
+        for c in event.changes
+        if c.pair and not world.is_location_fluent(c.pair_fluent)
+    )
     return {
         "count": len(scenes),
         "steps": len(steps),
@@ -456,6 +504,14 @@ def _scenes(planner: Planner) -> dict[str, Any]:
         "numeric_changes_per_event": _share(numeric_changes, len(events)),
         "drift_changes_per_step": _share(drift_changes, len(steps)),
         "quiescent_share": _share(quiescent, len(scenes)),
+        "place_events": kinds["move"] + kinds["act"],
+        "moves": kinds["move"],
+        "acts": kinds["act"],
+        "move_share": _share(kinds["move"], len(events)),
+        "act_share": _share(kinds["act"], len(events)),
+        "pair_changes": pair_changes + kinds["move"],
+        "pair_changes_between_entities": pair_changes,
+        "pair_changes_per_event": _share(pair_changes + kinds["move"], len(events)),
     }
 
 
@@ -471,7 +527,7 @@ def corpus_stats(
     return {
         "documents": _documents(planner, documents),
         "sentences": _sentences(documents),
-        "states": _states(documents),
+        "states": _states(planner, documents),
         "causal": _causal(planner, documents),
         "comparisons": _comparisons(documents),
         "quantifiers": _quantifiers(documents),

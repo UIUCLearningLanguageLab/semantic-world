@@ -20,11 +20,13 @@ world's own (``docs/specs/WORLD_AND_LANGUAGE.md``, "Labels").
 
 Since stage c4a a world may have pair fluents, places with location fluents, and place event
 types (``docs/specs/WORLD_PHASE_C.md``): the corpus runs on it, its scenes carry pair changes and
-place events, and its truth tests replay them, but it says nothing about them yet. No word is
-made for a pair fluent, a place, a place feature, or a place event type, no sentence or test item
-names one, and an event of a place event type is never narrated; ``World.place_event_types``
-lists the place event types so that every reader can skip them. The lexicon and the sentences
-about them are stages c4b, c4c, and c5a.
+place events, and its truth tests replay them. Since stage c4b the corpus names them at the
+instance level, and this view gives the lexicon and the planner what they need: the pair fluents
+with their profiles and the ones that some precondition or condition reads (the prepositions),
+the places with their categories, paths, features, and scalars (the referents and their words),
+the place patient capacities, and the place event types with dynamics (the moves and the acts,
+transitive verbs with a place as the object), beside the entities' side. The class-level
+statements about pairs and places are stages c5a and c5b.
 """
 
 from __future__ import annotations
@@ -56,7 +58,8 @@ from semantic_world.world.definition import (
 from semantic_world.world.derived import DERIVED_DIR, read_manifest
 from semantic_world.world.episodes import Relatedness
 from semantic_world.world.generate import WorldResult, define
-from semantic_world.world.runtime import ENTITY, able_table
+from semantic_world.world.places import EVERYPLACE
+from semantic_world.world.runtime import ENTITY, able_table, place_able_table, place_facts
 from semantic_world.world.unary import EVENT_TYPE1_TYPE
 
 THING = "THING"
@@ -79,8 +82,23 @@ SCALAR_POLES = ("HIGH", "LOW")
 PROPERTY_KIND = "property"
 PART_KIND = "part"
 PLACE_EVENT_PREFIX = "PLACEEVENTTYPE."
-"""The prefix of a place event type's label (stage c3a): an event of one is never narrated in
-stage c4a."""
+"""The prefix of a place event type's label (stage c3a): a transitive verb with a place as its
+object since stage c4b."""
+PAIR_PREFIX = "PAIRFL."
+"""The prefix of a pair fluent's label (stage c2a): the concept of a preposition since stage
+c4b."""
+SAME_PREFIX = "SAME."
+"""The prefix of the ``SAME`` literal's concept (``SAME.PAIRFL.5``), a preposition of stage c4b
+that no sentence uses before stage c5a."""
+PLACE_PREFIX = "PLACE."
+"""The prefix of a place's label (``PLACE.1.2.1``, stage c1): a referent since stage c4b."""
+PLACE_CATEGORY_PREFIX = "PLACECATEGORY."
+PLACE_PROPERTY_PREFIX = "PLACEPROPERTY."
+PLACE_PART_PREFIX = "PLACEPART."
+PLACE_SCALAR_PREFIX = "PLACESCALARDIM."
+PLACE_PATIENT_CAPACITY_PREFIX = "CANBE.PLACEEVENTTYPE."
+"""The prefix of a place patient capacity (``CANBE.PLACEEVENTTYPE.2``, stage c1), an adjective
+of places since stage c4b."""
 EVENT_TYPE1_KIND = "event_type1"
 FEATURE_KINDS = (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND)
 """The kinds of the world's feature table: a PROPERTY feature, a PART feature, and a one-place
@@ -313,12 +331,76 @@ class World:
         self.place_event_types: tuple[str, ...] = (
             tuple(result.places.event_type_labels) if result.places is not None else ()
         )
-        """The place event types (stage c1), whose events the scenes may hold since stage c3b and
-        which the corpus does not name in stage c4a: not among ``event_types``."""
+        """The place event types (stage c1), whose events the scenes may hold since stage c3b:
+        not among ``event_types``, which holds the entity event types' tree. Since stage c4b a
+        place event type with dynamics (a move or an act) is a transitive verb with a place as
+        its object."""
         self.pair_fluents: tuple[str, ...] = tuple(result.pair_fluents.labels)
-        """The pair fluents (stage c2a), the location fluents last, which the corpus does not
-        name in stage c4a."""
+        """The pair fluents (stage c2a), the location fluents last: the concepts of the
+        prepositions since stage c4b."""
+        self.pair_fluent_info: dict[str, Any] = {f.label: f for f in result.pair_fluents.fluents}
+        """Each pair fluent's profile (``PairFluent``: ``symmetric``, ``functional``,
+        ``total``), by label."""
+        self.location_fluents: tuple[str, ...] = tuple(
+            f.label for f in result.pair_fluents.fluents if f.total
+        )
         self._able: dict[str, np.ndarray] | None = None
+
+        # Places (stage c1), as the corpus reads them since stage c4b: a second tree of
+        # categories, the places with their leaves and paths, the place features and scalars,
+        # and the place patient capacities. A place is a referent, told apart from other places
+        # by its static place features; it is not an entity, and nothing above reads it.
+        self.place_categories: tuple[str, ...] = ()
+        self.place_category: dict[str, CategoryInfo] = {}
+        self.places: tuple[str, ...] = tuple(self.definition.place_labels)
+        self.place_index: dict[str, int] = {label: i for i, label in enumerate(self.places)}
+        self.place_leaf: tuple[str, ...] = tuple(self.definition.place_leaves)
+        self.place_paths: tuple[tuple[str, ...], ...] = ()
+        self.place_depth = 0
+        self.place_features: dict[str, tuple[str, ...]] = {PROPERTY_KIND: (), PART_KIND: ()}
+        self.place_feature_kind: dict[str, str] = {}
+        self.place_scalars: tuple[str, ...] = tuple(self.definition.place_scalars)
+        self.place_poles: tuple[str, ...] = tuple(
+            f"{scalar}.{pole}" for scalar in self.place_scalars for pole in SCALAR_POLES
+        )
+        self._place_below: dict[str, np.ndarray] = {}
+        self.place_patient_capacities: tuple[str, ...] = ()
+        self._place_capacity: dict[str, np.ndarray] = {}
+        if result.places is not None:
+            place_tree = result.places.taxonomy.tree
+            self.place_categories = tuple(c.label for c in place_tree.categories)
+            place_children: dict[str, list[str]] = {label: [] for label in self.place_categories}
+            place_infos: dict[str, CategoryInfo] = {}
+            for category in place_tree.categories:
+                label = category.label
+                parent = None if category.parent is None else category.parent.label
+                if parent is not None:
+                    place_children[parent].append(label)
+                path = tuple(a.label for a in reversed(category.ancestors())) + (label,)
+                place_infos[label] = CategoryInfo(
+                    label, category.level, parent, category.is_leaf, path, ()
+                )
+            self.place_category = {
+                label: dataclasses.replace(info, children=tuple(place_children[label]))
+                for label, info in place_infos.items()
+            }
+            self.place_paths = tuple(self.place_category[leaf].path for leaf in self.place_leaf)
+            self.place_depth = place_tree.depth
+            for feature in result.places.taxonomy.features.features:
+                kind = _KIND_OF_TYPE[feature.type]
+                self.place_features[kind] = self.place_features[kind] + (feature.label,)
+            self.place_feature_kind = {
+                label: kind for kind, labels in self.place_features.items() for label in labels
+            }
+            every_place = np.arange(len(self.places))
+            self._place_below = {EVERYPLACE: every_place}
+            for label in self.place_categories:
+                self._place_below[label] = np.flatnonzero(
+                    np.array([label in path for path in self.place_paths], dtype=bool)
+                )
+            for i, label in enumerate(result.places.event_type_labels):
+                self._place_capacity[f"CANBE.{label}"] = result.places.patient[:, i].astype(bool)
+            self.place_patient_capacities = tuple(self._place_capacity)
 
         # Patient capacities: every two-place leaf event type's, from the patient projections
         # (intensional: some possible agent).
@@ -408,36 +490,108 @@ class World:
 
     def able(self, event_type: str) -> np.ndarray:
         """An event type's requirement over the entities: a bool vector for a one-place event
-        type, and a bool matrix over ordered pairs (agent, patient) for a two-place event type
-        or a category of them (its base relation), with a false diagonal."""
+        type, a bool matrix over ordered pairs (agent, patient) for a two-place event type or a
+        category of them (its base relation), with a false diagonal, and, for a place event
+        type (stage c4b), a bool matrix over the bindings of an entity and a place."""
+        if self.is_place_event_type(event_type):
+            return place_able_table(self.definition)[event_type]
         if self._able is None:
             self._able = able_table(self.definition)
         return self._able[event_type]
 
     def event_names(self, event_type: str) -> tuple[str, ...]:
         """The labels that can name an event of an event type: the event type, then the
-        categories above it, from the nearest. A one-place event type has only its own label. A
-        place event type (stage c4a) has none: the corpus has no word for it yet, so no label
-        names its events, and every reader of a scene skips them."""
+        categories above it, from the nearest. A one-place event type has only its own label,
+        and so has a place event type (stage c4b: the place event types are flat, and a move or
+        an act is named by its own verb); a place event type without dynamics has no events, and
+        no label names one."""
         if self.is_place_event_type(event_type):
-            return ()
+            return (event_type,) if self.definition.event_type(event_type).performable else ()
         return tuple(reversed(self.event_types[event_type].path))
 
     def is_place_event_type(self, label: str) -> bool:
         """Whether a label is a place event type of the world (stage c3a), an event type whose
-        patient is a place and which the corpus says nothing about in stage c4a."""
+        patient is a place."""
         return label in self.place_event_types
+
+    def place_event_kind(self, label: str) -> str | None:
+        """``move`` or ``act`` for a place event type with dynamics (stage c3b, WM.65), None for
+        one without."""
+        return self.definition.event_type(label).place_kind
 
     def event_types_below(self, label: str) -> tuple[str, ...]:
         """The event types that have events and are named by a label: the label itself when it
-        is an event type, or the leaves below it when it is a category."""
-        if not self.event_types[label].category:
+        is an event type (a place event type included), or the leaves below it when it is a
+        category."""
+        if self.is_place_event_type(label) or not self.event_types[label].category:
             return (label,)
         return tuple(leaf for leaf in self.binary_leaves if label in self.event_types[leaf].path)
 
     def capacity(self, label: str) -> np.ndarray:
         """A patient capacity (``CANBE.<event type>``) over every instance."""
         return self._capacity[label]
+
+    # Pair fluents (stage c4b) ----------------------------------------------------------------
+
+    def is_pair_fluent(self, label: str) -> bool:
+        return label in self.pair_fluent_info
+
+    def is_location_fluent(self, label: str) -> bool:
+        return label in self.location_fluents
+
+    def pair_fluents_read(self) -> tuple[str, ...]:
+        """The pair fluents that some precondition literal or condition literal of some event
+        type reads as a pair (``PAIRFL.k(x, y)``, a compiled literal included), in label order:
+        the pair fluents that get a preposition (``WORLD_PHASE_C.md``, "Lexicon")."""
+        found = {lit.pair_fluent for lit in self._pair_literals() if lit.kind == "pair"}
+        return tuple(f for f in self.pair_fluents if f in found)
+
+    def same_read(self) -> tuple[str, ...]:
+        """The ``SAME`` literals that some precondition or condition reads, as concepts
+        (``SAME.PAIRFL.5``), in the order of the pair fluents."""
+        found = {lit.pair_fluent for lit in self._pair_literals() if lit.kind == "pair_same"}
+        return tuple(f"SAME.{f}" for f in self.pair_fluents if f in found)
+
+    def _pair_literals(self) -> list[Any]:
+        found: list[Any] = []
+        for et in self.definition.event_types:
+            found += [lit for lit in et.precondition if lit.pair]
+            found += [lit for effect in et.effects for lit in effect.condition if lit.pair]
+        return found
+
+    # Places (stage c4b) ----------------------------------------------------------------------
+
+    def is_place(self, label: str) -> bool:
+        return label in self.place_index
+
+    def place_below(self, category: str) -> np.ndarray:
+        """The indices of the places below a category of places (every place for
+        ``EVERYPLACE``)."""
+        return self._place_below[category]
+
+    def place_column(self, feature: str) -> np.ndarray:
+        """A place feature's values over every place, free or determined."""
+        return np.asarray(place_facts(self.definition).values[feature])
+
+    def place_scalar_column(self, scalar: str) -> np.ndarray:
+        assert self.definition.place_scalar_values is not None
+        return self.definition.place_scalar_values[:, self.place_scalars.index(scalar)]
+
+    def is_place_pole(self, label: str) -> bool:
+        """Whether a label is a pole of a place scalar (``PLACESCALARDIM.1.HIGH``)."""
+        scalar, _, side = label.rpartition(".")
+        return side in SCALAR_POLES and scalar in self.place_scalars
+
+    def place_capacity(self, label: str) -> np.ndarray:
+        """A place patient capacity (``CANBE.PLACEEVENTTYPE.<n>``) over every place."""
+        return self._place_capacity[label]
+
+    def place_leaf_of(self, place: str) -> str:
+        return self.place_leaf[self.place_index[place]]
+
+    def place_path(self, place: str) -> tuple[str, ...]:
+        """The categories of places a place is below, from the top to its leaf."""
+        return self.place_paths[self.place_index[place]]
 
     # The fixed test --------------------------------------------------------------------------
 
@@ -611,19 +765,31 @@ class World:
 
 
 def leaf_of(world: World, instance: str) -> str:
+    """The leaf category of an instance, or (stage c4b) of a place."""
+    if world.is_place(instance):
+        return world.place_leaf_of(instance)
     return world.instance_leaf[world.instance_index[instance]]
 
 
 __all__ = [
     "ENTITY",
     "EVENT_TYPE1_KIND",
+    "EVERYPLACE",
     "EXACT",
     "FEATURE_KINDS",
     "LOCAL",
     "NUMERIC_PREFIX",
+    "PAIR_PREFIX",
     "PART_KIND",
+    "PLACE_CATEGORY_PREFIX",
     "PLACE_EVENT_PREFIX",
+    "PLACE_PART_PREFIX",
+    "PLACE_PATIENT_CAPACITY_PREFIX",
+    "PLACE_PREFIX",
+    "PLACE_PROPERTY_PREFIX",
+    "PLACE_SCALAR_PREFIX",
     "PROPERTY_KIND",
+    "SAME_PREFIX",
     "THING",
     "CategoryInfo",
     "EventTypeInfo",

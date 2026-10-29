@@ -167,6 +167,11 @@ def test_false_events_did_not_happen_in_their_scene(cases) -> None:
             if report is None:
                 continue
             assert facts.truth.is_true(report)
+            if event.place:
+                # a move or an act at a place (stage c4b) takes no change: its false items,
+                # with the change ``object``, are stage c4c's
+                assert changes_for(report) == ()
+                continue
             assert changes_for(report) == (
                 (PREDICATE, SUBJECT, ROLE) if event.transitive else (PREDICATE, SUBJECT)
             )

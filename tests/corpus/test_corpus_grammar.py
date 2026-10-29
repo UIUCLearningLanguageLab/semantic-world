@@ -1430,10 +1430,10 @@ def test_plans_the_grammar_does_not_realize(tiny) -> None:
             kind_of("CATEGORY.1.1", quantifier="all"), Predication(COMPARISON, "SCALARDIM.1.HIGH")
         ),
         "only a class-level sentence has a quantifier": SentencePlan(subject, swims, NEC_ALL),
-        "a verb or a comparative, and only one": SentencePlan(
+        "a verb, a comparative, a pair state, or a place event type, and only one": SentencePlan(
             subject, Predication(VERB, "EVENTTYPE2.1.1")
         ),
-        "a verb or a comparative, and only one ": SentencePlan(
+        "a verb, a comparative, a pair state, or a place event type, and only one ": SentencePlan(
             subject, Predication(CAN, "EVENTTYPE1.1", True, target)
         ),
         "never negated": SentencePlan(

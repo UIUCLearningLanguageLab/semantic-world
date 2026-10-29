@@ -315,13 +315,29 @@ class Described:
 
     @staticmethod
     def path(instance: str) -> list[str]:
-        prefix, *numbers = instance.rsplit(".", 1)[0].replace("INSTANCE", "CATEGORY", 1).split(".")
+        """The categories an instance is below, from its label; for a place (stage c4b), the
+        categories of places (``PLACE.1.2.1`` is below ``PLACECATEGORY.1.2``)."""
+        label = instance.rsplit(".", 1)[0]
+        label = (
+            label.replace("PLACE", "PLACECATEGORY", 1)
+            if instance.startswith("PLACE.")
+            else label.replace("INSTANCE", "CATEGORY", 1)
+        )
+        prefix, *numbers = label.split(".")
         return [".".join([prefix, *numbers[: k + 1]]) for k in range(len(numbers))]
 
     def fits(self, instance: str, phrase) -> bool:
         if phrase.noun not in self.path(instance):
             return False
         world = self.world
+        if instance.startswith("PLACE."):
+            # a place (stage c4b) is told apart by its place properties and parts, read from
+            # the places' static facts
+            row = world.place_index[instance]
+            return all(
+                bool(world.place_column(literal.feature)[row]) == literal.positive
+                for literal in phrase.restriction
+            )
         row = self.row[instance]
         for literal in phrase.restriction:
             if literal.feature.startswith("SCALARDIM."):
@@ -347,8 +363,12 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
     described = Described(case.world)
     flags: Counter = Counter()
     needed = 0
+    place_flags: Counter = Counter()
     for document in documents:
         cast = list(dict.fromkeys(p for scene in document.scenes for p in scene.participants))
+        # the places of the document's scenes (stage c4b): what a mention of a place is told
+        # apart from
+        places = list(dict.fromkeys(q for scene in document.scenes for q in (scene.places or ())))
         if document.type in ENCYCLOPEDIC:
             assert not cast
         for sentence in document.sentences:
@@ -363,6 +383,11 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
                     continue
                 # what the noun phrase says is true of its referent
                 assert described.fits(phrase.referent, phrase)
+                if phrase.place:
+                    fitting = [q for q in places if described.fits(q, phrase)]
+                    assert flag == (fitting == [phrase.referent])
+                    place_flags[flag] += 1
+                    continue
                 fitting = [p for p in cast if described.fits(p, phrase)]
                 assert flag == (fitting == [phrase.referent])
                 flags[flag] += 1
@@ -379,6 +404,13 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
                     assert bool(phrase.restriction) == (len(bare) > 1) or not flag
                 needed += len(bare) > 1
     assert flags[True] > 100 and needed > 30
+    # the places are told apart where their features allow (the tiny place taxonomy's two
+    # places of a category share every place property, so none of its definite place mentions
+    # is distinguished; the default world's are, in part)
+    if case.world.location_fluents:  # the written worlds have places and no moves
+        assert sum(place_flags.values()) > 0
+    if name == "default":
+        assert place_flags[True] > 0
     # nearly every definite mention can be told apart. An entity narrative has 2 to 5 scenes,
     # so its cast is large, and the smallest worlds have few features to tell instances apart
     # (the still world: 20 of 189 definite mentions)
@@ -511,6 +543,10 @@ def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
             if phrase.kind == CLASS_NP:
                 # a class-level noun phrase is always named by its own noun
                 assert phrase.noun == phrase.referent
+            elif phrase.place:
+                # a place (stage c4b) is named by a category of places above it, at a level of
+                # the place tree by mention.place_level_weights
+                assert phrase.noun in Described.path(phrase.referent)
             elif not phrase.pronoun:
                 # an instance is named by its leaf, or by a category above it
                 path = Described.path(phrase.referent)
@@ -527,7 +563,7 @@ def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
     named: Counter = Counter()
     for _, sentence in sentences_of(documents, *NARRATIVES):
         for phrase in sentence.plan.noun_phrases():
-            if phrase.pronoun:
+            if phrase.pronoun or phrase.place:  # a place's level is place_level_weights'
                 continue
             level = Described.path(phrase.referent).index(phrase.noun) + 1
             named[level] += 1
@@ -772,9 +808,9 @@ def test_narratives(cases, corpora) -> None:
         else:
             (scene,) = document.scenes
             assert document.topic == scene.label
-            # every event of the scene, as far as the document's length goes (a move or an
-            # act at a place is not narrated in stage c4a)
-            narrated = [e.label for e in scene_events(scene) if not e.place]
+            # every event of the scene, as far as the document's length goes, the moves and
+            # the acts at a place among them (stage c4b)
+            narrated = [e.label for e in scene_events(scene)]
             assert reported == narrated[: len(reported)]
         for index, sentence in enumerate(document.sentences):
             proposition = sentence.proposition

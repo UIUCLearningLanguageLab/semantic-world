@@ -169,7 +169,9 @@ from semantic_world.corpus.propositions import (
     MOST,
     NEC_KINDS,
     NEC_QUANTIFIERS,
+    PAIR_STATE,
     PATIENT,
+    PLACE_EVENT,
     PRECONDITION,
     PROGRESSIVE,
     PROJECTION,
@@ -186,11 +188,11 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
     Truth,
+    is_property_feature,
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import as_json
 from semantic_world.corpus.renderings import TIMED_OPERATORS, propositional
-from semantic_world.corpus.world import PROPERTY_PREFIX
 from semantic_world.world.history import History
 from semantic_world.world.runtime import RANGE
 
@@ -318,6 +320,10 @@ def candidates(
 
     if isinstance(subject, EventTerm):
         return _causal_candidates(facts, proposition, change)
+    if predicate.kind in (PAIR_STATE, PLACE_EVENT):
+        # the changes of a pair state, a location, or an event of a place event type (the
+        # change ``object`` among them, WM.56) are stage c4c's: no false item is made from them
+        return []
 
     if change == PREDICATE:
         if proposition.level in (EVENT, ABLE_NOW):
@@ -481,6 +487,8 @@ def _valid_false(facts: Facts, option: Proposition) -> Proposition | None:
 
 def changes_for(proposition: Proposition) -> tuple[str, ...]:
     """The kinds of change that can apply to a proposition at all."""
+    if proposition.predicate.kind in (PAIR_STATE, PLACE_EVENT):
+        return ()  # stage c4c's
     if isinstance(proposition.subject, EventTerm):
         changes = [PREDICATE, POLARITY, EVENT_SWAP]
         if not proposition.subject.event_type.startswith("EVENTTYPE1."):
@@ -579,6 +587,9 @@ def stated_propositions(
             for phrase in sentence.plan.noun_phrases():
                 if phrase.noun is None or not counts(phrase):
                     continue
+                # a mention of a place (stage c4b) states its category and its place features
+                # the same way; no test item of this stage names a place, so the entries are
+                # never looked up
                 instance = phrase.referent
                 add(Proposition(INSTANCE, instance, Predicate(MEMBER, phrase.noun)))
                 for literal in phrase.restriction:
@@ -586,7 +597,7 @@ def stated_propositions(
                         predicate = Predicate(COMPARISON, literal.feature, comparison=phrase.noun)
                         add(Proposition(INSTANCE, instance, predicate))
                     else:
-                        kind = IS if literal.feature.startswith(PROPERTY_PREFIX) else HAS
+                        kind = IS if is_property_feature(literal.feature) else HAS
                         predicate = Predicate(kind, literal.feature)
                         add(Proposition(INSTANCE, instance, predicate, literal.positive))
     return stated
@@ -874,7 +885,9 @@ class TestSetBuilder:
         self.streams = planner.streams
         self.size = planner.config.test_sets.size
         self.stated = stated_propositions(documents, self.config.test_sets.seen_descriptions)
-        self.narratives = [d for d in documents if d.scenes and d.referents]
+        # the referents a test item can be about are the entities (stage c4b): a place is a
+        # referent of a document too, but no item of this stage mentions one
+        self.narratives = [d for d in documents if d.scenes and self.entity_referents(d)]
         self._events: dict[str, SceneEvent] = {
             event.label: event
             for d in documents
@@ -883,16 +896,26 @@ class TestSetBuilder:
         }
         self._reports: dict[str, tuple[str, ...]] = {}
         for document in self.narratives:
+            # the events the document reports, in a main clause or a relative clause, apart
+            # from the moves and the acts at a place (stage c4b): the event items with place
+            # event types, and their change ``object``, are stage c4c's
             labels = dict.fromkeys(
                 label
                 for sentence in document.sentences
                 for label in sentence.sentence.event_labels
-                if label is not None and is_event_label(label)
+                if label is not None and is_event_label(label) and not self._events[label].place
             )
             self._reports[document.label] = tuple(labels)
         self.reporting = [d for d in self.narratives if self._reports[d.label]]
         self.situational = [d for d in self.narratives if d.type == SITUATIONAL]
         self._tense = self.config.propositions.event_tense
+
+    def entity_referents(self, document: Document) -> tuple[str, ...]:
+        """The referents of a document that are entities, in the order of first mention: what
+        an item of this stage can be about, and what a subject swap can bring in (a place
+        referent, stage c4b, is neither)."""
+        world = self.planner.world
+        return tuple(r for r in document.referents.values() if not world.is_place(r))
 
     # The sets --------------------------------------------------------------------------------
 
@@ -953,7 +976,7 @@ class TestSetBuilder:
             ) -> bool:
                 return self._kind(level, document, true, candidate) in open_kinds
 
-            referents = None if document is None else tuple(document.referents.values())
+            referents = None if document is None else self.entity_referents(document)
             false = falsify(self.facts, true, change, rng, instances=referents, accept=accept)
             if false is None:
                 continue
@@ -1060,7 +1083,7 @@ class TestSetBuilder:
         if not self.narratives:
             return None
         document = self.narratives[int(rng.integers(len(self.narratives)))]
-        referents = tuple(document.referents.values())
+        referents = self.entity_referents(document)
         instance = referents[int(rng.integers(len(referents)))]
         others = tuple(r for r in referents if r != instance)
         negative = bool(rng.random() < self.config.propositions.negation_rate[INSTANCE])
@@ -1081,7 +1104,7 @@ class TestSetBuilder:
         if not self.narratives or not self.facts.scalars:
             return None
         document = self.narratives[int(rng.integers(len(self.narratives)))]
-        referents = tuple(document.referents.values())
+        referents = self.entity_referents(document)
         if len(referents) < 2:
             return None
         first, second = (referents[int(i)] for i in rng.choice(len(referents), 2, replace=False))
@@ -1123,7 +1146,7 @@ class TestSetBuilder:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]
         scene = document.scenes[0]
-        referents = tuple(document.referents.values())
+        referents = self.entity_referents(document)
         instance = referents[int(rng.integers(len(referents)))]
         final = time_index(scene.final)
         predicate = predicates[int(rng.integers(len(predicates)))]
@@ -1151,7 +1174,7 @@ class TestSetBuilder:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]
         scene = document.scenes[0]
-        referents = tuple(document.referents.values())
+        referents = self.entity_referents(document)
         if len(referents) < 2:
             return None
         first, second = (referents[int(i)] for i in rng.choice(len(referents), 2, replace=False))
@@ -1170,7 +1193,7 @@ class TestSetBuilder:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]
         scene = document.scenes[0]
-        referents = tuple(document.referents.values())
+        referents = self.entity_referents(document)
         agent = referents[int(rng.integers(len(referents)))]
         final = time_index(scene.final)
         facts, truth = self.facts, self.truth

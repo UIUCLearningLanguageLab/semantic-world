@@ -58,8 +58,43 @@ ADJECTIVE = "adjective"
 PART_NOUN = "part_noun"
 INTRANSITIVE_VERB = "intransitive_verb"
 TRANSITIVE_VERB = "transitive_verb"
+PREPOSITION = "preposition"
+"""The part of speech of a pair fluent's word and of a ``SAME`` literal's (stage c4b,
+``docs/specs/WORLD_PHASE_C.md``, "Lexicon"): a content lexeme, which the word-form pipeline
+assigns a word as it does any other, and which takes no affix."""
 FUNCTION_WORD = "function_word"
-PARTS_OF_SPEECH = (NOUN, ADJECTIVE, PART_NOUN, INTRANSITIVE_VERB, TRANSITIVE_VERB, FUNCTION_WORD)
+PARTS_OF_SPEECH = (
+    NOUN,
+    ADJECTIVE,
+    PART_NOUN,
+    INTRANSITIVE_VERB,
+    TRANSITIVE_VERB,
+    PREPOSITION,
+    FUNCTION_WORD,
+)
+PAIR = "pair"
+"""The concept type of a pair fluent's preposition (stage c4b)."""
+SAME = "same"
+"""The concept type of a ``SAME`` literal's preposition (stage c4b): made in that stage, used by
+no sentence before stage c5a."""
+PLACE_CATEGORY = "place_category"
+PLACE_IS = "place_is"
+PLACE_HAS = "place_has"
+PLACE_SCALAR = "place_scalar"
+PLACE_EVENT = "place_event"
+PLACE_PATIENT_PROJECTION = "place_patient_projection"
+PLACE_TYPES = (
+    PLACE_CATEGORY,
+    PLACE_IS,
+    PLACE_HAS,
+    PLACE_SCALAR,
+    PLACE_EVENT,
+    PLACE_PATIENT_PROJECTION,
+)
+"""The concept types of the places' words (stage c4b): the nouns of the categories of places,
+the adjectives and part nouns of the place features, the two pole adjectives of each place
+scalar, the transitive verbs of the place event types, and the adjectives of the place patient
+capacities."""
 
 GENERIC = "generic"
 """The concept type of the generic head noun."""
@@ -249,12 +284,18 @@ def function_word_glosses(config: Config) -> tuple[str, ...]:
 def relation_extent(world: World, event_type: str) -> str | None:
     """``every pair`` when a two-place event type's requirement (a category's base relation)
     holds for every ordered pair of distinct instances, ``no pair`` when it holds for none, and
-    None otherwise. With fewer than two instances there is no pair."""
-    n = world.count
-    true_pairs = int(world.able(event_type).sum())
+    None otherwise. With fewer than two instances there is no pair. For a place event type
+    (stage c4b) the pairs are the bindings of an entity and a place."""
+    matrix = world.able(event_type)
+    true_pairs = int(matrix.sum())
+    if world.is_place_event_type(event_type):
+        every = matrix.size
+    else:
+        n = world.count
+        every = n * (n - 1)
     if true_pairs == 0:
         return NO_PAIR
-    if true_pairs == n * (n - 1):
+    if true_pairs == every:
         return EVERY_PAIR
     return None
 
@@ -289,14 +330,39 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
             label = f"{fluent}.{pole}"
             concepts.append(Concept(label, NUMERIC, ADJECTIVE, label))
     concepts.append(Concept(THING, GENERIC, NOUN, THING))
+    # The concepts of phase (c) (stage c4b), after the generic noun, so that every content
+    # lexeme of a world without them keeps its label: the prepositions of the pair fluents and
+    # the SAME literals that some precondition or condition reads, then the places' words in
+    # the order of the specification's table.
+    concepts += [Concept(f, PAIR, PREPOSITION, f) for f in world.pair_fluents_read()]
+    concepts += [Concept(f, SAME, PREPOSITION, f) for f in world.same_read()]
+    concepts += [Concept(c, PLACE_CATEGORY, NOUN, c) for c in world.place_categories]
+    concepts += [Concept(f, PLACE_IS, ADJECTIVE, f) for f in world.place_features[PROPERTY_KIND]]
+    concepts += [Concept(f, PLACE_HAS, PART_NOUN, f) for f in world.place_features[PART_KIND]]
+    for scalar in world.place_scalars:
+        for pole in SCALAR_POLES:
+            label = f"{scalar}.{pole}"
+            concepts.append(Concept(label, PLACE_SCALAR, ADJECTIVE, label))
+    for label in world.place_event_types:
+        # a place event type with dynamics (a move or an act, which has events) and a
+        # requirement that holds for some binding and not every binding; one without dynamics
+        # has no events, and gets no word (its capacity facts are stage c5b's)
+        if world.event_names(label) and relation_extent(world, label) is None:
+            concepts.append(Concept(label, PLACE_EVENT, TRANSITIVE_VERB, label))
+    concepts += [
+        Concept(label, PLACE_PATIENT_PROJECTION, ADJECTIVE, label)
+        for label in world.place_patient_capacities
+    ]
     return tuple(concepts)
 
 
 def event_types_without_word(world: World) -> dict[str, str]:
-    """The two-place event types and categories that never get a word, with the reason, in
-    tree order."""
+    """The two-place event types and categories, and (stage c4b) the place event types with
+    dynamics, that never get a word, with the reason, in tree order."""
     found = {}
-    for label in world.binary:
+    for label in world.binary + tuple(
+        label for label in world.place_event_types if world.event_names(label)
+    ):
         extent = relation_extent(world, label)
         if extent is not None:
             found[label] = extent
@@ -326,7 +392,7 @@ def _named(config: Config, streams: Streams, concepts: tuple[Concept, ...]) -> s
                 continue
             unit = (
                 concept.label.rsplit(".", 1)[0]
-                if concept_type in ("scalar", NUMERIC)
+                if concept_type in ("scalar", NUMERIC, PLACE_SCALAR)
                 else concept.label
             )
             units.setdefault(unit, []).append(concept.label)

@@ -1,5 +1,5 @@
-# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 35 content
-# lexemes, 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
+# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 57 content
+# lexemes (44 before stage c4b, which added the prepositions and the places' words), 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
 # corpus first, so that its request exists:
 #
 #   python -m semantic_world.corpus generate data/corpus/tiny.yaml

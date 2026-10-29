@@ -937,7 +937,8 @@ def test_what_the_documents_state(runs) -> None:
                     if feature.startswith("SCALARDIM."):
                         predicate = Predicate("comparison", feature, comparison=mention["noun"])
                     else:
-                        predicate = Predicate(world.feature_kind[feature], feature)
+                        kind = world.feature_kind.get(feature) or world.place_feature_kind[feature]
+                        predicate = Predicate(kind, feature)
                     assert Proposition(INSTANCE, instance, predicate, positive) in stated
                 for clause in mention.get("clauses", ()):
                     relative += 1
@@ -962,9 +963,22 @@ def test_what_the_documents_state(runs) -> None:
                         )
                     assert expected in stated
     assert relative > 20 and modifiers > 100
-    # every stated proposition is true
+    # every stated proposition is true; what a mention of a place (stage c4b) states, its
+    # category and its place features, is read from the places' own table, which no truth test
+    # of the corpus judges (no item of this stage mentions a place)
     truth = corpus.planner.truth
-    assert all(truth.is_true(p) for p in stated)
+    places = 0
+    for p in stated:
+        if isinstance(p.subject, str) and world.is_place(p.subject):
+            places += 1
+            if p.predicate.kind == "member":
+                assert p.predicate.label in world.place_path(p.subject)
+            else:
+                row = world.place_index[p.subject]
+                assert bool(world.place_column(p.predicate.label)[row]) == p.polarity
+            continue
+        assert truth.is_true(p)
+    assert places > 0
 
 
 # ---------------------------------------------------------------------------------------------

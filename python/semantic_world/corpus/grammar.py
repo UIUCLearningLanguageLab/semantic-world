@@ -92,6 +92,7 @@ from semantic_world.corpus.propositions import (
     COMPARISON_KINDS,
     EFFECT,
     EVENT,
+    EVENT_KINDS,
     EVENT_VARIABLE,
     HAS,
     HIGH,
@@ -103,7 +104,9 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
+    PAIR_STATE,
     PATIENT,
+    PLACE_EVENT,
     PRECONDITION,
     PRESENT,
     PROJECTION,
@@ -123,13 +126,15 @@ from semantic_world.corpus.propositions import (
     event_of,
     is_event_variable,
     is_numeric,
+    is_part_feature,
+    is_property_feature,
     pole_dimension,
     pole_direction,
     scene_of,
 )
 from semantic_world.corpus.world import (
     FLUENT_PREFIX,
-    PART_PREFIX,
+    PLACE_PREFIX,
     PROPERTY_PREFIX,
     SCALAR_PREFIX,
     THING,
@@ -144,10 +149,13 @@ QUANTIFIER_WORDS = ("all", "most", "some", "no")
 a language setting; "most" and "some" express ``most`` and ``some``."""
 WORD_OF = {NEC_ALL: "all", ALL: "all", MOST: "most", SOME: "some", NO: "no", NEC_NO: "no"}
 """The determiner word that states each quantifier."""
-CLAUSE_KINDS = (CAN, VERB, PROJECTION, MEMBER)
+CLAUSE_KINDS = (CAN, VERB, PLACE_EVENT, PROJECTION, MEMBER)
 """The predicates a relative clause can hold, apart from the negated PROPERTY literals of the
 restriction. A positive PROPERTY literal, a scalar pole, and a PART literal are never in a
-relative clause: they are adjectives and with-phrases."""
+relative clause: they are adjectives and with-phrases. A pair state (stage c4b) is never in one
+either: a pair fluent or a location would need a time point, so it is never a modifier of a
+mention (``WORLD_PHASE_C.md``, "Grammar"); an event of a place event type can be reported in an
+event-level relative clause ("the owl that went to the dry place")."""
 
 
 class GrammarError(CorpusError):
@@ -178,39 +186,51 @@ class NounPhrase:
         return self.kind == INSTANCE_NP and self.noun is None
 
     @property
+    def place(self) -> bool:
+        """Whether the phrase mentions a place (stage c4b): a referent of the kind ``instance``
+        whose label is a place's. A place is introduced with ``a`` and mentioned later with
+        ``the``, named by a category of places, told apart by place features, and never a
+        pronoun; it takes no relative clause."""
+        return self.kind == INSTANCE_NP and self.referent.startswith(PLACE_PREFIX)
+
+    @property
     def negated(self) -> tuple[Literal, ...]:
-        """The negated PROPERTY literals, which go into the relative clause."""
+        """The negated PROPERTY literals (of entities, or of places), which go into the
+        relative clause."""
         return tuple(
-            x for x in self.restriction if not x.positive and x.feature.startswith(PROPERTY_PREFIX)
+            x for x in self.restriction if not x.positive and is_property_feature(x.feature)
         )
 
     @property
     def adjectives(self) -> tuple[Literal, ...]:
         """The positive PROPERTY literals and the scalar poles."""
-        return tuple(
-            x for x in self.restriction if x.positive and not x.feature.startswith(PART_PREFIX)
-        )
+        return tuple(x for x in self.restriction if x.positive and not is_part_feature(x.feature))
 
     @property
     def with_phrases(self) -> tuple[Literal, ...]:
-        return tuple(x for x in self.restriction if x.feature.startswith(PART_PREFIX))
+        return tuple(x for x in self.restriction if is_part_feature(x.feature))
 
 
 @dataclass(frozen=True)
 class Predication:
     kind: str
     """``property``, ``part``, ``event_type1``, ``comparison``, ``comparative``, ``member``,
-    ``patient_capacity``, ``event_type2``, ``state``, ``effect``, or ``precondition``."""
+    ``patient_capacity``, ``event_type2``, ``state``, ``effect``, ``precondition``, or (stage
+    c4b) ``pair_state`` (a prepositional predicate: the copula or ``become`` with the pair
+    fluent's preposition and its object) and ``place_event_type`` (a move or an act, a transitive
+    verb with a place as its object)."""
     label: str
     """The predicate word's concept. For a comparative, the pole adjective the sentence uses
     (``SCALARDIM.1.HIGH`` for "bigger than", ``SCALARDIM.1.LOW`` for "smaller than"); for a
     numeric change or a numeric effect statement, the numeric pole whose comparative form says
-    the direction (``NUMFL.1.HIGH`` for "became hungrier" and "become hungrier")."""
+    the direction (``NUMFL.1.HIGH`` for "became hungrier" and "become hungrier"); for a pair
+    state, the pair fluent, whose word is a preposition."""
     polarity: bool = True
     """For an effect or a precondition, the fluent's value."""
     object: NounPhrase | None = None
-    """Verbs and comparatives only: the patient, or the standard of a comparison ("than the
-    mouse"). None in an object relative, where the head noun is the patient."""
+    """Verbs, comparatives, and pair states only: the patient, the standard of a comparison
+    ("than the mouse"), or the object of the preposition ("near the mouse", "at the dry place").
+    None in an object relative, where the head noun is the patient."""
     event: str | None = None
     """Event level only: the label of the event that the verb phrase reports
     (``SCENE.8.EVENTINSTANCE.5``). In a test item it is the label of the scene (``SCENE.8``):
@@ -274,7 +294,7 @@ class Predication:
         """``able_now``, ``change``, or ``state`` for a predication about a time point."""
         if self.time is None:
             return None
-        if self.kind in (CAN, VERB):
+        if self.kind in EVENT_KINDS:
             return ABLE_NOW
         return CHANGE if self.become else STATE
 
@@ -633,6 +653,11 @@ def check_plan(plan: SentencePlan) -> None:
     elif plan.quantifier is not None:
         raise GrammarError("only a class-level sentence has a quantifier")
     _check_phrase(subject, plan.level, top=True)
+    if subject.place:
+        raise GrammarError(
+            "a place is never the subject of a sentence in phase (c): it is the object of a "
+            "preposition or of a place event type"
+        )
     _check_predication(predication, subject, plan.level, in_clause=False)
     if predication.kind == MEMBER and predication.label == subject.noun:
         raise GrammarError(
@@ -789,9 +814,34 @@ def _check_phrase(phrase: NounPhrase, level: str, top: bool = False, causal: boo
             raise GrammarError("a pronoun takes no determiner, modifier, or relative clause")
     elif phrase.determiner not in INSTANCE_DETERMINERS:
         raise GrammarError(f"an instance is mentioned with a or the, not {phrase.determiner!r}")
+    if phrase.place:
+        # a mention of a place (stage c4b): named by a category of places, told apart by place
+        # features, never a pronoun, and without a relative clause
+        if phrase.noun is None or not phrase.noun.startswith("PLACECATEGORY."):
+            raise GrammarError("a place is mentioned by a category of places, never by a pronoun")
+        if phrase.clause is not None:
+            raise GrammarError("a place takes no relative clause in phase (c)")
+        for literal in phrase.restriction:
+            if not literal.feature.startswith("PLACE"):
+                raise GrammarError(
+                    f"{literal.feature} is not a place feature: a place is told apart by its "
+                    "own features"
+                )
+    elif phrase.kind == INSTANCE_NP:
+        for literal in phrase.restriction:
+            if literal.feature.startswith("PLACE"):
+                raise GrammarError(
+                    f"{literal.feature} is a place feature: an entity is told apart by its own "
+                    "features"
+                )
     for literal in phrase.restriction:
         if literal.pole and not literal.positive:
             raise GrammarError("a scalar pole in a restriction is never negated")
+        if literal.feature.startswith("PAIRFL.") or literal.feature.startswith("SAME."):
+            raise GrammarError(
+                "a pair fluent or a location is never a modifier of a mention: it would need a "
+                "time point"
+            )
     clause = phrase.clause
     if clause is None:
         return
@@ -864,6 +914,8 @@ def _check_predication(
         PROJECTION,
         VERB,
         STATE_KIND,
+        PAIR_STATE,
+        PLACE_EVENT,
         *CAUSAL_KINDS,
     ):
         raise GrammarError(f"unknown predicate kind {kind!r}")
@@ -876,15 +928,33 @@ def _check_predication(
         )
     if in_clause and predication.time is not None:
         raise GrammarError("a relative clause is never about a time point")
-    timed_kinds = (STATE_KIND,) + ((COMPARISON, COMPARATIVE) if predication.numeric else ())
-    if (kind in timed_kinds) != (predication.time is not None and kind not in (CAN, VERB)):
+    timed_kinds = (STATE_KIND, PAIR_STATE) + (
+        (COMPARISON, COMPARATIVE) if predication.numeric else ()
+    )
+    if (kind in timed_kinds) != (predication.time is not None and kind not in EVENT_KINDS):
         raise GrammarError(
             "a fluent is stated at a time point of a scene (a state or a change), and a time "
-            "point belongs to a fluent, a numeric pole or comparative, or to what was possible "
-            "then (able_now)"
+            "point belongs to a fluent, a pair fluent, a numeric pole or comparative, or to what "
+            "was possible then (able_now)"
         )
-    if predication.become and kind != STATE_KIND:
-        raise GrammarError("only a change of a fluent says become")
+    if predication.become and kind not in (STATE_KIND, PAIR_STATE):
+        raise GrammarError("only a change of a fluent, or of a pair, says become")
+    if kind == PAIR_STATE:
+        # a prepositional predicate (stage c4b): the copula or become, the pair fluent's
+        # preposition, and an object, an entity or a place, never a category
+        target = predication.object
+        if target is None or target.kind != INSTANCE_NP:
+            raise GrammarError("a pair state has an object: an instance or a place")
+        if subject.place:
+            raise GrammarError("the first argument of a pair state is an entity")
+        if target.referent == subject.referent:
+            raise GrammarError("a thing is never in a pair with itself")
+    if kind == PLACE_EVENT:
+        target = predication.object
+        if not gap and (target is None or not target.place):
+            raise GrammarError("the object of a place event type is a place")
+        if subject.place:
+            raise GrammarError("the agent of a place event type is an entity")
     if kind == STATE_KIND and is_numeric(predication.label):
         if not predication.become:
             raise GrammarError(
@@ -912,16 +982,22 @@ def _check_predication(
             "a class-level relative clause holds a one-place or a two-place event type, and is "
             "never negated"
         )
-    if (kind in (VERB, COMPARATIVE)) != (predication.object is not None or gap):
-        raise GrammarError("a verb or a comparative, and only one, has an object")
+    if (kind in (VERB, COMPARATIVE, PAIR_STATE, PLACE_EVENT)) != (
+        predication.object is not None or gap
+    ):
+        raise GrammarError(
+            "a verb, a comparative, a pair state, or a place event type, and only one, has an "
+            "object"
+        )
     if (predication.event is not None) != (level == EVENT):
         raise GrammarError(
             "every verb phrase of an event-level sentence reports an event, and no other does"
         )
     if predication.event is not None:
-        if kind not in (CAN, VERB):
+        if kind not in EVENT_KINDS:
             raise GrammarError(
-                "an event is a one-place event type, or a two-place event type with a patient"
+                "an event is a one-place event type, a two-place event type with a patient, or "
+                "a place event type with a place"
             )
         if not predication.polarity:
             raise GrammarError("an event-level proposition is never negated")

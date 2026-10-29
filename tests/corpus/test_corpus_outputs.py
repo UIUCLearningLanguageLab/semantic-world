@@ -184,6 +184,8 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
     assert len(documents) == corpus.config.documents.count
     lexemes = {x.label for x in corpus.planner.lexicon.lexemes}
     instances = set(corpus.planner.world.instances)
+    places = set(corpus.planner.world.places)
+    place_categories = set(corpus.planner.world.place_categories)
     categories = set(corpus.planner.world.categories) | {"THING"}
     scene_labels = {scene.label for scene in corpus.planner.scenes}
     event_labels = {e.label for scene in corpus.planner.scenes for e in scene_events(scene)}
@@ -196,7 +198,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
         assert set(document["scenes"]) <= scene_labels
         referents = document["referents"]
         assert list(referents) == [f"REF.{n}" for n in range(1, len(referents) + 1)]
-        assert set(referents.values()) <= instances
+        assert set(referents.values()) <= instances | places  # a place is a referent (stage c4b)
         assert document["sentences"]
         for k, sentence in enumerate(document["sentences"], start=1):
             assert list(sentence) == SENTENCE_FIELDS
@@ -220,8 +222,8 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
             assert len(sentence["referents"]) == len(phrases)
             for entry in sentence["referents"]:
                 assert list(entry) == ["referent", "noun"]
-                assert entry["referent"] in instances | categories
-                assert entry["noun"] is None or entry["noun"] in categories
+                assert entry["referent"] in instances | categories | places
+                assert entry["noun"] is None or entry["noun"] in categories | place_categories
             assert len(sentence["events"]) == len(verb_phrases)
             # the event a verb phrase reports, or the time point it is about
             assert all(e is None or e in event_labels or is_time_key(e) for e in sentence["events"])
@@ -508,13 +510,26 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     )
     assert stats["ambiguity"]["quantifier_readings"] == dict(sorted(quantifier_readings.items()))
     block = stats["mentions"]
-    undistinguished = sum(mark is False for s in sentences for mark in s["distinguished"])
-    definite = sum(mark is not None for s in sentences for mark in s["distinguished"])
-    assert block["definite_not_distinguished"] == undistinguished
-    assert block["definite"] == definite
+    # the mentions of entities and of places (stage c4b) are counted apart: the referents and
+    # the distinguished marks of a sentence line up, one per noun phrase
+    marks = [
+        (entry, mark)
+        for s in sentences
+        for entry, mark in zip(s["referents"], s["distinguished"], strict=True)
+    ]
+    entity_marks = [mark for entry, mark in marks if entry["referent"].startswith("INSTANCE.")]
+    place_marks = [mark for entry, mark in marks if entry["referent"].startswith("PLACE.")]
+    assert block["definite_not_distinguished"] == sum(mark is False for mark in entity_marks)
+    assert block["definite"] == sum(mark is not None for mark in entity_marks)
+    assert block["place_definite_not_distinguished"] == sum(mark is False for mark in place_marks)
+    assert block["place_definite"] == sum(mark is not None for mark in place_marks)
     pronouns = sum(entry["noun"] is None for s in sentences for entry in s["referents"])
     assert block["pronouns"] == pronouns
-    assert block["instance_mentions"] == block["indefinite"] + definite + pronouns
+    assert block["instance_mentions"] == block["indefinite"] + block["definite"] + pronouns
+    assert block["place_mentions"] == block["place_indefinite"] + block["place_definite"]
+    assert block["instance_mentions"] + block["place_mentions"] == len(entity_marks) + len(
+        place_marks
+    )
     scenes = lines(folder / "scenes.jsonl")
     steps = [step for scene in scenes for step in scene["steps"]]
     events = [event for step in steps for event in step["events"]]

@@ -48,11 +48,28 @@ CONCEPT_TYPES = (
     "patient_projection",
     "scalar",
     "numeric",
+    "pair",
+    "same",
+    "place_category",
+    "place_is",
+    "place_has",
+    "place_scalar",
+    "place_event",
+    "place_patient_projection",
 )
 """The concept types whose share of named concepts is a parameter. ``numeric`` (stage b3b) is
 the two absolute adjectives of a numeric fluent (``NUMFL.1.HIGH`` and ``NUMFL.1.LOW``), named
-together as the two poles of a scalar are."""
-NAMED_PROPORTION_DEFAULTS = {**dict.fromkeys(CONCEPT_TYPES, 1.0), "patient_projection": 0.25}
+together as the two poles of a scalar are. The last eight are phase (c)'s (stage c4b,
+``docs/specs/WORLD_PHASE_C.md``, "Lexicon"): the prepositions of the pair fluents and of the
+``SAME`` literals that some precondition or condition reads, the nouns of the categories of
+places, the adjectives and part nouns of the place properties and parts, the two pole adjectives
+of each place scalar (named together), the transitive verbs of the place event types, and the
+adjectives of the place patient capacities (a quarter by default, as for entities)."""
+NAMED_PROPORTION_DEFAULTS = {
+    **dict.fromkeys(CONCEPT_TYPES, 1.0),
+    "patient_projection": 0.25,
+    "place_patient_projection": 0.25,
+}
 RENAMED_CONCEPT_TYPES = {
     "is": "property",
     "has": "part",
@@ -145,6 +162,13 @@ class WorldSource:
         types."""
         binary = self.config.event_types.binary
         return None if binary is None else binary.taxonomy.depth
+
+    @property
+    def place_depth(self) -> int | None:
+        """The depth of the place taxonomy's category tree (stage c4b), or None when the world
+        has no places."""
+        places = self.config.places
+        return None if places is None else places.taxonomy_run.taxonomy.depth
 
     def resolved(self) -> dict[str, Any]:
         if self.kind == "run":
@@ -370,6 +394,10 @@ class MentionConfig:
     event_level_weights: tuple[float, ...]
     """The weight of every level of the event-type tree, 1 to its depth, for the verb that names
     an event. Empty when the world has no two-place event types."""
+    place_level_weights: tuple[float, ...]
+    """The weight of every level of the place tree, 1 to its depth, for the noun of a mention of
+    a place (stage c4b, ``WORLD_PHASE_C.md``, "Places as referents"): the leaf heaviest by
+    default, as for categories of entities. Empty when the world has no places."""
     pronoun_rate: float
     modifier_rate: float
     max_adjectives: int
@@ -382,6 +410,7 @@ class MentionConfig:
         return {
             "level_weights": _list_schedule(self.level_weights),
             "event_level_weights": _list_schedule(self.event_level_weights),
+            "place_level_weights": _list_schedule(self.place_level_weights),
             "pronoun_rate": self.pronoun_rate,
             "modifier_rate": self.modifier_rate,
             "max_adjectives": self.max_adjectives,
@@ -853,7 +882,9 @@ def _read_scene(node: _Node) -> SceneConfig:
     return config
 
 
-def _read_mention(node: _Node, depth: int, event_depth: int | None) -> MentionConfig:
+def _read_mention(
+    node: _Node, depth: int, event_depth: int | None, place_depth: int | None = None
+) -> MentionConfig:
     _renamed(node, "verb_level_weights", "mention.event_level_weights")
     default_weights = {"schedule": "linear", "start": 1, "end": 4}
     if event_depth is None:
@@ -862,6 +893,13 @@ def _read_mention(node: _Node, depth: int, event_depth: int | None) -> MentionCo
     else:
         event_level_weights = _level_weights(
             node, "event_level_weights", default_weights, event_depth
+        )
+    if place_depth is None:
+        node.get("place_level_weights", default_weights)  # no places, so no levels to weigh
+        place_level_weights: tuple[float, ...] = ()
+    else:
+        place_level_weights = _level_weights(
+            node, "place_level_weights", default_weights, place_depth
         )
     clauses = node.mapping("relative_clauses")
     relative_clauses = RelativeClausesConfig(
@@ -873,6 +911,7 @@ def _read_mention(node: _Node, depth: int, event_depth: int | None) -> MentionCo
     config = MentionConfig(
         level_weights=_level_weights(node, "level_weights", default_weights, depth),
         event_level_weights=event_level_weights,
+        place_level_weights=place_level_weights,
         pronoun_rate=node.probability("pronoun_rate", 0.5),
         modifier_rate=node.probability("modifier_rate", 0.3),
         max_adjectives=node.int("max_adjectives", 3, min=0),
@@ -1056,7 +1095,7 @@ def config_from_mapping(data: Any, *, source: str = "<mapping>", seed: int | Non
     entity = root.mapping("entity")
     entity_scenes = entity.range("scenes", [2, 5], min=1)
     entity.finish()
-    mention = _read_mention(root.mapping("mention"), depth, world.event_depth)
+    mention = _read_mention(root.mapping("mention"), depth, world.event_depth, world.place_depth)
     grammar = _read_grammar(root.mapping("grammar"), propositions.event_tense)
     scalar = root.mapping("scalar_adjectives")
     z = scalar.get("z", 1.0)

@@ -310,12 +310,12 @@ wordforms: {count: 60}
 assignment: {mode: arbitrary}
 ```
 
-`data/wordforms/corpus_tiny.yaml` is the example. `data/wordforms/corpus_default.yaml` does the same for the default corpus (`runs/corpus/default_seed1`), with the default word-form settings: 500 words, 45 speakers, and all five embeddings. On a laptop, the three steps take about 15 seconds for the tiny corpus (about 9 of them the word forms with audio and embeddings), and the default corpus's word forms (<!--figure:default.corpus.lexemes.content|d-->203<!--/figure--> content lexemes and <!--figure:default.corpus.lexemes.function|d-->18<!--/figure--> function words, with the comparative affix and its inflected forms, audio, and all five embeddings) take about 30 minutes, measured on October 15, 2026 (30 minutes, stage b3b of the world-and-language refactor; 31.5 minutes in stage b3a, 30 minutes in stage a8). `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
+`data/wordforms/corpus_tiny.yaml` is the example. `data/wordforms/corpus_default.yaml` does the same for the default corpus (`runs/corpus/default_seed1`), with the default word-form settings: 500 words, 45 speakers, and all five embeddings. On a laptop, the three steps take about 15 seconds for the tiny corpus (about 9 of them the word forms with audio and embeddings), and the default corpus's word forms (<!--figure:default.corpus.lexemes.content|d-->236<!--/figure--> content lexemes and <!--figure:default.corpus.lexemes.function|d-->18<!--/figure--> function words, with the comparative affix and its inflected forms, audio, and all five embeddings) take about 30 minutes, measured on October 15, 2026 (30 minutes, stage b3b of the world-and-language refactor; 31.5 minutes in stage b3a, 30 minutes in stage a8). `forms` in place of `all` makes the word forms without audio, which is all that `render` needs, in about 2 seconds.
 
 The request lists:
 
 - `lexemes`: the content words of the corpus's language, each with its concept and its part of speech. A homonym names the lexeme whose form it shares (`same_form_as`);
-- `takes`: for each part of speech, the affixes that its lexemes' words must be able to take;
+- `takes`: for each part of speech, the affixes that its lexemes' words must be able to take. A part of speech that takes no affix has no entry: the prepositions of the corpus's pair fluents (stage c4b of the world-and-language refactor) are content lexemes that take none, and the pipeline needs nothing else to know about a part of speech it has not seen before;
 - `function_words`, `affixes`, and `inflect`, as in any request. The function words come in order of their frequency in the corpus, and an `inflect` entry names lexemes, or function words by gloss (the auxiliaries that carry the tense affix, stage b3b);
 - `meanings`: the meaning vectors of the categories, in a file beside the request.
 

@@ -69,10 +69,13 @@ def test_formal_rendering(tiny_world) -> None:
     (noun,) = lexicon.lexemes_of("CATEGORY.1.1")
     (verb,) = lexicon.lexemes_of("EVENTTYPE1.2")
     # a content lexeme's gloss is its concept's label, and a function word's is its English gloss
-    # the four numeric adjectives of the tiny world's two numeric fluents (stage b3b) stand
-    # before the function words, so "the" is the 46th lexeme (the 42nd in stage b3a)
-    assert formal([the, noun, verb]) == "the/LEXEME.46 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.28"
-    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.50"
+    # the four numeric adjectives of the tiny world's two numeric fluents (stage b3b) and the
+    # thirteen words of its pair fluents and places (stage c4b: a preposition for the location
+    # fluent and one for SAME on it, two place nouns, four place adjectives, two place pole
+    # adjectives, two place verbs, and one place patient capacity) stand before the function
+    # words, so "the" is the 59th lexeme (the 46th in stage b3b, the 42nd in stage b3a)
+    assert formal([the, noun, verb]) == "the/LEXEME.59 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.28"
+    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.63"
     assert formal([]) == ""
     for lexeme in lexicon.lexemes:
         gloss, label = formal_word(lexeme).split("/")

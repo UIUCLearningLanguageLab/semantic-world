@@ -241,8 +241,8 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
     expected = set()
     for entry in record["event_types"]:
         label = entry["label"]
-        if label not in facts.named:
-            continue
+        if label not in facts.named or entry["kind"] == "place_event_type":
+            continue  # a place event type has a word since stage c4b, and no causal statement until c5a
         for kind in CAUSAL_KINDS:
             found = None
             for leaf in oracle.leaves_below(label):
