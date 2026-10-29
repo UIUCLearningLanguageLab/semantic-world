@@ -248,6 +248,10 @@ class _Reader:
             auxiliary_gloss = previous
         if verb is None:
             adjective = self.child(node, "A")
+            if adjective is None and self.child(node, "NP-PRD") is None:
+                # a verb phrase with no predicate word of its own: the copula or become with a
+                # prepositional phrase, a pair state at a time point (stage c4b)
+                return {STATE}
             if adjective is not None:
                 concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
                 if (

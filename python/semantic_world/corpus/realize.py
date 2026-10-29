@@ -109,19 +109,19 @@ from semantic_world.corpus.lexicon import (
     Lexeme,
     Lexicon,
 )
+from semantic_world.corpus.propositions import COMPARATIVE as COMPARATIVE_KIND
 from semantic_world.corpus.propositions import (
-    CAN,
     EFFECT,
+    EVENT_KINDS,
     HAS,
     IS,
     MEMBER,
     NEC_NO,
     NO,
+    PAIR_STATE,
     PRECONDITION,
     STATE_KIND,
-    VERB,
 )
-from semantic_world.corpus.propositions import COMPARATIVE as COMPARATIVE_KIND
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
 from semantic_world.corpus.propositions import PROGRESSIVE as PROGRESSIVE_ASPECT
 from semantic_world.corpus.streams import Streams
@@ -366,11 +366,20 @@ class _Builder:
         """The standard of a comparative: the function word ``than`` and the object noun
         phrase, as a ``PP``, with ``than`` before the noun phrase (``adposition: preposition``)
         or after it (``postposition``)."""
-        than = self.function("P", THAN_WORD)
+        return self.adpositional(self.function("P", THAN_WORD), phrase)
+
+    def prepositional(self, concept: str, phrase: NounPhrase) -> Tree:
+        """The prepositional phrase of a pair state (stage c4b): the pair fluent's word, a
+        content lexeme, and the object noun phrase (an entity or a place), as a ``PP``, with the
+        preposition before or after the noun phrase by ``word_order.adposition``, as ``than`` is
+        placed."""
+        return self.adpositional(self.word("P", concept), phrase)
+
+    def adpositional(self, adposition: Tree, phrase: NounPhrase) -> Tree:
         target = self.noun_phrase(phrase, "NP-OBJ")
         if self.order.adposition == "preposition":
-            return ["PP", than, target]
-        return ["PP", target, than]
+            return ["PP", adposition, target]
+        return ["PP", target, adposition]
 
     def relative_clause(self, phrase: NounPhrase) -> Tree | None:
         clause = phrase.clause
@@ -442,7 +451,17 @@ class _Builder:
             if morphology.tense.enabled and predication.tense == PAST_TENSE:
                 timed_marks = (PAST,)
         adverb: Tree | None = None
-        if kind == STATE_KIND and predication.comparative_form:
+        head: Tree | None
+        if kind == PAIR_STATE:
+            # a prepositional predicate (stage c4b): the copula, or become for a change, and
+            # the preposition with its object as a PP, placed where an object stands; the
+            # verb phrase has no predicate word of its own
+            auxiliary = "become" if predication.become else ("are" if plural and agree else "is")
+            negated = not polarity
+            head = None
+            assert predication.object is not None
+            target = self.prepositional(predication.label, predication.object)
+        elif kind == STATE_KIND and predication.comparative_form:
             # a numeric change (stage b3b): become with the comparative form of the pole
             auxiliary = "become"
             head = self.word("A", predication.label, (COMPARATIVE,))
@@ -461,12 +480,14 @@ class _Builder:
             head = self.word("A", predication.label)
             if kind == PRECONDITION:
                 adverb = self.function("Adv", BEFORE_WORD)
-        elif kind in (CAN, VERB) and predication.time is not None:
+        elif kind in EVENT_KINDS and predication.time is not None:
             auxiliary, negated = self.realizer.able_now_word, not polarity
             head = self.word("V", predication.label)
             if predication.object is not None:
                 target = self.noun_phrase(predication.object, "NP-OBJ")
-        elif kind in (CAN, VERB):
+        elif kind in EVENT_KINDS:
+            # a one-place or a two-place event type, or (stage c4b) a place event type, whose
+            # object is a place mention
             marks: tuple[str, ...] = ()
             if predication.event is not None:
                 if morphology.tense.enabled and predication.tense == PAST_TENSE:
@@ -516,17 +537,18 @@ class _Builder:
 
         negation = self.function("Neg", "not") if negated else None
         before = self.order.auxiliary == "before"
+        heads = [] if head is None else [head]
         if auxiliary is not None and auxiliary != elide:
             group = [self.function("AUX", auxiliary, timed_marks)]
             if negation is not None:
                 after = self.order.negation == "after_auxiliary"
                 group = group + [negation] if after else [negation] + group
-            parts = group + [head] if before else [head] + group
+            parts = group + heads if before else heads + group
         elif negation is not None:
             # the auxiliary is left out: "not" keeps its side of the predicate word
-            parts = [negation, head] if before else [head, negation]
+            parts = [negation, *heads] if before else [*heads, negation]
         else:
-            parts = [head]
+            parts = list(heads)
         if adverb is not None:
             parts = parts + [adverb] if self.order.before == "after_predicate" else [adverb] + parts
         return parts, target, auxiliary

@@ -77,6 +77,7 @@ from semantic_world.corpus.propositions import (
     IS,
     LOW,
     MEMBER,
+    PLACE_EVENT,
     PRECONDITION,
     SIMPLE,
     STATE_KIND,
@@ -87,17 +88,24 @@ from semantic_world.corpus.propositions import (
     Predicate,
     Proposition,
     direction_pole,
+    is_part_feature,
 )
 from semantic_world.corpus.streams import Streams
-from semantic_world.corpus.world import PART_PREFIX, PROPERTY_PREFIX, SCALAR_PREFIX
+from semantic_world.corpus.world import (
+    PLACE_PART_PREFIX,
+    PLACE_PROPERTY_PREFIX,
+    PROPERTY_PREFIX,
+    SCALAR_PREFIX,
+)
+from semantic_world.corpus.world import leaf_of as world_leaf_of
 from semantic_world.world.runtime import RANGE
 
 REFERENT_PREFIX = "REF."
 
 
 def leaf_of(facts: Facts, instance: str) -> str:
-    """The leaf category of an instance."""
-    return facts.truth.paths[facts.truth.instance_index[instance]][-1]
+    """The leaf category of an instance, or (stage c4b) of a place."""
+    return world_leaf_of(facts.world, instance)
 
 
 def mention(
@@ -353,6 +361,7 @@ class RelativeClauses:
             depth > self.settings.max_depth
             or phrase.kind != INSTANCE_NP
             or phrase.pronoun
+            or phrase.place  # a place takes no relative clause in phase (c) (stage c4b)
             or phrase.clause is not None
             or rng.random() >= self.settings.rate
         ):
@@ -402,7 +411,10 @@ class RelativeClauses:
                 names = facts.event_names(event)
                 if not names:
                     continue
-                kind = VERB if event.transitive else CAN
+                if event.place:
+                    kind = PLACE_EVENT  # a move or an act at a place (stage c4b)
+                else:
+                    kind = VERB if event.transitive else CAN
                 report = (event.label, self.tense, SIMPLE)  # the aspect is drawn once chosen
                 if object_relative and event.patient == referent:
                     options.append((Predication(kind, names[0], True, None, *report), event.agent))
@@ -497,32 +509,65 @@ class MentionRules:
         self.preference: tuple[str, ...] = tuple(attributes[int(i)] for i in order)
         """PROPERTY features, PART features, and scalar dimensions, in the order they are
         tried."""
+        # The preference order of the places' attributes (stage c4b): place properties and
+        # place parts, drawn from a part of the stream of its own, so that the entities' order
+        # is what it was.
+        place_attributes = facts.place_features[IS] + facts.place_features[HAS]
+        order = streams.substream("mentions", "place_preference").permutation(len(place_attributes))
+        self.place_preference: tuple[str, ...] = tuple(place_attributes[int(i)] for i in order)
+        """Place properties and place parts, in the order they are tried to tell a place apart
+        from the other places of a document's scenes."""
+
+    def is_place(self, label: str) -> bool:
+        return self.world.is_place(label)
+
+    def row(self, instance: str) -> int:
+        """The row of an entity in the entities table, or of a place in the places table."""
+        if self.is_place(instance):
+            return self.world.place_index[instance]
+        return self.truth.instance_index[instance]
 
     def path(self, instance: str) -> tuple[str, ...]:
-        """The categories an instance is below, from the top to its leaf."""
+        """The categories an instance is below, from the top to its leaf; the categories of
+        places for a place (stage c4b)."""
+        if self.is_place(instance):
+            return self.world.place_path(instance)
         return self.truth.paths[self.truth.instance_index[instance]]
 
     def nouns(self, instance: str, exclude: str | None = None) -> tuple[list[str], np.ndarray]:
         """The categories whose noun can name an instance, and their weights: its leaf and the
-        categories above it that have a word, by ``mention.level_weights``."""
+        categories above it that have a word, by ``mention.level_weights``; for a place (stage
+        c4b), the categories of places by ``mention.place_level_weights``."""
         named = [c for c in self.path(instance) if c in self.facts.named and c != exclude]
-        weights = np.array(
-            [self.settings.level_weights[self.facts.level[c] - 1] for c in named], dtype=float
-        )
+        if self.is_place(instance):
+            weights = np.array(
+                [self.settings.place_level_weights[self.facts.place_level[c] - 1] for c in named],
+                dtype=float,
+            )
+        else:
+            weights = np.array(
+                [self.settings.level_weights[self.facts.level[c] - 1] for c in named], dtype=float
+            )
         return named, weights
 
     def value(self, instance: str, attribute: str, noun: str) -> Literal | None:
         """The literal that states an instance's value on an attribute, in a noun phrase headed
         by ``noun``: an adjective for a PROPERTY feature it has, a with-phrase or a
         without-phrase for a PART feature, and a pole adjective for a scalar on which it is at a
-        pole of the noun's category. None when no adjective or with-phrase states the value."""
-        row = self.truth.instance_index[instance]
+        pole of the noun's category. None when no adjective or with-phrase states the value.
+        For a place (stage c4b), the attribute is a place property or a place part."""
+        row = self.row(instance)
         if attribute.startswith(SCALAR_PREFIX):
             for side in ("HIGH", "LOW"):
                 pole = f"{attribute}.{side}"
                 if pole in self.facts.named and self.fits(row, Literal(pole), noun):
                     return Literal(pole)
             return None
+        if attribute.startswith(PLACE_PROPERTY_PREFIX) or attribute.startswith(PLACE_PART_PREFIX):
+            value = bool(self.world.place_column(attribute)[row])
+            if attribute.startswith(PLACE_PROPERTY_PREFIX):
+                return Literal(attribute) if value else None
+            return Literal(attribute, value)
         value = bool(self.world.column(attribute)[row])
         if attribute.startswith(PROPERTY_PREFIX):
             return Literal(attribute) if value else None
@@ -530,21 +575,24 @@ class MentionRules:
 
     def fits(self, row: int, literal: Literal, noun: str) -> bool:
         """Whether an instance satisfies a literal of a noun phrase headed by ``noun``. A pole
-        is relative to the noun's category."""
+        is relative to the noun's category. A place literal (stage c4b) is read from the places
+        table, ``row`` being the place's row."""
         if literal.pole:
             return bool(self.truth.pole_mask(literal.feature, noun)[0][row])
-
+        if literal.feature.startswith("PLACE"):
+            return bool(self.world.place_column(literal.feature)[row]) == literal.positive
         value = bool(self.world.column(literal.feature)[row])
         return value == literal.positive
 
     def matches(self, phrase: NounPhrase, cast: Sequence[str]) -> list[str]:
-        """The instances among ``cast`` that the noun and the modifiers of a noun phrase fit."""
+        """The instances among ``cast`` that the noun and the modifiers of a noun phrase fit;
+        for a mention of a place, the places among ``cast``."""
         assert phrase.noun is not None
         found = []
         for instance in cast:
             if phrase.noun not in self.path(instance):
                 continue
-            row = self.truth.instance_index[instance]
+            row = self.row(instance)
             if all(self.fits(row, literal, phrase.noun) for literal in phrase.restriction):
                 found.append(instance)
         return found
@@ -555,22 +603,20 @@ class MentionRules:
         """The modifiers that tell an instance apart from the other instances among ``cast``
         that the noun fits, by the incremental algorithm, and whether they pick out the
         instance alone. The limits on adjectives and with-phrases hold. ``avoid`` are the
-        features that the sentence itself states, which no modifier says again."""
-        truth = self.truth
-        left = [
-            truth.instance_index[other]
-            for other in cast
-            if other != instance and noun in self.path(other)
-        ]
+        features that the sentence itself states, which no modifier says again. A place (stage
+        c4b) is told apart from the other places by its place properties and parts, in their
+        own preference order."""
+        left = [self.row(other) for other in cast if other != instance and noun in self.path(other)]
         chosen: list[Literal] = []
         adjectives = with_phrases = 0
-        for attribute in self.preference:
+        preference = self.place_preference if self.is_place(instance) else self.preference
+        for attribute in preference:
             if not left:
                 break
             literal = self.value(instance, attribute, noun)
             if literal is None or literal.feature in avoid:
                 continue
-            is_with = literal.feature.startswith(PART_PREFIX)
+            is_with = is_part_feature(literal.feature)
             if is_with and with_phrases >= self.settings.max_with_phrases:
                 continue
             if not is_with and adjectives >= self.settings.max_adjectives:
@@ -590,12 +636,19 @@ class Mentions:
     is made."""
 
     def __init__(
-        self, rules: MentionRules, cast: Sequence[str] = (), modifiers: bool = False
+        self,
+        rules: MentionRules,
+        cast: Sequence[str] = (),
+        modifiers: bool = False,
+        places: Sequence[str] = (),
     ) -> None:
         self.rules = rules
         self.cast = tuple(cast)
         """The participants of the document's scenes: the instances a mention could be taken
         for."""
+        self.places = tuple(places)
+        """The places of the document's scenes (stage c4b): the places a mention of a place
+        could be taken for, as the participants are for an entity (CG.E54)."""
         self.modifiers = modifiers
         """Whether mentions take modifiers at ``mention.modifier_rate``, beside the modifiers
         that tell referents apart."""
@@ -631,6 +684,8 @@ class Mentions:
         (the predicate of "is a penguin"). ``pronoun`` says whether the mention can be ``it``.
         ``avoid`` are the features that a modifier must not state: what the sentence says."""
         rules, settings = self.rules, self.rules.settings
+        if rules.is_place(instance):
+            return self.place_phrase(rng, instance)
         first = instance not in self.referents
         if first:
             self.referents[instance] = f"{REFERENT_PREFIX}{len(self.referents) + 1}"
@@ -660,6 +715,38 @@ class Mentions:
             literals = self._modifier(rng, instance, noun, literals, avoid)
         return NounPhrase(INSTANCE_NP, instance, noun, "a" if first else "the", literals)
 
+    def nameable(self, place: str) -> bool:
+        """Whether a place can be mentioned: some category of places above it has a noun (stage
+        c4b). A place without one is never mentioned, and no sentence names it."""
+        named, _ = self.rules.nouns(place)
+        return bool(named)
+
+    def place_phrase(self, rng: np.random.Generator, place: str) -> NounPhrase:
+        """The next mention of a place (stage c4b, ``WORLD_PHASE_C.md``, "Places as
+        referents"): the place is introduced with ``a`` and mentioned later with ``the``, named
+        at a level of the place tree by ``mention.place_level_weights``, told apart from the
+        other places of the document's scenes by place properties and parts, never a pronoun,
+        and numbered among the referents with the entities."""
+        rules = self.rules
+        first = place not in self.referents
+        if first:
+            self.referents[place] = f"{REFERENT_PREFIX}{len(self.referents) + 1}"
+        self._current.append(place)
+        named, weights = rules.nouns(place)
+        if not named:
+            return NounPhrase(INSTANCE_NP, place)  # no noun can name it: the grammar refuses it
+        if weights.sum() == 0:
+            weights = np.ones(len(named))
+        noun = named[int(rng.choice(len(named), p=weights / weights.sum()))]
+        literals: tuple[Literal, ...] = ()
+        if not first:
+            literals, alone = rules.distinguish(place, noun, self.places)
+            leaf = rules.path(place)[-1]
+            if not alone and noun != leaf and leaf in rules.facts.named:
+                noun = leaf
+                literals, alone = rules.distinguish(place, noun, self.places)
+        return NounPhrase(INSTANCE_NP, place, noun, "a" if first else "the", literals)
+
     def _modifier(
         self,
         rng: np.random.Generator,
@@ -672,14 +759,14 @@ class Mentions:
         an adjective for a PROPERTY feature or a pole, or a with-phrase for a PART feature."""
         rules, settings = self.rules, self.rules.settings
         stated = {literal.feature for literal in literals} | set(avoid)
-        adjectives = sum(not x.feature.startswith(PART_PREFIX) for x in literals)
+        adjectives = sum(not is_part_feature(x.feature) for x in literals)
         with_phrases = len(literals) - adjectives
         options = []
         for attribute in rules.preference:
             literal = rules.value(instance, attribute, noun)
             if literal is None or not literal.positive or literal.feature in stated:
                 continue
-            is_with = literal.feature.startswith(PART_PREFIX)
+            is_with = is_part_feature(literal.feature)
             if (with_phrases if is_with else adjectives) >= (
                 settings.max_with_phrases if is_with else settings.max_adjectives
             ):
@@ -696,7 +783,8 @@ class Mentions:
         noun phrase."""
         if phrase.kind != INSTANCE_NP or phrase.pronoun or phrase.determiner != "the":
             return None
-        cast = self.cast if phrase.referent in self.cast else self.cast + (phrase.referent,)
+        pool = self.places if phrase.place else self.cast
+        cast = pool if phrase.referent in pool else pool + (phrase.referent,)
         return self.rules.matches(phrase, cast) == [phrase.referent]
 
     def end_sentence(self, subject: str | None) -> None:

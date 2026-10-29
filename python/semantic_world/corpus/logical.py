@@ -77,8 +77,8 @@ from semantic_world.corpus.propositions import (
     LOW,
     Proposition,
     is_numeric,
+    is_scalar_pole,
 )
-from semantic_world.corpus.world import SCALAR_PREFIX
 
 
 def is_descriptive(phrase: NounPhrase) -> bool:
@@ -98,8 +98,7 @@ def has_pole(data: Any) -> bool:
         return any(has_pole(value) for key, value in data.items() if key != "grounding")
     if isinstance(data, list):
         return any(
-            (isinstance(item, str) and item.removeprefix("not ").startswith(SCALAR_PREFIX))
-            or has_pole(item)
+            (isinstance(item, str) and is_scalar_pole(item.removeprefix("not "))) or has_pole(item)
             for item in data
         )
     return False
@@ -185,6 +184,8 @@ def logical_form(
     labels = referents or {}
 
     def mention(phrase: NounPhrase) -> dict[str, Any]:
+        # a mention of a place (stage c4b) has the same shape: ``instance`` names the
+        # individual, an entity or a place, and ``noun`` the category of places
         data: dict[str, Any] = {
             "instance": phrase.referent,
             "referent": labels.get(phrase.referent),

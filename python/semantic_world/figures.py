@@ -465,6 +465,26 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
             "numeric_state_sentences": stats["states"].get("numeric_state_sentences"),
             "numeric_change_sentences": stats["states"].get("numeric_change_sentences"),
         },
+        # the sentences about pairs and places (stage c4b, Jon's ruling 3 of WM.72), the place
+        # events and the pair changes of the scenes, and the mentions of places
+        "pairs_places": {
+            **{
+                key: stats["states"].get(key)
+                for key in (
+                    "pair_state_sentences",
+                    "pair_change_sentences",
+                    "location_sentences",
+                    "move_sentences",
+                    "act_sentences",
+                )
+            },
+            **{
+                key: stats["scenes"].get(key)
+                for key in ("place_events", "moves", "acts", "pair_changes", "move_share")
+            },
+            "place_mentions": stats["mentions"].get("place_mentions"),
+            "prepositions": lexicon["lexemes_by_pos"].get("preposition", 0),
+        },
         "narratives_short": {
             kind: by_type[kind]["shorter_than_drawn_share"] for kind in ("entity", "situational")
         },

@@ -28,10 +28,15 @@ There are four document types (``documents.mix``):
 - **situational narrative.** One scene. The document narrates its events in time order.
 
 Since stage c4a a scene may hold the events of place event types (moves and acts at a place) and
-pair changes: a narrative skips a place event and never states a pair change as a result, because
-the corpus says nothing about pairs and places until stages c4b and c4c; the other sentences stay
-true around a skipped event, because every sentence is judged on the replayed history, moves and
-pair changes included.
+pair changes. Since stage c4b (``docs/specs/WORLD_PHASE_C.md``, "The corpus") a narrative reports
+a move or an act as a transitive verb with the place as its object ("the owl went to the dry
+place"), a place being a referent introduced with ``a`` and mentioned later with ``the``, and a
+result sentence can state a pair change of the event's own effects, the new place of a move, or
+the loss of the old place, with ``become`` and the pair fluent's preposition ("the owl became at
+the dry place"; Jon's decision WM.72). The initial states with pairs and places, the blocked
+events of place event types, and the comparative descriptions of places are stage c4c's, so a
+place is never described or compared here, and a place introduced by an event sentence takes no
+initial-state sentence.
 
 In a narrative, an event sentence can be followed by five kinds of sentence, each at its rate,
 in this order: an initial-state sentence about each participant the event sentence first
@@ -130,6 +135,7 @@ from semantic_world.corpus.propositions import (
     IS,
     MEMBER,
     MOST,
+    PAIR_STATE,
     PROGRESSIVE,
     SIMPLE,
     STATE,
@@ -1063,7 +1069,10 @@ class Planner:
             self.truth.add_scene(scene)
         topic = seed if kind == ENTITY else scenes[0].label
         cast = tuple(dict.fromkeys(p for scene in scenes for p in scene.participants))
-        mentions = Mentions(self.rules, cast, modifiers=kind == ENTITY)
+        # the places of the document's scenes (stage c4b): the referents a mention of a place
+        # is told apart from, as the participants are for an entity
+        places = tuple(dict.fromkeys(q for scene in scenes for q in (scene.places or ())))
+        mentions = Mentions(self.rules, cast, modifiers=kind == ENTITY, places=places)
         aspects = Aspects(self.config, mention_rng)
         length = self._length(kind, rng)
         rate = self.config.documents.instance_description_rate
@@ -1075,8 +1084,8 @@ class Planner:
             for event in events:
                 if len(items) >= length:
                     break
-                if event.place:
-                    continue  # a move or an act at a place is not narrated in stage c4a
+                if event.place and not mentions.nameable(event.patient or ""):
+                    continue  # no noun can name the place of the move or the act
                 report = self.facts.draw_event(mention_rng, event, aspects.of(event))
                 if report is None:
                     continue  # no word can report the event
@@ -1086,7 +1095,11 @@ class Planner:
                 )
                 items.append(sentence)
                 # the participants the sentence first mentioned, in the order of first mention
-                introduced = [p for p in mentions.referents if p not in known]
+                # (a place introduced by it takes no initial-state sentence in stage c4b: the
+                # initial states with pairs and places are stage c4c's)
+                introduced = [
+                    p for p in mentions.referents if p not in known and not self.world.is_place(p)
+                ]
                 for participant in introduced:
                     if len(items) < length and facts_rng.random() < settings.initial_state_rate:
                         assert sentence.plan is not None
@@ -1106,6 +1119,7 @@ class Planner:
                         items.append(blocked)
                 if (
                     event.patient is not None
+                    and not event.place  # a place is compared with no entity (stage c4b)
                     and len(items) < length
                     and comparative_rng.random() < settings.comparative_rate
                 ):
@@ -1118,7 +1132,10 @@ class Planner:
                     if kind == ENTITY:
                         about = seed
                     else:
-                        taking_part = [event.agent] + ([event.patient] if event.patient else [])
+                        # a place is never described (stage c4b): the participants of the event
+                        taking_part = [event.agent] + (
+                            [event.patient] if event.patient and not event.place else []
+                        )
                         new = [p for p in taking_part if p not in known]
                         pool = new or taking_part
                         about = pool[int(facts_rng.integers(len(pool)))]
@@ -1142,7 +1159,13 @@ class Planner:
         """The sentence that reports an event. A relative clause reports an earlier event of
         the scene."""
         events = self.truth.events_of(scene.label)
-        earlier = [e for e in events[: events.index(event)] if not e.place]  # no place event (c4a)
+        # the earlier events of the scene, moves and acts included (stage c4b), of which a
+        # relative clause may report one whose place has a noun
+        earlier = [
+            e
+            for e in events[: events.index(event)]
+            if not e.place or mentions.nameable(e.patient or "")
+        ]
         known = dict(mentions.referents)
         plan: SentencePlan | None = None
         for with_clauses in (True, False):
@@ -1294,13 +1317,24 @@ class Planner:
         truth = self.truth
         named = set(self.facts.fluents)
         numeric_named = set(self.facts.numeric_fluents)
+        pair_named = set(self.facts.pair_prepositions)
         recorded = self._history_events(scene)[event.label]
-        # a pair change (stage c4a) is no result: the corpus states no pair until stage c4c
         candidates: list[tuple[str, Predicate, bool]] = [
             (change.entity, Predicate(STATE_KIND, change.fluent), bool(change.to))
             for change in recorded.changes
             if not change.pair and not change.numeric and change.fluent in named
         ]
+        # a pair change of the event's own effects (stage c4b, WM.72): a pair between two
+        # participants added or deleted, a move's new place, or the loss of the old place,
+        # each said with become and the pair fluent's preposition; the second argument must
+        # have a noun (a place of the scene always has one when its categories are named)
+        for change in recorded.changes:
+            if not change.pair or change.pair_fluent not in pair_named:
+                continue
+            if self.world.is_place(change.second) and not mentions.nameable(change.second):
+                continue
+            predicate = Predicate(PAIR_STATE, change.pair_fluent, change.second)
+            candidates.append((change.first, predicate, bool(change.to)))
         step = event.step
         for change in recorded.changes:
             if change.pair or not change.numeric or change.fluent not in numeric_named:
@@ -1313,7 +1347,10 @@ class Planner:
             ):
                 predicate = Predicate(STATE_KIND, change.fluent, direction=direction)
                 candidates.append((change.entity, predicate, True))
-        for entity in [event.agent] + ([event.patient] if event.patient is not None else []):
+        participants = [event.agent]
+        if event.patient is not None and not event.place:
+            participants.append(event.patient)
+        for entity in participants:
             for fluent in self._derived_fluents:
                 before = truth.fluent_value(scene.label, step, entity, fluent)
                 after = truth.fluent_value(scene.label, step + 1, entity, fluent)
@@ -1342,7 +1379,11 @@ class Planner:
         truth, facts = self.truth, self.facts
         step = event.step
         negative = bool(facts_rng.random() < self.config.propositions.negation_rate[ABLE_NOW])
-        agents = [event.agent] + ([event.patient] if event.patient is not None else [])
+        # the entities of the event (a place event's place is none; the blocked events of
+        # place event types are stage c4c's, so the bindings below are the entity event types')
+        agents = [event.agent]
+        if event.patient is not None and not event.place:
+            agents.append(event.patient)
         done = [e for e in truth.events_of(scene.label) if e.step == step]
 
         def happened(label: str, agent: str, patient: str | None) -> bool:
@@ -1440,11 +1481,14 @@ class Planner:
         predicate = fact.predicate
         patient = predicate.patient if isinstance(predicate.patient, str) else None
         known = dict(mentions.referents)
+        # the other referents an instance-level clause can relate the instance to: the
+        # entities mentioned so far, never a place (stage c4b)
+        others_known = tuple(p for p in known if not self.world.is_place(p))
         plan: SentencePlan | None = None
         for with_clauses in (True, False):
             context = ClauseContext(
                 INSTANCE,
-                others=tuple(known),
+                others=others_known,
                 mention=lambda other: mentions.noun_phrase(rng, other, pronoun=False),
                 used={(predicate.label, instance, patient)},
             )

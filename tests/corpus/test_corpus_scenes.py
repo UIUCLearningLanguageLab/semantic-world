@@ -32,6 +32,7 @@ from semantic_world.corpus.propositions import (
     EVENT,
     INSTANCE,
     IS,
+    PLACE_EVENT,
     PROGRESSIVE,
     SIMPLE,
     VERB,
@@ -623,9 +624,10 @@ def test_every_event_is_reported_by_a_true_proposition(cases, name) -> None:
                 assert proposition.level == EVENT and proposition.polarity
                 assert (proposition.scene, proposition.event) == (scene.label, event.label)
                 assert proposition.subject == event.agent and proposition.aspect == aspect
-                assert proposition.predicate == Predicate(
-                    VERB if event.transitive else CAN, event.type, event.patient
-                )
+                # a move or an act at a place (stage c4b) has its own kind, with the place as
+                # its patient
+                kind = PLACE_EVENT if event.place else (VERB if event.transitive else CAN)
+                assert proposition.predicate == Predicate(kind, event.type, event.patient)
                 assert proposition.grounding == {
                     "scene": scene.label,
                     "step": event.step,
@@ -816,7 +818,7 @@ def test_event_forms_that_cannot_be_judged(cases) -> None:
         "never related to itself": dataclasses.replace(
             report, predicate=Predicate(VERB, event.type, event.agent)
         ),
-        "one-place event type, or a two-place": dataclasses.replace(
+        "one-place event type, a two-place event type": dataclasses.replace(
             report, predicate=Predicate(IS, "PROPERTY.1")
         ),
         "unknown two-place event type": dataclasses.replace(
@@ -899,7 +901,8 @@ def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None
     for scene in scenes:
         for event in scene_events(scene):
             if event.place:
-                assert facts.event_names(event) == ()  # not named in stage c4a
+                # a place event type is flat: its own label names it (stage c4b)
+                assert facts.event_names(event) == (event.type,)
                 continue
             names = facts.event_names(event)
             if not event.transitive:

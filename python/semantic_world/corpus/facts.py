@@ -86,6 +86,7 @@ from semantic_world.corpus.propositions import (
     NEC_NO,
     NEGATIVE_ORDER,
     NO,
+    PLACE_EVENT,
     POSITIVE_ORDER,
     PRECONDITION,
     PROJECTION,
@@ -183,7 +184,23 @@ class Facts:
         """The base fluents that have a state adjective: what a causal statement is about."""
         self.verbs = of_type("event", "event_category")
         """The two-place event types and categories of them that have a word, in tree order."""
+        # Phase (c) (stage c4b): the prepositions of the pair fluents and of the SAME literals,
+        # and the places' words. The statements about them at the instance level are the pair
+        # states and changes and the events of the place event types; the SAME prepositions,
+        # the place poles, and the place patient capacities have words and no sentence yet.
+        self.pair_prepositions = of_type("pair")
+        """The pair fluents that have a preposition: what a pair state can be about."""
+        self.same_prepositions = of_type("same")
+        self.place_categories = of_type("place_category")
+        self.place_features = {IS: of_type("place_is"), HAS: of_type("place_has")}
+        self.place_poles = of_type("place_scalar")
+        self.place_verbs = of_type("place_event")
+        """The place event types that have a word: the moves and the acts a narrative can
+        report. Kept apart from ``verbs``, which the relation facts, the causal statements, the
+        blocked sentences, and the test sets draw from."""
+        self.place_projections = of_type("place_patient_projection")
         self.level = {label: info.level for label, info in world.category.items()}
+        self.place_level = {label: info.level for label, info in world.place_category.items()}
         self._class_facts: dict[tuple, tuple[Proposition, ...]] = {}
         self._restrictions: dict[CategoryTerm, tuple[Literal, ...]] = {}
         self._clauses: dict[tuple[CategoryTerm, bool], tuple[Clause, ...]] = {}
@@ -773,8 +790,12 @@ class Facts:
     ) -> Proposition | None:
         """The event-level proposition that reports an event, named by its own event type or by
         ``verb``, a category above it, with the report's aspect. None when the name has no
-        word, or does not name the event."""
-        kind = VERB if event.transitive else CAN
+        word, or does not name the event. An event of a place event type (stage c4b) is named
+        by its own verb, with the place as its patient."""
+        if event.place:
+            kind = PLACE_EVENT
+        else:
+            kind = VERB if event.transitive else CAN
         predicate = Predicate(kind, event.type if verb is None else verb, event.patient)
         candidate = Proposition(
             EVENT,
@@ -797,7 +818,8 @@ class Facts:
         aspect. A level with the weight 0 is never used. None when no level can name the
         event."""
         names = self.event_names(event)
-        if not event.transitive:
+        if not event.transitive or event.place:
+            # a one-place event type has one name, and so has a place event type (stage c4b)
             return self.event_fact(event, aspect=aspect) if names else None
         levels = self.config.mention.event_level_weights
         weights = np.array(

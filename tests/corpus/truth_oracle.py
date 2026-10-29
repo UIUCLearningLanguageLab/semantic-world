@@ -637,10 +637,13 @@ class Oracle:
         fluent: str,
         event_label: str,
         direction: str | None = None,
+        second: str | None = None,
     ) -> bool:
         """Whether the event's own recorded changes, applied alone to the state at
         ``TIME.<time>``, change the fluent of the participant; for a numeric fluent, whether the
-        event recorded a change of it in the ``direction`` (``increase`` or ``decrease``)."""
+        event recorded a change of it in the ``direction`` (``increase`` or ``decrease``); for a
+        pair fluent (stage c4b), whether the event recorded the pair from the participant to
+        ``second``, an entity or a place."""
         step = next(s for s in scene["steps"] if s["step"] == time)
         event = next((e for e in step["events"] if e["label"] == event_label), None)
         if event is None:
@@ -656,6 +659,16 @@ class Oracle:
                     or (float(c["to"]) > float(c["from"])) == (direction == "increase")
                 )
                 for c in event["changes"]
+            )
+        if fluent in self.pair_fluents:
+            # a pair change (stage c4b): the event records the pair, in either direction for a
+            # symmetric pair fluent
+            assert second is not None
+            return any(
+                (f, a, b) in {(fluent, entity, second), (fluent, second, entity)}
+                if fluent in self.symmetric
+                else (f, a, b) == (fluent, entity, second)
+                for f, a, b, _ in self._recorded_pair_changes(event)
             )
         if not self.symbols[fluent]["derived"]:
             return any(
@@ -695,11 +708,19 @@ class Oracle:
 
     def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
         """Whether a state form (``HOLDS``) is true of the scene: a Boolean fluent's value, a
-        numeric pole against the range at the form's ``cut``, or a numeric comparative at the
-        time point (with the sentence's word deciding which argument is the greater)."""
+        numeric pole against the range at the form's ``cut``, a numeric comparative at the
+        time point (with the sentence's word deciding which argument is the greater), or (stage
+        c4b) a pair state, the pair of the pair fluent from the subject to the patient, an
+        entity or a place, among the replayed pairs."""
         time = int(form["time"].split(".")[1])
         predicate = form["predicate"]
         entity = form["subject"]["instance"]
+        if predicate["kind"] == "pair_state":
+            other = predicate["patient"]["instance"]
+            if other == entity or predicate["label"] not in self.pair_fluents:
+                return None  # type: ignore[return-value]
+            held = self.pair_holds(scene, time, predicate["label"], entity, other)
+            return held == form["polarity"]
         if predicate["kind"] == "comparison":
             if predicate["class"] != "RANGE":
                 return None  # type: ignore[return-value]
@@ -725,6 +746,15 @@ class Oracle:
         time = int(form["time"].split(".")[1])
         entity, fluent = form["subject"]["instance"], form["predicate"]["label"]
         direction = form["predicate"].get("direction")
+        if form["predicate"]["kind"] == "pair_state":
+            # a pair change (stage c4b): the pair lacked the stated value at the time point
+            # and has it at the next, a move's new place or lost place included
+            other = form["predicate"]["patient"]["instance"]
+            if other == entity or fluent not in self.pair_fluents:
+                return None  # type: ignore[return-value]
+            before = self.pair_holds(scene, time, fluent, entity, other)
+            after = self.pair_holds(scene, time + 1, fluent, entity, other)
+            return before != form["polarity"] and after == form["polarity"]
         if direction is not None:
             before = self.numeric_at(scene, time, entity, fluent)
             after = self.numeric_at(scene, time + 1, entity, fluent)

@@ -1,20 +1,27 @@
-"""Stage c4a of ``docs/specs/WORLD_PHASE_C.md``: the corpus on worlds with pair fluents and places.
+"""Stages c4a and c4b of ``docs/specs/WORLD_PHASE_C.md``: the corpus on worlds with pair fluents
+and places, and its sentences about them.
 
 Since stage c4a ``data/world/tiny.yaml`` and ``data/world/default.yaml`` carry the phase (c)
 settings (Jon's ruling WM.63): pair fluents between entities, a location fluent, moves and acts
 at a place, ``SAME`` on the location fluent, and derived fluents over ``SOME`` and ``SOMEOF``.
-The corpus runs on them and says nothing about them yet (the lexicon and the sentences are
-stages c4b, c4c, and c5a): no word is made for a pair fluent, a place, a place feature, a place
-event type, ``SAME``, ``SOME``, or ``SOMEOF``; no sentence or test item names one; an event of a
-place event type is never narrated; a causal statement never states a pair literal; and a
-conditional effect whose condition holds a pair literal is stated in neither form (WM.59). Every
-sentence the corpus does make must stay true by the independent oracle, whose replay now carries
-the pairs and the places, and whose pairs and places must agree with ``history.replay`` at every
-time point of every scene. The fast tier runs the tiny corpus, the slow tier the default one.
+Since stage c4b the corpus names them at the instance level: the pair fluents and the ``SAME``
+literals that some precondition or condition reads get prepositions, the places' categories,
+features, and event types get words, a narrative reports a move or an act as a transitive verb
+with the place as its object, a place is a referent introduced with ``a`` and mentioned later
+with ``the``, and a result sentence states a pair change of the event's own effects, a move's
+new place, or the loss of the old place, with ``become`` and the preposition (predicate kind
+``pair_state``; Jon's decision WM.72). The initial states, the blocked events, the comparative
+descriptions of places, and the test sets with pairs and places are stage c4c's, so no test item
+is made from this stage's sentences; the causal statements with pair literals are stage c5a's
+(a conditional effect whose condition holds a pair literal is stated in neither form, WM.59).
+Every sentence must be true by the independent oracle, whose replay carries the pairs and the
+places, and whose pairs and places must agree with ``history.replay`` at every time point of
+every scene. The fast tier runs the tiny corpus, the slow tier the default one.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 from collections import Counter
 from pathlib import Path
@@ -24,37 +31,77 @@ import pytest
 import yaml
 from corpus_support import REPO, TINY_WORLD, corpus_config
 
-from semantic_world.corpus import Facts, load_world
+from semantic_world.corpus import Facts, Streams, build_lexicon, load_world
+from semantic_world.corpus.grammar import (
+    INSTANCE_NP,
+    NounPhrase,
+    Predication,
+    RelativeClause,
+    SentencePlan,
+    check_plan,
+)
 from semantic_world.corpus.histories import scene_events
-from semantic_world.corpus.logical import with_cut
-from semantic_world.corpus.planner import EVENT_SECTION
+from semantic_world.corpus.interpret import interpret
+from semantic_world.corpus.lexicon import PREPOSITION
+from semantic_world.corpus.logical import logical_form, with_cut
+from semantic_world.corpus.planner import EVENT_SECTION, RESULT
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     CHANGE,
     CLASS,
     EFFECT,
     EVENT,
+    PAIR_STATE,
+    PLACE_EVENT,
     STATE,
+    VERB,
     EventTerm,
+    Literal,
     condition_of,
     effect_matches,
+)
+from semantic_world.corpus.readings import readings
+from semantic_world.corpus.realize import Realizer, leaves
+from semantic_world.corpus.renderings import (
+    formula,
+    parse_propositional,
+    proposition_of,
+    propositional,
 )
 from semantic_world.world.history import replay
 
 WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow))
-PAIR_LABELS = ("PAIRFL", "PLACE", "SAME.", "SOME.", "SOMEOF.", "EVERYPLACE", "SOMEPLACE")
-"""The labels of phase (c) that no sentence, test item, or word of the corpus may carry in
-stage c4a: the pair fluents, the places and their categories, features, and event types, the
-pair operators, and the bare symbols for places."""
+UNNAMED_LABELS = ("SOME.", "SOMEOF.", "EVERYPLACE", "SOMEPLACE")
+"""The labels of phase (c) that no word of the corpus carries in stage c4b: ``SOME`` and
+``SOMEOF`` (WM.55, stage c5a), and the bare symbols for places."""
+PHASE_C_LABELS = ("PAIRFL", "PLACE", "SAME.") + UNNAMED_LABELS
+"""Every label of phase (c): what no test item may carry in stage c4b."""
 MANY = {
     "documents": {"initial_state_rate": 0.6, "result_rate": 0.9, "blocked_rate": 0.5},
     "propositions": {"negation_rate": {"able_now": 0.6}},
 }
 """Many state, result, and blocked sentences, so that the tests see every kind."""
+CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
+ADPOSITIONS = ("preposition", "postposition")
 
 
 def scenes_json(corpus) -> dict[str, dict]:
     return {scene.label: json.loads(json.dumps(scene.to_json())) for scene in corpus.planner.scenes}
+
+
+def _carries(value, labels: tuple[str, ...] = PHASE_C_LABELS) -> bool:
+    text = json.dumps(value)
+    return any(label in text for label in labels)
+
+
+def glosses(sentence) -> str:
+    """The sentence in glosses: the formal rendering without the lexeme labels."""
+    words = []
+    for word in sentence.formal.split():
+        gloss, _, rest = word.partition("/")
+        _, hyphen, affix = rest.partition("-")
+        words.append(gloss + hyphen + affix)
+    return " ".join(words)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -108,20 +155,22 @@ def test_the_oracles_pairs_and_places_agree_with_history_replay(cases, runs, nam
 
 @pytest.mark.parametrize("name", WORLDS)
 def test_every_sentence_is_true_and_every_false_item_false_by_the_oracle(cases, runs, name) -> None:
-    """Every sentence of the corpus (the timed ones judged with the pairs and the places, which
-    now decide what is legal) is true by the oracle, and every false test item is false; the
-    corpus holds state, change, and ``able_now`` sentences, and blocked sentences whose binding
-    the pairs or the places block."""
+    """Every sentence of the corpus is true by the oracle (the pair changes and the moves and
+    acts of stage c4b judged on the replayed pairs and places, and the timed sentences with the
+    pairs and the places deciding what is legal), and every false test item is false; the corpus
+    holds state, change, and ``able_now`` sentences, pair changes, and narrated place events."""
     case = cases(name)
     corpus = runs(name, **MANY)
     oracle = case.oracle(**MANY)
     scenes = scenes_json(corpus)
     cuts = corpus.planner.truth.cuts
     levels: Counter = Counter()
+    kinds: Counter = Counter()
     for document in corpus.documents:
         for sentence in document.sentences:
             proposition = sentence.proposition
             levels[proposition.level] += 1
+            kinds[proposition.predicate.kind] += 1
             if proposition.level == EVENT:
                 assert oracle.event(sentence.logical_form, scenes[proposition.scene])
                 continue
@@ -129,6 +178,7 @@ def test_every_sentence_is_true_and_every_false_item_false_by_the_oracle(cases, 
             form = with_cut(proposition.to_json(), cuts)
             assert oracle.truth(form, scene) is True, sentence.label
     assert levels[STATE] > 0 and levels[CHANGE] > 0 and levels[ABLE_NOW] > 0
+    assert kinds[PAIR_STATE] > 0 and kinds[PLACE_EVENT] > 0
     items = 0
     for test_set in corpus.test_sets:
         for true, false in test_set.pairs:
@@ -149,7 +199,9 @@ def test_blocked_sentences_are_judged_with_the_pairs_and_the_places(cases, runs,
     """A negative ``ABLE_NOW`` sentence is blocked by a precondition that the replayed state
     fails, and since stage c4a that precondition may be a pair literal: ``SAME`` on the location
     fluent, a pair between the two participants, ``SOME`` or ``SOMEOF``, or a compiled literal.
-    The oracle, replaying the pairs, agrees with the corpus on every such sentence."""
+    The oracle, replaying the pairs, agrees with the corpus on every such sentence. The blocked
+    sentences are about the entity event types alone: those of place event types are stage
+    c4c's."""
     case = cases(name)
     corpus = runs(name, **MANY)
     oracle = case.oracle(**MANY)
@@ -159,7 +211,10 @@ def test_blocked_sentences_are_judged_with_the_pairs_and_the_places(cases, runs,
     for document in corpus.documents:
         for sentence in document.sentences:
             proposition = sentence.proposition
-            if proposition.level != ABLE_NOW or proposition.polarity:
+            if proposition.level != ABLE_NOW:
+                continue
+            assert proposition.predicate.kind != PLACE_EVENT
+            if proposition.polarity:
                 continue
             blocked += 1
             scene = scenes[proposition.scene]
@@ -176,74 +231,639 @@ def test_blocked_sentences_are_judged_with_the_pairs_and_the_places(cases, runs,
 
 
 # ---------------------------------------------------------------------------------------------
-# Acceptance: nothing names a pair fluent, a place, or a place event type
+# Acceptance: the lexicon of pairs and places (stage c4b)
 # ---------------------------------------------------------------------------------------------
 
 
-def _carries(value, labels: tuple[str, ...] = PAIR_LABELS) -> bool:
-    text = json.dumps(value)
-    return any(label in text for label in labels)
-
-
 @pytest.mark.parametrize("name", WORLDS)
-def test_no_sentence_item_or_word_names_a_pair_fluent_or_a_place(cases, runs, name) -> None:
-    """The lexicon has no concept of phase (c), no sentence's tokens, logical form, or
-    rendering name one, no test item does, and the word-form request lists the same lexemes as
-    the lexicon's content lexemes, none for a pair fluent or a place."""
+def test_the_lexicon_names_the_pair_fluents_and_the_places(cases, runs, name) -> None:
+    """The lexicon's phase (c) concepts (``WORLD_PHASE_C.md``, "Lexicon"): a preposition for
+    every pair fluent and every ``SAME`` literal that some precondition or condition reads, the
+    location fluent's included; a noun for every category of places; an adjective or a part noun
+    for every place feature; two pole adjectives per place scalar; a transitive verb for every
+    place event type with dynamics; and a quarter of the place patient capacities. No word for
+    ``SOME``, ``SOMEOF``, ``SOMEPLACE``, or ``them``. The concepts come after the generic noun,
+    so every earlier content lexeme keeps its label, and the request lists the new lexemes with
+    their parts of speech, the prepositions taking no affix."""
     from semantic_world.corpus import wordform_request
 
     corpus = runs(name)
     lexicon = corpus.planner.lexicon
-    assert not any(_carries(c.label) for c in lexicon.concepts)
-    assert not any(_carries(x.concept) for x in lexicon.lexemes)
-    world = case = cases(name).world
-    assert world.place_event_types and world.pair_fluents
-    for label in world.place_event_types:
-        assert world.event_names(label) == ()
-        assert not lexicon.is_named(label)
-    for document in corpus.documents:
-        for sentence in document.sentences:
-            assert not _carries(sentence.to_json()), sentence.label
-    for test_set in corpus.test_sets:
-        for item in test_set.items:
-            assert not _carries(item.input), (test_set.name, item.input["propositional"])
-    request = wordform_request(corpus)
-    assert [x["concept"] for x in request["lexemes"]] == [
-        x.concept for x in lexicon.content_lexemes
+    world = cases(name).world
+    definition = world.definition
+    of = lexicon.of_type
+    read = {
+        lit.pair_fluent
+        for et in definition.event_types
+        for lit in list(et.precondition) + [c for e in et.effects for c in e.condition]
+        if lit.pair and lit.kind == "pair"
+    }
+    same = {
+        lit.pair_fluent
+        for et in definition.event_types
+        for lit in list(et.precondition) + [c for e in et.effects for c in e.condition]
+        if lit.pair and lit.kind == "pair_same"
+    }
+    assert [c.label for c in of("pair")] == [f for f in world.pair_fluents if f in read]
+    assert world.location_fluents[0] in read  # a move's compiled literal reads it
+    assert [c.label for c in of("same")] == [f"SAME.{f}" for f in world.pair_fluents if f in same]
+    assert all(c.pos == PREPOSITION for c in of("pair") + of("same"))
+    assert [c.label for c in of("place_category")] == list(world.place_categories)
+    assert [c.label for c in of("place_is")] == list(world.place_features["property"])
+    assert [c.label for c in of("place_has")] == list(world.place_features["part"])
+    assert [c.label for c in of("place_scalar")] == [
+        f"{s}.{pole}" for s in world.place_scalars for pole in ("HIGH", "LOW")
     ]
-    assert not _carries(request)
-    del case
+    assert [c.label for c in of("place_event")] == [
+        label
+        for label in world.place_event_types
+        if definition.event_type(label).performable
+        and label not in lexicon.event_types_without_word
+    ]
+    assert [c.label for c in of("place_patient_projection")] == list(world.place_patient_capacities)
+    proportion = corpus.config.lexicon.named_proportion["place_patient_projection"]
+    named = sum(lexicon.is_named(c.label) for c in of("place_patient_projection"))
+    assert named == int(np.floor(proportion * len(of("place_patient_projection")) + 0.5))
+    for concept_type in ("pair", "same", "place_category", "place_is", "place_event"):
+        assert all(lexicon.is_named(c.label) for c in of(concept_type))
+    assert not any(_carries(c.label, UNNAMED_LABELS) for c in lexicon.concepts)
+    assert not any(x.gloss == "them" for x in lexicon.lexemes)
+    # the earlier content lexemes keep their labels: every lexeme before the first phase (c)
+    # lexeme names no phase (c) concept, and the generic noun stands right before them
+    first = next(i for i, x in enumerate(lexicon.content_lexemes) if _carries(x.concept))
+    assert all(not _carries(x.concept) for x in lexicon.content_lexemes[:first])
+    assert lexicon.content_lexemes[first - 1].concept == "THING"
+    request = wordform_request(corpus)
+    by_label = {x["label"]: x for x in request["lexemes"]}
+    for lexeme in lexicon.content_lexemes:
+        assert by_label[lexeme.label]["pos"] == lexeme.pos
+    assert PREPOSITION not in request["takes"]
+    assert any(x["pos"] == PREPOSITION for x in request["lexemes"])
+    assert not any(_carries(x, UNNAMED_LABELS) for x in request["lexemes"])
+
+
+# ---------------------------------------------------------------------------------------------
+# Acceptance: moves and acts in narratives, places as referents
+# ---------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", WORLDS)
-def test_narratives_skip_the_events_of_place_event_types(cases, runs, name) -> None:
-    """A move or an act at a place is never narrated, in a main clause or in a relative clause,
-    while the scenes hold such events; the narrative's other sentences stay true around a
-    skipped event (the test above), because every sentence is judged on the replayed history."""
+def test_narratives_report_the_moves_and_the_acts(cases, runs, name) -> None:
+    """An event of a place event type is narrated as a transitive verb with the place as its
+    object (``WORLD_PHASE_C.md``, "Grammar"), in a main clause or in a relative clause; a
+    situational narrative reports every event of its scene in time order, the moves and the acts
+    among them, as far as its length goes; and the oracle finds every reported place event in
+    its scene."""
     corpus = runs(name)
     world = cases(name).world
-    place_events = narrated_events = skipped = 0
+    oracle = cases(name).oracle()
+    scenes = scenes_json(corpus)
+    narrated: Counter = Counter()
+    in_clauses = 0
     for document in corpus.documents:
         if not document.scenes:
             continue
-        reported = {
-            label
-            for sentence in document.sentences
-            for label in sentence.sentence.event_labels
-            if label is not None
-        }
-        for scene in document.scenes:
-            for event in scene_events(scene):
-                if event.place:
-                    place_events += 1
-                    assert world.is_place_event_type(event.type)
-                    assert event.label not in reported
-                    skipped += 1
+        events = {e.label: e for scene in document.scenes for e in scene_events(scene)}
+        reported = [s.proposition.event for s in document.sentences if s.section == EVENT_SECTION]
+        if document.type == "situational":
+            (scene,) = document.scenes
+            assert reported == [e.label for e in scene_events(scene)][: len(reported)]
         for sentence in document.sentences:
-            if sentence.section == EVENT_SECTION:
-                narrated_events += 1
-                assert not world.is_place_event_type(sentence.proposition.predicate.label)
-    assert place_events > 0 and skipped == place_events and narrated_events > 0
+            plan = sentence.plan
+            for phrase in plan.noun_phrases():
+                if phrase.clause is None:
+                    continue
+                for predication in phrase.clause.predications:
+                    if predication.kind == PLACE_EVENT:
+                        in_clauses += 1
+                        assert predication.object is not None and predication.object.place
+            if sentence.section != EVENT_SECTION:
+                continue
+            proposition = sentence.proposition
+            event = events[proposition.event]
+            if not event.place:
+                assert proposition.predicate.kind != PLACE_EVENT
+                continue
+            assert proposition.predicate.kind == PLACE_EVENT
+            assert proposition.predicate.label == event.type
+            assert proposition.predicate.patient == event.patient
+            assert event.patient in (document.scenes[0].places or ()) or any(
+                event.patient in (scene.places or ()) for scene in document.scenes
+            )
+            kind = world.place_event_kind(event.type)
+            assert kind in ("move", "act")
+            narrated[kind] += 1
+            target = plan.predication.object
+            assert target is not None and target.place and not target.pronoun
+            assert target.noun in world.place_path(event.patient)
+            assert oracle.event(sentence.logical_form, scenes[proposition.scene])
+            assert sentence.readings == ("event",)
+    assert narrated["move"] > 0
+    if name == "default":
+        assert narrated["act"] > 0 and in_clauses > 0
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_result_sentences_state_pair_changes(cases, runs, name) -> None:
+    """A result sentence states a pair change of the event's own effects with ``become`` and
+    the preposition (WM.72): a move's new place (``BECOME(..., PAIRFL.k(REF.a, REF.q))``), the
+    loss of the old place (``NOT``), or a pair between two participants; the change is of the
+    event's step, the event recorded it, and the oracle judges it true and made by the event."""
+    case = cases(name)
+    corpus = runs(name, **MANY)
+    oracle = case.oracle(**MANY)
+    world = case.world
+    scenes = scenes_json(corpus)
+    found: Counter = Counter()
+    for document in corpus.documents:
+        events = {e.label: e for scene in document.scenes for e in scene_events(scene)}
+        recorded = {
+            e.label: e for scene in document.scenes for step in scene.steps for e in step.events
+        }
+        for index, sentence in enumerate(document.sentences):
+            proposition = sentence.proposition
+            if sentence.section != RESULT or proposition.predicate.kind != PAIR_STATE:
+                continue
+            assert proposition.level == CHANGE
+            before = next(
+                s for s in reversed(document.sentences[:index]) if s.section == EVENT_SECTION
+            )
+            event = events[before.proposition.event]
+            assert proposition.scene == event.scene and proposition.time == f"TIME.{event.step}"
+            fluent, second = proposition.predicate.label, proposition.predicate.patient
+            assert proposition.subject == event.agent or event.involves(proposition.subject)
+            changes = [
+                c
+                for c in recorded[event.label].changes
+                if c.pair and c.pair_fluent == fluent and c.first == proposition.subject
+            ]
+            assert any(c.second == second and c.to == proposition.polarity for c in changes)
+            scene = scenes[event.scene]
+            assert oracle.change(sentence.logical_form, scene)
+            assert oracle.made_by(
+                scene, event.step, proposition.subject, fluent, event.label, second=second
+            )
+            assert proposition.grounding["caused_by"] == event.label
+            if world.is_location_fluent(fluent):
+                assert world.is_place(second) and world.place_event_kind(event.type) == "move"
+                found["new place" if proposition.polarity else "old place"] += 1
+            else:
+                assert not world.is_place(second)
+                found["pair"] += 1
+            # the plan says it with become and the preposition's object
+            predication = sentence.plan.predication
+            assert predication.become and predication.object is not None
+            assert predication.object.place == world.is_place(second)
+            assert sentence.readings == ("state",)
+    assert found["new place"] > 0 and found["old place"] > 0
+    # no pair state at a time point (HOLDS) is stated in stage c4b: the initial states with
+    # pairs and places are stage c4c's
+    for document in corpus.documents:
+        for sentence in document.sentences:
+            if sentence.proposition.predicate.kind == PAIR_STATE:
+                assert sentence.proposition.level == CHANGE and sentence.section == RESULT
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_places_are_referents(cases, runs, name) -> None:
+    """A place is introduced with ``a`` and mentioned later with ``the``, numbered among the
+    referents of its document with the entities, named by a category of places above it, told
+    apart from the other places of the document's scenes by place properties and parts (and
+    kept, counted as not distinguished, when they cannot), never a pronoun, never with a
+    relative clause, and never the subject; no mention of anything carries a pair fluent or a
+    location as a modifier."""
+    corpus = runs(name, **MANY)
+    world = cases(name).world
+    rules = corpus.planner.rules
+    introduced = later = 0
+    for document in corpus.documents:
+        seen: set[str] = set()
+        places = tuple(dict.fromkeys(q for scene in document.scenes for q in (scene.places or ())))
+        for sentence in document.sentences:
+            assert not sentence.plan.subject.place
+            for phrase in sentence.plan.noun_phrases():
+                for literal in phrase.restriction:
+                    assert not literal.feature.startswith(("PAIRFL.", "SAME."))
+                if phrase.kind != INSTANCE_NP or not world.is_place(phrase.referent):
+                    continue
+                place = phrase.referent
+                assert phrase.place and not phrase.pronoun and phrase.clause is None
+                assert phrase.noun in world.place_path(place)
+                assert all(literal.feature.startswith("PLACE") for literal in phrase.restriction)
+                assert all(
+                    rules.fits(world.place_index[place], x, phrase.noun) for x in phrase.restriction
+                )
+                assert place in places
+                if place not in seen:
+                    assert phrase.determiner == "a" and not phrase.restriction
+                    seen.add(place)
+                    introduced += 1
+                else:
+                    assert phrase.determiner == "the"
+                    later += 1
+                    fitting = rules.matches(phrase, places)
+                    # the place is among them; when the modifiers cannot tell it apart the
+                    # mention is kept as it is, and counted (CG.43)
+                    assert place in fitting
+            for phrase, flag in zip(sentence.sentence.phrases, sentence.distinguished, strict=True):
+                if phrase.place and phrase.determiner == "the":
+                    assert flag == (rules.matches(phrase, places) == [phrase.referent])
+        # the referent labels number entities and places together, by first mention
+        labels = list(document.referents)
+        assert labels == [f"REF.{i}" for i in range(1, len(labels) + 1)]
+        for instance in document.referents.values():
+            if world.is_place(instance):
+                assert instance in places
+    assert introduced > 0 and later > 0
+    stats = corpus.stats["mentions"]
+    assert stats["place_mentions"] == introduced + later
+    assert stats["place_indefinite"] == introduced and stats["place_definite"] == later
+
+
+# ---------------------------------------------------------------------------------------------
+# Acceptance: the grammar of prepositional predicates and place event types
+# ---------------------------------------------------------------------------------------------
+
+
+def the(instance: str, noun: str, *restriction: Literal, clause=None, determiner="the"):
+    return NounPhrase(INSTANCE_NP, instance, noun, determiner, restriction, clause)
+
+
+def _tiny_plans() -> dict[str, SentencePlan]:
+    """Fixed plans on the tiny world: a location state and change, a move, and a move reported
+    in a relative clause. ``PAIRFL.3`` is the tiny world's location fluent and
+    ``PLACEEVENTTYPE.1`` a move (both with words)."""
+    time = "SCENE.1.TIME.2"
+    owl = the("INSTANCE.1.1.1", "CATEGORY.1.1")
+    place = the("PLACE.1.1", "PLACECATEGORY.1")
+    other_place = the("PLACE.2.1", "PLACECATEGORY.2", Literal("PLACEPROPERTY.1"))
+    return {
+        "location": SentencePlan(
+            owl, Predication(PAIR_STATE, "PAIRFL.3", True, place, tense="past", time=time)
+        ),
+        "left": SentencePlan(
+            owl,
+            Predication(
+                PAIR_STATE, "PAIRFL.3", False, other_place, tense="past", time=time, become=True
+            ),
+        ),
+        "went": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1", determiner="a"),
+            Predication(
+                PLACE_EVENT,
+                "PLACEEVENTTYPE.1",
+                True,
+                the("PLACE.2.1", "PLACECATEGORY.2", determiner="a"),
+                "SCENE.1.EVENTINSTANCE.2",
+                "past",
+                "simple",
+            ),
+        ),
+        "clause": SentencePlan(
+            the(
+                "INSTANCE.1.1.1",
+                "CATEGORY.1.1",
+                clause=RelativeClause(
+                    (
+                        Predication(
+                            PLACE_EVENT,
+                            "PLACEEVENTTYPE.1",
+                            True,
+                            place,
+                            "SCENE.1.EVENTINSTANCE.1",
+                            "past",
+                            "progressive",
+                        ),
+                    )
+                ),
+            ),
+            Predication(
+                VERB,
+                "EVENTTYPE2.1.1",
+                True,
+                the("INSTANCE.2.1.1", "CATEGORY.2.1"),
+                "SCENE.1.EVENTINSTANCE.3",
+                "past",
+                "simple",
+            ),
+        ),
+    }
+
+
+ENGLISH = {
+    "location": "the CATEGORY.1.1 is PAIRFL.3 the PLACECATEGORY.1",
+    "left": "the CATEGORY.1.1 become not PAIRFL.3 the PLACEPROPERTY.1 PLACECATEGORY.2",
+    "went": "a CATEGORY.1.1 PLACEEVENTTYPE.1 a PLACECATEGORY.2",
+    "clause": (
+        "the CATEGORY.1.1 that PLACEEVENTTYPE.1 the PLACECATEGORY.1 EVENTTYPE2.1.1 the CATEGORY.2.1"
+    ),
+}
+LOCATION_ORDERS = {
+    ("SVO", "preposition"): "the CATEGORY.1.1 is PAIRFL.3 the PLACECATEGORY.1",
+    ("SVO", "postposition"): "the CATEGORY.1.1 is the PLACECATEGORY.1 PAIRFL.3",
+    ("SOV", "preposition"): "the CATEGORY.1.1 PAIRFL.3 the PLACECATEGORY.1 is",
+    ("VSO", "preposition"): "is the CATEGORY.1.1 PAIRFL.3 the PLACECATEGORY.1",
+    ("VOS", "postposition"): "is the PLACECATEGORY.1 PAIRFL.3 the CATEGORY.1.1",
+    ("OVS", "preposition"): "PAIRFL.3 the PLACECATEGORY.1 is the CATEGORY.1.1",
+    ("OSV", "postposition"): "the PLACECATEGORY.1 PAIRFL.3 the CATEGORY.1.1 is",
+}
+"""The location sentence in some clause orders, with the preposition before or after its noun
+phrase: the prepositional phrase stands where an object stands."""
+
+
+def _realize(case, plan: SentencePlan, **grammar):
+    settings = {"grammar": {"can_rate": {"class": 1.0}, **grammar}}
+    realizer = case.realizer(**settings)
+    sentence = realizer.realize(plan, np.random.default_rng(0))
+    lexicon = case.lexicon(**settings)
+    assert tuple(leaves(sentence.tree)) == sentence.tokens
+    read = interpret(
+        sentence.tree,
+        lexicon,
+        sentence.referents,
+        sentence.events,
+        sentence.plan.quantifier,
+        sentence.plan.predication.standard,
+    )
+    assert read == plan
+    return sentence
+
+
+def test_prepositional_predicates_in_the_six_clause_orders(cases) -> None:
+    """With the preposition before and after its noun phrase (``word_order.adposition``), the
+    trees of a pair state, a pair change, and a place event type are correct in all six clause
+    orders: the words are the plan's, the leaves are the tokens, ``interpret(tree)`` recovers the
+    plan, and the propositional rendering of the logical form parses back to it."""
+    tiny = cases("tiny")
+    plans = _tiny_plans()
+    for name, plan in plans.items():
+        check_plan(plan)
+        assert glosses(_realize(tiny, plan)) == ENGLISH[name]
+    for order, adposition in itertools.product(CLAUSE_ORDERS, ADPOSITIONS):
+        grammar = {"word_order": {"clause": order, "adposition": adposition}}
+        for name, plan in plans.items():
+            sentence = _realize(tiny, plan, **grammar)
+            assert sorted(glosses(sentence).split()) == sorted(ENGLISH[name].split())
+            proposition = plan.proposition()
+            form = logical_form(plan, proposition, {}, 1.0, {"HIGH": 0.75, "LOW": 0.25})
+            text = propositional(form)
+            parsed = parse_propositional(text)
+            assert parsed == formula(form)
+            assert proposition_of(parsed) == proposition
+            assert sentence.events[0] is not None
+        if (order, adposition) in LOCATION_ORDERS:
+            assert (
+                glosses(_realize(tiny, plans["location"], **grammar))
+                == LOCATION_ORDERS[order, adposition]
+            )
+    # the readings: a pair state and a pair change read as a state, a move as an event
+    for name, reading in (("location", "state"), ("left", "state"), ("went", "event")):
+        sentence = _realize(tiny, plans[name])
+        assert readings(sentence.tree, tiny.lexicon(), tiny.config()) == (reading,)
+    # the renderings of the fixed plans
+    forms = {
+        name: propositional(logical_form(plan, plan.proposition(), {}, 1.0))
+        for name, plan in plans.items()
+    }
+    assert forms["location"] == (
+        "{CATEGORY.1.1(INSTANCE.1.1.1) AND PLACECATEGORY.1(PLACE.1.1)} "
+        "HOLDS(SCENE.1, TIME.2, PAST, PAIRFL.3(INSTANCE.1.1.1, PLACE.1.1))"
+    )
+    assert forms["left"] == (
+        "{CATEGORY.1.1(INSTANCE.1.1.1) AND PLACECATEGORY.2(PLACE.2.1) AND "
+        "PLACEPROPERTY.1(PLACE.2.1)} "
+        "BECOME(SCENE.1, TIME.2, PAST, NOT PAIRFL.3(INSTANCE.1.1.1, PLACE.2.1))"
+    )
+    assert forms["went"] == (
+        "CATEGORY.1.1(INSTANCE.1.1.1) AND PLACECATEGORY.2(PLACE.2.1) AND "
+        "EVENT(SCENE.1.EVENTINSTANCE.2, PAST, SIMPLE, PLACEEVENTTYPE.1(INSTANCE.1.1.1, PLACE.2.1))"
+    )
+
+
+def test_pairs_between_entities_in_the_six_clause_orders(tmp_path: Path) -> None:
+    """On the world of ``tiny_pairs.yaml``, whose event file reads pair fluents between entities
+    in its preconditions, a pair state and a pair change between two entities, with the
+    preposition before and after, in all six clause orders."""
+    config = corpus_config("data/world/tiny_pairs.yaml")
+    world = load_world(config)
+    streams = Streams(config.seed)
+    lexicon = build_lexicon(config, world, streams)
+    prepositions = [
+        c.label for c in lexicon.of_type("pair") if not world.is_location_fluent(c.label)
+    ]
+    assert prepositions, "the event file reads a pair fluent between entities"
+    fluent = prepositions[0]
+    owl, mouse = world.instances[0], world.instances[1]
+    time = "SCENE.1.TIME.3"
+    plans = {
+        "near": SentencePlan(
+            the(owl, world.instance_leaf[0]),
+            Predication(
+                PAIR_STATE,
+                fluent,
+                True,
+                the(mouse, world.instance_leaf[1]),
+                tense="past",
+                time=time,
+            ),
+        ),
+        "became": SentencePlan(
+            NounPhrase(INSTANCE_NP, owl),
+            Predication(
+                PAIR_STATE,
+                fluent,
+                True,
+                the(mouse, world.instance_leaf[1]),
+                tense="past",
+                time=time,
+                become=True,
+            ),
+        ),
+    }
+    for order, adposition in itertools.product(CLAUSE_ORDERS, ADPOSITIONS):
+        settings = {"grammar": {"word_order": {"clause": order, "adposition": adposition}}}
+        config = corpus_config("data/world/tiny_pairs.yaml", **settings)
+        realizer = Realizer(config, lexicon, streams)
+        for name, plan in plans.items():
+            check_plan(plan)
+            sentence = realizer.realize(plan, np.random.default_rng(0))
+            read = interpret(
+                sentence.tree, lexicon, sentence.referents, sentence.events, None, None
+            )
+            assert read == plan
+            assert fluent in sentence.conceptual
+            assert readings(sentence.tree, lexicon, config) == ("state",)
+            form = logical_form(plan, plan.proposition(), {owl: "REF.1", mouse: "REF.2"}, 1.0)
+            text = propositional(form)
+            assert (
+                proposition_of(parse_propositional(text), {"REF.1": owl, "REF.2": mouse})
+                == plan.proposition()
+            )
+            if name == "near":
+                assert text.endswith(f"HOLDS(SCENE.1, TIME.3, PAST, {fluent}(REF.1, REF.2))")
+            else:
+                assert text.endswith(f"BECOME(SCENE.1, TIME.3, PAST, {fluent}(REF.1, REF.2))")
+    del tmp_path
+
+
+def test_plans_the_grammar_refuses(cases) -> None:
+    """The limits of "Grammar" (``WORLD_PHASE_C.md``): a pair fluent or a location is never a
+    modifier of a mention, a pair state is never in a relative clause, a place is never a
+    pronoun, never takes a relative clause, and is never the subject, and the object of a place
+    event type is a place."""
+    from semantic_world.corpus.grammar import GrammarError
+
+    tiny = cases("tiny")
+    plans = _tiny_plans()
+    realizer = tiny.realizer()
+    rng = np.random.default_rng(0)
+    bad = {
+        "a pair fluent as a modifier": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1", Literal("PAIRFL.3")),
+            plans["location"].predication,
+        ),
+        "a pair state in a relative clause": SentencePlan(
+            the(
+                "INSTANCE.1.1.1",
+                "CATEGORY.1.1",
+                clause=RelativeClause((plans["location"].predication,)),
+            ),
+            Predication(
+                "event_type1",
+                "EVENTTYPE1.1",
+                event="SCENE.1.EVENTINSTANCE.1",
+                tense="past",
+                aspect="simple",
+            ),
+        ),
+        "a place as a pronoun": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1"),
+            Predication(
+                PAIR_STATE,
+                "PAIRFL.3",
+                True,
+                NounPhrase(INSTANCE_NP, "PLACE.1.1"),
+                tense="past",
+                time="SCENE.1.TIME.2",
+            ),
+        ),
+        "a place with a relative clause": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1"),
+            Predication(
+                PAIR_STATE,
+                "PAIRFL.3",
+                True,
+                the(
+                    "PLACE.1.1",
+                    "PLACECATEGORY.1",
+                    clause=RelativeClause((Predication("event_type1", "EVENTTYPE1.1"),)),
+                ),
+                tense="past",
+                time="SCENE.1.TIME.2",
+            ),
+        ),
+        "a place as the subject": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1"), Predication("property", "PLACEPROPERTY.1")
+        ),
+        "an entity as the object of a move": SentencePlan(
+            plans["went"].subject,
+            Predication(
+                PLACE_EVENT,
+                "PLACEEVENTTYPE.1",
+                True,
+                the("INSTANCE.2.1.1", "CATEGORY.2.1"),
+                "SCENE.1.EVENTINSTANCE.2",
+                "past",
+                "simple",
+            ),
+        ),
+        "a pair state without a time point": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1"),
+            Predication(PAIR_STATE, "PAIRFL.3", True, the("PLACE.1.1", "PLACECATEGORY.1")),
+        ),
+    }
+    for what, plan in bad.items():
+        with pytest.raises(GrammarError):
+            check_plan(plan)
+        with pytest.raises(GrammarError):
+            realizer.realize(plan, rng)
+        print(what)
+
+
+# ---------------------------------------------------------------------------------------------
+# Acceptance: the test sets take none of this stage's sentences; the statistics
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_no_test_item_is_made_from_this_stages_sentences(cases, runs, name) -> None:
+    """No item of any set names a pair fluent, a place, a place feature, a place event type, or
+    ``SAME`` (the state, event, ``able_now``, and false-event sets with them are stage c4c's),
+    and every item's referents are entities."""
+    corpus = runs(name)
+    world = cases(name).world
+    items = 0
+    for test_set in corpus.test_sets:
+        for item in test_set.items:
+            items += 1
+            assert not _carries(item.input), (test_set.name, item.input["propositional"])
+            form = item.input["logical_form"]
+            assert form["predicate"]["kind"] not in (PAIR_STATE, PLACE_EVENT)
+            for mention in item.input["referents"]:
+                assert not world.is_place(mention["referent"])
+    assert items > 100
+    # while the documents do state them
+    assert corpus.stats["states"]["pair_change_sentences"] > 0
+    assert corpus.stats["states"]["move_sentences"] > 0
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_the_statistics_count_the_new_sentences_and_the_place_events(cases, runs, name) -> None:
+    """``stats.yaml`` counts the pair-state sentences, the change sentences with ``become``, the
+    location sentences, and the narrated moves and acts (Jon's ruling 3 of WM.72), and the
+    scenes' place events and pair changes, a move's two changes counted as one move; the counts
+    agree with a recount from the documents and the scenes."""
+    corpus = runs(name)
+    world = cases(name).world
+    states = corpus.stats["states"]
+    sentences = [s for d in corpus.documents for s in d.sentences]
+    pairs = [s for s in sentences if s.proposition.predicate.kind == PAIR_STATE]
+    assert states["pair_state_sentences"] == sum(s.proposition.level == STATE for s in pairs)
+    assert states["pair_change_sentences"] == sum(s.proposition.level == CHANGE for s in pairs)
+    assert states["location_sentences"] == sum(
+        world.is_location_fluent(s.proposition.predicate.label) for s in pairs
+    )
+    assert states["pair_state_sentences"] == 0  # the initial states with pairs are stage c4c's
+    place_events = [
+        s
+        for s in sentences
+        if s.section == EVENT_SECTION and s.proposition.predicate.kind == PLACE_EVENT
+    ]
+    kinds = Counter(world.place_event_kind(s.proposition.predicate.label) for s in place_events)
+    assert states["move_sentences"] == kinds["move"]
+    assert states["act_sentences"] == kinds["act"]
+    scenes = corpus.stats["scenes"]
+    events = [e for scene in corpus.planner.scenes for step in scene.steps for e in step.events]
+    moves = sum(
+        world.place_event_kind(e.type) == "move"
+        for e in events
+        if world.is_place_event_type(e.type)
+    )
+    acts = sum(
+        world.place_event_kind(e.type) == "act" for e in events if world.is_place_event_type(e.type)
+    )
+    between = sum(
+        1
+        for e in events
+        for c in e.changes
+        if c.pair and not world.is_location_fluent(c.pair_fluent)
+    )
+    assert scenes["place_events"] == moves + acts
+    assert scenes["moves"] == moves and scenes["acts"] == acts
+    assert scenes["pair_changes"] == between + moves
+    assert scenes["pair_changes_between_entities"] == between
+    assert scenes["move_share"] == round(moves / len(events), 6)
+    assert scenes["pair_changes_per_event"] == round((between + moves) / len(events), 6)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -263,6 +883,7 @@ def test_no_causal_statement_states_a_pair_literal(cases, runs, name) -> None:
     for statement in statements:
         assert isinstance(statement.subject, EventTerm)
         assert not _carries(statement.predicate.label)
+        assert not _carries(statement.subject.event_type)
         assert not any(_carries(c.label) for c in statement.subject.condition)
     report = facts.causal_report
     assert {"pair_condition", "pair_effect"} <= set(report["unstated"])

@@ -64,7 +64,13 @@ from semantic_world.corpus.grammar import (
     SentencePlan,
 )
 from semantic_world.corpus.histories import is_time_key
-from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, THAN_WORD, Lexicon
+from semantic_world.corpus.lexicon import (
+    ABLE_NOW_WORD,
+    BEFORE_WORD,
+    PREPOSITION,
+    THAN_WORD,
+    Lexicon,
+)
 from semantic_world.corpus.propositions import (
     CAN,
     CAUSAL_KINDS,
@@ -78,6 +84,8 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
+    PAIR_STATE,
+    PLACE_EVENT,
     PRECONDITION,
     PRESENT,
     PROJECTION,
@@ -92,6 +100,9 @@ from semantic_world.corpus.world import (
     NUMERIC_PREFIX,
     ONE_PLACE_PREFIX,
     PATIENT_CAPACITY_PREFIX,
+    PLACE_EVENT_PREFIX,
+    PLACE_PATIENT_CAPACITY_PREFIX,
+    PLACE_SCALAR_PREFIX,
     SCALAR_PREFIX,
 )
 
@@ -206,7 +217,10 @@ class _Reader:
             or self.standard_object(self.tree)
             or self.standard_object(verb_phrase)
         )
-        predication, _ = self.predication(verb_phrase, target, subject.kind, None)
+        # the preposition of a pair state (stage c4b): a PP whose adposition is a content
+        # lexeme, under the sentence or the verb phrase, wherever the word order put it
+        preposition = self.pair_preposition(self.tree) or self.pair_preposition(verb_phrase)
+        predication, _ = self.predication(verb_phrase, target, subject.kind, None, preposition)
         if predication.kind in CAUSAL_KINDS:
             # a causal statement: the subject's relative clause names the event
             return SentencePlan(self.bound_subject(subject), predication, NEC_ALL)
@@ -222,12 +236,28 @@ class _Reader:
         return SentencePlan(subject, predication, quantifier)
 
     def standard_object(self, node: Tree) -> Tree | None:
-        """The object of a comparative under a node: the noun phrase of a ``PP`` whose
-        adposition is ``than``."""
+        """The object of a comparative under a node (the noun phrase of a ``PP`` whose
+        adposition is ``than``), or (stage c4b) the object of a pair state's preposition (the
+        noun phrase of a ``PP`` whose adposition is a content lexeme)."""
         for phrase in self.children(node, "PP"):
             adposition = self.child(phrase, "P")
-            if adposition is not None and self.gloss(adposition) == THAN_WORD:
+            if adposition is not None and (
+                self.gloss(adposition) == THAN_WORD or self.is_preposition(adposition)
+            ):
                 return self.child(phrase, "NP-OBJ")
+        return None
+
+    def is_preposition(self, node: Tree) -> bool:
+        """Whether a ``P`` node holds a content preposition: the word of a pair fluent (stage
+        c4b), as its lexeme's part of speech says."""
+        return self.lexicon.lexeme(token_parts(self.token(node))[0]).pos == PREPOSITION
+
+    def pair_preposition(self, node: Tree) -> str | None:
+        """The concept of the content preposition of a ``PP`` under a node, or None."""
+        for phrase in self.children(node, "PP"):
+            adposition = self.child(phrase, "P")
+            if adposition is not None and self.is_preposition(adposition):
+                return self.concept(adposition)
         return None
 
     @staticmethod
@@ -305,16 +335,56 @@ class _Reader:
         return NounPhrase(kind, referent, noun, determiner, tuple(literals), clause)
 
     def predication(
-        self, node: Tree, target: Tree | None, subject_kind: str, previous: str | None
+        self,
+        node: Tree,
+        target: Tree | None,
+        subject_kind: str,
+        previous: str | None,
+        preposition: str | None = None,
     ) -> tuple[Predication, str | None]:
         """The predication of a verb phrase, and the gloss of its auxiliary. ``previous`` is the
-        auxiliary of the verb phrase before it in a joined relative clause."""
+        auxiliary of the verb phrase before it in a joined relative clause. ``preposition`` is
+        the concept of the pair fluent's preposition when the sentence has a ``PP`` of one
+        (stage c4b): the verb phrase is then a pair state, the copula or ``become`` with the
+        preposition's object."""
         auxiliary_node = self.child(node, "AUX")
         auxiliary = None if auxiliary_node is None else self.gloss(auxiliary_node)
         polarity = self.child(node, "Neg") is None
         verb = self.child(node, "V")
         adjective = self.child(node, "A")
         nominal = self.child(node, "NP-PRD")
+        if preposition is not None and verb is None and adjective is None and nominal is None:
+            # a prepositional predicate (stage c4b): a pair state at the time point the record
+            # gives, with the copula, or a pair change with become
+            if subject_kind == CLASS_NP:
+                raise GrammarError(
+                    f"the preposition {preposition} with a category as the subject is a "
+                    "statement of stage c5a, which the grammar does not read yet"
+                )
+            report = self.event[id(node)]
+            if report is None or not is_time_key(report[0]):
+                raise GrammarError(
+                    f"the preposition {preposition} states a pair at a time point, and no time "
+                    "point was given for its verb phrase"
+                )
+            if auxiliary not in ("is", "are", "become"):
+                raise GrammarError("a pair is stated with the copula or with become")
+            if target is None:
+                raise GrammarError(f"the preposition {preposition} has no object")
+            time, tense, _ = report
+            patient = self.noun_phrase(target)
+            return (
+                Predication(
+                    PAIR_STATE,
+                    preposition,
+                    polarity,
+                    patient,
+                    tense=tense,
+                    time=time,
+                    become=auxiliary == "become",
+                ),
+                auxiliary,
+            )
         if auxiliary is None and previous is not None:
             # an auxiliary that is not said again, when it fits the predicate word
             fits = (
@@ -326,7 +396,12 @@ class _Reader:
                 auxiliary = previous
         if verb is not None:
             concept = self.concept(verb)
-            kind = CAN if concept.startswith(ONE_PLACE_PREFIX) else VERB
+            if concept.startswith(ONE_PLACE_PREFIX):
+                kind = CAN
+            elif concept.startswith(PLACE_EVENT_PREFIX):
+                kind = PLACE_EVENT  # a move or an act at a place (stage c4b)
+            else:
+                kind = VERB
             patient = None if target is None else self.noun_phrase(target)
             report = self.event[id(node)]
             if report is not None and is_time_key(report[0]):
@@ -395,7 +470,7 @@ class _Reader:
                     f"the adjective {concept} is static, and a time point was given for its "
                     "verb phrase"
                 )
-            if concept.startswith(SCALAR_PREFIX):
+            if concept.startswith(SCALAR_PREFIX) or concept.startswith(PLACE_SCALAR_PREFIX):
                 if COMPARATIVE_MARK in self.marks(adjective):
                     # a comparative: the pole adjective's comparative form, and "than" the object
                     if target is None:
@@ -406,7 +481,9 @@ class _Reader:
                     return Predication(COMPARATIVE, concept, polarity, patient), auxiliary
                 standard = self.standard if subject_kind == CLASS_NP else None
                 return Predication(COMPARISON, concept, polarity, standard=standard), auxiliary
-            if concept.startswith(PATIENT_CAPACITY_PREFIX):
+            if concept.startswith(PATIENT_CAPACITY_PREFIX) or concept.startswith(
+                PLACE_PATIENT_CAPACITY_PREFIX
+            ):
                 kind = PROJECTION
             else:
                 kind = IS

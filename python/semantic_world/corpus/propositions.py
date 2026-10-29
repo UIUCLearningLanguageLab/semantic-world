@@ -148,6 +148,9 @@ from semantic_world.corpus.world import (
     FLUENT_PREFIX,
     NUMERIC_PREFIX,
     PART_PREFIX,
+    PLACE_PART_PREFIX,
+    PLACE_PROPERTY_PREFIX,
+    PLACE_SCALAR_PREFIX,
     PROPERTY_PREFIX,
     SCALAR_PREFIX,
     THING,
@@ -238,9 +241,22 @@ type, the participant in the subject's role has the fluent's value (``AFTER``)."
 PRECONDITION = "precondition"
 """The kind of the predicate of a precondition statement: before every event of the subject's
 event type, the participant in the subject's role has the fluent's value (``BEFORE``)."""
+PAIR_STATE = "pair_state"
+"""The kind of a pair fluent's predicate (stage c4b, ``docs/specs/WORLD_PHASE_C.md``, "Instance
+level"): a pair state between two entities, or from an entity to a place, at a time point of a
+scene, with the pair fluent as its ``label`` and the second argument as its ``patient``, as the
+timed comparative carries its patient: ``HOLDS(SCENE.8, TIME.2, PAST, PAIRFL.2(REF.1, REF.2))``;
+with ``become`` a change, ``BECOME(SCENE.8, TIME.2, PAST, NOT PAIRFL.5(REF.1, REF.3))``."""
+PLACE_EVENT = "place_event_type"
+"""The kind of a place event type's predicate (stage c4b): an event of a move or an act at a
+place, a transitive verb whose patient is a place, ``EVENT(SCENE.8.EVENTINSTANCE.4, PAST,
+SIMPLE, PLACEEVENTTYPE.2(REF.1, REF.3))``. The key is the world's symbol kind."""
 CAUSAL_KINDS = (EFFECT, PRECONDITION)
 COMPARISON_KINDS = (COMPARISON, COMPARATIVE)
 """The kinds judged by the world's comparisons of scalars."""
+EVENT_KINDS = (CAN, VERB, PLACE_EVENT)
+"""The kinds whose predicate is an event type with events: a one-place event type, a two-place
+event type or a category of them, and (stage c4b) a place event type."""
 KINDS = (
     IS,
     HAS,
@@ -253,6 +269,8 @@ KINDS = (
     STATE_KIND,
     EFFECT,
     PRECONDITION,
+    PAIR_STATE,
+    PLACE_EVENT,
 )
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
@@ -306,7 +324,29 @@ _LITERAL_ORDER = {
     SCALAR_PREFIX: 2,
     FLUENT_PREFIX: 3,
     NUMERIC_PREFIX: 4,
+    # the place features (stage c4b), in the same order: a place's restriction holds place
+    # properties, place parts, then place scalar poles
+    PLACE_PROPERTY_PREFIX: 0,
+    PLACE_PART_PREFIX: 1,
+    PLACE_SCALAR_PREFIX: 2,
 }
+
+
+def is_part_feature(label: str) -> bool:
+    """Whether a label is a PART feature of entities or (stage c4b) a place part: the literals
+    said with a with-phrase or a without-phrase."""
+    return label.startswith(PART_PREFIX) or label.startswith(PLACE_PART_PREFIX)
+
+
+def is_property_feature(label: str) -> bool:
+    """Whether a label is a PROPERTY feature of entities or (stage c4b) a place property."""
+    return label.startswith(PROPERTY_PREFIX) or label.startswith(PLACE_PROPERTY_PREFIX)
+
+
+def is_scalar_pole(label: str) -> bool:
+    """Whether a label is a pole of a scalar dimension of entities or (stage c4b) of places:
+    a relative adjective, a comparison with a comparison class."""
+    return label.startswith(SCALAR_PREFIX) or label.startswith(PLACE_SCALAR_PREFIX)
 
 
 def _number(value: float) -> float:
@@ -329,7 +369,8 @@ class Literal:
 
     @property
     def pole(self) -> bool:
-        return self.feature.startswith(SCALAR_PREFIX)
+        """Whether the literal is a scalar pole, of entities or (stage c4b) of places."""
+        return is_scalar_pole(self.feature)
 
     @property
     def sort_key(self) -> tuple:
@@ -612,7 +653,9 @@ class Predicate:
     (``BOOLFL.3``)."""
     patient: CategoryTerm | str | None = None
     """Two-place event types and comparatives only: the patient category (class level) or the
-    patient instance (instance level); for a comparative, the argument the subject exceeds."""
+    patient instance (instance level); for a comparative, the argument the subject exceeds; for
+    a pair state (stage c4b), the second argument of the pair, an instance or a place; for a
+    place event type, the place."""
     comparison: str | None = None
     """Comparisons only: the comparison class. At the instance level it is the category that
     the subject's noun names ("big for a mouse"); at the class level an ancestor of the
@@ -1286,6 +1329,19 @@ class Truth:
                 return f"unknown fluent {label!r}"
             elif predicate.direction is not None:
                 return f"the Boolean fluent {label} has no direction"
+        elif kind == PAIR_STATE:
+            # a pair state (stage c4b): a pair fluent, with the second argument as its patient
+            if not world.is_pair_fluent(label):
+                return f"unknown pair fluent {label!r}"
+            if predicate.patient is None:
+                return "a pair state has a patient: the second argument of the pair"
+        elif kind == PLACE_EVENT:
+            if not world.is_place_event_type(label):
+                return f"unknown place event type {label!r}"
+            if not world.event_names(label):
+                return f"{label} has no dynamics: no event is a move or an act of it"
+            if predicate.patient is None:
+                return "an event of a place event type has a patient: the place"
         elif kind in CAUSAL_KINDS:
             if label in world.numeric_fluents:
                 if kind == PRECONDITION:
@@ -1314,8 +1370,13 @@ class Truth:
             return "only a numeric change or a numeric effect statement has a direction"
         if predicate.direction is not None and not predicate.numeric:
             return "only a predicate about a numeric fluent has a direction"
-        if (kind in (VERB, COMPARATIVE)) != (predicate.patient is not None):
-            return "a two-place event type or a comparative, and only one, has a patient"
+        if (kind in (VERB, COMPARATIVE, PAIR_STATE, PLACE_EVENT)) != (
+            predicate.patient is not None
+        ):
+            return (
+                "a two-place event type, a comparative, a pair state, or a place event type, "
+                "and only one, has a patient"
+            )
         if kind != COMPARISON and predicate.comparison is not None:
             return "only a comparison (a scalar pole) has a comparison class"
         return ""
@@ -1517,8 +1578,10 @@ class Truth:
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
-        if predicate.kind == STATE_KIND or predicate.numeric:
+        if predicate.kind in (STATE_KIND, PAIR_STATE) or predicate.numeric:
             return _invalid("a fluent is stated at a time point of a scene, never timelessly")
+        if predicate.kind == PLACE_EVENT:
+            return _invalid("an event of a place event type is reported in a scene")
         index = self.instance_index[subject]
         kind, label = predicate.kind, predicate.label
         grounding: dict[str, Any]
@@ -1813,11 +1876,24 @@ class Truth:
 
     def allows(self, label: str, agent: str, patient: str | None) -> bool:
         """Whether the binding is able: the requirement of the event type (or the base relation
-        of the category) holds for the agent, or for the agent and the patient."""
+        of the category) holds for the agent, or for the agent and the patient, or (stage c4b)
+        for the agent and the place of a place event type."""
         row = self.instance_index[agent]
         if patient is None:
             return bool(self.world.able(label)[row])
-        return bool(self.world.able(label)[row, self.instance_index[patient]])
+        return bool(self.world.able(label)[row, self._patient_index(label, patient)])
+
+    def _patient_index(self, label: str, patient: str) -> int:
+        """The column of a patient in the able table of an event type: a place's index for a
+        place event type, an entity's otherwise."""
+        if self.world.is_place_event_type(label):
+            return self.world.place_index[patient]
+        return self.instance_index[patient]
+
+    def _binding(self, label: str, agent: str, patient: str | None) -> tuple[int, ...]:
+        if patient is None:
+            return (self.instance_index[agent],)
+        return (self.instance_index[agent], self._patient_index(label, patient))
 
     def states_of(self, scene: str) -> list[State]:
         """The state at every time point of a scene, by replaying its history."""
@@ -1829,7 +1905,7 @@ class Truth:
         """Whether the binding was legal at some time point of the scene for the event type, or
         for some event type below the category."""
         world = self.world
-        binding = tuple(world.instance_index[x] for x in (agent, patient) if x is not None)
+        binding = self._binding(label, agent, patient)
         if not self.allows(label, agent, patient):
             return False
         for event_type in world.event_types_below(label):
@@ -1858,20 +1934,25 @@ class Truth:
         scene = self.scenes.get(proposition.scene)
         if scene is None:
             return _invalid(f"unknown scene {proposition.scene!r}")
-        if predicate.kind not in (CAN, VERB):
+        if predicate.kind not in EVENT_KINDS:
             return _invalid(
-                "an event is a one-place event type, or a two-place event type with a patient "
-                "instance"
+                "an event is a one-place event type, a two-place event type with a patient "
+                "instance, or a place event type with a place"
             )
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
         patient = predicate.patient
-        if predicate.kind == VERB and not isinstance(patient, str):
-            return _invalid("the patient of an event is an instance")
-        for instance in (subject, patient):
-            if instance is not None and instance not in scene.participants:
-                return _invalid(f"{instance!r} takes no part in the scene {scene.label}")
+        if predicate.kind in (VERB, PLACE_EVENT) and not isinstance(patient, str):
+            return _invalid("the patient of an event is an instance, or a place")
+        if subject not in scene.participants:
+            return _invalid(f"{subject!r} takes no part in the scene {scene.label}")
+        if predicate.kind == PLACE_EVENT:
+            # the patient of a move or an act (stage c4b) is a place of the scene
+            if patient not in (scene.places or ()):
+                return _invalid(f"{patient!r} is not a place of the scene {scene.label}")
+        elif patient is not None and patient not in scene.participants:
+            return _invalid(f"{patient!r} takes no part in the scene {scene.label}")
         if patient == subject:
             return _invalid("an instance is never related to itself")
         assert isinstance(subject, str)
@@ -1959,25 +2040,73 @@ class Truth:
 
     def legal_at(self, scene: str, time: int, label: str, agent: str, patient: str | None) -> bool:
         """Whether a binding was legal at ``TIME.<time>`` of a scene, for the event type or for
-        some event type below the category."""
+        some event type below the category; for a place event type (stage c4b), the binding of
+        the agent and a place of the scene."""
         world = self.world
-        binding = tuple(self.instance_index[x] for x in (agent, patient) if x is not None)
+        binding = self._binding(label, agent, patient)
         table = self.legal_table(scene, time)
         return any(binding in table[event_type] for event_type in world.event_types_below(label))
 
     def legal_table(self, scene: str, time: int) -> dict[str, set[tuple[int, ...]]]:
         """The legal bindings of every event type among the participants of a scene at
-        ``TIME.<time>``, as sets of entity-index tuples, computed once per time point."""
+        ``TIME.<time>``, as sets of entity-index tuples (the agent and a place index for a place
+        event type, over the scene's places, stage c4b), computed once per time point."""
         key = (scene, time)
         if key not in self._legal:
             world = self.world
+            history = self.scenes[scene]
             state = self.states_of(scene)[time - 1]
-            participants = [self.instance_index[p] for p in self.scenes[scene].participants]
-            self._legal[key] = {
+            participants = [self.instance_index[p] for p in history.participants]
+            table = {
                 label: set(legal_bindings(world.definition, state, label, participants))
                 for label in world.binary_leaves + world.unary
             }
+            if history.places is not None:
+                places = [world.place_index[q] for q in history.places]
+                for label in world.place_event_types:
+                    if world.event_names(label):
+                        table[label] = set(
+                            legal_bindings(world.definition, state, label, participants, places)
+                        )
+            self._legal[key] = table
         return self._legal[key]
+
+    def pair_value(self, scene: str, time: int, fluent: str, first: str, second: str) -> bool:
+        """Whether a pair holds at ``TIME.<time>`` of a scene (stage c4b): the pair of a pair
+        fluent between two participants, or of a location fluent from a participant to a place,
+        from the replayed history."""
+        definition = self.world.definition
+        state = self.states_of(scene)[time - 1]
+        k = definition.pair_index(fluent)
+        j = self._pair_target(fluent, second)
+        return bool(state.pairs[k][self.instance_index[first], j])
+
+    def _pair_target(self, fluent: str, second: str) -> int:
+        if self.world.is_location_fluent(fluent):
+            return self.world.place_index[second]
+        return self.instance_index[second]
+
+    def pair_caused_by(
+        self, scene: str, time: int, fluent: str, first: str, second: str
+    ) -> str | None:
+        """The event of step ``time`` whose own effect changed the pair from ``TIME.<time>`` to
+        the next time point (stage c4b): the event that records the pair change, in either
+        direction for a symmetric pair fluent; a move records the old place's deletion and the
+        new place's add. None when no event of the step records it."""
+        history = self.scenes[scene]
+        step = next((s for s in history.steps if s.step == time), None)
+        if step is None:
+            return None
+        symmetric = self.world.pair_fluent_info[fluent].symmetric
+        for event in step.events:
+            for change in event.changes:
+                if not change.pair or change.pair_fluent != fluent:
+                    continue
+                if (change.first, change.second) == (first, second) or (
+                    symmetric and (change.first, change.second) == (second, first)
+                ):
+                    return event.label
+        return None
 
     def made_by(self, scene: str, time: int, entity: str, fluent: str, event: str) -> bool:
         """Whether the event's own effect made the change of a participant's fluent from
@@ -2083,13 +2212,19 @@ class Truth:
             return _invalid(problem)
         patient = predicate.patient
         if level == ABLE_NOW:
-            if predicate.kind not in (CAN, VERB):
+            if predicate.kind not in EVENT_KINDS:
                 return _invalid(
-                    "an able_now proposition is about a one-place event type, or a two-place "
-                    "event type with a patient instance"
+                    "an able_now proposition is about a one-place event type, a two-place "
+                    "event type with a patient instance, or a place event type with a place"
                 )
-            if predicate.kind == VERB and not isinstance(patient, str):
-                return _invalid("the patient of an able_now proposition is an instance")
+            if predicate.kind in (VERB, PLACE_EVENT) and not isinstance(patient, str):
+                return _invalid("the patient of an able_now proposition is an instance or a place")
+        elif predicate.kind == PAIR_STATE:
+            # a pair state or a pair change (stage c4b)
+            if not isinstance(patient, str):
+                return _invalid("the second argument of a pair state is an instance or a place")
+            if level == CHANGE and predicate.numeric:
+                return _invalid("a pair change has a value, not a direction")
         elif level == STATE and predicate.kind in COMPARISON_KINDS:
             # a numeric pole, or a numeric comparative, at a time point (stage b3b)
             if not predicate.numeric:
@@ -2107,9 +2242,18 @@ class Truth:
             return _invalid("a numeric fluent is stated through its poles: ABOVE or BELOW")
         elif level == CHANGE and predicate.numeric and not proposition.polarity:
             return _invalid("a numeric change is never negated: its direction says it")
-        for instance in (subject, patient):
-            if instance is not None and instance not in scene.participants:
-                return _invalid(f"{instance!r} takes no part in the scene {scene.label}")
+        if subject not in scene.participants:
+            return _invalid(f"{subject!r} takes no part in the scene {scene.label}")
+        toward_place = predicate.kind == PLACE_EVENT or (
+            predicate.kind == PAIR_STATE and self.world.is_location_fluent(predicate.label)
+        )
+        if patient is not None and toward_place:
+            # the second argument of a location, or the patient of a move or an act (stage
+            # c4b), is a place of the scene
+            if patient not in (scene.places or ()):
+                return _invalid(f"{patient!r} is not a place of the scene {scene.label}")
+        elif patient is not None and patient not in scene.participants:
+            return _invalid(f"{patient!r} takes no part in the scene {scene.label}")
         if patient == subject:
             return _invalid("an instance is never related to itself")
         assert isinstance(subject, str)
@@ -2119,6 +2263,8 @@ class Truth:
             legal_now = self.legal_at(scene.label, time, predicate.label, subject, patient)
             grounding.update({"able": able, "legal": legal_now, "test": HISTORY})
             return Evaluation(True, legal_now == proposition.polarity, True, grounding)
+        if predicate.kind == PAIR_STATE:
+            return self._evaluate_pair_state(proposition, scene, time, grounding)
         fluent = predicate.label
         if predicate.kind in COMPARISON_KINDS:
             return self._evaluate_numeric_comparison(proposition, scene, time, grounding)
@@ -2159,6 +2305,43 @@ class Truth:
                 "from": int(value),
                 "to": int(after),
                 "caused_by": self.caused_by(scene.label, time, subject, fluent)
+                if value != after
+                else None,
+                "test": HISTORY,
+            }
+        )
+        return Evaluation(True, true, True, grounding)
+
+    def _evaluate_pair_state(
+        self, proposition: Proposition, scene: History, time: int, grounding: dict[str, Any]
+    ) -> Evaluation:
+        """A pair state (``HOLDS`` around ``PAIRFL.k(REF.a, REF.b)``) or a pair change
+        (``BECOME``) at a time point of a scene (stage c4b), judged on the replayed pairs as a
+        Boolean fluent is judged on the replayed values: a state holds when the pair holds at
+        the time point; a change when the pair lacks the stated value at the time point and has
+        it at the next, its grounding naming the event of the step that recorded the change."""
+        subject, predicate = proposition.subject, proposition.predicate
+        assert isinstance(subject, str) and isinstance(predicate.patient, str)
+        fluent, patient = predicate.label, predicate.patient
+        value = self.pair_value(scene.label, time, fluent, subject, patient)
+        if proposition.level == STATE:
+            initial = self.pair_value(scene.label, 1, fluent, subject, patient)
+            grounding.update(
+                {
+                    "value": int(value),
+                    "initial": int(initial),
+                    "changed": value != initial,
+                    "test": HISTORY,
+                }
+            )
+            return Evaluation(True, value == proposition.polarity, True, grounding)
+        after = self.pair_value(scene.label, time + 1, fluent, subject, patient)
+        true = value != proposition.polarity and after == proposition.polarity
+        grounding.update(
+            {
+                "from": int(value),
+                "to": int(after),
+                "caused_by": self.pair_caused_by(scene.label, time, fluent, subject, patient)
                 if value != after
                 else None,
                 "test": HISTORY,
@@ -2237,6 +2420,7 @@ __all__ = [
     "EFFECT",
     "EFFECT_DIRECTIONS",
     "EVENT",
+    "EVENT_KINDS",
     "EVENT_VARIABLE",
     "EXACT",
     "FEATURE_KINDS",
@@ -2264,8 +2448,10 @@ __all__ = [
     "OBSERVED",
     "OCCURRED",
     "OPERATORS",
+    "PAIR_STATE",
     "PAST",
     "PATIENT",
+    "PLACE_EVENT",
     "POSITIVE_ORDER",
     "PRECONDITION",
     "PRESENT",
@@ -2300,6 +2486,9 @@ __all__ = [
     "event_of",
     "is_event_variable",
     "is_numeric",
+    "is_part_feature",
+    "is_property_feature",
+    "is_scalar_pole",
     "low_word",
     "pole_dimension",
     "pole_direction",

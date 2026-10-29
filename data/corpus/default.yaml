@@ -13,8 +13,8 @@ seed: 1                          # the corpus's master seed, independent of the 
 world: {config: data/world/default.yaml, seed: 1}
 
 lexicon:
-  # the proportion of concepts of each type that get a word (state: the Boolean fluents, whose words are state adjectives; numeric: the numeric fluents, each with two absolute adjectives, named together)
-  named_proportion: {category: 1.0, property: 1.0, part: 1.0, state: 1.0, event_unary: 1.0, event: 1.0, event_category: 1.0, patient_projection: 0.25, scalar: 1.0, numeric: 1.0}
+  # the proportion of concepts of each type that get a word (state: the Boolean fluents, whose words are state adjectives; numeric: the numeric fluents, each with two absolute adjectives, named together; since stage c4b: pair and same, the prepositions of the pair fluents and the SAME literals that some precondition or condition reads; place_category, place_is, place_has, place_scalar, place_event, and place_patient_projection, the places' nouns, adjectives, part nouns, pole adjectives, transitive verbs, and patient-capacity adjectives)
+  named_proportion: {category: 1.0, property: 1.0, part: 1.0, state: 1.0, event_unary: 1.0, event: 1.0, event_category: 1.0, patient_projection: 0.25, scalar: 1.0, numeric: 1.0, pair: 1.0, same: 1.0, place_category: 1.0, place_is: 1.0, place_has: 1.0, place_scalar: 1.0, place_event: 1.0, place_patient_projection: 0.25}
   synonym_rate: 0.0              # the probability that a content concept gets a second lexeme
   homonym_rate: 0.0              # the probability that a content lexeme shares its word form
   homonym_same_pos: 0.5          # the share of homonym pairs within one part of speech
@@ -75,6 +75,7 @@ entity:
 mention:
   level_weights: {schedule: linear, start: 1, end: 4}         # noun levels, heaviest at the leaf level
   event_level_weights: {schedule: linear, start: 1, end: 4}   # event-type levels for naming events, heaviest at the leaf (the event type)
+  place_level_weights: {schedule: linear, start: 1, end: 4}   # levels of the place tree for the noun of a mention of a place (stage c4b), heaviest at the leaf
   pronoun_rate: 0.5
   modifier_rate: 0.3
   max_adjectives: 3

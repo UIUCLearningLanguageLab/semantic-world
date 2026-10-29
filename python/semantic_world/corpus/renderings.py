@@ -119,7 +119,9 @@ from semantic_world.corpus.propositions import (
     NEC_NO,
     NO,
     OPERATORS,
+    PAIR_STATE,
     PATIENT,
+    PLACE_EVENT,
     PRECONDITION,
     PROJECTION,
     RAISES,
@@ -139,6 +141,7 @@ from semantic_world.corpus.propositions import (
     event_of,
     is_event_variable,
     is_numeric,
+    is_scalar_pole,
     low_word,
     pole_dimension,
     pole_operator,
@@ -149,13 +152,22 @@ from semantic_world.corpus.world import (
     FLUENT_PREFIX,
     NUMERIC_PREFIX,
     ONE_PLACE_PREFIX,
+    PAIR_PREFIX,
     PART_PREFIX,
     PATIENT_CAPACITY_PREFIX,
+    PLACE_CATEGORY_PREFIX,
+    PLACE_EVENT_PREFIX,
+    PLACE_PART_PREFIX,
+    PLACE_PATIENT_CAPACITY_PREFIX,
+    PLACE_PROPERTY_PREFIX,
     PROPERTY_PREFIX,
-    SCALAR_PREFIX,
     TWO_PLACE_PREFIX,
 )
 from semantic_world.world.runtime import RANGE
+
+TWO_PLACE_KINDS = (VERB, PAIR_STATE, PLACE_EVENT)
+"""The kinds whose atom has two arguments: a two-place event type, a pair state (stage c4b,
+``PAIRFL.2(REF.1, REF.2)``), and a place event type (``PLACEEVENTTYPE.2(REF.1, REF.3)``)."""
 
 REFERENT_MODES = ("local", "instance")
 DESCRIPTION_MODES = ("marked", "omitted")
@@ -478,6 +490,15 @@ def _predication(
             return Timed(
                 TIMED_OPERATORS[level], scene, time, tense, atom if polarity else Not(atom)
             )
+        if kind == PAIR_STATE:
+            # a pair state or a pair change (stage c4b): the pair fluent's atom over the two
+            # arguments, negated inside for the value, as a Boolean fluent's is
+            if patient is None:
+                raise RenderingError(f"the pair fluent {label} has no second argument")
+            atom = Atom(label, (subject, patient))
+            return Timed(
+                TIMED_OPERATORS[level], scene, time, tense, atom if polarity else Not(atom)
+            )
         if kind == COMPARISON:
             # a numeric pole at a time point, against RANGE at the language's cut
             cut = predicate.get("cut")
@@ -498,7 +519,7 @@ def _predication(
                 subject, patient = patient, subject
             body = Comparison(GREATER, label, (subject, patient))
             return Timed(TIMED_OPERATORS[level], scene, time, tense, body)
-        if kind == VERB:
+        if kind in (VERB, PLACE_EVENT):
             if patient is None:
                 raise RenderingError(f"the verb {label} has no patient")
             atom = Atom(label, (subject, patient))
@@ -506,7 +527,7 @@ def _predication(
             atom = Atom(label, (subject,))
         body = Timed(TIMED_OPERATORS[level], scene, time, tense, atom)
         return body if polarity else Not(body)
-    if kind == STATE_KIND:
+    if kind in (STATE_KIND, PAIR_STATE):
         raise RenderingError(f"the fluent {label} is stated at a time point of a scene")
     if kind == COMPARISON:
         comparison = _pole(label, subject, predicate.get("class"), z)
@@ -519,7 +540,7 @@ def _predication(
         if low_word(predicate):
             subject, patient = patient, subject  # "smaller than": the object is the greater
         return Comparison(GREATER, label, (subject, patient))
-    if kind == VERB:
+    if kind in (VERB, PLACE_EVENT):
         if patient is None:
             raise RenderingError(f"the verb {label} has no patient")
         atom = Atom(label, (subject, patient))
@@ -528,7 +549,7 @@ def _predication(
     body: Any = atom
     if report is not None:
         body = Report(report[0], report[1], report[2], atom)
-    elif kind in (CAN, VERB):
+    elif kind in (CAN, VERB, PLACE_EVENT):
         body = Able(atom)
     return body if polarity else Not(body)
 
@@ -873,16 +894,26 @@ def _kind(label: str) -> str:
         (PART_PREFIX, HAS),
         (FLUENT_PREFIX, STATE_KIND),
         (NUMERIC_PREFIX, STATE_KIND),
+        # the place patient capacities (stage c4b) before the entity ones, whose prefix is a
+        # prefix of theirs
+        (PLACE_PATIENT_CAPACITY_PREFIX, PROJECTION),
         (PATIENT_CAPACITY_PREFIX, PROJECTION),
         (ONE_PLACE_PREFIX, CAN),
         (TWO_PLACE_PREFIX, VERB),
         (CATEGORY_PREFIX, MEMBER),
+        # phase (c) (stage c4b): a pair fluent's atom is a pair state, a place event type's an
+        # event, and the places' categories and features are named as the entities' are
+        (PAIR_PREFIX, PAIR_STATE),
+        (PLACE_EVENT_PREFIX, PLACE_EVENT),
+        (PLACE_CATEGORY_PREFIX, MEMBER),
+        (PLACE_PROPERTY_PREFIX, IS),
+        (PLACE_PART_PREFIX, HAS),
     ):
         if label.startswith(prefix):
             return kind
     if label == THING:
         return MEMBER
-    if label.startswith(SCALAR_PREFIX):
+    if is_scalar_pole(label):
         raise RenderingError(f"a scalar pole is written as a comparison, not as the atom {label}")
     raise RenderingError(f"unknown kind of concept {label!r}")
 
@@ -1068,7 +1099,7 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         kind = _kind(inner.label)
         subject = names.get(inner.arguments[0], inner.arguments[0])
         patient = None
-        if kind == VERB:
+        if kind in TWO_PLACE_KINDS:
             patient = names.get(inner.arguments[1], inner.arguments[1])
         direction = _DIRECTION_OF_OPERATOR.get(body.operator)
         return Proposition(
@@ -1082,7 +1113,7 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
     kind = _kind(atom.label)
     subject = names.get(atom.arguments[0], atom.arguments[0])
     patient = None
-    if kind == VERB:
+    if kind in TWO_PLACE_KINDS:
         patient = names.get(atom.arguments[1], atom.arguments[1])
     predicate = Predicate(kind, atom.label, patient)
 

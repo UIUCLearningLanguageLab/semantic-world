@@ -13,9 +13,9 @@ world, not about the language: the generator uses every event type, with a word 
 
 This module gives the planner and the truth tests what they read of a history: its events in
 time order, each with its step and its scene, what happened, and what involves an entity. Since
-stage c4a a history may hold place events (``SceneEvent.place``) and pair changes; the readers
-that name an event's event type or read a change's fluent skip them, because the corpus says
-nothing about pairs and places until stages c4b and c4c.
+stage c4a a history may hold place events (``SceneEvent.place``, a move or an act at a place,
+whose patient is a place) and pair changes; since stage c4b the corpus narrates the place events
+and states the pair changes as results (``docs/specs/WORLD_PHASE_C.md``).
 """
 
 from __future__ import annotations
@@ -112,7 +112,8 @@ class SceneEvent:
     @property
     def place(self) -> bool:
         """Whether the event is of a place event type (a move or an act at a place, stage c3b),
-        whose patient is a place: never narrated in stage c4a."""
+        whose patient is a place: narrated as a transitive verb with the place as its object
+        since stage c4b."""
         return self.type.startswith(PLACE_EVENT_PREFIX)
 
     @property

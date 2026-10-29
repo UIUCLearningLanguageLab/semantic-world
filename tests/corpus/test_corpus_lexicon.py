@@ -31,6 +31,8 @@ from semantic_world.corpus.lexicon import (
     NO_PAIR,
     NOUN,
     PART_NOUN,
+    PLACE_TYPES,
+    PREPOSITION,
     THING,
     TRANSITIVE_VERB,
     event_types_without_word,
@@ -51,6 +53,9 @@ def lexicon_of(world, path: str = DEFAULT_WORLD, seed: int = 1, **sections: Any)
 def round_half_up(x: float) -> int:
     return math.floor(x + 0.5)
 
+
+PHASE_C_TYPES = ("pair", "same", *PLACE_TYPES)
+"""The concept types of phase (c) (stage c4b), which come after the generic noun."""
 
 # ---------------------------------------------------------------------------------------------
 # Concepts
@@ -107,6 +112,15 @@ def test_parts_of_speech(default_world) -> None:
         "patient_projection": ADJECTIVE,
         "scalar": ADJECTIVE,
         "numeric": ADJECTIVE,
+        # phase (c) (stage c4b): the prepositions and the places' words
+        "pair": PREPOSITION,
+        "same": PREPOSITION,
+        "place_category": NOUN,
+        "place_is": ADJECTIVE,
+        "place_has": PART_NOUN,
+        "place_scalar": ADJECTIVE,
+        "place_event": TRANSITIVE_VERB,
+        "place_patient_projection": ADJECTIVE,
         GENERIC: NOUN,
         FUNCTION: FUNCTION_WORD,
     }
@@ -120,7 +134,11 @@ def test_parts_of_speech(default_world) -> None:
 def test_concept_order_follows_the_specification_table(default_world) -> None:
     lexicon = lexicon_of(default_world)
     types = [c.type for c in lexicon.concepts]
-    order = list(CONCEPT_TYPES) + [GENERIC, FUNCTION]
+    # the generic noun stands after the entities' concepts and before the phase (c) concepts
+    # (stage c4b), so that every content lexeme of a world without them keeps its label; the
+    # tiny and default place taxonomies have no place parts, so place_has is empty
+    phase_c = [t for t in PHASE_C_TYPES if t != "place_has"]
+    order = list(CONCEPT_TYPES[: -len(PHASE_C_TYPES)]) + [GENERIC] + phase_c + [FUNCTION]
     assert [t for i, t in enumerate(types) if i == 0 or types[i - 1] != t] == order
 
 
@@ -130,9 +148,16 @@ def test_a_world_without_two_place_event_types_or_scalars(world_files) -> None:
     for concept_type in ("event", "event_category", "patient_projection", "scalar"):
         assert lexicon.of_type(concept_type) == ()
     assert lexicon.event_types_without_word == {}
-    assert (
-        len(lexicon.content_lexemes)
-        == sum(len(lexicon.of_type(t)) for t in ("category", "property", "part", "event_unary")) + 1
+    # the plain world has places (the default place taxonomy, stage c1) and no location
+    # fluent, so its place event types have no dynamics and no word (stage c4b), while its
+    # categories of places, its place features, and its place scalars have words
+    place_types = ("place_category", "place_is", "place_has", "place_scalar")
+    assert lexicon.of_type("place_event") == () and lexicon.of_type("pair") == ()
+    assert len(lexicon.of_type("place_category")) > 0
+    assert len(lexicon.content_lexemes) == sum(
+        len(lexicon.of_type(t)) for t in ("category", "property", "part", "event_unary")
+    ) + 1 + sum(len(lexicon.of_type(t)) for t in place_types) + sum(
+        lexicon.is_named(c.label) for c in lexicon.of_type("place_patient_projection")
     )  # and the generic noun
     assert lexicon.stats()["lexemes_by_pos"][TRANSITIVE_VERB] == 0
 
@@ -181,7 +206,9 @@ def test_event_types_without_a_word_match_brute_force(world_name: str, request) 
 
 def test_relation_extent() -> None:
     def world(matrix: np.ndarray):
-        return SimpleNamespace(count=len(matrix), able=lambda label: matrix)
+        return SimpleNamespace(
+            count=len(matrix), able=lambda label: matrix, is_place_event_type=lambda label: False
+        )
 
     every = ~np.eye(4, dtype=bool)
     assert relation_extent(world(every), "EVENTTYPE2.1") == EVERY_PAIR
@@ -215,7 +242,7 @@ def test_an_event_type_that_holds_for_no_pair_gets_no_lexeme(tiny_world, monkeyp
 def units(lexicon: Lexicon, concept_type: str) -> list[str]:
     """The units a named proportion counts: concepts, or scalar dimensions."""
     labels = [c.label for c in lexicon.of_type(concept_type)]
-    if concept_type in ("scalar", "numeric"):
+    if concept_type in ("scalar", "numeric", "place_scalar"):
         return sorted({label.rsplit(".", 1)[0] for label in labels})
     return labels
 
@@ -261,9 +288,14 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
     assert concepts["state"] == len(default_world.fluents)
     assert concepts["scalar"] == 2 * len(default_world.scalars)
     assert counts["concepts"] == {**concepts, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
+    # the default proportion of a type the test leaves out is 1.0, and a quarter for the place
+    # patient capacities (stage c4b), as for the entities'
     named = {
-        t: round_half_up(proportions.get(t, 1.0) * len(units(lexicon, t)))
-        * (2 if t in ("scalar", "numeric") else 1)
+        t: round_half_up(
+            proportions.get(t, 0.25 if t == "place_patient_projection" else 1.0)
+            * len(units(lexicon, t))
+        )
+        * (2 if t in ("scalar", "numeric", "place_scalar") else 1)
         for t in CONCEPT_TYPES
     }
     assert counts["named_concepts"] == {**named, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
@@ -324,7 +356,7 @@ def test_with_both_knobs_at_zero_lexemes_and_concepts_are_one_to_one(
 ) -> None:
     world = request.getfixturevalue(world_name)
     path = TINY_WORLD if world_name == "tiny_world" else DEFAULT_WORLD
-    every = {"named_proportion": {"patient_projection": 1.0}}
+    every = {"named_proportion": {"patient_projection": 1.0, "place_patient_projection": 1.0}}
     lexicon = lexicon_of(world, path, lexicon=every)
     assert lexicon.unnamed == ()
     assert [x.concept for x in lexicon.lexemes] == [c.label for c in lexicon.concepts]
@@ -354,7 +386,13 @@ def test_lexeme_labels(default_world) -> None:
     # content lexemes come first, then the function words
     assert all(x.content for x in lexicon.lexemes[:content])
     assert lexicon.lexeme("LEXEME.1").concept == "CATEGORY.1"
-    assert lexicon.lexeme(f"LEXEME.{content}").concept == THING
+    # the generic noun stands right before the phase (c) lexemes (stage c4b), which come last
+    # among the content lexemes
+    phase_c = [
+        x for x in lexicon.content_lexemes if lexicon.concept(x.concept).type in PHASE_C_TYPES
+    ]
+    assert phase_c and lexicon.content_lexemes[-len(phase_c) - 1].concept == THING
+    assert lexicon.lexeme(f"LEXEME.{content - len(phase_c)}").concept == THING
     assert lexicon.lexeme(f"LEXEME.{content + 1}").gloss == "a"
     assert lexicon.lexeme(f"LEXEME.{total - 2}").gloss == "become"
     assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "before"
@@ -377,7 +415,7 @@ def test_the_same_seed_gives_the_same_lexicon(default_world) -> None:
     assert first != lexicon_of(default_world, seed=6, lexicon=knobs)
     # with nothing to draw, the corpus seed does not matter (the default proportions draw the
     # named quarter of the patient capacities, so every capacity is named here)
-    every = {"named_proportion": {"patient_projection": 1.0}}
+    every = {"named_proportion": {"patient_projection": 1.0, "place_patient_projection": 1.0}}
     assert lexicon_of(default_world, seed=5, lexicon=every) == lexicon_of(
         default_world, seed=6, lexicon=every
     )
@@ -621,7 +659,16 @@ def test_a_missing_kind_of_partner_falls_back_to_the_other_kind(world_files) -> 
     # A world of categories only has one part of speech: every pair is within it.
     world = load_world(corpus_config(world_files["plain"]))
     only_nouns = {
-        "named_proportion": {"property": 0.0, "part": 0.0, "event_unary": 0.0},
+        # the place adjectives of the plain world's default places (stage c4b) off too, so
+        # that its content lexemes are nouns alone: the categories, and the categories of places
+        "named_proportion": {
+            "property": 0.0,
+            "part": 0.0,
+            "event_unary": 0.0,
+            "place_is": 0.0,
+            "place_scalar": 0.0,
+            "place_patient_projection": 0.0,
+        },
         "homonym_rate": 1.0,
         "homonym_same_pos": 0.0,
     }

@@ -843,11 +843,14 @@ def test_the_corpus_reads_the_scene_keys_and_refuses_the_chain_world(tmp_path: P
     from semantic_world.corpus import load_world
 
     # since stage c4a the corpus loads a world with location fluents and place event types
-    # (WM.63), and names no event of a place event type
+    # (WM.63); since stage c4b a place event type with dynamics is named by its own label (a
+    # transitive verb), and one without dynamics by none
     world = load_world(corpus_config_from_mapping(data, source=str(tmp_path / "corpus.yaml")))
     assert world.place_event_types
     assert all(world.is_place_event_type(p) for p in world.place_event_types)
-    assert all(world.event_names(p) == () for p in world.place_event_types)
+    for label in world.place_event_types:
+        performable = world.definition.event_type(label).performable
+        assert world.event_names(label) == ((label,) if performable else ())
 
 
 # ---------------------------------------------------------------------------------------------
