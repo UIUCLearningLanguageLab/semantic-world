@@ -35,7 +35,8 @@ documents:
   initial_state_rate: 0.2        # the probability that the event sentence that first mentions a participant is followed by a sentence stating one of its fluents at the time point before the event
   result_rate: 0.5               # the probability that an event sentence is followed by a sentence stating a change the event's own effects made
   blocked_rate: 0.1              # the probability that an event sentence is followed by a sentence saying what a participant could not (or could) do at that time point
-  comparative_rate: 0.1          # the probability that an event sentence of a two-place event is followed by a comparative description of its two participants ("the owl is bigger than the mouse"), on a scalar where their values differ, or on a numeric fluent at the event's time point ("the owl was hungrier than the mouse")
+  comparative_rate: 0.1          # the probability that an event sentence of a two-place event is followed by a comparative description of its two participants ("the owl is bigger than the mouse"), on a scalar where their values differ, or on a numeric fluent at the event's time point ("the owl was hungrier than the mouse"); since stage c4c also the probability that a sentence that introduces a second place of the scene is followed by a comparison of the two places on a place scalar
+  place_description_rate: 0.1    # the probability that an event sentence that mentions a place is followed by a description of the place by its static place features ("the place is dry"; stage c4c, WM.73)
   comparison_partners: siblings  # which categories a category document compares its topic with: its siblings with a word (siblings), as many thematic partners, the other categories of its level most related to the topic (thematic), or both
 
 propositions:
@@ -103,5 +104,5 @@ renderings:
 
 test_sets:
   size: 500                      # true items per set; each gets one matched false item
-  changes: [predicate, subject, quantifier, polarity, event, role, condition]   # polarity and event apply to the causal sets, and condition to the conditional effect statements
+  changes: [predicate, subject, quantifier, polarity, event, role, condition, object]   # polarity and event apply to the causal sets, condition to the conditional effect statements, and object (stage c4c, WM.56) to the pair, location, and SAME items of the state sets and to the event items of place event types
   seen: {descriptions: true}     # whether a description counts as stated, for the seen mark

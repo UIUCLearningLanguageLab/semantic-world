@@ -33,6 +33,7 @@ from semantic_world.corpus.planner import (
     EVENT_SECTION,
     INITIAL_STATE,
     NARRATIVE_SECTIONS,
+    PLACE_COMPARATIVE,
     RESULT,
 )
 from semantic_world.corpus.propositions import (
@@ -45,6 +46,7 @@ from semantic_world.corpus.propositions import (
     EVENT,
     INSTANCE,
     PAIR_STATE,
+    PLACE_EVENT,
     STATE,
     STATE_KIND,
     VERB,
@@ -116,9 +118,11 @@ def test_state_and_change_sentences_are_true_of_their_history(cases, runs, name)
         assert form["tense"] == "past" and "aspect" not in form and "event" not in form
         predicate = proposition.predicate
         if predicate.kind == PAIR_STATE:
-            # a pair change (stage c4b): the pair fluent and its second argument, an entity or
-            # a place, as a mention
-            assert proposition.level == CHANGE and predicate.label.startswith("PAIRFL.")
+            # a pair change (stage c4b) or a pair, location, or SAME state (stage c4c): the pair
+            # fluent (or SAME on one) and its second argument, an entity or a place, as a mention
+            assert proposition.level in (STATE, CHANGE)
+            assert predicate.label.startswith(("PAIRFL.", "SAME.PAIRFL."))
+            assert proposition.level == STATE or predicate.label.startswith("PAIRFL.")
             assert form["predicate"]["kind"] == PAIR_STATE
             assert form["predicate"]["patient"]["instance"] == predicate.patient
         elif proposition.level in (STATE, CHANGE) and not predicate.numeric:
@@ -142,7 +146,8 @@ def test_state_and_change_sentences_are_true_of_their_history(cases, runs, name)
         elif proposition.level == STATE:
             assert predicate.kind == COMPARATIVE and predicate.label.startswith("NUMFL.")
         else:
-            assert form["predicate"]["kind"] in (CAN, VERB)
+            # a one-place or a two-place event type, or (stage c4c) a place event type
+            assert form["predicate"]["kind"] in (CAN, VERB, PLACE_EVENT)
         counts[proposition.level] += 1
     assert counts[STATE] > 10 and counts[CHANGE] > 10 and counts[ABLE_NOW] > 5, counts
 
@@ -298,11 +303,13 @@ def test_changed_marks_agree_with_the_history(cases, runs, name) -> None:
                 document = next(d for d in corpus.documents if d.label == item.input["document"])
                 assert document.type == "situational"
                 assert item.proposition.subject in document.referents.values()
+                patient = form["predicate"].get("patient")
                 changed = oracle.changed(
                     scene,
                     form["subject"]["instance"],
                     form["predicate"]["label"],
                     form["predicate"].get("cut"),
+                    None if patient is None else patient["instance"],
                 )
                 assert item.meta["changed"] == changed
                 assert oracle.state(form, scene) == item.meta["truth"]
@@ -414,8 +421,16 @@ def test_follow_up_sentences_come_after_event_sentences_in_order(runs) -> None:
                 group = [EVENT_SECTION]
                 continue
             assert group, "a follow-up sentence comes after an event sentence"
+            if sentence.section == PLACE_COMPARATIVE:
+                # a comparison of two places (stage c4c) follows the sentence that introduced
+                # the second of them, an event sentence, an initial state, or a result, so it
+                # stands anywhere in the group, and more than once when two places were
+                # introduced
+                assert group[-1] in (EVENT_SECTION, INITIAL_STATE, RESULT)
+                continue
             assert order[sentence.section] >= order[group[-1]], (document.label, sentence.label)
-            # one result, one blocked sentence, and one description per event sentence
+            # one result, one blocked sentence, one description, and one place description
+            # per event sentence
             if sentence.section != INITIAL_STATE:
                 assert sentence.section not in group
             group.append(sentence.section)

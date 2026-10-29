@@ -78,6 +78,8 @@ from semantic_world.corpus.planner import (
     COMPARATIVE_STRENGTH,
     EVENT_SECTION,
     INITIAL_STATE,
+    PLACE_COMPARATIVE,
+    PLACE_DESCRIPTION,
     POLE,
     RESULT,
     Document,
@@ -341,10 +343,24 @@ def _states(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
         if s.section == EVENT_SECTION and s.proposition.predicate.kind == PLACE_EVENT
     ]
     kinds = Counter(world.place_event_kind(s.proposition.predicate.label) for s in place_events)
+    # stage c4c: the SAME states among the pair states, the blocked sentences about place event
+    # types (and the moves among them), and the descriptions of places
+    same_states = sum(
+        s.proposition.level == STATE
+        and world.is_same_literal(s.proposition.predicate.label) is not None
+        for s in pairs
+    )
+    blocked_place = [s for s in blocked if s.proposition.predicate.kind == PLACE_EVENT]
+    blocked_moves = sum(
+        world.place_event_kind(s.proposition.predicate.label) == "move" for s in blocked_place
+    )
     return {
         "initial_state_sentences": sections[INITIAL_STATE],
         "result_sentences": sections[RESULT],
         "blocked_sentences": sections[BLOCKED],
+        "blocked_place_sentences": len(blocked_place),
+        "blocked_move_sentences": blocked_moves,
+        "place_description_sentences": sections[PLACE_DESCRIPTION],
         "event_sentences": sections[EVENT_SECTION],
         "events_with_result_share": _share(sections[RESULT], sections[EVENT_SECTION]),
         "blocked_negative_share": _share(negative, len(blocked)),
@@ -352,6 +368,7 @@ def _states(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
         "numeric_change_sentences": numeric_changes,
         "pair_state_sentences": pair_states,
         "pair_change_sentences": pair_changes,
+        "same_state_sentences": same_states,
         "location_sentences": len(locations),
         "location_state_sentences": sum(s.proposition.level == STATE for s in locations),
         "location_change_sentences": sum(s.proposition.level == CHANGE for s in locations),
@@ -409,6 +426,7 @@ def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
         "comparison_sentences": {CLASS: comparison[CLASS], INSTANCE: comparison[INSTANCE]},
         "comparative_sentences": {CLASS: comparative[CLASS], INSTANCE: comparative[INSTANCE]},
         "comparative_descriptions": sum(s.section == COMPARATIVE_SECTION for s in sentences),
+        "place_comparative_sentences": sum(s.section == PLACE_COMPARATIVE for s in sentences),
         "numeric_comparative_sentences": numeric_comparatives,
         "pole_modifiers": modifiers,
         "pole_restrictions": restrictions,

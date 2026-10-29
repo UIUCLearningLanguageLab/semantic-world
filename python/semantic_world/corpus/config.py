@@ -119,7 +119,19 @@ REALIZATIONS = ("affix", "word")
 VERB_MARKS = ("plural", "singular")
 EVENT_TENSES = ("past", "present")
 REFERENT_LABELS = ("local", "instance")
-TEST_CHANGES = ("predicate", "subject", "quantifier", "polarity", "event", "role", "condition")
+TEST_CHANGES = (
+    "predicate",
+    "subject",
+    "quantifier",
+    "polarity",
+    "event",
+    "role",
+    "condition",
+    "object",
+)
+"""The changes of the test sets, in the order of ``test_sets.changes``: ``object`` (stage c4c,
+WM.56) swaps the second argument of a pair, location, or ``SAME`` item, or the place of an event
+of a place event type."""
 """The changes a false test item can be made by. ``predicate``, ``subject``, ``quantifier``, and
 ``role`` are those of ``CORPUS_GENERATOR.md``; ``polarity`` and ``event`` are the changes of the
 causal sets (``WORLD_AND_LANGUAGE.md``, "Test sets"), beside ``predicate`` and ``role``;
@@ -235,7 +247,13 @@ class DocumentsConfig:
     comparative_rate: float
     """The probability that an event sentence of a two-place event is followed by a comparative
     description of its two participants, on a scalar where their values differ (stage b3a), or
-    on a numeric fluent at the event's time point (stage b3b)."""
+    on a numeric fluent at the event's time point (stage b3b); since stage c4c also the
+    probability that a sentence that introduces a second place of the scene is followed by a
+    comparison of the two places on a place scalar where their values differ."""
+    place_description_rate: float
+    """The probability that an event sentence that mentions a place is followed by an
+    instance-level description of the place by its static place features (stage c4c, Jon's
+    ruling 3 of WM.73)."""
     comparison_partners: str
     """The comparison partners of a category document's topic: ``siblings``, ``thematic``, or
     ``both`` (stage b3b)."""
@@ -257,6 +275,7 @@ class DocumentsConfig:
             "result_rate": self.result_rate,
             "blocked_rate": self.blocked_rate,
             "comparative_rate": self.comparative_rate,
+            "place_description_rate": self.place_description_rate,
             "comparison_partners": self.comparison_partners,
         }
 
@@ -746,6 +765,7 @@ def _read_documents(node: _Node, depth: int) -> DocumentsConfig:
         result_rate=node.probability("result_rate", 0.5),
         blocked_rate=node.probability("blocked_rate", 0.1),
         comparative_rate=node.probability("comparative_rate", 0.1),
+        place_description_rate=node.probability("place_description_rate", 0.1),
         comparison_partners=node.choice("comparison_partners", "siblings", COMPARISON_PARTNERS),
     )
     node.finish()

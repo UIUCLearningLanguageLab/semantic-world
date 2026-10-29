@@ -476,14 +476,31 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
                     "location_sentences",
                     "move_sentences",
                     "act_sentences",
+                    # stage c4c: the SAME states, the blocked place events, and the place
+                    # descriptions
+                    "same_state_sentences",
+                    "blocked_place_sentences",
+                    "blocked_move_sentences",
+                    "place_description_sentences",
                 )
             },
+            "place_comparative_sentences": stats["comparisons"].get("place_comparative_sentences"),
             **{
                 key: stats["scenes"].get(key)
                 for key in ("place_events", "moves", "acts", "pair_changes", "move_share")
             },
             "place_mentions": stats["mentions"].get("place_mentions"),
+            "place_definite_not_distinguished_share": stats["mentions"].get(
+                "place_definite_not_distinguished_share"
+            ),
             "prepositions": lexicon["lexemes_by_pos"].get("preposition", 0),
+            # the test items of stage c4c: the pair, location, and SAME items of the state sets
+            # and the place event items of the event and able_now sets, summed over the sets
+            "state_items_by_kind": {
+                kind: sum(s.get("pairs_by_item_kind", {}).get(kind, 0) for s in sets.values())
+                for kind in ("boolean", "numeric", "pair", "location", "same")
+            },
+            "place_event_pairs": sum(s.get("place_event_pairs", 0) for s in sets.values()),
         },
         "narratives_short": {
             kind: by_type[kind]["shorter_than_drawn_share"] for kind in ("entity", "situational")

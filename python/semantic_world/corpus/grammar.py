@@ -134,8 +134,13 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.world import (
     FLUENT_PREFIX,
+    PLACE_CATEGORY_PREFIX,
+    PLACE_PART_PREFIX,
     PLACE_PREFIX,
+    PLACE_PROPERTY_PREFIX,
+    PLACE_SCALAR_PREFIX,
     PROPERTY_PREFIX,
+    SAME_PREFIX,
     SCALAR_PREFIX,
     THING,
 )
@@ -150,6 +155,14 @@ a language setting; "most" and "some" express ``most`` and ``some``."""
 WORD_OF = {NEC_ALL: "all", ALL: "all", MOST: "most", SOME: "some", NO: "no", NEC_NO: "no"}
 """The determiner word that states each quantifier."""
 CLAUSE_KINDS = (CAN, VERB, PLACE_EVENT, PROJECTION, MEMBER)
+PLACE_FEATURE_PREFIXES = (
+    PLACE_PROPERTY_PREFIX,
+    PLACE_PART_PREFIX,
+    PLACE_CATEGORY_PREFIX,
+    PLACE_SCALAR_PREFIX,
+)
+"""The concepts that are said of a place (stage c4c): its properties, parts, categories, and
+poles."""
 """The predicates a relative clause can hold, apart from the negated PROPERTY literals of the
 restriction. A positive PROPERTY literal, a scalar pole, and a PART literal are never in a
 relative clause: they are adjectives and with-phrases. A pair state (stage c4b) is never in one
@@ -653,11 +666,7 @@ def check_plan(plan: SentencePlan) -> None:
     elif plan.quantifier is not None:
         raise GrammarError("only a class-level sentence has a quantifier")
     _check_phrase(subject, plan.level, top=True)
-    if subject.place:
-        raise GrammarError(
-            "a place is never the subject of a sentence in phase (c): it is the object of a "
-            "preposition or of a place event type"
-        )
+    _check_place_subject(plan)
     _check_predication(predication, subject, plan.level, in_clause=False)
     if predication.kind == MEMBER and predication.label == subject.noun:
         raise GrammarError(
@@ -676,6 +685,34 @@ def check_plan(plan: SentencePlan) -> None:
         _check_comparative(plan)
 
 
+def _check_place_subject(plan: SentencePlan) -> None:
+    """A place is the subject of an instance-level sentence about its own static features alone
+    (stage c4c, Jon's ruling 3 of WM.73): a place property or part, membership in a category of
+    places, a place pole, or a comparative with another place on a place scalar. It is never the
+    subject of an event, of a sentence about a time point, of a pair state, or of a class-level
+    sentence; and a place feature is said of a place, never of an entity."""
+    subject, predication = plan.subject, plan.predication
+    label = predication.label
+    about_a_place = label.startswith(PLACE_FEATURE_PREFIXES)
+    if not subject.place:
+        if about_a_place and predication.kind != PAIR_STATE:
+            raise GrammarError(f"{label} is said of a place, and the subject is an entity")
+        return
+    if plan.level != INSTANCE or predication.time is not None or predication.event is not None:
+        raise GrammarError(
+            "a place is the subject of an instance-level sentence about its own features, and "
+            "of nothing about a time point or an event"
+        )
+    if predication.kind not in (IS, HAS, MEMBER, COMPARISON, COMPARATIVE) or not about_a_place:
+        raise GrammarError(
+            "a place is described by a place property or part, a category of places, a place "
+            "pole, or a comparative on a place scalar"
+        )
+    target = predication.object
+    if predication.kind == COMPARATIVE and (target is None or not target.place):
+        raise GrammarError("a place is compared with another place")
+
+
 def _check_comparative(plan: SentencePlan) -> None:
     """A comparative: the comparative form of a pole adjective, a positive polarity, an object
     of the subject's kind (an instance with an instance, a plain category with a plain
@@ -684,7 +721,12 @@ def _check_comparative(plan: SentencePlan) -> None:
     subject, predication = plan.subject, plan.predication
     target = predication.object
     label = predication.label
-    scalar = label.startswith(SCALAR_PREFIX) or is_numeric(label)
+    # a scalar pole, a numeric pole, or (stage c4c) a place pole, for a comparative of places
+    scalar = (
+        label.startswith(SCALAR_PREFIX)
+        or label.startswith(PLACE_SCALAR_PREFIX)
+        or is_numeric(label)
+    )
     if not scalar or label.rsplit(".", 1)[1] not in (HIGH, LOW):
         raise GrammarError("a comparative is the comparative form of a pole adjective")
     if not predication.polarity:
@@ -949,6 +991,9 @@ def _check_predication(
             raise GrammarError("the first argument of a pair state is an entity")
         if target.referent == subject.referent:
             raise GrammarError("a thing is never in a pair with itself")
+        if predication.label.startswith(SAME_PREFIX) and target.place:
+            # SAME relates two entities with the same partner (stage c4c, WM.73)
+            raise GrammarError("the object of a SAME preposition is an entity")
     if kind == PLACE_EVENT:
         target = predication.object
         if not gap and (target is None or not target.place):

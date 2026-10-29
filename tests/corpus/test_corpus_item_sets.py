@@ -32,6 +32,8 @@ from semantic_world.corpus.propositions import (
     INSTANCE,
     NEC_ALL,
     NEC_NO,
+    PAIR_STATE,
+    PLACE_EVENT,
     SIMPLE,
     STATE,
     VERB,
@@ -48,6 +50,7 @@ from semantic_world.corpus.testsets import (
     INPUT_FIELDS,
     INSTANCE_COMPARISON,
     LAWLIKE,
+    OBJECT,
     POLARITY,
     POSSIBLE,
     PREDICATE,
@@ -91,10 +94,17 @@ ALL_SETS = (
     "event_role_possible",
     "event_role_blocked",
     "event_role_impossible",
+    "event_object_possible",
+    "event_object_blocked",
+    "event_object_impossible",
     "state_predicate_changed",
     "state_predicate_unchanged",
     "state_subject_changed",
     "state_subject_unchanged",
+    "state_role_changed",
+    "state_role_unchanged",
+    "state_object_changed",
+    "state_object_unchanged",
     "state_comparison_role",
     "able_now_predicate_blocked",
     "able_now_predicate_impossible",
@@ -119,6 +129,21 @@ ALL_SETS = (
 )
 CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
 EMPTY_IN_DEFAULT = ("causal_effect_condition_lawlike",)
+UNFILLED_IN_DEFAULT = (
+    "state_role_changed",
+    "state_role_unchanged",
+    "event_object_possible",
+    "event_object_blocked",
+    "event_object_impossible",
+)
+"""The sets of stage c4c that the default world may not fill, and may leave empty in a run of
+a few hundred documents: a role swap of a pair between entities needs a pair fluent between
+entities with a preposition that is not symmetric (two of the default world's five pair
+fluents), and one whose pair changed over the scene is rare; the event items of place event
+types are the moves and acts the documents report, a tenth of the reported events, and a false
+one that was never legal, or is not able, is rare when the moves are able at most places. The
+sets hold what the world gives, as the law-like sets do (the full default run fills
+`event_object_possible`, `state_role_unchanged`, and the object state sets)."""
 """The sets that the default world leaves empty: its ten conditional statements (four since
 stage b3b, six more with the numeric conditions at the cut, WM.35) have no law-like false item,
 because the condition fails for some event of each type."""
@@ -212,10 +237,12 @@ def test_the_layout_of_the_test_sets(runs) -> None:
     # sets, which hold every pair of a true statement and a valid false item, capped at the size
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
     unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS}
+    unfilled |= set(UNFILLED_IN_DEFAULT)
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
     # the default world's conditional statements have no law-like false item: the condition
     # fails for some event of each type (stage b3b)
-    assert all(sizes[name] > 0 for name in ALL_SETS if name not in EMPTY_IN_DEFAULT), sizes
+    rare = EMPTY_IN_DEFAULT + UNFILLED_IN_DEFAULT
+    assert all(sizes[name] > 0 for name in ALL_SETS if name not in rare), sizes
     # a true item is used once in the sets of one level and change, except in the causal sets,
     # where a true statement is paired with every valid false item
     for level, change in {
@@ -361,14 +388,31 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
                 assert b.subject in referents and b.subject != a.subject
         elif test_set.change == QUANTIFIER:
             assert changed == {"quantifier"} and test_set.level == CLASS
+        elif test_set.change == OBJECT:
+            # the second argument swapped (stage c4c, WM.56): another referent of the document
+            # for a pair between entities or SAME, another place the document mentioned for a
+            # location or a place event; the kind of the second argument is kept
+            assert changed == {"predicate"}
+            assert a.predicate.kind in (PAIR_STATE, PLACE_EVENT)
+            assert dataclasses.replace(b.predicate, patient=a.predicate.patient) == a.predicate
+            assert b.predicate.patient != a.predicate.patient
+            referents = documents[true.input["document"]]["referents"].values()
+            assert b.predicate.patient in referents
+            world = corpus.planner.world
+            assert world.is_place(b.predicate.patient) == world.is_place(a.predicate.patient)
         else:
             assert changed == {"subject", "predicate"}
-            assert a.predicate.kind in (VERB, COMPARATIVE)
+            assert a.predicate.kind in (VERB, COMPARATIVE, PAIR_STATE)
             assert (b.subject, b.predicate.patient) == (a.predicate.patient, a.subject)
             assert b.predicate.label == a.predicate.label
+            if a.predicate.kind == PAIR_STATE:
+                # a pair fluent between entities that is not symmetric (stage c4c)
+                world = corpus.planner.world
+                assert not world.pair_fluent_info[a.predicate.label].symmetric
     assert sum(made.values()) > 150, made
     if name == "default":
-        assert all(made[s] > 0 for s in ALL_SETS if s not in EMPTY_IN_DEFAULT)
+        rare = EMPTY_IN_DEFAULT + UNFILLED_IN_DEFAULT
+        assert all(made[s] > 0 for s in ALL_SETS if s not in rare)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -454,7 +498,8 @@ def test_true_and_false_items_never_differ_in_format(runs, name, language) -> No
     assert sum(checked.values()) > 150
     # every set of the default world is checked
     if name == "default":
-        assert all(checked[s] > 0 for s in ALL_SETS if s not in EMPTY_IN_DEFAULT), checked
+        rare = EMPTY_IN_DEFAULT + UNFILLED_IN_DEFAULT
+        assert all(checked[s] > 0 for s in ALL_SETS if s not in rare), checked
 
 
 @pytest.mark.slow
@@ -640,10 +685,11 @@ def test_event_items(cases, runs, name) -> None:
         kinds[test_set.kind] += 1
         event_types = corpus.planner.world.event_types
         category_names += label in event_types and event_types[label].category
-        # the agent and the patient take part in the scene
-        participants = scenes[other["scene"]]["participants"]
-        assert other["subject"]["instance"] in participants
-        assert patient is None or patient in participants
+        # the agent and the patient take part in the scene, or (stage c4c) the patient is a
+        # place of the scene, for an event of a place event type
+        scene = scenes[other["scene"]]
+        assert other["subject"]["instance"] in scene["participants"]
+        assert patient is None or patient in scene["participants"] + scene.get("places", [])
     assert kinds[POSSIBLE] > 10 and kinds[IMPOSSIBLE] > 10, kinds
     if name == "default":
         assert kinds[BLOCKED] > 10, kinds
@@ -934,7 +980,8 @@ def test_what_the_documents_state(runs) -> None:
                     modifiers += 1
                     positive = not literal.startswith("not ")
                     feature = literal.removeprefix("not ")
-                    if feature.startswith("SCALARDIM."):
+                    if feature.startswith(("SCALARDIM.", "PLACESCALARDIM.")):
+                        # a scalar pole, or (stage c4c) a place pole, relative to the noun
                         predicate = Predicate("comparison", feature, comparison=mention["noun"])
                     else:
                         kind = world.feature_kind.get(feature) or world.place_feature_kind[feature]
@@ -963,22 +1010,29 @@ def test_what_the_documents_state(runs) -> None:
                         )
                     assert expected in stated
     assert relative > 20 and modifiers > 100
-    # every stated proposition is true; what a mention of a place (stage c4b) states, its
-    # category and its place features, is read from the places' own table, which no truth test
-    # of the corpus judges (no item of this stage mentions a place)
+    # every stated proposition is true, what a mention of a place states (its category, its
+    # place features, and since stage c4c its place poles) included: the truth tests judge an
+    # instance-level proposition about a place since stage c4c, and the places' own table agrees
     truth = corpus.planner.truth
-    places = 0
+    places = poles = 0
     for p in stated:
+        assert truth.is_true(p), p
         if isinstance(p.subject, str) and world.is_place(p.subject):
             places += 1
+            row = world.place_index[p.subject]
             if p.predicate.kind == "member":
                 assert p.predicate.label in world.place_path(p.subject)
+            elif p.predicate.kind == "comparison":
+                poles += 1
+                assert world.is_place_pole(p.predicate.label)
+                assert p.predicate.comparison in world.place_path(p.subject)
+            elif p.predicate.kind == "comparative":
+                # a comparison of two places (stage c4c), a main clause
+                assert p.predicate.label in world.place_scalars
+                assert world.is_place(p.predicate.patient)
             else:
-                row = world.place_index[p.subject]
                 assert bool(world.place_column(p.predicate.label)[row]) == p.polarity
-            continue
-        assert truth.is_true(p)
-    assert places > 0
+    assert places > 0 and poles > 0
 
 
 # ---------------------------------------------------------------------------------------------

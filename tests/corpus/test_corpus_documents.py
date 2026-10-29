@@ -44,6 +44,8 @@ from semantic_world.corpus.planner import (
     EVENT_SECTION,
     INITIAL_STATE,
     MEMBERSHIP,
+    PLACE_COMPARATIVE,
+    PLACE_DESCRIPTION,
     RARER,
     RELATION,
     RESULT,
@@ -69,6 +71,7 @@ from semantic_world.corpus.propositions import (
     NEC_ALL,
     NEC_NO,
     NO,
+    PLACE_EVENT,
     SOME,
     STATE,
     VERB,
@@ -238,8 +241,10 @@ def test_the_propositional_rendering_parses_back_to_the_logical_form(corpora, na
             existential += "EXISTS(" in text
         else:
             assert "VAR." not in text
-            label = "REF." if mode == "local" else "INSTANCE."
-            assert f"({label}" in text or f", {label}" in text  # a comparison's referent
+            # a comparison's referent: a referent label, or the world's label of an entity or
+            # (stage c4c, a sentence about a place) of a place
+            labels = ("REF.",) if mode == "local" else ("INSTANCE.", "PLACE.")
+            assert any(f"({label}" in text or f", {label}" in text for label in labels)
             events += "EVENT(" in text
             capacities += "ABLE(" in text
             # the tense and the aspect of every event are written
@@ -332,12 +337,24 @@ class Described:
         world = self.world
         if instance.startswith("PLACE."):
             # a place (stage c4b) is told apart by its place properties and parts, read from
-            # the places' static facts
+            # the places' static facts, and (stage c4c) by its place poles, relative to the
+            # places below the noun's category
             row = world.place_index[instance]
-            return all(
-                bool(world.place_column(literal.feature)[row]) == literal.positive
-                for literal in phrase.restriction
-            )
+            for literal in phrase.restriction:
+                if literal.feature.startswith("PLACESCALARDIM."):
+                    scalar, side = literal.feature.rsplit(".", 1)
+                    column = world.place_scalar_column(scalar)
+                    below = [
+                        world.place_index[q] for q in world.places if phrase.noun in self.path(q)
+                    ]
+                    mean, sd = column[below].mean(), column[below].std()
+                    high = sd > 0 and column[row] >= mean + self.z * sd
+                    low = sd > 0 and column[row] <= mean - self.z * sd
+                    if not (high if side == "HIGH" else low):
+                        return False
+                elif bool(world.place_column(literal.feature)[row]) != literal.positive:
+                    return False
+            return True
         row = self.row[instance]
         for literal in phrase.restriction:
             if literal.feature.startswith("SCALARDIM."):
@@ -404,13 +421,11 @@ def test_every_distinguishing_mention_picks_out_one_participant(cases, corpora, 
                     assert bool(phrase.restriction) == (len(bare) > 1) or not flag
                 needed += len(bare) > 1
     assert flags[True] > 100 and needed > 30
-    # the places are told apart where their features allow (the tiny place taxonomy's two
-    # places of a category share every place property, so none of its definite place mentions
-    # is distinguished; the default world's are, in part)
+    # the places are told apart where their features and poles allow (stage c4c, Jon's ruling
+    # 2 of WM.73: the tiny place taxonomy's two places of a category share every place property
+    # and differ on their place scalar, so its definite place mentions are distinguished too)
     if case.world.location_fluents:  # the written worlds have places and no moves
-        assert sum(place_flags.values()) > 0
-    if name == "default":
-        assert place_flags[True] > 0
+        assert sum(place_flags.values()) > 0 and place_flags[True] > 0
     # nearly every definite mention can be told apart. An entity narrative has 2 to 5 scenes,
     # so its cast is large, and the smallest worlds have few features to tell instances apart
     # (the still world: 20 of 189 definite mentions)
@@ -843,6 +858,10 @@ def test_narratives(cases, corpora) -> None:
                 # scalar (timeless) or on a numeric fluent at the event's time point (b3b)
                 assert proposition.level == (STATE if proposition.predicate.numeric else INSTANCE)
                 assert proposition.predicate.kind == COMPARATIVE
+            elif sentence.section in (PLACE_DESCRIPTION, PLACE_COMPARATIVE):
+                # a description of a place, or a comparison of two places (stage c4c): an
+                # instance-level sentence with a place as its subject
+                assert proposition.level == INSTANCE and sentence.plan.subject.place
             elif sentence.section != DESCRIPTION:
                 # an initial state, a result, or a blocked sentence (test_corpus_states.py)
                 assert sentence.section in (INITIAL_STATE, RESULT, BLOCKED)
@@ -1163,7 +1182,7 @@ def test_readings_in_documents(corpora) -> None:
     for _, sentence in sentences_of(documents):
         proposition = sentence.proposition
         level = proposition.level
-        if level in (INSTANCE, ABLE_NOW) and proposition.predicate.kind in (CAN, VERB):
+        if level in (INSTANCE, ABLE_NOW) and proposition.predicate.kind in (CAN, VERB, PLACE_EVENT):
             assert sentence.readings == ("capacity", "able_now")
             with_can += 1
             continue

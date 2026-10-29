@@ -193,6 +193,7 @@ from semantic_world.corpus.propositions import (
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import as_json
 from semantic_world.corpus.renderings import TIMED_OPERATORS, propositional
+from semantic_world.corpus.world import PLACE_PREFIX, SAME_PREFIX
 from semantic_world.world.history import History
 from semantic_world.world.runtime import RANGE
 
@@ -206,7 +207,12 @@ EVENT_SWAP = "event"
 CONDITION = "condition"
 """The condition change of the conditional effect statements (stage b3b): the condition
 dropped."""
-CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE, CONDITION)
+OBJECT = "object"
+"""The object change (stage c4c, WM.56): the second argument of a pair, location, or ``SAME``
+state swapped for another referent of the document or another place of the scene, or the place
+of an event of a place event type swapped for another place of the scene; a swap keeps the kind
+of the second argument."""
+CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE, CONDITION, OBJECT)
 
 LAWLIKE = "lawlike"
 POSSIBLE = "possible"
@@ -247,6 +253,23 @@ NEITHER_ITEM = "neither"
 CHANGED_ITEMS = (TRUE_ITEM, FALSE_ITEM, BOTH_ITEMS, NEITHER_ITEM)
 """Which item of a state pair changed, as ``changed_item`` records it (``neither`` is written
 null in the metadata)."""
+ITEM_KINDS = ("boolean", "numeric", "pair", "location", "same")
+"""The kinds of state item (stage c4c), as ``pairs_by_item_kind`` counts them: a Boolean
+fluent, a numeric pole, a pair between entities, a location, or ``SAME``."""
+
+
+def item_kind(proposition: Proposition) -> str:
+    """The kind of a state item's proposition, one of ``ITEM_KINDS``."""
+    predicate = proposition.predicate
+    if predicate.kind != PAIR_STATE:
+        return "numeric" if predicate.numeric else "boolean"
+    label = predicate.label
+    if label.startswith(SAME_PREFIX):
+        return "same"
+    if isinstance(predicate.patient, str) and predicate.patient.startswith(PLACE_PREFIX):
+        return "location"
+    return "pair"
+
 
 _DRAWS_PER_PAIR = 60
 _DRAWS = 300
@@ -258,15 +281,18 @@ LEVEL_CHANGES = {
     CLASS: (PREDICATE, SUBJECT, QUANTIFIER, ROLE),
     INSTANCE: (PREDICATE, SUBJECT, ROLE),
     INSTANCE_COMPARISON: (PREDICATE, ROLE),
-    EVENT: (PREDICATE, SUBJECT, ROLE),
-    STATE: (PREDICATE, SUBJECT),
+    EVENT: (PREDICATE, SUBJECT, ROLE, OBJECT),
+    STATE: (PREDICATE, SUBJECT, ROLE, OBJECT),
     STATE_COMPARISON: (ROLE,),
     ABLE_NOW: (PREDICATE, SUBJECT),
     CAUSAL_EFFECT: (PREDICATE, POLARITY, EVENT_SWAP, ROLE, CONDITION),
     CAUSAL_PRECONDITION: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
 }
 """The changes that can apply at each level: only a class-level proposition has a quantifier,
-the state and ``able_now`` sets take a predicate swap and a subject swap, the instance
+the ``able_now`` sets take a predicate swap and a subject swap, the state sets those and (stage
+c4c) the role swap of a pair state on a pair fluent between entities that is not symmetric and
+the object swap of a pair, location, or ``SAME`` state, the event sets the role swap of a
+two-place event type and (stage c4c) the object swap of a place event type, the instance
 comparison sets a predicate swap (the scalar) and a role swap (the arguments), the state
 comparison set a role swap, and the causal sets the predicate, polarity, event, and role swaps,
 with the condition change for the effect statements."""
@@ -300,11 +326,15 @@ def candidates(
     proposition: Proposition,
     change: str,
     instances: Sequence[str] | None = None,
+    places: Sequence[str] | None = None,
 ) -> list[Proposition]:
     """Every proposition that differs from ``proposition`` by one change of the given kind,
-    true or false, in a fixed order. ``instances`` are the instances that a subject swap can
-    bring in: the referents of a document. Without them, a subject swap brings in any instance
-    of the world, or, for an event, any participant of its scene."""
+    true or false, in a fixed order. ``instances`` are the instances that a subject swap, or an
+    object swap of a pair between entities or of ``SAME``, can bring in: the referents of a
+    document. Without them, a subject swap brings in any instance of the world, or, for an
+    event, any participant of its scene. ``places`` are the places that an object swap of a
+    location or of a place event can bring in (stage c4c): the places among a document's
+    referents; without them, any place of the scene."""
     if change not in CHANGES:
         raise ValueError(f"unknown change {change!r}; the changes are {', '.join(CHANGES)}")
     predicate = proposition.predicate
@@ -320,12 +350,53 @@ def candidates(
 
     if isinstance(subject, EventTerm):
         return _causal_candidates(facts, proposition, change)
-    if predicate.kind in (PAIR_STATE, PLACE_EVENT):
-        # the changes of a pair state, a location, or an event of a place event type (the
-        # change ``object`` among them, WM.56) are stage c4c's: no false item is made from them
-        return []
+    world = facts.world
+
+    def pool_of(instances: Sequence[str] | None) -> Sequence[str]:
+        """The instances a subject or object swap can bring in: the referents given, or the
+        participants of the proposition's scene, or every instance of the world."""
+        if instances is not None:
+            return instances
+        if proposition.level == EVENT or proposition.timed:
+            scene = truth.scenes.get(proposition.scene)
+            return () if scene is None else scene.participants
+        return truth.world.instances
+
+    if change == OBJECT:
+        # the second argument swapped (stage c4c, WM.56): another place of the scene for a
+        # location state or an event of a place event type, another referent for a pair state
+        # between entities or a SAME state; the kind of the second argument is kept
+        if predicate.kind not in (PAIR_STATE, PLACE_EVENT) or not isinstance(
+            predicate.patient, str
+        ):
+            return []
+        if world.is_place(predicate.patient):
+            scene = truth.scenes.get(proposition.scene)
+            others: Sequence[str] = (
+                places if places is not None else () if scene is None else (scene.places or ())
+            )
+        else:
+            others = pool_of(instances)
+        return [
+            dataclasses.replace(
+                proposition, predicate=dataclasses.replace(predicate, patient=other)
+            )
+            for other in others
+            if other != predicate.patient and other != subject
+        ]
 
     if change == PREDICATE:
+        if predicate.kind == PLACE_EVENT:
+            return with_predicate(facts.place_verbs)  # another move or act (stage c4c)
+        if predicate.kind == PAIR_STATE:
+            # another pair fluent of the same kind (stage c4c): a location fluent, a pair fluent
+            # between entities, or SAME
+            label = predicate.label
+            if world.is_same_literal(label) is not None:
+                return with_predicate(facts.same_prepositions)
+            if world.is_location_fluent(label):
+                return with_predicate(facts.location_prepositions)
+            return with_predicate(facts.entity_pair_prepositions)
         if proposition.level in (EVENT, ABLE_NOW):
             # an event is a two-place event type with a patient, or a one-place one: the kind
             # is kept
@@ -363,17 +434,9 @@ def candidates(
                 for c in facts.categories
                 if c != subject.category and facts.level[c] == level
             ]
-        pool: Sequence[str]
-        if instances is not None:
-            pool = instances
-        elif proposition.level == EVENT or proposition.timed:
-            scene = truth.scenes.get(proposition.scene)
-            pool = () if scene is None else scene.participants
-        else:
-            pool = truth.world.instances
         return [
             dataclasses.replace(proposition, subject=other)
-            for other in pool
+            for other in pool_of(instances)
             if other != subject and other != predicate.patient
         ]
 
@@ -387,10 +450,26 @@ def candidates(
             if quantifier != proposition.quantifier
         ]
 
-    if predicate.kind not in (VERB, COMPARATIVE):
+    if predicate.kind == PAIR_STATE:
+        # the arguments of a pair state exchanged (stage c4c): a pair fluent between entities
+        # that is not symmetric; never SAME or a location, whose second argument is a place
+        if not _role_swappable(facts, predicate):
+            return []
+    elif predicate.kind not in (VERB, COMPARATIVE):
         return []
     swapped = dataclasses.replace(predicate, patient=subject)
     return [dataclasses.replace(proposition, subject=predicate.patient, predicate=swapped)]
+
+
+def _role_swappable(facts: Facts, predicate: Predicate) -> bool:
+    """Whether a pair state's arguments can be exchanged for a false item (stage c4c): its label
+    is a pair fluent between entities that is not symmetric (a symmetric pair holds both ways, a
+    location's second argument is a place, and SAME is symmetric by its meaning)."""
+    world = facts.world
+    label = predicate.label
+    if world.is_same_literal(label) is not None or world.is_location_fluent(label):
+        return False
+    return not world.pair_fluent_info[label].symmetric
 
 
 def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
@@ -447,14 +526,15 @@ def falsify(
     rng: np.random.Generator,
     *,
     instances: Sequence[str] | None = None,
+    places: Sequence[str] | None = None,
     accept: Callable[[Proposition], bool] | None = None,
 ) -> Proposition | None:
     """A false proposition made from a true one by one minimal change, drawn at random from the
     changes that give a false, expressible, non-vacuous proposition that the language can state.
     None when there is none. The false item carries the grounding that shows it false. A false
-    event names no event. ``instances`` limits a subject swap (see :func:`candidates`), and
-    ``accept`` is one more condition on the false item."""
-    options = candidates(facts, proposition, change, instances)
+    event names no event. ``instances`` limits a subject swap and ``places`` an object swap of a
+    place (see :func:`candidates`), and ``accept`` is one more condition on the false item."""
+    options = candidates(facts, proposition, change, instances, places)
     for index in rng.permutation(len(options)):
         candidate = _valid_false(facts, options[int(index)])
         if candidate is not None and (accept is None or accept(candidate)):
@@ -485,10 +565,17 @@ def _valid_false(facts: Facts, option: Proposition) -> Proposition | None:
     return dataclasses.replace(candidate, grounding=evaluation.grounding)
 
 
-def changes_for(proposition: Proposition) -> tuple[str, ...]:
-    """The kinds of change that can apply to a proposition at all."""
-    if proposition.predicate.kind in (PAIR_STATE, PLACE_EVENT):
-        return ()  # stage c4c's
+def changes_for(proposition: Proposition, facts: Facts | None = None) -> tuple[str, ...]:
+    """The kinds of change that can apply to a proposition at all. ``facts`` tells whether a
+    pair state's arguments can be exchanged (stage c4c); without it a pair state takes no role
+    swap."""
+    if proposition.predicate.kind == PLACE_EVENT:
+        return (PREDICATE, SUBJECT, OBJECT)
+    if proposition.predicate.kind == PAIR_STATE:
+        changes = [PREDICATE, SUBJECT]
+        if facts is not None and _role_swappable(facts, proposition.predicate):
+            changes.append(ROLE)
+        return (*changes, OBJECT)
     if isinstance(proposition.subject, EventTerm):
         changes = [PREDICATE, POLARITY, EVENT_SWAP]
         if not proposition.subject.event_type.startswith("EVENTTYPE1."):
@@ -706,13 +793,19 @@ def format_differences(a: Any, b: Any, path: str = "input") -> list[str]:
         return []
     if isinstance(a, list):
         found = []
+        if len(a) == len(b):
+            # two lists of one length are compared entry by entry (stage c4c): the referents of
+            # a location or place event item name an entity and then a place, and the two
+            # items of a pair must name the same kinds in the same positions
+            for x, y in zip(a, b, strict=True):
+                if isinstance(x, dict) and isinstance(y, dict):
+                    found += format_differences(x, y, f"{path}[]")
+                elif (x is None) != (y is None) or type(x) is not type(y):
+                    found.append(f"{path}: {x!r} and {y!r} are not of one type")
+            return found
         entries = [x for x in a + b if isinstance(x, dict)]
         for entry in entries[1:]:
             found += format_differences(entries[0], entry, f"{path}[]")
-        if len(a) == len(b) and not entries:
-            for x, y in zip(a, b, strict=True):
-                if (x is None) != (y is None):
-                    found.append(f"{path}: {x!r} and {y!r} are not of one type")
         return found
     if isinstance(a, str) and notation(a) != notation(b) and not path.endswith(_CONDITION_LABEL):
         return [f"{path}: {a!r} and {b!r} are not in one notation"]
@@ -809,6 +902,14 @@ class ItemSet:
             )
             by_item = Counter(true.meta["changed_item"] or NEITHER_ITEM for true, _ in self.pairs)
             record["pairs_by_changed_item"] = {kind: by_item[kind] for kind in CHANGED_ITEMS}
+            # the pairs by the kind of their true item (stage c4c): a Boolean fluent, a numeric
+            # pole, a pair between entities, a location, or SAME
+            by_kind = Counter(item_kind(true.proposition) for true, _ in self.pairs)
+            record["pairs_by_item_kind"] = {kind: by_kind[kind] for kind in ITEM_KINDS}
+        if self.level in (EVENT, ABLE_NOW):
+            record["place_event_pairs"] = sum(
+                true.proposition.predicate.kind == PLACE_EVENT for true, _ in self.pairs
+            )
         if self.level in CAUSAL_LEVELS:
             record["true_statements"] = len({true.meta["statement"] for true, _ in self.pairs})
         return record
@@ -885,8 +986,8 @@ class TestSetBuilder:
         self.streams = planner.streams
         self.size = planner.config.test_sets.size
         self.stated = stated_propositions(documents, self.config.test_sets.seen_descriptions)
-        # the referents a test item can be about are the entities (stage c4b): a place is a
-        # referent of a document too, but no item of this stage mentions one
+        # the subjects of the items are the entities among a document's referents; a place is
+        # the second argument of a location or a place event item (stage c4c)
         self.narratives = [d for d in documents if d.scenes and self.entity_referents(d)]
         self._events: dict[str, SceneEvent] = {
             event.label: event
@@ -896,14 +997,13 @@ class TestSetBuilder:
         }
         self._reports: dict[str, tuple[str, ...]] = {}
         for document in self.narratives:
-            # the events the document reports, in a main clause or a relative clause, apart
-            # from the moves and the acts at a place (stage c4b): the event items with place
-            # event types, and their change ``object``, are stage c4c's
+            # the events the document reports, in a main clause or a relative clause, the moves
+            # and the acts at a place among them (stage c4c)
             labels = dict.fromkeys(
                 label
                 for sentence in document.sentences
                 for label in sentence.sentence.event_labels
-                if label is not None and is_event_label(label) and not self._events[label].place
+                if label is not None and is_event_label(label)
             )
             self._reports[document.label] = tuple(labels)
         self.reporting = [d for d in self.narratives if self._reports[d.label]]
@@ -912,10 +1012,18 @@ class TestSetBuilder:
 
     def entity_referents(self, document: Document) -> tuple[str, ...]:
         """The referents of a document that are entities, in the order of first mention: what
-        an item of this stage can be about, and what a subject swap can bring in (a place
-        referent, stage c4b, is neither)."""
+        an item is about, and what a subject swap can bring in (a place referent is the second
+        argument of a location or a place event item, stage c4c, never the subject)."""
         world = self.planner.world
         return tuple(r for r in document.referents.values() if not world.is_place(r))
+
+    def places_of(self, document: Document) -> tuple[str, ...]:
+        """The places among a document's referents (stage c4c), in the order of first mention:
+        the second arguments of its location and place event items, and what an object swap can
+        bring in. An item is a continuation of its document, so it mentions a place the document
+        mentioned, with ``the``, as it mentions an entity the document mentioned."""
+        world = self.planner.world
+        return tuple(r for r in document.referents.values() if world.is_place(r))
 
     # The sets --------------------------------------------------------------------------------
 
@@ -977,7 +1085,10 @@ class TestSetBuilder:
                 return self._kind(level, document, true, candidate) in open_kinds
 
             referents = None if document is None else self.entity_referents(document)
-            false = falsify(self.facts, true, change, rng, instances=referents, accept=accept)
+            places = None if document is None else self.places_of(document)
+            false = falsify(
+                self.facts, true, change, rng, instances=referents, places=places, accept=accept
+            )
             if false is None:
                 continue
             kind = self._kind(level, document, true, false)
@@ -1125,8 +1236,10 @@ class TestSetBuilder:
         document = self.reporting[int(rng.integers(len(self.reporting)))]
         labels = self._reports[document.label]
         event = self._events[labels[int(rng.integers(len(labels)))]]
-        if change == ROLE and not event.transitive:
-            return None
+        if change == ROLE and (not event.transitive or event.place):
+            return None  # a place cannot fill the agent's role (WM.56)
+        if change == OBJECT and not event.place:
+            return None  # the object swap is the place event types' (WM.56)
         rate = self.config.documents.progressive_rate
         aspect = PROGRESSIVE if aspects.random() < rate else SIMPLE
         report = self.facts.draw_event(rng, event, aspect)
@@ -1138,17 +1251,30 @@ class TestSetBuilder:
     def _draw_state(
         self, rng: np.random.Generator, change: str, aspects: np.random.Generator
     ) -> tuple[Document, Proposition, bool] | None:
-        """A fluent with a word, or a numeric pole with words (stage b3b), that holds of a
-        participant of a situational narrative at the scene's final time point."""
-        predicates = [Predicate(STATE_KIND, f) for f in self.facts.fluents]
-        predicates += self.facts.numeric_pole_predicates()
-        if not self.situational or not predicates:
+        """A fluent with a word, a numeric pole with words (stage b3b), or (stage c4c) a pair
+        state with a preposition (a pair with another referent of the document, the location on
+        a location fluent toward a place of the scene, or ``SAME`` with another referent), that
+        holds of a participant of a situational narrative at the scene's final time point. For
+        the role and object changes the predicate is drawn among the pair states they apply
+        to."""
+        if not self.situational:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]
         scene = document.scenes[0]
         referents = self.entity_referents(document)
         instance = referents[int(rng.integers(len(referents)))]
         final = time_index(scene.final)
+        predicates: list[Predicate] = []
+        if change not in (ROLE, OBJECT):
+            predicates += [Predicate(STATE_KIND, f) for f in self.facts.fluents]
+            predicates += self.facts.numeric_pole_predicates()
+        others = tuple(r for r in referents if r != instance and r in scene.participants)
+        pairs = self.facts.pair_predicates(others, self.places_of(document))
+        if change == ROLE:
+            pairs = [p for p in pairs if _role_swappable(self.facts, p)]
+        predicates += pairs
+        if not predicates:
+            return None
         predicate = predicates[int(rng.integers(len(predicates)))]
         if not self.truth.predicate_holds(scene.label, final, instance, predicate):
             return None
@@ -1205,6 +1331,11 @@ class TestSetBuilder:
             for label in facts.verbs
             for patient in referents  # a definite mention of a referent of the document
             if patient != agent
+        ]
+        options += [
+            (PLACE_EVENT, label, place)  # a move or an act at a place of the scene (stage c4c)
+            for label in facts.place_verbs
+            for place in self.places_of(document)
         ]
         if not options:
             return None
@@ -1348,7 +1479,10 @@ class TestSetBuilder:
         else:
             referents = {instance: label for label, instance in document.referents.items()}
             cast = tuple(dict.fromkeys(p for scene in document.scenes for p in scene.participants))
-            mentions = Mentions(planner.rules, cast)
+            places = tuple(
+                dict.fromkeys(q for scene in document.scenes for q in (scene.places or ()))
+            )
+            mentions = Mentions(planner.rules, cast, places=places)
             mentions.referents = dict(referents)
 
             def phrase(instance: str, **options: Any) -> NounPhrase:
