@@ -772,8 +772,10 @@ def test_narratives(cases, corpora) -> None:
         else:
             (scene,) = document.scenes
             assert document.topic == scene.label
-            # every event of the scene, as far as the document's length goes
-            assert reported == [e.label for e in scene_events(scene)][: len(reported)]
+            # every event of the scene, as far as the document's length goes (a move or an
+            # act at a place is not narrated in stage c4a)
+            narrated = [e.label for e in scene_events(scene) if not e.place]
+            assert reported == narrated[: len(reported)]
         for index, sentence in enumerate(document.sentences):
             proposition = sentence.proposition
             if sentence.section == EVENT_SECTION:

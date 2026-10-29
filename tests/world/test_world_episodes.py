@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+from world_support import config_before_phase_c, mapping_before_phase_c
 
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.__main__ import main
@@ -48,7 +49,9 @@ DATA = Path("data/world")
 
 @pytest.fixture(scope="module")
 def tiny() -> WorldResult:
-    return define(load_config(DATA / "tiny.yaml"))
+    """The tiny world of stage c3b, without the phase (c) settings that ``tiny.yaml`` carries
+    since stage c4a: the episodes with pairs and places have their own tests."""
+    return define(config_before_phase_c())
 
 
 @pytest.fixture(scope="module")
@@ -162,7 +165,7 @@ def test_event_labels_and_numbering(tiny: WorldResult) -> None:
 
 
 def test_without_fluents_every_able_binding_is_available_at_every_step(tmp_path: Path) -> None:
-    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    data = mapping_before_phase_c()
     data["fluents"] = {"count": 0}
     data["numeric_fluents"] = {"count": 0}
     data["taxonomy"]["config"] = str(Path("data/taxonomy/tiny_relations.yaml"))
@@ -217,6 +220,8 @@ def _catch_before_eat(result: WorldResult, silence: bool) -> int:
                     eaten += 1
             for event in step.events:
                 for change in event.changes:
+                    if change.pair:
+                        continue  # a pair change (the chain world has pairs since stage c4a)
                     if change.fluent == "BOOLFL.2" and change.to:
                         assert not silence or event.type == "EVENTTYPE2.1.1"
                         caught[change.entity] = step.step
@@ -419,7 +424,7 @@ def test_relatedness_from_a_run_equals_in_memory(tiny: WorldResult, tmp_path: Pa
 
 
 def test_relatedness_without_two_place_event_types(tmp_path: Path) -> None:
-    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    data = mapping_before_phase_c()
     data["event_types"]["binary"] = None
     path = tmp_path / "unary.yaml"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")

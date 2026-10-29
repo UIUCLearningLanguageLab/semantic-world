@@ -2,12 +2,15 @@
 # stage c2b the configuration must allow the event file's four pair fluents (pair_fluents.count 4),
 # and the pair shares, the pair condition weight, the derived-rule quota, and the rule weight are
 # 0, so that generation adds nothing and the world keeps stage c2a's rule-set identity (WM.63).
+# Since stage c4a the code's defaults are the phase (c) settings, so this file writes out every
+# setting whose default changed then (no location fluent, the habitat strength 1, no density band
+# of the place requirements) and keeps that identity.
 
 name: tiny_pairs
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
-places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
-place_event_types: {count: 2}
+places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}, habitat_strength: 1}
+place_event_types: {count: 2, density: null}
 
 fluents:
   count: 4
@@ -23,4 +26,4 @@ event_types:
     condition_kinds: {feature: 0.4, fluent: 0.4, numeric: 0.2, pair: 0}
   event_file: events/pair_example.yaml
 
-pair_fluents: {count: 4, derived_rules: 0, rule_weight: 0}
+pair_fluents: {count: 4, locations: 0, derived_rules: 0, rule_weight: 0}

@@ -16,9 +16,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from world_support import config_before_phase_c
 
 from semantic_world.world.comparisons import COMPARISON_CLASSES_FILE, comparison_classes_frame
-from semantic_world.world.config import load_config
 from semantic_world.world.definition import RuntimeDefinition
 from semantic_world.world.derived import load_derived_csv
 from semantic_world.world.errors import WorldError
@@ -53,8 +53,12 @@ def worlds() -> dict[str, WorldResult]:
 
 
 def world_named(worlds: dict[str, WorldResult], name: str) -> WorldResult:
+    """The world of ``data/world/<name>.yaml`` with the phase (c) settings off (the tiny and
+    default worlds of stage c3b, before stage c4a moved the pair fluents, the location fluent,
+    the density band, and the habitat strength into their files): these tests are about the
+    static side and the places of stage c1."""
     if name not in worlds:
-        worlds[name] = define(load_config(DATA / f"{name}.yaml"))
+        worlds[name] = define(config_before_phase_c(name))
     return worlds[name]
 
 

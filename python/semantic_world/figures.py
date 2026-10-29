@@ -7,13 +7,13 @@ A figure is a number, a label, or a short text that a run's files hold: ``config
 ``world_stats.yaml``, ``definition.json``, and ``derived/`` of a world run, and ``config.yaml``
 and ``stats.yaml`` of a corpus run. ``world_figures`` and ``corpus_figures`` read them into one
 mapping each. The snapshot (``tests/figures/snapshot.yaml``) holds the figures of the tiny and
-default worlds and corpora, of the ``tiny_full`` and ``default_full`` worlds (the phase (c)
-settings until stage c4, Jon's ruling WM.63; no corpus runs on them) and of the ``tiny_pairs``
-world (stage c2a's world from an event file, whose identity must not move), and the baselines of
-the settings that turn a feature off (the rule-set identity of each world without an event file
-with the feature off, and the hash of the tiny corpus's ``documents.jsonl`` without conditional
-effects). One test compares a regenerated run with the snapshot; ``snapshot`` rewrites the file
-on purpose and prints what moved.
+default worlds and corpora (with the phase (c) settings since stage c4a, Jon's ruling WM.63),
+of the ``tiny_pairs`` world (stage c2a's world from an event file, whose identity must not move),
+and of the ``tiny_place_chain`` world (stage c3a's), and the baselines of the settings that turn
+a feature off (the rule-set identity of each world without an event file with the feature off,
+and the hash of the tiny corpus's ``documents.jsonl`` without conditional effects). One test
+compares a regenerated run with the snapshot; ``snapshot`` rewrites the file on purpose and
+prints what moved.
 
 The guides quote figures between marker comments, ``<!--figure:KEY|FORMAT-->TEXT<!--/figure-->``,
 where ``KEY`` is a dotted path into the figures (``default.corpus.sentences``,
@@ -45,19 +45,18 @@ RUNS = REPO / "runs"
 WORLD_CONFIGS = {
     "tiny": "data/world/tiny.yaml",
     "default": "data/world/default.yaml",
-    "tiny_full": "data/world/tiny_full.yaml",
-    "default_full": "data/world/default_full.yaml",
     "tiny_pairs": "data/world/tiny_pairs.yaml",
     "tiny_place_chain": "data/world/tiny_place_chain.yaml",
 }
-"""The worlds of the snapshot. ``tiny_full`` and ``default_full`` carry the phase (c) settings
-until stage c4 (stage c2b, WM.63), ``tiny_pairs`` is stage c2a's world from an event file, kept
-so that its identity is tested, and ``tiny_place_chain`` is stage c3a's world with a location
-fluent and the place chain example's moves and acts, the only world of ``data/`` with location
-fluents until stage c3b."""
+"""The worlds of the snapshot. ``tiny`` and ``default`` carry the phase (c) settings since stage
+c4a (WM.63; until then they lived in ``tiny_full.yaml`` and ``default_full.yaml``, which stage
+c4a removed), ``tiny_pairs`` is stage c2a's world from an event file, kept so that its identity
+is tested, and ``tiny_place_chain`` is stage c3a's world with a location fluent and the place
+chain example's moves and acts."""
 CORPUS_CONFIGS = {"tiny": "data/corpus/tiny.yaml", "default": "data/corpus/default.yaml"}
-"""The corpora of the snapshot: none runs on a world with pair fluents until stage c4."""
-BASELINE_NAMES = ("tiny", "default", "tiny_full", "default_full")
+"""The corpora of the snapshot, on the tiny and default worlds (with pair fluents and places
+since stage c4a)."""
+BASELINE_NAMES = ("tiny", "default")
 """The worlds whose off-setting baselines the snapshot holds: every world of the snapshot
 without an event file (``tiny_pairs`` and ``tiny_place_chain`` define pair fluents and place
 event types in a file, which the off settings would refuse)."""
@@ -73,7 +72,8 @@ OFF_SETTINGS: dict[str, dict[str, Any]] = {
     "fluents_off": {"fluents": {"count": 0}},
     "two_place_off": {"event_types": {"binary": None}},
     "numeric_fluents_off": {"numeric_fluents": {"count": 0}},
-    # places off turns the location fluents off with them (stage c3b: the full worlds have one)
+    # places off turns the location fluents off with them (stage c3b; the tiny and default worlds
+    # have one since stage c4a)
     "places_off": {"places": None, "place_event_types": None, "pair_fluents": {"locations": 0}},
     "pair_fluents_off": {"pair_fluents": {"count": 0, "locations": 0}},
     "locations_off": {"pair_fluents": {"locations": 0}},
@@ -93,19 +93,19 @@ b1, promised byte-identical to the world without them), fluents (the static side
 unchanged), two-place event types (the taxonomy and the one-place side are promised unchanged),
 numeric fluents (stage b2, promised byte-identical to the b1 world), places (stage c1, promised
 byte-identical to the world before places, after the rounding of drawn reals), pair fluents
-(stage c2b: ``default_full`` with ``count`` 0 is promised byte-identical to the default world of
-stage c2a, and every world without pair fluents is its own baseline), and the pair dynamics
-(stage c2b: with the pair shares, the pair condition weight, the rule weight, and the quotas
-``derived_rules`` and, since stage c3b, ``same_rules`` at 0, the pair fluents exist with their
-initial pairs but no entity event type reads or writes them, and in a world without location
-fluents the event types and the derived rules are promised to be those of the world without
-pair fluents; with location fluents the place event types keep their drawn dynamics, which
-are location dynamics), and the location fluents (stage c3b: with ``locations`` 0 no draw of
-stage c3b happens, so a world without location fluents is its own baseline; ``tiny_full`` and
-``default_full`` with ``locations`` 0 were the full worlds of stage c2b until the follow-up of
-October 28, 2026, whose density band and habitat strength (WM.67) the full worlds keep with
-``locations`` 0, so their ``locations_off`` baselines are the stage c2b worlds with the band's
-place requirements, not the stage c2b worlds)."""
+(stage c2b: with ``count`` 0 and ``locations`` 0 the world draws nothing from the pair streams;
+since stage c4a the tiny and default worlds keep the density band of the place requirements
+(WM.67) with the pair fluents off, so the baseline is the world of stage c2a with the band's
+place requirements, not the world of stage c2a), and the pair dynamics (stage c2b: with the pair
+shares, the pair condition weight, the rule weight, and the quotas ``derived_rules`` and, since
+stage c3b, ``same_rules`` at 0, the pair fluents exist with their initial pairs but no entity
+event type reads or writes them, and in a world without location fluents the event types and
+the derived rules are promised to be those of the world without pair fluents; with location
+fluents the place event types keep their drawn dynamics, which are location dynamics), and the
+location fluents (stage c3b: with ``locations`` 0 no draw of stage c3b happens, so the baseline
+is the world of stage c2b with the band's place requirements, which the band keeps with
+``locations`` 0). Since stage c4a the Boolean rule of WM.70 runs in every world, so a baseline
+is the earlier world with its dead Boolean effects redrawn where it had any."""
 
 _MARKER = re.compile(
     r"<!--figure:(?P<key>[A-Za-z0-9_.]+)(?:\|(?P<format>[^>]*?))?-->(?P<text>.*?)<!--/figure-->",
@@ -649,8 +649,8 @@ def write_snapshot(
     new["baselines"] = baselines() if with_baselines else old.get("baselines", {})
     changed = moves(old, new)
     header = (
-        "# The figures of the default and tiny runs (and of the default_full, tiny_full, and\n"
-        "# tiny_pairs worlds), and the baselines of the off settings.\n"
+        "# The figures of the default and tiny runs (and of the tiny_pairs and tiny_place_chain\n"
+        "# worlds), and the baselines of the off settings.\n"
         "# Written by `python -m semantic_world.figures snapshot` from the runs in runs/;\n"
         "# compared by tests/figures/test_figures.py against runs regenerated in memory. Never\n"
         "# edited by hand: rewrite it on purpose after a change that alters a run, and say what\n"

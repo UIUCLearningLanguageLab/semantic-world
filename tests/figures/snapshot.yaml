@@ -1,5 +1,5 @@
-# The figures of the default and tiny runs (and of the default_full, tiny_full, and
-# tiny_pairs worlds), and the baselines of the off settings.
+# The figures of the default and tiny runs (and of the tiny_pairs and tiny_place_chain
+# worlds), and the baselines of the off settings.
 # Written by `python -m semantic_world.figures snapshot` from the runs in runs/;
 # compared by tests/figures/test_figures.py against runs regenerated in memory. Never
 # edited by hand: rewrite it on purpose after a change that alters a run, and say what
@@ -7,509 +7,6 @@
 tiny:
   world:
     name: tiny
-    seed: 1
-    rule_set_id: 0ea72e128a39f89377a76dd32585337b6cab3ca5bd973bc999f27dc5a420e1e1
-    rule_set_short: 0ea72e128a39
-    rule_set_code: '`0ea72e128a39...`'
-    entities: 12
-    categories: 6
-    fluents: {base: 3, derived: 1}
-    fluents_total: 4
-    event_types: {one_place: 4, two_place: 4, two_place_categories: 2, leaves: 8}
-    constraints: 12
-    constraints_two_place: 8
-    event_type_features: 4
-    constraint_families: {agent: 3, key_lock: 2, patient: 1, comparison: 1, cross: 1}
-    precondition_literals:
-      total: 11
-      by_kind: {one_place: 3, two_place: 8}
-      by_role: {agent: 6, patient: 5}
-      from_features: 1
-    effects:
-      total: 10
-      by_kind: {one_place: 4, two_place: 6}
-      by_role: {agent: 7, patient: 3}
-      from_features: 1
-    conditional:
-      total: 2
-      by_kind: {one_place: 1, two_place: 1}
-      share_of_drawn: 0.181818
-      share_of_all: 0.2
-      literals:
-        total: 3
-        by_symbol: {feature: 2, fluent: 1, numeric: 0}
-        by_role: {agent: 2, patient: 1}
-        from_features: 0
-      inherited: []
-      inherited_count: 0
-      own:
-      - {expression: 'when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 1', code: '`when
-          NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 1`', event_type: EVENTTYPE1.1}
-      - {expression: 'when NOT patient.PROPERTY.4 then patient.BOOLFL.2 := 1', code: '`when NOT patient.PROPERTY.4
-          then patient.BOOLFL.2 := 1`', event_type: EVENTTYPE2.2.2}
-      own_count: 2
-      expressions: ['`when NOT agent.BOOLFL.4 AND agent.PROPERTY.2 then agent.BOOLFL.2 := 1`, on `EVENTTYPE1.1`',
-        '`when NOT patient.PROPERTY.4 then patient.BOOLFL.2 := 1`, on `EVENTTYPE2.2.2`']
-    numeric:
-      count: 2
-      drifting: 2
-      fluents:
-        NUMFL.1:
-          range: [0.0, 1.0]
-          initial: {kind: uniform}
-          drift: 0.0728
-        NUMFL.2:
-          range: [0.0, 1.0]
-          initial: {kind: uniform}
-          drift: 0.0056
-      drifts: [0.0728, 0.0056]
-      effects:
-        total: 4
-        by_operator: {add: 3, subtract: 1}
-        by_kind: {one_place: 1, two_place: 3}
-        by_role: {agent: 3, patient: 1}
-        from_features: 0
-      precondition_literals:
-        total: 5
-        by_side: {above: 1, at_or_below: 4}
-        by_kind: {one_place: 1, two_place: 4}
-        by_role: {agent: 2, patient: 3}
-        from_features: 1
-      condition_literals:
-        total: 0
-        by_side: {above: 0, at_or_below: 0}
-        by_role: {agent: 0, patient: 0}
-      rules_reading_a_threshold: 1
-      changes_per_event: 0.438962
-      drift_changes_per_step: 8.447248
-    places:
-      'on': true
-      places: 4
-      categories: 2
-      features:
-        place_property: {total: 4, free: 3, determined: 1}
-        place_part: {total: 0, free: 0, determined: 0}
-        place_scalar: 1
-      place_event_types: 2
-      constraints: 3
-      constraint_families: {key_lock: 1, cross: 2}
-      density: {mean: 0.479167, min: 0.041667, max: 0.916667}
-      approximate_capacities: 0.0
-    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
-      effects_dropped_no_slot: 0, effects_redrawn: 2, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
-    enabling_graph: {edges: 10, longest_chain: 3}
-    absorbing_fluents: [BOOLFL.1, BOOLFL.2, BOOLFL.3]
-    absorbing_code: '`BOOLFL.1`, `BOOLFL.2`, `BOOLFL.3`'
-    requirements:
-      one_place: {mean: 0.666667, min: 0.5, max: 0.75}
-      two_place: {mean: 0.278409, min: 0.128788, max: 0.356061}
-    episodes:
-      count: 1000
-      steps: 5469
-      events: 8208
-      two_place_share: 0.381213
-      mean_changes_per_event: 0.247685
-      quiescent_share: 0.0
-      precondition_redraws: {}
-      never_legal: {}
-    categories_with_word: 2
-    wrote_line: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place and 4 two-place event
-      types, 12 constraints, 4 places and 2 place event types; rule set 0ea72e128a39
-    redraw_notes: ''
-    quick_start_block: '
-
-      ```
-
-      wrote runs/world/tiny_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
-      and 4 two-place event types, 12 constraints, 4 places and 2 place event types; rule set 0ea72e128a39
-
-      ```
-
-      '
-  corpus:
-    name: tiny
-    seed: 1
-    world: 0ea72e128a39
-    documents: 20
-    sentences: 196
-    by_level: {class: 124, instance: 9, event: 44, state: 3, change: 13, able_now: 3}
-    tokens: 952
-    scenes: 17
-    events: 141
-    lexemes:
-      total: 62
-      content: 44
-      function: 18
-      without_word: {}
-    test_sets:
-      count: 46
-      pairs: 575
-      items: 1150
-      by_set:
-        class_predicate: {pairs: 20, true_items_seen_share: 0.45}
-        class_predicate_lawlike: {pairs: 20, true_items_seen_share: 0.4}
-        class_subject: {pairs: 20, true_items_seen_share: 0.35}
-        class_subject_lawlike: {pairs: 3, true_items_seen_share: 0.666667}
-        class_quantifier: {pairs: 20, true_items_seen_share: 0.45}
-        class_quantifier_lawlike: {pairs: 20, true_items_seen_share: 0.35}
-        class_role: {pairs: 20, true_items_seen_share: 0.1}
-        instance_predicate: {pairs: 20, true_items_seen_share: 0.2}
-        instance_subject: {pairs: 20, true_items_seen_share: 0.25}
-        instance_role: {pairs: 20, true_items_seen_share: 0.1}
-        instance_comparison_predicate: {pairs: 0, true_items_seen_share: null}
-        instance_comparison_role: {pairs: 20, true_items_seen_share: 0.1}
-        event_predicate_possible: {pairs: 20, true_items_seen_share: 0.85}
-        event_predicate_blocked: {pairs: 20, true_items_seen_share: 0.95}
-        event_predicate_impossible: {pairs: 20, true_items_seen_share: 0.9}
-        event_subject_possible: {pairs: 13, true_items_seen_share: 1.0}
-        event_subject_blocked: {pairs: 11, true_items_seen_share: 0.636364}
-        event_subject_impossible: {pairs: 20, true_items_seen_share: 0.95}
-        event_role_possible: {pairs: 8, true_items_seen_share: 0.75}
-        event_role_blocked: {pairs: 13, true_items_seen_share: 0.461538}
-        event_role_impossible: {pairs: 8, true_items_seen_share: 0.75}
-        state_predicate_changed: {pairs: 19, true_items_seen_share: 0.0}
-        state_predicate_unchanged: {pairs: 20, true_items_seen_share: 0.0}
-        state_subject_changed: {pairs: 14, true_items_seen_share: 0.0}
-        state_subject_unchanged: {pairs: 16, true_items_seen_share: 0.0}
-        state_comparison_role: {pairs: 20, true_items_seen_share: 0.0}
-        able_now_predicate_blocked: {pairs: 20, true_items_seen_share: 0.0}
-        able_now_predicate_impossible: {pairs: 11, true_items_seen_share: 0.0}
-        able_now_subject_blocked: {pairs: 13, true_items_seen_share: 0.0}
-        able_now_subject_impossible: {pairs: 20, true_items_seen_share: 0.0}
-        causal_effect_predicate: {pairs: 13, true_items_seen_share: 0.615385, true_statements: 9}
-        causal_effect_predicate_lawlike: {pairs: 1, true_items_seen_share: 0.0, true_statements: 1}
-        causal_effect_polarity: {pairs: 9, true_items_seen_share: 0.555556, true_statements: 9}
-        causal_effect_event: {pairs: 20, true_items_seen_share: 0.55, true_statements: 9}
-        causal_effect_event_lawlike: {pairs: 1, true_items_seen_share: 0.0, true_statements: 1}
-        causal_effect_role: {pairs: 5, true_items_seen_share: 0.6, true_statements: 5}
-        causal_effect_role_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
-        causal_effect_condition: {pairs: 1, true_items_seen_share: 0.0, true_statements: 1}
-        causal_effect_condition_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
-        causal_precondition_predicate: {pairs: 9, true_items_seen_share: 0.333333, true_statements: 6}
-        causal_precondition_predicate_lawlike: {pairs: 3, true_items_seen_share: 0.333333, true_statements: 3}
-        causal_precondition_polarity: {pairs: 6, true_items_seen_share: 0.333333, true_statements: 6}
-        causal_precondition_event: {pairs: 14, true_items_seen_share: 0.285714, true_statements: 6}
-        causal_precondition_event_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
-        causal_precondition_role: {pairs: 4, true_items_seen_share: 0.5, true_statements: 4}
-        causal_precondition_role_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
-    seen: {min_share: 0.1, min_set: class_role, max_share: 1.0, max_set: event_subject_possible, min_set_code: '`class_role`',
-      max_set_code: '`event_subject_possible`'}
-    rule_statements: {rules: 8, terms: 31, stated: 20}
-    causal:
-      causal_sentences: 9
-      effect_sentences: 7
-      precondition_sentences: 2
-      raises_sentences: 3
-      lowers_sentences: 0
-      conditional_sentences: 0
-      conditional_effects:
-        conditional_effects: 2
-        stated: 1
-        unstated: {numeric_condition: 0, patient_relative: 1, no_word: 0}
-    comparisons:
-      comparison_sentences: {class: 0, instance: 1}
-      comparative_sentences: {class: 5, instance: 1}
-      comparative_descriptions: 1
-      numeric_comparative_sentences: 0
-      pole_modifiers: 23
-      pole_restrictions: 1
-    effect_statements: 9
-    precondition_statements: 6
-    states: {events_with_result_share: 0.295455, result_sentences: 13, numeric_state_sentences: 2, numeric_change_sentences: 7}
-    narratives_short: {entity: 0.25, situational: 0.0}
-    cooccurrence:
-      pairs: 6
-      words:
-        entity: {thematic: 0.687478, taxonomic: 0.103985}
-        situational: {thematic: 0.265255, taxonomic: 0.564609}
-        encyclopedic_category: {thematic: 0.568957, taxonomic: 0.596778}
-        encyclopedic_feature: {thematic: 0.758453, taxonomic: 0.482986}
-      check:
-        words:
-          thematic_situational_above_encyclopedic: {pearson: false, spearman: false}
-          taxonomic_situational_below_encyclopedic: {pearson: false, spearman: false}
-        referents:
-          thematic_situational_above_encyclopedic: {pearson: false, spearman: false}
-          taxonomic_situational_below_encyclopedic: {pearson: false, spearman: false}
-    ambiguity: {ambiguous: 8, share: 0.040816}
-    changed_items_share: {state_predicate_changed: 0.552632, state_subject_changed: 0.5}
-    wrote_line: 20 documents, 196 sentences, 952 tokens, 17 scenes, 46 test sets with 575 pairs
-    wrote_code: '`20 documents, 196 sentences, 952 tokens, 17 scenes, 46 test sets with 575 pairs`'
-    quick_start_block: '
-
-      ```
-
-      wrote runs/corpus/tiny_seed1: 20 documents, 196 sentences, 952 tokens, 17 scenes, 46 test sets with
-      575 pairs
-
-      ```
-
-      '
-default:
-  world:
-    name: default
-    seed: 1
-    rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0
-    rule_set_short: 7677556dac8f
-    rule_set_code: '`7677556dac8f...`'
-    entities: 284
-    categories: 56
-    fluents: {base: 6, derived: 2}
-    fluents_total: 8
-    event_types: {one_place: 20, two_place: 20, two_place_categories: 5, leaves: 40}
-    constraints: 32
-    constraints_two_place: 12
-    event_type_features: 12
-    constraint_families: {patient: 4, agent: 3, cross: 2, comparison: 2, key_lock: 1}
-    precondition_literals:
-      total: 62
-      by_kind: {one_place: 18, two_place: 44}
-      by_role: {agent: 36, patient: 26}
-      from_features: 5
-    effects:
-      total: 81
-      by_kind: {one_place: 22, two_place: 59}
-      by_role: {agent: 51, patient: 30}
-      from_features: 5
-    conditional:
-      total: 10
-      by_kind: {one_place: 3, two_place: 7}
-      share_of_drawn: 0.096154
-      share_of_all: 0.123457
-      literals:
-        total: 16
-        by_symbol: {feature: 9, fluent: 1, numeric: 6}
-        by_role: {agent: 10, patient: 6}
-        from_features: 2
-      inherited:
-      - {expression: when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3641,
-        code: '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1 += 0.3641`', holders: 6}
-      inherited_count: 1
-      own:
-      - {expression: when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542, code: '`when NOT agent.PROPERTY.6
-          then agent.NUMFL.1 -= 0.2542`', event_type: EVENTTYPE1.6}
-      - {expression: when NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3231, code: '`when NOT agent.PROPERTY.15
-          then agent.NUMFL.2 += 0.3231`', event_type: EVENTTYPE1.15}
-      - {expression: 'when agent.PROPERTY.18 then agent.BOOLFL.2 := 0', code: '`when agent.PROPERTY.18
-          then agent.BOOLFL.2 := 0`', event_type: EVENTTYPE1.17}
-      - {expression: 'when agent.BOOLFL.8 then patient.BOOLFL.5 := 0', code: '`when agent.BOOLFL.8 then
-          patient.BOOLFL.5 := 0`', event_type: EVENTTYPE2.2.1}
-      own_count: 4
-      expressions: ['`when NOT agent.PROPERTY.6 then agent.NUMFL.1 -= 0.2542`, on `EVENTTYPE1.6`', '`when
-          NOT agent.PROPERTY.15 then agent.NUMFL.2 += 0.3231`, on `EVENTTYPE1.15`', '`when agent.PROPERTY.18
-          then agent.BOOLFL.2 := 0`, on `EVENTTYPE1.17`', '`when NOT patient.PART.1 AND agent.NUMFL.1
-          > 0.75 then patient.NUMFL.1 += 0.3641`, on `EVENTTYPE2.1.4`', '`when agent.BOOLFL.8 then patient.BOOLFL.5
-          := 0`, on `EVENTTYPE2.2.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3641`, on `EVENTTYPE2.2.3`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3641`, on `EVENTTYPE2.3.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3641`, on `EVENTTYPE2.3.3`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3641`, on `EVENTTYPE2.4.1`', '`when NOT patient.PART.1 AND agent.NUMFL.1 > 0.75 then patient.NUMFL.1
-          += 0.3641`, on `EVENTTYPE2.5.3`']
-    numeric:
-      count: 2
-      drifting: 2
-      fluents:
-        NUMFL.1:
-          range: [0.0, 1.0]
-          initial: {kind: uniform}
-          drift: 0.0728
-        NUMFL.2:
-          range: [0.0, 1.0]
-          initial: {kind: uniform}
-          drift: 0.0056
-      drifts: [0.0728, 0.0056]
-      effects:
-        total: 24
-        by_operator: {add: 17, subtract: 7}
-        by_kind: {one_place: 7, two_place: 17}
-        by_role: {agent: 15, patient: 9}
-        from_features: 2
-      precondition_literals:
-        total: 32
-        by_side: {above: 19, at_or_below: 13}
-        by_kind: {one_place: 8, two_place: 24}
-        by_role: {agent: 12, patient: 20}
-        from_features: 2
-      condition_literals:
-        total: 6
-        by_side: {above: 6, at_or_below: 0}
-        by_role: {agent: 6, patient: 0}
-      rules_reading_a_threshold: 1
-      changes_per_event: 0.4083
-      drift_changes_per_step: 8.425501
-    places:
-      'on': true
-      places: 12
-      categories: 8
-      features:
-        place_property: {total: 12, free: 9, determined: 3}
-        place_part: {total: 0, free: 0, determined: 0}
-        place_scalar: 2
-      place_event_types: 4
-      constraints: 5
-      constraint_families: {agent: 2, cross: 1, key_lock: 2}
-      density: {mean: 0.534331, min: 0.018192, max: 0.819836}
-      approximate_capacities: 0.0
-    fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 6,
-      effects_dropped_no_slot: 0, effects_redrawn: 9, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 17, literals_redrawn: 5, conditions_redrawn: 3, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
-    enabling_graph: {edges: 296, longest_chain: 1}
-    absorbing_fluents: [BOOLFL.3]
-    absorbing_code: '`BOOLFL.3`'
-    requirements:
-      one_place: {mean: 0.580106, min: 0.133803, max: 0.978873}
-      two_place: {mean: 0.17088, min: 0.004342, max: 0.964789}
-    episodes:
-      count: 1000
-      steps: 5490
-      events: 8337
-      two_place_share: 0.333693
-      mean_changes_per_event: 0.498021
-      quiescent_share: 0.0
-      precondition_redraws: {}
-      never_legal: {}
-    categories_with_word: 5
-    wrote_line: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place and 20 two-place
-      event types, 32 constraints, 12 places and 4 place event types; rule set 7677556dac8f
-    redraw_notes: ''
-    quick_start_block: '
-
-      ```
-
-      wrote runs/world/default_seed1: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place
-      and 20 two-place event types, 32 constraints, 12 places and 4 place event types; rule set 7677556dac8f
-
-      ```
-
-      '
-  corpus:
-    name: default
-    seed: 1
-    world: 7677556dac8f
-    documents: 10000
-    sentences: 100918
-    by_level: {class: 49873, instance: 5814, event: 28963, state: 3993, change: 9610, able_now: 2665}
-    tokens: 483322
-    scenes: 10082
-    events: 83075
-    lexemes:
-      total: 221
-      content: 203
-      function: 18
-      without_word: {}
-    test_sets:
-      count: 46
-      pairs: 16457
-      items: 32914
-      by_set:
-        class_predicate: {pairs: 500, true_items_seen_share: 0.64}
-        class_predicate_lawlike: {pairs: 391, true_items_seen_share: 0.606138}
-        class_subject: {pairs: 500, true_items_seen_share: 0.624}
-        class_subject_lawlike: {pairs: 292, true_items_seen_share: 0.592466}
-        class_quantifier: {pairs: 500, true_items_seen_share: 0.784}
-        class_quantifier_lawlike: {pairs: 500, true_items_seen_share: 0.572}
-        class_role: {pairs: 500, true_items_seen_share: 0.366}
-        instance_predicate: {pairs: 500, true_items_seen_share: 0.378}
-        instance_subject: {pairs: 500, true_items_seen_share: 0.532}
-        instance_role: {pairs: 500, true_items_seen_share: 0.006}
-        instance_comparison_predicate: {pairs: 500, true_items_seen_share: 0.01}
-        instance_comparison_role: {pairs: 500, true_items_seen_share: 0.018}
-        event_predicate_possible: {pairs: 500, true_items_seen_share: 0.93}
-        event_predicate_blocked: {pairs: 500, true_items_seen_share: 0.858}
-        event_predicate_impossible: {pairs: 500, true_items_seen_share: 0.848}
-        event_subject_possible: {pairs: 500, true_items_seen_share: 0.856}
-        event_subject_blocked: {pairs: 500, true_items_seen_share: 0.81}
-        event_subject_impossible: {pairs: 500, true_items_seen_share: 0.94}
-        event_role_possible: {pairs: 500, true_items_seen_share: 0.632}
-        event_role_blocked: {pairs: 500, true_items_seen_share: 0.608}
-        event_role_impossible: {pairs: 500, true_items_seen_share: 0.78}
-        state_predicate_changed: {pairs: 500, true_items_seen_share: 0.0}
-        state_predicate_unchanged: {pairs: 500, true_items_seen_share: 0.0}
-        state_subject_changed: {pairs: 500, true_items_seen_share: 0.0}
-        state_subject_unchanged: {pairs: 500, true_items_seen_share: 0.0}
-        state_comparison_role: {pairs: 500, true_items_seen_share: 0.0}
-        able_now_predicate_blocked: {pairs: 500, true_items_seen_share: 0.0}
-        able_now_predicate_impossible: {pairs: 500, true_items_seen_share: 0.0}
-        able_now_subject_blocked: {pairs: 500, true_items_seen_share: 0.0}
-        able_now_subject_impossible: {pairs: 500, true_items_seen_share: 0.0}
-        causal_effect_predicate: {pairs: 263, true_items_seen_share: 1.0, true_statements: 86}
-        causal_effect_predicate_lawlike: {pairs: 55, true_items_seen_share: 1.0, true_statements: 46}
-        causal_effect_polarity: {pairs: 86, true_items_seen_share: 1.0, true_statements: 86}
-        causal_effect_event: {pairs: 500, true_items_seen_share: 1.0, true_statements: 84}
-        causal_effect_event_lawlike: {pairs: 105, true_items_seen_share: 1.0, true_statements: 52}
-        causal_effect_role: {pairs: 51, true_items_seen_share: 1.0, true_statements: 51}
-        causal_effect_role_lawlike: {pairs: 7, true_items_seen_share: 1.0, true_statements: 7}
-        causal_effect_condition: {pairs: 10, true_items_seen_share: 1.0, true_statements: 10}
-        causal_effect_condition_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
-        causal_precondition_predicate: {pairs: 127, true_items_seen_share: 1.0, true_statements: 29}
-        causal_precondition_predicate_lawlike: {pairs: 14, true_items_seen_share: 1.0, true_statements: 11}
-        causal_precondition_polarity: {pairs: 29, true_items_seen_share: 1.0, true_statements: 29}
-        causal_precondition_event: {pairs: 477, true_items_seen_share: 1.0, true_statements: 28}
-        causal_precondition_event_lawlike: {pairs: 31, true_items_seen_share: 1.0, true_statements: 11}
-        causal_precondition_role: {pairs: 16, true_items_seen_share: 1.0, true_statements: 16}
-        causal_precondition_role_lawlike: {pairs: 3, true_items_seen_share: 1.0, true_statements: 3}
-    seen: {min_share: 0.006, min_set: instance_role, max_share: 0.94, max_set: event_subject_impossible,
-      min_set_code: '`instance_role`', max_set_code: '`event_subject_impossible`'}
-    rule_statements: {rules: 40, terms: 102, stated: 88}
-    causal:
-      causal_sentences: 2508
-      effect_sentences: 1877
-      precondition_sentences: 631
-      raises_sentences: 419
-      lowers_sentences: 181
-      conditional_sentences: 229
-      conditional_effects:
-        conditional_effects: 10
-        stated: 10
-        unstated: {numeric_condition: 0, patient_relative: 0, no_word: 0}
-    comparisons:
-      comparison_sentences: {class: 94, instance: 115}
-      comparative_sentences: {class: 5147, instance: 542}
-      comparative_descriptions: 1028
-      numeric_comparative_sentences: 486
-      pole_modifiers: 2969
-      pole_restrictions: 207
-    effect_statements: 86
-    precondition_statements: 29
-    states: {events_with_result_share: 0.331803, result_sentences: 9610, numeric_state_sentences: 758,
-      numeric_change_sentences: 3794}
-    narratives_short: {entity: 0.417582, situational: 0.389774}
-    cooccurrence:
-      pairs: 741
-      words:
-        entity: {thematic: 0.741013, taxonomic: 0.161212}
-        situational: {thematic: 0.63219, taxonomic: 0.206018}
-        encyclopedic_category: {thematic: 0.112743, taxonomic: 0.493091}
-        encyclopedic_feature: {thematic: 0.305943, taxonomic: 0.182262}
-      check:
-        words:
-          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
-          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
-        referents:
-          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
-          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
-    ambiguity: {ambiguous: 5895, share: 0.058414}
-    changed_items_share: {state_predicate_changed: 0.543, state_subject_changed: 0.531}
-    wrote_line: 10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457
-      pairs
-    wrote_code: '`10000 documents, 100918 sentences, 483322 tokens, 10082 scenes, 46 test sets with 16457
-      pairs`'
-    quick_start_block: '
-
-      ```
-
-      wrote runs/corpus/default_seed1: 10000 documents, 100918 sentences, 483322 tokens, 10082 scenes,
-      46 test sets with 16457 pairs
-
-      ```
-
-      '
-tiny_full:
-  world:
-    name: tiny_full
     seed: 1
     rule_set_id: 2f80537bb72b3ddd0b850f25b7fde6806e508cc051c26a1ea82d04d7be91de6e
     rule_set_short: 2f80537bb72b
@@ -601,10 +98,11 @@ tiny_full:
       density_band: [0.05, 0.5]
       outside_density: 0
       by_kind: {moves: 2, acts: 0, without_dynamics: 0, explicit: 0}
-      dynamics: {drawn: 2, moves: 2, acts: 0, effects_drawn: 0, effects_redrawn: 0, effects_dropped_no_slot: 0,
-        numeric_effect_replacements: 0, literals_drawn: 2, literals_redrawn: 0, literals_dropped: 0, numeric_literal_replacements: 0,
-        pair_replacement_draws: 2, pair_replacements: 0, pair_replacements_failed: 0, pair_literals_redrawn: 0,
-        conditions_drawn: 0, conditions_redrawn: 0, conditions_dropped: 0, pair_conditions_drawn: 0}
+      dynamics: {drawn: 2, moves: 2, acts: 0, effects_drawn: 0, effects_redrawn: 0, effects_redrawn_dead: 0,
+        effects_dropped_no_slot: 0, numeric_effect_replacements: 0, literals_drawn: 2, literals_redrawn: 0,
+        literals_dropped: 0, numeric_literal_replacements: 0, pair_replacement_draws: 2, pair_replacements: 0,
+        pair_replacements_failed: 0, pair_literals_redrawn: 0, conditions_drawn: 0, conditions_redrawn: 0,
+        conditions_dropped: 0, pair_conditions_drawn: 0}
       habitats:
         PAIRFL.3:
           by_place_category:
@@ -635,9 +133,9 @@ tiny_full:
           favorite_ratio: {median: 1.4, largest: 1.6, category: CATEGORY.1.2, place_category: PLACECATEGORY.2}
           entropy: {mean: 0.850729, uniform: 1.0}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
-      effects_dropped_no_slot: 0, effects_redrawn: 2, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
+      effects_dropped_no_slot: 0, effects_redrawn: 2, effects_redrawn_dead: 0, effects_dropped_dead: 0,
+      literals_dropped_contradiction: 0, literals_dropped_duplicate: 0, literals_dropped_unachievable: 0,
+      literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0, numeric_literals_redrawn: 0}
     enabling_graph: {edges: 6, longest_chain: 2}
     absorbing_fluents: [BOOLFL.1, BOOLFL.2, BOOLFL.3]
     absorbing_code: '`BOOLFL.1`, `BOOLFL.2`, `BOOLFL.3`'
@@ -725,16 +223,135 @@ tiny_full:
 
       ```
 
-      wrote runs/world/tiny_full_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
+      wrote runs/world/tiny_seed1: 12 entities, 4 fluents (1 derived), 2 numeric fluents, 4 one-place
       and 4 two-place event types, 12 constraints, 4 places and 2 place event types, 3 pair fluents (2
       between entities, 1 location fluent); rule set 2f80537bb72b
 
       ```
 
       '
-default_full:
+  corpus:
+    name: tiny
+    seed: 1
+    world: 2f80537bb72b
+    documents: 20
+    sentences: 192
+    by_level: {class: 123, instance: 6, event: 39, state: 5, change: 15, able_now: 4}
+    tokens: 935
+    scenes: 17
+    events: 135
+    lexemes:
+      total: 62
+      content: 44
+      function: 18
+      without_word: {}
+    test_sets:
+      count: 46
+      pairs: 592
+      items: 1184
+      by_set:
+        class_predicate: {pairs: 20, true_items_seen_share: 0.45}
+        class_predicate_lawlike: {pairs: 20, true_items_seen_share: 0.4}
+        class_subject: {pairs: 20, true_items_seen_share: 0.35}
+        class_subject_lawlike: {pairs: 3, true_items_seen_share: 0.666667}
+        class_quantifier: {pairs: 20, true_items_seen_share: 0.45}
+        class_quantifier_lawlike: {pairs: 20, true_items_seen_share: 0.35}
+        class_role: {pairs: 20, true_items_seen_share: 0.1}
+        instance_predicate: {pairs: 20, true_items_seen_share: 0.1}
+        instance_subject: {pairs: 20, true_items_seen_share: 0.2}
+        instance_role: {pairs: 20, true_items_seen_share: 0.05}
+        instance_comparison_predicate: {pairs: 0, true_items_seen_share: null}
+        instance_comparison_role: {pairs: 20, true_items_seen_share: 0.1}
+        event_predicate_possible: {pairs: 20, true_items_seen_share: 0.85}
+        event_predicate_blocked: {pairs: 20, true_items_seen_share: 0.9}
+        event_predicate_impossible: {pairs: 20, true_items_seen_share: 0.8}
+        event_subject_possible: {pairs: 20, true_items_seen_share: 0.85}
+        event_subject_blocked: {pairs: 5, true_items_seen_share: 0.0}
+        event_subject_impossible: {pairs: 20, true_items_seen_share: 0.95}
+        event_role_possible: {pairs: 8, true_items_seen_share: 0.5}
+        event_role_blocked: {pairs: 18, true_items_seen_share: 0.444444}
+        event_role_impossible: {pairs: 10, true_items_seen_share: 0.6}
+        state_predicate_changed: {pairs: 18, true_items_seen_share: 0.0}
+        state_predicate_unchanged: {pairs: 20, true_items_seen_share: 0.0}
+        state_subject_changed: {pairs: 19, true_items_seen_share: 0.0}
+        state_subject_unchanged: {pairs: 20, true_items_seen_share: 0.0}
+        state_comparison_role: {pairs: 20, true_items_seen_share: 0.0}
+        able_now_predicate_blocked: {pairs: 20, true_items_seen_share: 0.0}
+        able_now_predicate_impossible: {pairs: 20, true_items_seen_share: 0.0}
+        able_now_subject_blocked: {pairs: 20, true_items_seen_share: 0.0}
+        able_now_subject_impossible: {pairs: 20, true_items_seen_share: 0.0}
+        causal_effect_predicate: {pairs: 12, true_items_seen_share: 0.583333, true_statements: 8}
+        causal_effect_predicate_lawlike: {pairs: 1, true_items_seen_share: 0.0, true_statements: 1}
+        causal_effect_polarity: {pairs: 8, true_items_seen_share: 0.5, true_statements: 8}
+        causal_effect_event: {pairs: 20, true_items_seen_share: 0.5, true_statements: 8}
+        causal_effect_event_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+        causal_effect_role: {pairs: 4, true_items_seen_share: 0.5, true_statements: 4}
+        causal_effect_role_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+        causal_effect_condition: {pairs: 1, true_items_seen_share: 0.0, true_statements: 1}
+        causal_effect_condition_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+        causal_precondition_predicate: {pairs: 5, true_items_seen_share: 0.4, true_statements: 4}
+        causal_precondition_predicate_lawlike: {pairs: 3, true_items_seen_share: 0.666667, true_statements: 3}
+        causal_precondition_polarity: {pairs: 4, true_items_seen_share: 0.5, true_statements: 4}
+        causal_precondition_event: {pairs: 10, true_items_seen_share: 0.5, true_statements: 4}
+        causal_precondition_event_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+        causal_precondition_role: {pairs: 2, true_items_seen_share: 0.5, true_statements: 2}
+        causal_precondition_role_lawlike: {pairs: 1, true_items_seen_share: 1.0, true_statements: 1}
+    seen: {min_share: 0.0, min_set: event_subject_blocked, max_share: 0.95, max_set: event_subject_impossible,
+      min_set_code: '`event_subject_blocked`', max_set_code: '`event_subject_impossible`'}
+    rule_statements: {rules: 8, terms: 31, stated: 20}
+    causal:
+      causal_sentences: 7
+      effect_sentences: 5
+      precondition_sentences: 2
+      raises_sentences: 1
+      lowers_sentences: 0
+      conditional_sentences: 0
+      conditional_effects:
+        conditional_effects: 2
+        stated: 1
+        unstated: {numeric_condition: 0, patient_relative: 1, no_word: 0, pair_condition: 0, pair_effect: 0}
+    comparisons:
+      comparison_sentences: {class: 0, instance: 0}
+      comparative_sentences: {class: 5, instance: 1}
+      comparative_descriptions: 1
+      numeric_comparative_sentences: 0
+      pole_modifiers: 23
+      pole_restrictions: 1
+    effect_statements: 8
+    precondition_statements: 4
+    states: {events_with_result_share: 0.384615, result_sentences: 15, numeric_state_sentences: 3, numeric_change_sentences: 6}
+    narratives_short: {entity: 0.75, situational: 0.0}
+    cooccurrence:
+      pairs: 6
+      words:
+        entity: {thematic: 0.687478, taxonomic: 0.103985}
+        situational: {thematic: 0.88617, taxonomic: 0.411406}
+        encyclopedic_category: {thematic: 0.568957, taxonomic: 0.596778}
+        encyclopedic_feature: {thematic: 0.758453, taxonomic: 0.482986}
+      check:
+        words:
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
+        referents:
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
+    ambiguity: {ambiguous: 7, share: 0.036458}
+    changed_items_share: {state_predicate_changed: 0.583333, state_subject_changed: 0.5}
+    wrote_line: 20 documents, 192 sentences, 935 tokens, 17 scenes, 46 test sets with 592 pairs
+    wrote_code: '`20 documents, 192 sentences, 935 tokens, 17 scenes, 46 test sets with 592 pairs`'
+    quick_start_block: '
+
+      ```
+
+      wrote runs/corpus/tiny_seed1: 20 documents, 192 sentences, 935 tokens, 17 scenes, 46 test sets with
+      592 pairs
+
+      ```
+
+      '
+default:
   world:
-    name: default_full
+    name: default
     seed: 1
     rule_set_id: baa625dfd0fb356a40d56c46e6057ab99a2db291e649e7b54697d57d3120cf84
     rule_set_short: baa625dfd0fb
@@ -847,10 +464,11 @@ default_full:
       density_band: [0.05, 0.5]
       outside_density: 0
       by_kind: {moves: 3, acts: 1, without_dynamics: 0, explicit: 0}
-      dynamics: {drawn: 4, moves: 3, acts: 1, effects_drawn: 1, effects_redrawn: 0, effects_dropped_no_slot: 0,
-        numeric_effect_replacements: 1, literals_drawn: 5, literals_redrawn: 0, literals_dropped: 0, numeric_literal_replacements: 0,
-        pair_replacement_draws: 5, pair_replacements: 0, pair_replacements_failed: 0, pair_literals_redrawn: 0,
-        conditions_drawn: 1, conditions_redrawn: 0, conditions_dropped: 0, pair_conditions_drawn: 0}
+      dynamics: {drawn: 4, moves: 3, acts: 1, effects_drawn: 1, effects_redrawn: 0, effects_redrawn_dead: 0,
+        effects_dropped_no_slot: 0, numeric_effect_replacements: 1, literals_drawn: 5, literals_redrawn: 0,
+        literals_dropped: 0, numeric_literal_replacements: 0, pair_replacement_draws: 5, pair_replacements: 0,
+        pair_replacements_failed: 0, pair_literals_redrawn: 0, conditions_drawn: 1, conditions_redrawn: 0,
+        conditions_dropped: 0, pair_conditions_drawn: 0}
       habitats:
         PAIRFL.5:
           by_place_category:
@@ -919,9 +537,9 @@ default_full:
           favorite_ratio: {median: 1.490825, largest: 2.440589, category: CATEGORY.4.2.4, place_category: PLACECATEGORY.2.2}
           entropy: {mean: 2.485226, uniform: 2.584963}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 6,
-      effects_dropped_no_slot: 0, effects_redrawn: 5, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 1, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
+      effects_dropped_no_slot: 0, effects_redrawn: 5, effects_redrawn_dead: 0, effects_dropped_dead: 0,
+      literals_dropped_contradiction: 0, literals_dropped_duplicate: 0, literals_dropped_unachievable: 0,
+      literals_redrawn: 0, conditions_redrawn: 1, conditions_dropped: 0, numeric_literals_redrawn: 0}
     enabling_graph: {edges: 232, longest_chain: 1}
     absorbing_fluents: [BOOLFL.3]
     absorbing_code: '`BOOLFL.3`'
@@ -1012,9 +630,131 @@ default_full:
 
       ```
 
-      wrote runs/world/default_full_seed1: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20
-      one-place and 20 two-place event types, 32 constraints, 12 places and 4 place event types, 5 pair
-      fluents (4 between entities, 1 location fluent); rule set baa625dfd0fb
+      wrote runs/world/default_seed1: 284 entities, 8 fluents (2 derived), 2 numeric fluents, 20 one-place
+      and 20 two-place event types, 32 constraints, 12 places and 4 place event types, 5 pair fluents
+      (4 between entities, 1 location fluent); rule set baa625dfd0fb
+
+      ```
+
+      '
+  corpus:
+    name: default
+    seed: 1
+    world: baa625dfd0fb
+    documents: 10000
+    sentences: 97578
+    by_level: {class: 49724, instance: 6001, event: 28585, state: 4377, change: 6252, able_now: 2639}
+    tokens: 479618
+    scenes: 10091
+    events: 83517
+    lexemes:
+      total: 221
+      content: 203
+      function: 18
+      without_word: {}
+    test_sets:
+      count: 46
+      pairs: 16469
+      items: 32938
+      by_set:
+        class_predicate: {pairs: 500, true_items_seen_share: 0.642}
+        class_predicate_lawlike: {pairs: 391, true_items_seen_share: 0.608696}
+        class_subject: {pairs: 500, true_items_seen_share: 0.622}
+        class_subject_lawlike: {pairs: 292, true_items_seen_share: 0.592466}
+        class_quantifier: {pairs: 500, true_items_seen_share: 0.784}
+        class_quantifier_lawlike: {pairs: 500, true_items_seen_share: 0.572}
+        class_role: {pairs: 500, true_items_seen_share: 0.36}
+        instance_predicate: {pairs: 500, true_items_seen_share: 0.41}
+        instance_subject: {pairs: 500, true_items_seen_share: 0.472}
+        instance_role: {pairs: 500, true_items_seen_share: 0.014}
+        instance_comparison_predicate: {pairs: 500, true_items_seen_share: 0.034}
+        instance_comparison_role: {pairs: 500, true_items_seen_share: 0.028}
+        event_predicate_possible: {pairs: 500, true_items_seen_share: 0.908}
+        event_predicate_blocked: {pairs: 500, true_items_seen_share: 0.812}
+        event_predicate_impossible: {pairs: 500, true_items_seen_share: 0.814}
+        event_subject_possible: {pairs: 500, true_items_seen_share: 0.842}
+        event_subject_blocked: {pairs: 500, true_items_seen_share: 0.872}
+        event_subject_impossible: {pairs: 500, true_items_seen_share: 0.964}
+        event_role_possible: {pairs: 500, true_items_seen_share: 0.696}
+        event_role_blocked: {pairs: 500, true_items_seen_share: 0.644}
+        event_role_impossible: {pairs: 500, true_items_seen_share: 0.788}
+        state_predicate_changed: {pairs: 500, true_items_seen_share: 0.0}
+        state_predicate_unchanged: {pairs: 500, true_items_seen_share: 0.0}
+        state_subject_changed: {pairs: 500, true_items_seen_share: 0.0}
+        state_subject_unchanged: {pairs: 500, true_items_seen_share: 0.0}
+        state_comparison_role: {pairs: 500, true_items_seen_share: 0.0}
+        able_now_predicate_blocked: {pairs: 500, true_items_seen_share: 0.0}
+        able_now_predicate_impossible: {pairs: 500, true_items_seen_share: 0.0}
+        able_now_subject_blocked: {pairs: 500, true_items_seen_share: 0.0}
+        able_now_subject_impossible: {pairs: 500, true_items_seen_share: 0.0}
+        causal_effect_predicate: {pairs: 236, true_items_seen_share: 1.0, true_statements: 66}
+        causal_effect_predicate_lawlike: {pairs: 48, true_items_seen_share: 1.0, true_statements: 33}
+        causal_effect_polarity: {pairs: 66, true_items_seen_share: 1.0, true_statements: 66}
+        causal_effect_event: {pairs: 500, true_items_seen_share: 1.0, true_statements: 66}
+        causal_effect_event_lawlike: {pairs: 68, true_items_seen_share: 1.0, true_statements: 46}
+        causal_effect_role: {pairs: 33, true_items_seen_share: 1.0, true_statements: 33}
+        causal_effect_role_lawlike: {pairs: 9, true_items_seen_share: 1.0, true_statements: 9}
+        causal_effect_condition: {pairs: 4, true_items_seen_share: 1.0, true_statements: 4}
+        causal_effect_condition_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+        causal_precondition_predicate: {pairs: 198, true_items_seen_share: 1.0, true_statements: 43}
+        causal_precondition_predicate_lawlike: {pairs: 15, true_items_seen_share: 1.0, true_statements: 10}
+        causal_precondition_polarity: {pairs: 43, true_items_seen_share: 1.0, true_statements: 43}
+        causal_precondition_event: {pairs: 500, true_items_seen_share: 1.0, true_statements: 43}
+        causal_precondition_event_lawlike: {pairs: 34, true_items_seen_share: 1.0, true_statements: 11}
+        causal_precondition_role: {pairs: 32, true_items_seen_share: 1.0, true_statements: 32}
+        causal_precondition_role_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
+    seen: {min_share: 0.014, min_set: instance_role, max_share: 0.964, max_set: event_subject_impossible,
+      min_set_code: '`instance_role`', max_set_code: '`event_subject_impossible`'}
+    rule_statements: {rules: 40, terms: 102, stated: 88}
+    causal:
+      causal_sentences: 2300
+      effect_sentences: 1453
+      precondition_sentences: 847
+      raises_sentences: 158
+      lowers_sentences: 149
+      conditional_sentences: 110
+      conditional_effects:
+        conditional_effects: 12
+        stated: 4
+        unstated: {numeric_condition: 0, patient_relative: 0, no_word: 0, pair_condition: 8, pair_effect: 0}
+    comparisons:
+      comparison_sentences: {class: 94, instance: 138}
+      comparative_sentences: {class: 5140, instance: 680}
+      comparative_descriptions: 1336
+      numeric_comparative_sentences: 656
+      pole_modifiers: 3143
+      pole_restrictions: 208
+    effect_statements: 66
+    precondition_statements: 43
+    states: {events_with_result_share: 0.218716, result_sentences: 6252, numeric_state_sentences: 769,
+      numeric_change_sentences: 1764}
+    narratives_short: {entity: 0.458313, situational: 0.495522}
+    cooccurrence:
+      pairs: 741
+      words:
+        entity: {thematic: 0.640682, taxonomic: 0.174831}
+        situational: {thematic: 0.547403, taxonomic: 0.200645}
+        encyclopedic_category: {thematic: 0.112877, taxonomic: 0.492375}
+        encyclopedic_feature: {thematic: 0.318793, taxonomic: 0.184124}
+      check:
+        words:
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
+        referents:
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
+    ambiguity: {ambiguous: 5891, share: 0.060372}
+    changed_items_share: {state_predicate_changed: 0.515, state_subject_changed: 0.511}
+    wrote_line: 10000 documents, 97578 sentences, 479618 tokens, 10091 scenes, 46 test sets with 16469
+      pairs
+    wrote_code: '`10000 documents, 97578 sentences, 479618 tokens, 10091 scenes, 46 test sets with 16469
+      pairs`'
+    quick_start_block: '
+
+      ```
+
+      wrote runs/corpus/default_seed1: 10000 documents, 97578 sentences, 479618 tokens, 10091 scenes,
+      46 test sets with 16469 pairs
 
       ```
 
@@ -1114,9 +854,9 @@ tiny_pairs:
       density: {mean: 0.583333, min: 0.5, max: 0.666667}
       approximate_capacities: 0.0
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
-      effects_dropped_no_slot: 0, effects_redrawn: 1, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
+      effects_dropped_no_slot: 0, effects_redrawn: 1, effects_redrawn_dead: 0, effects_dropped_dead: 0,
+      literals_dropped_contradiction: 0, literals_dropped_duplicate: 0, literals_dropped_unachievable: 0,
+      literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0, numeric_literals_redrawn: 0}
     enabling_graph: {edges: 8, longest_chain: 2}
     absorbing_fluents: [BOOLFL.2]
     absorbing_code: '`BOOLFL.2`'
@@ -1277,10 +1017,11 @@ tiny_place_chain:
       density: {mean: 0.75, min: 0.5, max: 1.0}
       approximate_capacities: 0.0
       by_kind: {moves: 1, acts: 1, without_dynamics: 0, explicit: 2}
-      dynamics: {drawn: 0, moves: 0, acts: 0, effects_drawn: 0, effects_redrawn: 0, effects_dropped_no_slot: 0,
-        numeric_effect_replacements: 0, literals_drawn: 0, literals_redrawn: 0, literals_dropped: 0, numeric_literal_replacements: 0,
-        pair_replacement_draws: 0, pair_replacements: 0, pair_replacements_failed: 0, pair_literals_redrawn: 0,
-        conditions_drawn: 0, conditions_redrawn: 0, conditions_dropped: 0, pair_conditions_drawn: 0}
+      dynamics: {drawn: 0, moves: 0, acts: 0, effects_drawn: 0, effects_redrawn: 0, effects_redrawn_dead: 0,
+        effects_dropped_no_slot: 0, numeric_effect_replacements: 0, literals_drawn: 0, literals_redrawn: 0,
+        literals_dropped: 0, numeric_literal_replacements: 0, pair_replacement_draws: 0, pair_replacements: 0,
+        pair_replacements_failed: 0, pair_literals_redrawn: 0, conditions_drawn: 0, conditions_redrawn: 0,
+        conditions_dropped: 0, pair_conditions_drawn: 0}
       habitats:
         PAIRFL.2:
           by_place_category:
@@ -1311,9 +1052,9 @@ tiny_place_chain:
           favorite_ratio: {median: 1.2, largest: 1.2, category: CATEGORY.2.2, place_category: PLACECATEGORY.2}
           entropy: {mean: 0.970951, uniform: 1.0}
     fix_ups: {effects_dropped_contradiction: 0, effects_dropped_duplicate: 0, effects_dropped_empty: 0,
-      effects_dropped_no_slot: 0, effects_redrawn: 1, literals_dropped_contradiction: 0, literals_dropped_duplicate: 0,
-      literals_dropped_unachievable: 0, literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0,
-      numeric_literals_redrawn: 0}
+      effects_dropped_no_slot: 0, effects_redrawn: 1, effects_redrawn_dead: 0, effects_dropped_dead: 0,
+      literals_dropped_contradiction: 0, literals_dropped_duplicate: 0, literals_dropped_unachievable: 0,
+      literals_redrawn: 0, conditions_redrawn: 0, conditions_dropped: 0, numeric_literals_redrawn: 0}
     enabling_graph: {edges: 13, longest_chain: 2}
     absorbing_fluents: [BOOLFL.3]
     absorbing_code: '`BOOLFL.3`'
@@ -1409,74 +1150,42 @@ tiny_place_chain:
       '
 baselines:
   conditional_effects_off:
-    tiny: {rule_set_id: ccf9bae0a9c816ca4fa596c7361f55b6936a7e54ce177051f0d86c4fdf28a86c, rule_set_short: ccf9bae0a9c8,
-      rule_set_code: '`ccf9bae0a9c8...`', documents_sha256: ac58a46bbeb5bfbcd2ec5206adab21a98294a930d4192157aa707969f1d9ee56}
-    default: {rule_set_id: e9e38a67d89cc13ab59aa1e270b687b0e2b9cf71eeb5724be188164e90682bd3, rule_set_short: e9e38a67d89c,
-      rule_set_code: '`e9e38a67d89c...`'}
-    tiny_full: {rule_set_id: 08cbb73684458a54b0c08f3247676e731fef1ac5051ffd0cfdc59d1676cbe311, rule_set_short: 08cbb7368445,
-      rule_set_code: '`08cbb7368445...`'}
-    default_full: {rule_set_id: b7e2428b0c0b8cb461d18e59be2b9c026a89001894ae2f1a1ee86db1c6d16a1e, rule_set_short: b7e2428b0c0b,
+    tiny: {rule_set_id: 08cbb73684458a54b0c08f3247676e731fef1ac5051ffd0cfdc59d1676cbe311, rule_set_short: 08cbb7368445,
+      rule_set_code: '`08cbb7368445...`', documents_sha256: 810ac190df9df756a860837e1438d5b39d2ecb14e530472a45e82941aa30cc27}
+    default: {rule_set_id: b7e2428b0c0b8cb461d18e59be2b9c026a89001894ae2f1a1ee86db1c6d16a1e, rule_set_short: b7e2428b0c0b,
       rule_set_code: '`b7e2428b0c0b...`'}
   fluents_off:
-    tiny: {rule_set_id: 711cb00f792b8659eb51f23b6986335012fda49e1ceb972b97b09d8930309554, rule_set_short: 711cb00f792b,
-      rule_set_code: '`711cb00f792b...`'}
-    default: {rule_set_id: b78bdf87d15d40dac01bc69313e8c66acd197be6d933f957235cdedae625231c, rule_set_short: b78bdf87d15d,
-      rule_set_code: '`b78bdf87d15d...`'}
-    tiny_full: {rule_set_id: b96efc59b9e8171e29b19289f15f7d24ab9cf77691d4e5511ddb6defe6bacbc2, rule_set_short: b96efc59b9e8,
+    tiny: {rule_set_id: b96efc59b9e8171e29b19289f15f7d24ab9cf77691d4e5511ddb6defe6bacbc2, rule_set_short: b96efc59b9e8,
       rule_set_code: '`b96efc59b9e8...`'}
-    default_full: {rule_set_id: fe2f9fc681c5eaec6624928bd3de61fe3ae66b69fdafc82e12da8aeca8507b60, rule_set_short: fe2f9fc681c5,
+    default: {rule_set_id: fe2f9fc681c5eaec6624928bd3de61fe3ae66b69fdafc82e12da8aeca8507b60, rule_set_short: fe2f9fc681c5,
       rule_set_code: '`fe2f9fc681c5...`'}
   two_place_off:
-    tiny: {rule_set_id: 01e6cc267a9d8008b571fb240c6816554dd399e26dadbecbbb82d6918ffa8cca, rule_set_short: 01e6cc267a9d,
-      rule_set_code: '`01e6cc267a9d...`'}
-    default: {rule_set_id: 17fc009d43a5cd447a776c607482b3365f851678b9e6f086e4c477f9be1d5cf2, rule_set_short: 17fc009d43a5,
-      rule_set_code: '`17fc009d43a5...`'}
-    tiny_full: {rule_set_id: 510bb501782107effe348023f644f1d1c04c7a18c2c268ab0914bad88f2ffc67, rule_set_short: 510bb5017821,
+    tiny: {rule_set_id: 510bb501782107effe348023f644f1d1c04c7a18c2c268ab0914bad88f2ffc67, rule_set_short: 510bb5017821,
       rule_set_code: '`510bb5017821...`'}
-    default_full: {rule_set_id: 171b897a3c13633e4efc4c1746436cc1493e2dd179d3937c6825815f8ac4d4da, rule_set_short: 171b897a3c13,
+    default: {rule_set_id: 171b897a3c13633e4efc4c1746436cc1493e2dd179d3937c6825815f8ac4d4da, rule_set_short: 171b897a3c13,
       rule_set_code: '`171b897a3c13...`'}
   numeric_fluents_off:
-    tiny: {rule_set_id: aa10aaf515a775e67844e9b307fe7cec857e3a4a3598856d7dac1231d4cb8f63, rule_set_short: aa10aaf515a7,
-      rule_set_code: '`aa10aaf515a7...`'}
-    default: {rule_set_id: 4522d2471f881f1e4c01c4b559340dd3a2c93b9bf7890dc3819f299be4df3f80, rule_set_short: 4522d2471f88,
-      rule_set_code: '`4522d2471f88...`'}
-    tiny_full: {rule_set_id: 0d82bd4cff0baef2d07fcb7f5580b504cee212fa75ff8657de002b429a52c0ec, rule_set_short: 0d82bd4cff0b,
+    tiny: {rule_set_id: 0d82bd4cff0baef2d07fcb7f5580b504cee212fa75ff8657de002b429a52c0ec, rule_set_short: 0d82bd4cff0b,
       rule_set_code: '`0d82bd4cff0b...`'}
-    default_full: {rule_set_id: 42f730e46459920e1897f14e5c63adb42f5e53b55720b16eaa0f9739ab621cac, rule_set_short: 42f730e46459,
-      rule_set_code: '`42f730e46459...`'}
+    default: {rule_set_id: 131376b6c9d934092badb0ccc1106158b62ae5a46bda0f7f60b4e10f05cd919b, rule_set_short: 131376b6c9d9,
+      rule_set_code: '`131376b6c9d9...`'}
   places_off:
-    tiny: {rule_set_id: 6834c215f732f636019a1ff554982219a18de94d1e27224cda1e13f5abdd3682, rule_set_short: 6834c215f732,
-      rule_set_code: '`6834c215f732...`'}
-    default: {rule_set_id: cc1e27fac81953d454a038cfc0facde68353bb517ad42171862e130589d5c0db, rule_set_short: cc1e27fac819,
-      rule_set_code: '`cc1e27fac819...`'}
-    tiny_full: {rule_set_id: b041540a47db95b5242b8d2697d4b76ed3c101863dd23c7c5dcc95d411d1bf65, rule_set_short: b041540a47db,
+    tiny: {rule_set_id: b041540a47db95b5242b8d2697d4b76ed3c101863dd23c7c5dcc95d411d1bf65, rule_set_short: b041540a47db,
       rule_set_code: '`b041540a47db...`'}
-    default_full: {rule_set_id: 46bf62e0008dc69c50865c7d9f05c02fde146e67a812fdfbb6abaebfb7c8ecd1, rule_set_short: 46bf62e0008d,
+    default: {rule_set_id: 46bf62e0008dc69c50865c7d9f05c02fde146e67a812fdfbb6abaebfb7c8ecd1, rule_set_short: 46bf62e0008d,
       rule_set_code: '`46bf62e0008d...`'}
   pair_fluents_off:
-    tiny: {rule_set_id: 0ea72e128a39f89377a76dd32585337b6cab3ca5bd973bc999f27dc5a420e1e1, rule_set_short: 0ea72e128a39,
-      rule_set_code: '`0ea72e128a39...`'}
-    default: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
-      rule_set_code: '`7677556dac8f...`'}
-    tiny_full: {rule_set_id: cf7f7123fb386b8b792576fc6271d98625f30be51b67732ed9ad092193f27623, rule_set_short: cf7f7123fb38,
+    tiny: {rule_set_id: cf7f7123fb386b8b792576fc6271d98625f30be51b67732ed9ad092193f27623, rule_set_short: cf7f7123fb38,
       rule_set_code: '`cf7f7123fb38...`'}
-    default_full: {rule_set_id: ec7752c2cac176b841fa5708a2914a95d06caaadf0e12ec7e5eee2c6ac8a7f84, rule_set_short: ec7752c2cac1,
-      rule_set_code: '`ec7752c2cac1...`'}
+    default: {rule_set_id: f24b88c149673bf6a59980dc636dc426d45e404d7d259fdcbf83953d54001307, rule_set_short: f24b88c14967,
+      rule_set_code: '`f24b88c14967...`'}
   locations_off:
-    tiny: {rule_set_id: 0ea72e128a39f89377a76dd32585337b6cab3ca5bd973bc999f27dc5a420e1e1, rule_set_short: 0ea72e128a39,
-      rule_set_code: '`0ea72e128a39...`'}
-    default: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
-      rule_set_code: '`7677556dac8f...`'}
-    tiny_full: {rule_set_id: 0d4a0d9a0dbaf3d3b49d2b2d05af1a1bcf31f1071e2c11b2c359171a5eb70c32, rule_set_short: 0d4a0d9a0dba,
+    tiny: {rule_set_id: 0d4a0d9a0dbaf3d3b49d2b2d05af1a1bcf31f1071e2c11b2c359171a5eb70c32, rule_set_short: 0d4a0d9a0dba,
       rule_set_code: '`0d4a0d9a0dba...`'}
-    default_full: {rule_set_id: 9b7e4dc35a940c73ada108a356dcaba083a939e0829c363e2b6c40f254bba8c5, rule_set_short: 9b7e4dc35a94,
+    default: {rule_set_id: 9b7e4dc35a940c73ada108a356dcaba083a939e0829c363e2b6c40f254bba8c5, rule_set_short: 9b7e4dc35a94,
       rule_set_code: '`9b7e4dc35a94...`'}
   pair_dynamics_off:
-    tiny: {rule_set_id: 0ea72e128a39f89377a76dd32585337b6cab3ca5bd973bc999f27dc5a420e1e1, rule_set_short: 0ea72e128a39,
-      rule_set_code: '`0ea72e128a39...`'}
-    default: {rule_set_id: 7677556dac8fe7e227eedba6f0df7ea3383a895710a33fe0eb7c28cae4de21c0, rule_set_short: 7677556dac8f,
-      rule_set_code: '`7677556dac8f...`'}
-    tiny_full: {rule_set_id: 49cbbd57b83632718e7186a5319cad0b7c8e7b97a52b264480548cc170e87b45, rule_set_short: 49cbbd57b836,
+    tiny: {rule_set_id: 49cbbd57b83632718e7186a5319cad0b7c8e7b97a52b264480548cc170e87b45, rule_set_short: 49cbbd57b836,
       rule_set_code: '`49cbbd57b836...`'}
-    default_full: {rule_set_id: 9d2048eb3c6f525eb21902bcb8dc57fd659ee3aab2ecd49299dc7eca3c1957fb, rule_set_short: 9d2048eb3c6f,
-      rule_set_code: '`9d2048eb3c6f...`'}
+    default: {rule_set_id: e06b0e8e37ddcbae88eaeaca5e76c9a434894e1f04cc1bfa7da5462dac2bc3e5, rule_set_short: e06b0e8e37dd,
+      rule_set_code: '`e06b0e8e37dd...`'}

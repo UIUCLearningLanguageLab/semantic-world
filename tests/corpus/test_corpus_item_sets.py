@@ -658,21 +658,26 @@ def test_a_false_event_did_not_happen_in_any_scene_of_its_document(cases) -> Non
     truth = facts.truth
     streams = Streams(3)
     seed = case.world.instances[0]
-    first, second = (generator.scene(streams, number, seed) for number in (900, 901))
-    truth.add_scene(first)
-    truth.add_scene(second)
     # an event of the second scene that did not happen in the first, with both participants in
     # the first: the truth test calls it false of the first scene, and the test sets do not
-    # take it, because the words would be true of the document
+    # take it, because the words would be true of the document; the scenes of a pair of numbers
+    # need not give one (since stage c4a some events are moves, which no word reports), so the
+    # search goes on to the next pair
     moved = None
-    for event in scene_events(second):
-        report = facts.event_fact(event)
-        if report is None:
-            continue
-        claim = dataclasses.replace(report, scene=first.label, event=None, grounding=None)
-        evaluation = truth.evaluate(claim)
-        if evaluation.valid and not evaluation.true and not happened_in(first, *event.key):
-            moved = claim
+    for number in range(900, 940, 2):
+        first, second = (generator.scene(streams, n, seed) for n in (number, number + 1))
+        truth.add_scene(first)
+        truth.add_scene(second)
+        for event in scene_events(second):
+            report = facts.event_fact(event)
+            if report is None:
+                continue
+            claim = dataclasses.replace(report, scene=first.label, event=None, grounding=None)
+            evaluation = truth.evaluate(claim)
+            if evaluation.valid and not evaluation.true and not happened_in(first, *event.key):
+                moved = claim
+                break
+        if moved is not None:
             break
     assert moved is not None
     assert not happened(truth, [first], moved) and happened(truth, [first, second], moved)

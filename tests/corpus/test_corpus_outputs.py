@@ -524,7 +524,10 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         len(steps),
         len(events),
     )
-    changes = sum(1 for event in events for c in event["changes"] if "from" not in c)
+    # a pair change (stage c4a) is neither a Boolean nor a numeric change
+    changes = sum(
+        1 for event in events for c in event["changes"] if "from" not in c and "pair" not in c
+    )
     assert block["mean_changes_per_event"] == pytest.approx(changes / len(events), abs=1e-6)
     # the numeric changes of the events and of the drift (stage b2)
     numeric = sum(1 for event in events for c in event["changes"] if "from" in c)

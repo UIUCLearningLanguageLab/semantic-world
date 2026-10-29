@@ -5,12 +5,15 @@
 # the pair condition weight, the derived-rule quota, and the rule weight at 0, as in tiny_pairs.yaml,
 # and, since stage c3b, the quota same_rules at 0), so that generation adds nothing to what the
 # file gives. The world of the acceptance checks of stage c3a (tests/world/test_world_locations.py).
+# Since stage c4a the code's defaults are the phase (c) settings, so this file writes out the
+# habitat strength 1 and no density band of the place requirements, the settings of stage c3a,
+# and keeps its identity.
 
 name: tiny_place_chain
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
-places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
-place_event_types: {count: 2}
+places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}, habitat_strength: 1}
+place_event_types: {count: 2, density: null}
 
 fluents:
   count: 4

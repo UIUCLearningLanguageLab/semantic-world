@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
+from world_support import config_before_phase_c
 
-from semantic_world.world.config import load_config
 from semantic_world.world.definition import (
     RuntimeDefinition,
     load_definition,
@@ -45,7 +45,9 @@ RANDOM_SETS = 1000
 
 @pytest.fixture(scope="module")
 def tiny() -> WorldResult:
-    return define(load_config(DATA / "tiny.yaml"))
+    """The tiny world of stage c3b, without the phase (c) settings that ``tiny.yaml`` carries
+    since stage c4a: the runtime over pairs and places has its own tests."""
+    return define(config_before_phase_c())
 
 
 @pytest.fixture(scope="module")

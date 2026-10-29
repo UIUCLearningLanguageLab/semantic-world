@@ -913,9 +913,13 @@ def condition_of(effect: Any, cut_points: CutPoints | None = None) -> tuple[Cond
     as :class:`Condition` literals, in one order. A numeric threshold literal is the positive
     numeric pole whose cut it is at (:func:`numeric_pole_of`, WM.35); any other numeric
     threshold literal has no :class:`Condition` (decision 23), so an effect with one gives
-    None."""
+    None; so does an effect whose condition holds a pair literal (WM.59, stage c4a)."""
     found = []
     for literal in effect.condition:
+        if literal.pair:
+            # a pair condition literal (stage c2b) makes no statement in phase (c), and its
+            # unconditional form is never stated as true (Jon's ruling WM.59, review point 11)
+            return None
         if literal.numeric:
             pole = numeric_pole_of(literal, cut_points)
             if pole is None:
@@ -939,8 +943,10 @@ def effect_matches(
     and fluent, the value (a Boolean effect) or the sign (a numeric effect: ``raises`` for an
     addition, ``lowers`` for a subtraction), and the same condition (none for an unconditional
     statement; a numeric threshold literal at the language's cut is its numeric pole, WM.35).
-    An effect under any other numeric threshold condition is no entry of any statement."""
-    if effect.role != role or effect.fluent != fluent:
+    An effect under any other numeric threshold condition is no entry of any statement, and
+    neither is a pair effect or an effect under a pair condition (stage c4a; stage c5a states
+    pair effects)."""
+    if effect.pair or effect.role != role or effect.fluent != fluent:
         return False
     if effect.numeric:
         if direction is None or (effect.amount >= 0) != (direction == RAISES):
@@ -1596,8 +1602,11 @@ class Truth:
                     for e in record.effects
                 )
             else:
+                # a pair literal is no entry (stage c4a; the statements with pair literals are
+                # stage c5a's)
                 found = any(
                     not lit.numeric
+                    and not lit.pair
                     and lit.role == role
                     and lit.fluent == fluent
                     and lit.value == value
@@ -1984,7 +1993,9 @@ class Truth:
         if recorded is None:
             return False
         if definition.is_base_fluent(fluent):
-            return any(c.entity == entity and c.fluent == fluent for c in recorded.changes)
+            return any(
+                not c.pair and c.entity == entity and c.fluent == fluent for c in recorded.changes
+            )
         if not recorded.changes:
             return False
         before = self.states_of(scene)[time - 1]
@@ -1993,7 +2004,25 @@ class Truth:
         was = bool(derive(definition, before, [row]).fluent[0, j])
         values = np.array(before.values, dtype=np.uint8, copy=True)
         numeric = np.array(before.numeric, dtype=np.float64, copy=True)
+        pairs = [np.array(matrix, dtype=bool, copy=True) for matrix in before.pairs]
         for change in recorded.changes:
+            if change.pair:
+                # a pair change of the event (stage c4a) is applied as recorded, both
+                # directions of a symmetric pair; a move records the old place's deletion and
+                # the new place's add, so the row of the location fluent follows; a derived
+                # fluent whose rule reads SOME or SOMEOF then reads the pairs after the event
+                k = definition.pair_index(change.pair_fluent)
+                pair_fluent = definition.pair_fluent(change.pair_fluent)
+                i = self.instance_index[change.first]
+                second = (
+                    definition.place_index(change.second)
+                    if pair_fluent.total
+                    else self.instance_index[change.second]
+                )
+                pairs[k][i, second] = bool(change.to)
+                if pair_fluent.symmetric:
+                    pairs[k][second, i] = bool(change.to)
+                continue
             # a numeric change of the event (stage b2) is applied as recorded: the value after
             # the effect and before the drift
             if change.numeric:
@@ -2004,7 +2033,8 @@ class Truth:
             values[
                 self.instance_index[change.entity], definition.base_fluent_index(change.fluent)
             ] = int(change.to)
-        return bool(derive(definition, State(values, numeric), [row]).fluent[0, j]) != was
+        after = State(values, numeric, tuple(pairs))
+        return bool(derive(definition, after, [row]).fluent[0, j]) != was
 
     def caused_by(self, scene: str, time: int, entity: str, fluent: str) -> str | None:
         """The event of step ``time`` of a scene whose own effect changed a participant's

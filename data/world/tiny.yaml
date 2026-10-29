@@ -2,14 +2,20 @@
 # 4 one-place event types, 4 two-place event types in a tree of 2 superordinates, 4 fluents, and,
 # since stage c1, the tiny place taxonomy (4 places) with 2 place event types, whose requirements
 # read the place (the agent family at 0, Jon's ruling WM.62 of stage c3b: the tests of habitats
-# and of acts at a place need tiny place requirements that read the place). Parameters not
-# listed keep their defaults (see default.yaml).
+# and of acts at a place need tiny place requirements that read the place). Since stage c4a the
+# phase (c) settings of docs/specs/WORLD_PHASE_C.md live here (Jon's ruling WM.63, carried out
+# when the corpus's truth oracle learned pairs and places): 2 pair fluents between entities and 1
+# location fluent (stage c2b, c3b), so its 2 place event types are a move or an act each, with
+# drawn dynamics, and the density band of the place requirements ([0.05, 0.5]: a requirement that
+# holds for fewer than 3 or more than 24 of the 48 bindings of an entity and a place is drawn
+# again) with a habitat strength of 2 (Jon's ruling WM.67). Parameters not listed keep their
+# defaults (see default.yaml).
 
 name: tiny
 seed: 1
 taxonomy: {config: data/taxonomy/tiny_relations.yaml}
-places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}}
-place_event_types: {count: 2, constraint_families: {patient: 1, cross: 1, key_lock: 1}}
+places: {taxonomy: {config: data/taxonomy/places_tiny.yaml}, habitat_strength: 2}
+place_event_types: {count: 2, constraint_families: {patient: 1, cross: 1, key_lock: 1}, density: [0.05, 0.5]}
 
 fluents:
   count: 4
@@ -19,3 +25,5 @@ event_types:
   binary:
     features: {count: 4, expected_true: 2}
     taxonomy: {superordinates: 2, depth: 2, branching: 2}
+
+pair_fluents: {count: 2, locations: 1}

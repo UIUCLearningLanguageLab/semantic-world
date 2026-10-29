@@ -271,7 +271,7 @@ def cooccurrence(planner: Planner, documents: Sequence[Document]) -> dict[str, A
 # ---------------------------------------------------------------------------------------------
 
 
-def _documents(documents: Sequence[Document]) -> dict[str, Any]:
+def _documents(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
     by_type: dict[str, Any] = {}
     for kind in DOCUMENT_TYPES:
         made = [d for d in documents if d.type == kind]
@@ -286,7 +286,8 @@ def _documents(documents: Sequence[Document]) -> dict[str, Any]:
             "shorter_than_drawn": short,
             "shorter_than_drawn_share": _share(short, len(made)),
         }
-    return {"count": len(documents), "by_type": by_type}
+    # the drafts with nothing to say that were drawn again (stage c4a)
+    return {"count": len(documents), "redrawn_drafts": planner.redrawn_drafts, "by_type": by_type}
 
 
 def _sentences(documents: Sequence[Document]) -> dict[str, Any]:
@@ -441,7 +442,9 @@ def _scenes(planner: Planner) -> dict[str, Any]:
     scenes = planner.scenes
     steps = [step for scene in scenes for step in scene.steps]
     events = [event for step in steps for event in step.events]
-    changes = sum(1 for event in events for c in event.changes if not c.numeric)
+    # a pair change (stage c4a) is neither a Boolean nor a numeric change; the counts of pair
+    # changes, moves, and acts are stage c4c's
+    changes = sum(1 for event in events for c in event.changes if not c.numeric and not c.pair)
     numeric_changes = sum(1 for event in events for c in event.changes if c.numeric)
     drift_changes = sum(len(step.drift) for step in steps)
     quiescent = sum(scene.quiescent for scene in scenes)
@@ -466,7 +469,7 @@ def corpus_stats(
     propositions = {s.proposition for d in documents for s in d.sentences}
     planner.facts.rule_statements()  # the report on the rule terms is made with the statements
     return {
-        "documents": _documents(documents),
+        "documents": _documents(planner, documents),
         "sentences": _sentences(documents),
         "states": _states(documents),
         "causal": _causal(planner, documents),

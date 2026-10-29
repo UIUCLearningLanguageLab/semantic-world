@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+from world_support import mapping_before_phase_c
 
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.__main__ import main
@@ -86,7 +87,9 @@ HEAVY: dict[str, Any] = {
 
 
 def tiny_mapping(**overrides: Any) -> dict:
-    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    # the tiny world of stage c3b: the phase (c) settings that tiny.yaml carries since stage
+    # c4a are off, so that these tests keep the numeric fluents as their subject
+    data = mapping_before_phase_c()
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(data.get(key), dict):
             merged = dict(data[key])
@@ -123,7 +126,7 @@ def brute(heavy: WorldResult) -> BruteForce:
 
 @pytest.fixture(scope="module")
 def tiny() -> WorldResult:
-    return define(load_config(DATA / "tiny.yaml"))
+    return define(tiny_config())
 
 
 def _random_state(definition: RuntimeDefinition, rng: np.random.Generator) -> State:
@@ -617,6 +620,8 @@ def test_events_that_read_a_numeric_fluent_another_writes_interfere(
             if shared:
                 same_numeric += 1
                 assert "both write" in message
+            elif writes_a & writes_b:
+                assert "both write" in message  # a shared Boolean write names itself first
             elif any(runtime.is_numeric_fluent(f) for _, f in writes_a | writes_b):
                 numeric_reads += 1
                 assert " reads" in message

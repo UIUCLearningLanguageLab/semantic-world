@@ -27,6 +27,12 @@ There are four document types (``documents.mix``):
   ``entity.scenes`` scenes that involve the instance, in time order, scene by scene;
 - **situational narrative.** One scene. The document narrates its events in time order.
 
+Since stage c4a a scene may hold the events of place event types (moves and acts at a place) and
+pair changes: a narrative skips a place event and never states a pair change as a result, because
+the corpus says nothing about pairs and places until stages c4b and c4c; the other sentences stay
+true around a skipped event, because every sentence is judged on the replayed history, moves and
+pair changes included.
+
 In a narrative, an event sentence can be followed by five kinds of sentence, each at its rate,
 in this order: an initial-state sentence about each participant the event sentence first
 mentioned, stating one of its fluents at the time point before its first reported event
@@ -399,6 +405,8 @@ class Planner:
         self.clauses = RelativeClauses(config, self.facts)
         self.rules = MentionRules(config, self.facts, self.streams)
         self.scenes: list[History] = []
+        self.redrawn_drafts = 0
+        """Drafts with nothing to say that ``next_document`` drew again (stage c4a)."""
         """Every scene of the documents made so far, in order."""
         self._proposition_ids: dict[Proposition, str] = {}
         self._made = 0
@@ -457,11 +465,19 @@ class Planner:
             ENTITY: self._narrative,
             SITUATIONAL: self._narrative,
         }
-        for _ in range(_MAX_REDRAWS):
+        for attempt in range(_MAX_REDRAWS):
             kind = DOCUMENT_TYPES[int(rngs["documents"].choice(4, p=weights / weights.sum()))]
-            draft = makers[kind](kind, rngs)
+            if kind in (ENTITY, SITUATIONAL):
+                # a narrative drawn again takes its scenes from a fresh part of the scene
+                # stream (stage c4a): a scene is drawn from the part named by its number, so
+                # the scene a rejected draft had, one with no event or with nothing a word can
+                # report, would come back whatever the new seed, and the redraws would never end
+                draft = self._narrative(kind, rngs, attempt)
+            else:
+                draft = makers[kind](kind, rngs)
             if draft is not None and draft.items:
                 break
+            self.redrawn_drafts += 1
         else:
             raise CorpusError(
                 f"no document with a sentence could be made for {label}: the world, the "
@@ -1029,7 +1045,9 @@ class Planner:
 
     # Narratives ------------------------------------------------------------------------------
 
-    def _narrative(self, kind: str, rngs: dict[str, np.random.Generator]) -> _Draft:
+    def _narrative(
+        self, kind: str, rngs: dict[str, np.random.Generator], attempt: int = 0
+    ) -> _Draft:
         rng, facts_rng, mention_rng = rngs["documents"], rngs["propositions"], rngs["mentions"]
         comparative_rng = rngs["comparatives"]
         seed = self._instances[int(rng.integers(len(self._instances)))]
@@ -1039,7 +1057,7 @@ class Planner:
             count = int(rng.integers(limits.min, limits.max + 1))
         first = len(self.scenes) + 1
         scenes = tuple(
-            self.scene_generator.scene(self.streams, first + k, seed) for k in range(count)
+            self.scene_generator.scene(self.streams, first + k, seed, attempt) for k in range(count)
         )
         for scene in scenes:
             self.truth.add_scene(scene)
@@ -1057,6 +1075,8 @@ class Planner:
             for event in events:
                 if len(items) >= length:
                     break
+                if event.place:
+                    continue  # a move or an act at a place is not narrated in stage c4a
                 report = self.facts.draw_event(mention_rng, event, aspects.of(event))
                 if report is None:
                     continue  # no word can report the event
@@ -1122,7 +1142,7 @@ class Planner:
         """The sentence that reports an event. A relative clause reports an earlier event of
         the scene."""
         events = self.truth.events_of(scene.label)
-        earlier = events[: events.index(event)]
+        earlier = [e for e in events[: events.index(event)] if not e.place]  # no place event (c4a)
         known = dict(mentions.referents)
         plan: SentencePlan | None = None
         for with_clauses in (True, False):
@@ -1275,14 +1295,15 @@ class Planner:
         named = set(self.facts.fluents)
         numeric_named = set(self.facts.numeric_fluents)
         recorded = self._history_events(scene)[event.label]
+        # a pair change (stage c4a) is no result: the corpus states no pair until stage c4c
         candidates: list[tuple[str, Predicate, bool]] = [
             (change.entity, Predicate(STATE_KIND, change.fluent), bool(change.to))
             for change in recorded.changes
-            if not change.numeric and change.fluent in named
+            if not change.pair and not change.numeric and change.fluent in named
         ]
         step = event.step
         for change in recorded.changes:
-            if not change.numeric or change.fluent not in numeric_named:
+            if change.pair or not change.numeric or change.fluent not in numeric_named:
                 continue
             direction = INCREASE if float(change.to) > float(change.from_) else DECREASE
             before = truth.numeric_value(scene.label, step, change.entity, change.fluent)

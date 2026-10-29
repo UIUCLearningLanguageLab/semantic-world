@@ -15,6 +15,7 @@ import numpy as np
 import polars as pl
 import pytest
 import yaml
+from world_support import config_before_phase_c, mapping_before_phase_c
 
 from semantic_world.taxonomy import generate as generate_taxonomy
 from semantic_world.taxonomy import load_config as load_taxonomy_config
@@ -38,7 +39,9 @@ TAXONOMY_DATA = REPO / "data" / "taxonomy"
 
 
 def world_mapping(name: str, **overrides) -> dict:
-    data = yaml.safe_load((DATA / f"{name}.yaml").read_text())
+    # the world of stage c3b: the phase (c) settings the file carries since stage c4a are off,
+    # so that the tests of the static side and the Boolean dynamics keep their subject
+    data = mapping_before_phase_c(name)
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(data.get(key), dict):
             data[key] = {**data[key], **value}
@@ -69,7 +72,9 @@ def static_records(statics: StaticWorld) -> dict:
 
 @pytest.fixture(scope="module")
 def tiny() -> WorldResult:
-    return define(load_config(DATA / "tiny.yaml"))
+    """The tiny world of stage c3b, without the phase (c) settings that ``tiny.yaml`` carries
+    since stage c4a (WM.63): the pair fluents and the locations have their own tests."""
+    return define(config_before_phase_c())
 
 
 @pytest.fixture(scope="module")
@@ -270,9 +275,17 @@ def test_every_rule_of_preconditions_and_effects_holds(default: WorldResult) -> 
         for i, f in enumerate(fluents.base)
         for v in np.unique(fluents.initial_values[:, i])
     }
-    for label, column in derived_initial_values(fluents, default.taxonomy, default.numeric).items():
+    for label, column in derived_initial_values(
+        fluents, default.taxonomy, default.numeric, default.pair_fluents
+    ).items():
         initial_present |= {(label, bool(v)) for v in np.unique(column)}
-    check_dynamics(default.event_types, fluents, initial_present, numeric=default.numeric)
+    check_dynamics(
+        default.event_types,
+        fluents,
+        initial_present,
+        numeric=default.numeric,
+        pair_fluents=default.pair_fluents,
+    )
     leaves = default.event_types.leaves
     assert sum(len(e.effects) for e in leaves) > 0
     assert sum(len(e.precondition) for e in leaves) > 0
@@ -302,15 +315,24 @@ def test_event_type_features_share_preconditions_and_effects(default: WorldResul
                 inherited_literals += 1
                 kept_literals += literal in et.precondition
     assert inherited_effects > 0 and kept_effects > 0
+    # since stage c4a the default world has pair fluents: an inherited pair effect is dropped
+    # when a compiled literal contradicts it or when its pair fluent can never hold (stage
+    # c2b), an inherited pair literal when the others imply its conflict, and an inherited
+    # Boolean effect when it can never change the state (WM.70)
+    pairs = event_types.pair_stats
     assert inherited_effects - kept_effects == (
         stats["effects_dropped_contradiction"]
         + stats["effects_dropped_duplicate"]
         + stats["effects_dropped_empty"]
+        + stats["effects_dropped_dead"]
+        + pairs.get("pair_effects_dropped_compiled", 0)
+        + pairs.get("pair_deletes_dropped_dead", 0)
     )
     assert inherited_literals - kept_literals == (
         stats["literals_dropped_contradiction"]
         + stats["literals_dropped_duplicate"]
         + stats["literals_dropped_unachievable"]
+        + pairs.get("pair_literals_dropped_implied", 0)
     )
 
 
@@ -340,7 +362,7 @@ def test_never_legal_event_types_have_their_preconditions_redrawn(tiny: WorldRes
     from semantic_world.world.event_types import redraw_preconditions
 
     for seed in range(1, 9):
-        tiny = define(load_config(DATA / "tiny.yaml", seed=seed))
+        tiny = define(config_before_phase_c(seed=seed))
         if tiny.stats["episodes"]["precondition_redraws"]:
             break
     episodes = tiny.stats["episodes"]

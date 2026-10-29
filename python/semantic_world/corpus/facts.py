@@ -195,7 +195,9 @@ class Facts:
         statement, by reason (stage b3b): ``numeric_condition`` (a numeric threshold literal,
         decision 23), ``patient_relative`` (a fluent or a negated PROPERTY literal of the
         patient's role in a statement about the patient, which an object relative cannot hold),
-        and ``no_word`` (a literal whose concept has no word)."""
+        ``no_word`` (a literal whose concept has no word), and, since stage c4a,
+        ``pair_condition`` (a pair literal in the condition, WM.59) and ``pair_effect`` (a
+        conditional pair effect, whose statement is stage c5a's)."""
         self._partners: dict[str, tuple[str, ...]] = {}
 
     def expressible(self, proposition: Proposition) -> bool:
@@ -717,13 +719,25 @@ class Facts:
             for p in statements
             if isinstance(p.subject, EventTerm) and p.subject.condition
         }
-        reasons = {"numeric_condition": 0, "patient_relative": 0, "no_word": 0}
+        reasons = {
+            "numeric_condition": 0,
+            "patient_relative": 0,
+            "no_word": 0,
+            "pair_condition": 0,
+            "pair_effect": 0,
+        }
         total = made = 0
         for label in world.binary_leaves + world.unary:
             for effect in definition.event_type(label).effects:
                 if not effect.condition:
                     continue
                 total += 1
+                if effect.pair:
+                    reasons["pair_effect"] += 1  # a conditional pair effect (stage c5a's)
+                    continue
+                if any(lit.pair for lit in effect.condition):
+                    reasons["pair_condition"] += 1  # a pair literal in the condition (WM.59)
+                    continue
                 condition = self.truth.condition_of(effect)
                 if condition is None:
                     reasons["numeric_condition"] += 1  # a threshold not at a cut (WM.35)

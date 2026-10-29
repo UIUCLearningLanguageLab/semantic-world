@@ -18,6 +18,8 @@ from semantic_world.world.fixtures import (
     check_fixture_brute,
     check_fixtures,
     fixture_initial_numeric,
+    fixture_initial_pairs,
+    fixture_initial_places,
     fixture_inputs,
     fixture_paths,
     fixture_places,
@@ -119,6 +121,8 @@ def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
         3,
         initial_numeric=numeric,
         places=fixture_places(tiny.definition),
+        initial_pairs=fixture_initial_pairs(tiny.definition),
+        initial_places=fixture_initial_places(tiny.definition),
     )
     broken = json.loads(json.dumps(fixture))
     first = next(k for k, v in broken["steps"][0]["legal"].items() if v)
@@ -141,6 +145,9 @@ def test_brute_force_check_reports_disagreements(tiny: WorldResult) -> None:
         3,
         error="illegal",
         initial_numeric=numeric,
+        places=fixture_places(tiny.definition),
+        initial_pairs=fixture_initial_pairs(tiny.definition),
+        initial_places=fixture_initial_places(tiny.definition),
     )
     wrong = json.loads(json.dumps(illegal))
     wrong["error"]["kind"] = "interference"
@@ -182,7 +189,7 @@ def test_generated_fixtures_are_reproducible(tiny: WorldResult) -> None:
 
 def test_generated_fixtures_record_the_tiny_world_identity(tiny: WorldResult) -> None:
     for path in fixture_paths(FIXTURES_DIR):
-        if path.stem.startswith("tiny_") and not path.stem.startswith("tiny_full_"):
+        if path.stem.startswith("tiny_"):
             assert read_fixture(path)["rule_set_id"] == tiny.rule_set_id
 
 
@@ -193,13 +200,16 @@ def test_brute_force_reads_truth_tables_only(tiny: WorldResult) -> None:
     brute = BruteForce(record, entities, fixture_places(tiny.definition) or ())
     state = {e: frozenset(initial[e]) for e in brute.entity_labels}
     numeric = fixture_initial_numeric(tiny.definition)
-    derived = brute.derived_record(state, numeric)
+    pairs = brute.pairs_from_record(
+        fixture_initial_pairs(tiny.definition) or [], fixture_initial_places(tiny.definition)
+    )
+    derived = brute.derived_record(state, numeric, pairs)
     assert set(derived) == set(brute.entity_labels)
-    legal = brute.legal_record(state, numeric)
+    legal = brute.legal_record(state, numeric, pairs)
     assert set(legal) == set(brute.performable())
     for label, bindings in legal.items():
         for binding in bindings:
-            assert brute.legal(BruteEvent(label, binding), state, numeric)
+            assert brute.legal(BruteEvent(label, binding), state, numeric, pairs)
 
 
 def test_check_fixture_reports_disagreements(tiny: WorldResult) -> None:
@@ -215,6 +225,8 @@ def test_check_fixture_reports_disagreements(tiny: WorldResult) -> None:
         3,
         initial_numeric=numeric,
         places=fixture_places(tiny.definition),
+        initial_pairs=fixture_initial_pairs(tiny.definition),
+        initial_places=fixture_initial_places(tiny.definition),
     )
     check_fixture(fixture)
     broken = json.loads(json.dumps(fixture))
@@ -258,6 +270,8 @@ def test_error_fixtures_need_the_right_kind(tiny: WorldResult) -> None:
         error="illegal",
         initial_numeric=numeric,
         places=fixture_places(tiny.definition),
+        initial_pairs=fixture_initial_pairs(tiny.definition),
+        initial_places=fixture_initial_places(tiny.definition),
     )
     assert fixture["error"] == {"step": 4, "kind": "illegal"}
     assert "state" not in fixture["steps"][-1]

@@ -59,6 +59,17 @@ PLACES_STREAM = "world:places"
 """The stream whose seed the place taxonomy takes when ``places.taxonomy.seed`` is null."""
 PLACE_CONSTRAINT_FAMILIES = CONSTRAINT_FAMILIES
 DEFAULT_PLACE_CONSTRAINT_FAMILIES = {"agent": 1, "patient": 1, "cross": 1, "key_lock": 1}
+DEFAULT_PLACE_DENSITY = (0.05, 0.5)
+"""The density band of a drawn place requirement (WM.67), the code's default since stage c4a
+(WM.63): a key written ``null`` turns the band off."""
+DEFAULT_HABITAT_STRENGTH = 2.0
+"""The weight of an entity's capacities at a place in its initial place (WM.39, WM.67), the
+code's default since stage c4a (WM.63)."""
+DEFAULT_PAIR_COUNT = 4
+"""The pair fluents between entities (WM.41), the code's default since stage c4a (WM.63)."""
+DEFAULT_LOCATIONS = 1
+"""The location fluents of a world with places (WM.41), the code's default since stage c4a
+(WM.63); a world with ``places: null`` has none."""
 """The comparison family is off by default for place event types: an entity's scalar and a
 place's scalar are different dimensions (WM.45)."""
 
@@ -469,8 +480,9 @@ class PlaceEventTypesConfig:
     density: tuple[float, float] | None = None
     """``[low, high]``: a drawn requirement that holds for a share of the world's bindings (an
     entity and a place) outside the band is drawn again, as a degenerate one is; None turns the
-    band off, and then only a degenerate requirement is drawn again (the code's default, and
-    ``default.yaml``'s, until stage c4, WM.63)."""
+    band off, and then only a degenerate requirement is drawn again. The code's default is
+    ``DEFAULT_PLACE_DENSITY`` since stage c4a (WM.63, WM.67); the key written ``null`` is the
+    band off."""
 
     @property
     def labels(self) -> tuple[str, ...]:
@@ -546,7 +558,9 @@ class Config:
             object.__setattr__(
                 self,
                 "pair_fluents",
-                _read_pair_fluents(_Node("<default>", "pair_fluents", {}), self.fluents),
+                _read_pair_fluents(
+                    _Node("<default>", "pair_fluents", {}), self.fluents, self.places is not None
+                ),
             )
 
     """The validated taxonomy configuration the world generates from."""
@@ -739,12 +753,12 @@ def _read_pair_fluents(
     node: _Node, fluents: FluentsConfig, has_places: bool = True
 ) -> PairFluentsConfig:
     """The ``pair_fluents`` block (stage c2b). ``locations`` (stage c3a) is the number of
-    location fluents, which need places: it must be 0 with ``places: null``; the code's default
-    is 0 until stage c4 (WM.63). The overrides name pair fluents ``PAIRFL.1`` to
-    ``PAIRFL.<count>``, the pair fluents between entities (a location fluent's profile is
-    fixed)."""
-    count = node.int("count", 0, min=0)
-    locations = node.int("locations", 0, min=0)
+    location fluents, which need places: it must be 0 with ``places: null``, and its default is
+    then 0; since stage c4a the code's defaults are the specification's, ``count`` 4 and
+    ``locations`` 1 (WM.63). The overrides name pair fluents ``PAIRFL.1`` to ``PAIRFL.<count>``,
+    the pair fluents between entities (a location fluent's profile is fixed)."""
+    count = node.int("count", DEFAULT_PAIR_COUNT, min=0)
+    locations = node.int("locations", DEFAULT_LOCATIONS if has_places else 0, min=0)
     if locations != 0 and not has_places:
         raise node.error(
             "locations",
@@ -1006,7 +1020,7 @@ def _read_places(root: _Node, source: str, master_seed: int) -> PlacesConfig | N
     setting_node.seen.add("seed")
     setting_node.get("resolved", None, nullable=True)  # written by a run's config.yaml; ignored
     setting_node.finish()
-    strength = float(node.number("habitat_strength", 1.0, min=0))
+    strength = float(node.number("habitat_strength", DEFAULT_HABITAT_STRENGTH, min=0))
     node.finish()
     setting = TaxonomySetting(path, seed)
     # The seed of the stream world:places, as the taxonomy takes it (its low 64 bits), when the
@@ -1068,7 +1082,7 @@ def _read_place_event_types(
     rules_node = node.mapping("rules")
     sampling = _read_sampling(rules_node, taxonomy.rules.sampling)
     rules_node.finish()
-    band = node.get("density", None, nullable=True)
+    band = node.get("density", list(DEFAULT_PLACE_DENSITY), nullable=True)
     if band is not None:
         if not isinstance(band, list) or len(band) != 2:
             raise node.error(
