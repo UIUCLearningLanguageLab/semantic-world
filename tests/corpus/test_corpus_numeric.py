@@ -241,7 +241,7 @@ def test_numeric_result_sentences_are_made_by_the_events_own_effect(heavy) -> No
                 c
                 for e in step["events"]
                 for c in e["changes"]
-                if c["entity"] == proposition.subject and c["fluent"] == fluent
+                if "pair" not in c and c["entity"] == proposition.subject and c["fluent"] == fluent
             ]
             assert own, "the change is an event's, not the drift's alone"
     assert results > 5

@@ -18,7 +18,19 @@ DEFAULT_TAXONOMY = "data/taxonomy/relations.yaml"
 PLAIN_TAXONOMY = "data/taxonomy/tiny.yaml"
 """The tiny taxonomy without scalar dimensions and without verbs."""
 
-PLAIN_WORLD = """\
+PHASE_C_OFF = """\
+pair_fluents: {count: 0, locations: 0}
+place_event_types: {density: null}
+"""
+"""The phase (c) settings off, as the written test worlds state them since stage c4a (when the
+code's defaults became the specification's, WM.63): no pair fluent, no location fluent, so no
+place event type has dynamics, and no density band of the place requirements, so the place
+event types are those of stage c1. The written worlds test the static side, the Boolean and
+numeric dynamics, and the propositions about them; the corpus on worlds with pairs and places is
+tested on ``tiny.yaml`` and ``default.yaml``."""
+
+PLAIN_WORLD = (
+    """\
 # The tiny taxonomy without scalars, with no two-place event types and no fluents (Boolean or
 # numeric): a world of one-place event types only.
 name: plain
@@ -30,8 +42,11 @@ event_types:
   unary: {count: 4}
   binary: null
 """
+    + PHASE_C_OFF
+)
 
-STATIC_WORLD = """\
+STATIC_WORLD = (
+    """\
 # The tiny relations taxonomy with no fluents (Boolean or numeric): every able binding is legal
 # at every time point, as in the corpus's old scene generator.
 name: static
@@ -45,6 +60,8 @@ event_types:
     features: {count: 4, expected_true: 2}
     taxonomy: {superordinates: 2, depth: 2, branching: 2}
 """
+    + PHASE_C_OFF
+)
 
 
 def corpus_config(world: str = TINY_WORLD, seed: int = 1, **sections: Any) -> Config:
@@ -124,11 +141,11 @@ EXAMPLE_WORLDS = {"tiny": TINY_WORLD, "default": DEFAULT_WORLD}
 def world_over(name: str, taxonomy_path: str, seed: int, event_types: str = "") -> str:
     """A world configuration over a written taxonomy, with the default Boolean fluents, no
     numeric fluents (the written worlds test the static side and the Boolean dynamics; the
-    numeric fluents of stage b2 have tests of their own), and the given ``event_types`` block
-    (the defaults when none is given)."""
+    numeric fluents of stage b2 have tests of their own), the phase (c) settings off
+    (``PHASE_C_OFF``), and the given ``event_types`` block (the defaults when none is given)."""
     return (
         f"name: {name}\nseed: {seed}\ntaxonomy: {{config: {taxonomy_path}, seed: {seed}}}\n"
-        f"numeric_fluents: {{count: 0}}\n" + event_types
+        f"numeric_fluents: {{count: 0}}\n" + PHASE_C_OFF + event_types
     )
 
 

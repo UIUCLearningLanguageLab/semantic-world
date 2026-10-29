@@ -6,9 +6,9 @@ kept in ``tests/figures/snapshot.yaml`` (taken from a run with the feature off, 
 conditional effects of stage b1 equal to the identity of the a8 world), and the tiny corpus over
 the tiny world without conditional effects is the a8 corpus, by the hash of its
 ``documents.jsonl``. One test per feature and world: the tiny worlds in the fast tier, the
-default worlds in the slow tier. Since stage c2b the worlds are those of ``BASELINE_NAMES``
-(``tiny_full`` and ``default_full`` beside ``tiny`` and ``default``), and the features include
-the pair fluents and the pair dynamics.
+default worlds in the slow tier. The worlds are those of ``BASELINE_NAMES`` (``tiny`` and
+``default``, which carry the phase (c) settings since stage c4a, WM.63), and the features include
+the pair fluents, the pair dynamics, the places, and the location fluents.
 """
 
 from __future__ import annotations
@@ -28,12 +28,7 @@ from semantic_world.figures import (
 )
 
 SLOW = pytest.mark.slow
-NAMES = [
-    "tiny",
-    pytest.param("default", marks=SLOW),
-    "tiny_full",
-    pytest.param("default_full", marks=SLOW),
-]
+NAMES = ["tiny", pytest.param("default", marks=SLOW)]
 
 
 @pytest.fixture(autouse=True)

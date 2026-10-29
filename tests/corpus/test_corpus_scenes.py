@@ -39,7 +39,7 @@ from semantic_world.corpus.propositions import (
     Proposition,
 )
 from semantic_world.world.history import History, replay
-from semantic_world.world.runtime import legal
+from semantic_world.world.runtime import Event, legal
 
 WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow), "deep", "still")
 BALANCED = {"policy": "uniform_event_type"}
@@ -104,11 +104,15 @@ def test_every_scene_replays_on_the_runs_definition(cases, name) -> None:
         participants = tuple(definition.entity_index(p) for p in scene.participants)
         for step, state in zip(scene.steps, states[:-1], strict=True):
             for event in step.events:
-                binding = tuple(
-                    definition.entity_index(x) for x in (event.agent, event.patient) if x
-                )
+                # a place event's patient is a place (stage c3a), one of the scene's places
+                binding = Event.from_labels(definition, event.type, event.binding).binding
                 assert legal(definition, state, event.type, [binding])[0]
-                assert set(binding) <= set(participants)
+                if definition.event_type(event.type).place:
+                    assert binding[0] in participants
+                    assert scene.places is not None
+                    assert event.patient in scene.places
+                else:
+                    assert set(binding) <= set(participants)
 
 
 @pytest.mark.parametrize("name", WORLDS)
@@ -260,7 +264,10 @@ def test_a_scene_never_has_more_participants_than_the_world(cases) -> None:
     alone = case.scenes(**scene_settings(size=0))
     for scene in make(alone, 20):
         assert scene.participants == (scene.seed,)
-        assert all(not e.transitive and e.agent == scene.seed for e in scene_events(scene))
+        # a lone participant can still move to a place or act at one (stage c3b)
+        assert all(
+            (e.place or not e.transitive) and e.agent == scene.seed for e in scene_events(scene)
+        )
 
 
 # ---------------------------------------------------------------------------------------------
@@ -320,9 +327,11 @@ def test_the_timeline_with_fluents(cases, name) -> None:
     # events change state: some event records a change to a base fluent; a numeric change
     # (stage b2) names a numeric fluent and carries its cause
     changes = [c for scene in scenes for e in scene.events for c in e.changes]
-    assert any(not c.numeric for c in changes)
+    assert any(not c.numeric and not c.pair for c in changes)
     for change in changes:
-        if change.numeric:
+        if change.pair:  # a pair change (stage c2a), a move's included (stage c3a)
+            assert change.pair_fluent.startswith("PAIRFL.")
+        elif change.numeric:
             assert change.fluent.startswith("NUMFL.") and change.cause is not None
         else:
             assert change.fluent.startswith("BOOLFL.")
@@ -558,9 +567,11 @@ def test_scene_json_is_a_history(cases) -> None:
     case = cases("tiny")
     for scene in make(case.scenes(), 50):
         form = scene.to_json()
+        # the tiny world has a location fluent and pair fluents since stage c4a, so a history
+        # lists its places, initial places, and initial pairs (stages c2a and c3a)
         assert list(form) == [
-            "label", "seed", "participants", "policy", "rule_set_id", "initial",
-            "initial_numeric", "steps", "final", "quiescent",
+            "label", "seed", "participants", "places", "policy", "rule_set_id", "initial",
+            "initial_numeric", "initial_places", "initial_pairs", "steps", "final", "quiescent",
         ]  # fmt: skip
         assert form["policy"] == "uniform_event"
         assert form["rule_set_id"] == case.world.rule_set_id
@@ -887,6 +898,9 @@ def test_an_event_can_be_named_by_a_category_above_its_event_type(cases) -> None
     checked = 0
     for scene in scenes:
         for event in scene_events(scene):
+            if event.place:
+                assert facts.event_names(event) == ()  # not named in stage c4a
+                continue
             names = facts.event_names(event)
             if not event.transitive:
                 assert names == (event.type,)
@@ -920,7 +934,9 @@ def test_the_event_level_is_drawn_by_weight(cases) -> None:
     named = case.facts().named
     # events whose category has a word, so that both levels can name them
     transitive = [
-        e for e in events if e.transitive and case.world.event_types[e.type].parent in named
+        e
+        for e in events
+        if e.transitive and not e.place and case.world.event_types[e.type].parent in named
     ]
 
     def category_share(weights) -> float:
@@ -941,7 +957,7 @@ def test_the_event_level_is_drawn_by_weight(cases) -> None:
     # a one-place event has one name
     facts = knowing(case.facts(), scenes)
     rng = Streams(1).mentions
-    for event in [e for e in events if not e.transitive][:50]:
+    for event in [e for e in events if not e.transitive and not e.place][:50]:
         assert facts.draw_event(rng, event).predicate == Predicate(CAN, event.type)
 
 

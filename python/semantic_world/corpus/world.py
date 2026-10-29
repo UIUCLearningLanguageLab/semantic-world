@@ -17,6 +17,14 @@ types with their columns, the scalars and poles, the event types with their tree
 of the runtime, the patient capacities, the relatedness, the fixed test and the rule terms over
 the world's static rules, and the meanings table of the word-form request. Every label is the
 world's own (``docs/specs/WORLD_AND_LANGUAGE.md``, "Labels").
+
+Since stage c4a a world may have pair fluents, places with location fluents, and place event
+types (``docs/specs/WORLD_PHASE_C.md``): the corpus runs on it, its scenes carry pair changes and
+place events, and its truth tests replay them, but it says nothing about them yet. No word is
+made for a pair fluent, a place, a place feature, or a place event type, no sentence or test item
+names one, and an event of a place event type is never narrated; ``World.place_event_types``
+lists the place event types so that every reader can skip them. The lexicon and the sentences
+about them are stages c4b, c4c, and c5a.
 """
 
 from __future__ import annotations
@@ -70,6 +78,9 @@ SCALAR_POLES = ("HIGH", "LOW")
 
 PROPERTY_KIND = "property"
 PART_KIND = "part"
+PLACE_EVENT_PREFIX = "PLACEEVENTTYPE."
+"""The prefix of a place event type's label (stage c3a): an event of one is never narrated in
+stage c4a."""
 EVENT_TYPE1_KIND = "event_type1"
 FEATURE_KINDS = (PROPERTY_KIND, PART_KIND, EVENT_TYPE1_KIND)
 """The kinds of the world's feature table: a PROPERTY feature, a PART feature, and a one-place
@@ -100,13 +111,6 @@ def load_world(config: Config | WorldSource) -> World:
     view of it. A run folder is checked against the regenerated world."""
     source = config.world if isinstance(config, Config) else config
     result = define(source.config)
-    if len(result.pair_fluents):
-        raise CorpusError(
-            f"the world {source.config.name} has pair fluents "
-            f"({', '.join(result.pair_fluents.labels)}), which the corpus cannot state yet: pair "
-            f"fluents enter the corpus in stage c4 of docs/specs/WORLD_PHASE_C.md. Use a world "
-            f"whose event file defines no pair fluents."
-        )
     if source.kind == "run":
         check_run_folder(result, source.path)
     return World(result, source)
@@ -306,6 +310,14 @@ class World:
         self.event_depth: int | None = max(
             (et.level for et in self.event_types.values() if et.arity == 2), default=None
         )
+        self.place_event_types: tuple[str, ...] = (
+            tuple(result.places.event_type_labels) if result.places is not None else ()
+        )
+        """The place event types (stage c1), whose events the scenes may hold since stage c3b and
+        which the corpus does not name in stage c4a: not among ``event_types``."""
+        self.pair_fluents: tuple[str, ...] = tuple(result.pair_fluents.labels)
+        """The pair fluents (stage c2a), the location fluents last, which the corpus does not
+        name in stage c4a."""
         self._able: dict[str, np.ndarray] | None = None
 
         # Patient capacities: every two-place leaf event type's, from the patient projections
@@ -404,8 +416,17 @@ class World:
 
     def event_names(self, event_type: str) -> tuple[str, ...]:
         """The labels that can name an event of an event type: the event type, then the
-        categories above it, from the nearest. A one-place event type has only its own label."""
+        categories above it, from the nearest. A one-place event type has only its own label. A
+        place event type (stage c4a) has none: the corpus has no word for it yet, so no label
+        names its events, and every reader of a scene skips them."""
+        if self.is_place_event_type(event_type):
+            return ()
         return tuple(reversed(self.event_types[event_type].path))
+
+    def is_place_event_type(self, label: str) -> bool:
+        """Whether a label is a place event type of the world (stage c3a), an event type whose
+        patient is a place and which the corpus says nothing about in stage c4a."""
+        return label in self.place_event_types
 
     def event_types_below(self, label: str) -> tuple[str, ...]:
         """The event types that have events and are named by a label: the label itself when it
@@ -601,6 +622,7 @@ __all__ = [
     "LOCAL",
     "NUMERIC_PREFIX",
     "PART_KIND",
+    "PLACE_EVENT_PREFIX",
     "PROPERTY_KIND",
     "THING",
     "CategoryInfo",

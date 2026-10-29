@@ -183,6 +183,10 @@ class EventType:
     """The precondition literals, the compiled literals of stage c2a (origin ``profile``) last."""
     effects: tuple[Effect, ...] = ()
     explicit: bool = False
+    explicit_effects: bool = False
+    """Whether an event file gave the effects (stage c4a): the Boolean rule of WM.70 is not
+    checked on them, as the dead-delete rule of Jon's ruling 1 on stage c2b is not. Not part of
+    the record."""
 
     @property
     def roles(self) -> tuple[str, ...]:
@@ -426,6 +430,26 @@ def pair_literal_achievable(
     if literal.value:
         return fluent.rate > 0.0 or fluent.label in adds
     return fluent.rate < 1.0 or fluent.functional or fluent.label in deletes
+
+
+def dead_boolean_values(fluents: Fluents, effects: Iterable[Effect]) -> set[tuple[str, bool]]:
+    """The Boolean values ``(fluent, v)`` that an effect ``:= v`` can never change (Jon's
+    ruling WM.70, stage c4a): the fluent's initial rate makes every entity ``v`` (a rate of 1
+    for true, of 0 for false, in every episode, redrawn or not), and no effect among ``effects``
+    (every effect of the world, the place event types' included, WM.66) sets it to ``not v``.
+    The Boolean counterpart of ``dead_pair_fluents``: a delete on a pair fluent that can never
+    hold."""
+    produced = {(e.fluent, bool(e.value)) for e in effects if not e.numeric and not e.pair}
+    dead: set[tuple[str, bool]] = set()
+    for fluent in fluents.base:
+        rate = fluent.initial_rate
+        if rate is None:
+            continue
+        if rate >= 1.0 and (fluent.label, False) not in produced:
+            dead.add((fluent.label, True))
+        if rate <= 0.0 and (fluent.label, True) not in produced:
+            dead.add((fluent.label, False))
+    return dead
 
 
 def add_compiled_literals(
@@ -811,6 +835,8 @@ class _Dynamics:
             "effects_dropped_empty": 0,
             "effects_dropped_no_slot": 0,
             "effects_redrawn": 0,
+            "effects_redrawn_dead": 0,
+            "effects_dropped_dead": 0,
             "literals_dropped_contradiction": 0,
             "literals_dropped_duplicate": 0,
             "literals_dropped_unachievable": 0,
@@ -1547,6 +1573,42 @@ class _Dynamics:
         return changed
 
     # Explicit entries -----------------------------------------------------------------------
+
+    def fix_dead_booleans(self, draft: _Draft) -> bool:
+        """A Boolean effect ``:= v`` on a fluent that can never be ``not v`` (Jon's ruling
+        WM.70: its initial rate makes every entity ``v``, and no effect anywhere in the world
+        sets it to ``not v``) can never change the state: an own effect is drawn again, an
+        inherited one dropped, as ``fix_dead_deletes`` treats a delete on a pair fluent that
+        can never hold. Run in the fix-up rounds until stable, because a redrawn effect can set
+        the other value and bring the fluent to life."""
+        if not any(not e.numeric and not e.pair for e in draft.effects):
+            return False
+        dead = dead_boolean_values(self.fluents, self.all_effects())
+        if not dead:
+            return False
+        changed = False
+        kept: dict[tuple, Effect] = {_effect_slot(e, self.pair_fluents): e for e in draft.effects}
+        for effect in list(draft.effects):
+            if effect.numeric or effect.pair or (effect.fluent, bool(effect.value)) not in dead:
+                continue
+            changed = True
+            key = _effect_slot(effect, self.pair_fluents)
+            del kept[key]
+            if key not in draft.own_effect_keys:
+                self.stats["effects_dropped_dead"] += 1
+                continue
+            draft.own_effect_keys.discard(key)
+            self.stats["effects_redrawn_dead"] += 1
+            self.stats["effects_redrawn"] += 1
+            candidate = self._draw_effect(draft.roles, set(kept), kept.values())
+            if candidate is None:
+                self.stats["effects_dropped_no_slot"] += 1
+                continue
+            kept[_effect_slot(candidate, self.pair_fluents)] = candidate
+            draft.own_effect_keys.add(_effect_slot(candidate, self.pair_fluents))
+        if changed:
+            draft.effects = tuple(kept.values())
+        return changed
 
     def apply_event_file(self) -> None:
         if self.event_file is None:
@@ -2335,6 +2397,7 @@ class _Dynamics:
                     changed |= self.fix_empty_effects(draft)
                     changed |= self.fix_compiled_contradictions(draft)
                     changed |= self.fix_dead_deletes(draft)
+                    changed |= self.fix_dead_booleans(draft)
             achievable = self.achievable()
             produced = self.produced()
             for draft in self.drafts.values():
@@ -2358,6 +2421,7 @@ class _Dynamics:
                 precondition=d.precondition,
                 effects=d.effects,
                 explicit=d.explicit is not None,
+                explicit_effects=d.explicit is not None and d.explicit.effects is not None,
             )
             for d in self.drafts.values()
         )
@@ -2652,8 +2716,11 @@ def check_dynamics(
     ``features`` lists them) of a role of the event type, no symbol twice in a condition, no
     fluent literal on a fluent the precondition fixes or on the fluent the effect sets, no pair
     condition literal whose value the precondition fixes under ``fixed_pair_literals`` (WM.68),
-    and every fluent literal achievable. Raises :class:`ValueError` naming the event type
-    otherwise. Tests and the generator both call it. Whether some able binding satisfies the
+    every fluent literal achievable, and (Jon's ruling WM.70, stage c4a) no Boolean effect
+    ``:= v`` on a fluent that can never be ``not v``, among the event types whose effects the
+    generator drew (an event file's effects are what the file says, as the dead-delete rule
+    leaves them). Raises :class:`ValueError` naming the event type otherwise. Tests and the
+    generator both call it. Whether some able binding satisfies the
     static literals needs the static side; the generator checks it when it draws. A literal's
     achievability counts every effect of the world (stage c3b, WM.66): ``extra_effects`` are
     the effects of event types outside ``event_types``, the place event types'."""
@@ -2665,6 +2732,7 @@ def check_dynamics(
     pair_fluents = pair_fluents if pair_fluents is not None else empty_pair_fluents()
     adds = {e.fluent for e in all_effects if e.pair and e.value}
     deletes = {e.fluent for e in all_effects if e.pair and not e.value}
+    dead = dead_boolean_values(fluents, all_effects)
 
     def numeric_ok(fluent: str, above: bool, threshold: float | None) -> bool:
         return (
@@ -2725,6 +2793,13 @@ def check_dynamics(
                     raise ValueError(f"{et.label}: the effect {effect.text} adds nothing")
             elif fluents[effect.fluent].derived:
                 raise ValueError(f"{et.label}: the effect {effect.text} writes a derived fluent")
+            elif not et.explicit_effects and (effect.fluent, bool(effect.value)) in dead:
+                raise ValueError(
+                    f"{et.label}: the effect {effect.text} can never change the state: the "
+                    f"initial rate of {effect.fluent} makes every entity "
+                    f"{'true' if effect.value else 'false'}, and no effect sets it "
+                    f"{'false' if effect.value else 'true'} (WM.70)"
+                )
             key = (effect.role, effect.fluent)
             if key in effect_keys:
                 raise ValueError(f"{et.label}: two effects write {effect.key}")
@@ -2915,6 +2990,7 @@ __all__ = [
     "compiled_literals",
     "condition_pair_keys",
     "condition_pair_names",
+    "dead_boolean_values",
     "fixed_condition_problem",
     "fixed_pair_literals",
     "implied_conflict",

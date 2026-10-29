@@ -172,6 +172,8 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
                 if proposition.predicate.kind == EFFECT
                 else event_types[leaf]["precondition"]["literals"]
             )
+            # a pair effect or a pair literal (stage c2a) is no entry of a statement (stage c4a)
+            entries = [e for e in entries if "pair_fluent" not in e]
             # the entry: the value of a Boolean effect or literal, or the sign of a numeric
             # effect, under the statement's condition (none for an unconditional statement,
             # stage b1; a conditional statement's own since stage b3b)
@@ -195,8 +197,33 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
     # 4 precondition statements, the numeric effects and literals taking the place of some
     # Boolean ones
     assert kinds[EFFECT] > 2 and kinds[PRECONDITION] > 1, kinds
+    # the statements about categories the language can state (the default world has some;
+    # a run of 200 documents need not state one): each holds of every event type below, by
+    # the record (WM.16)
+    pool = corpus.planner.facts.causal_statements()
+    about = [p for p in pool if world.event_types[p.subject.event_type].category]
     if name == "default":
-        assert about_categories > 0
+        assert about
+    for proposition in about:
+        below = oracle.leaves_below(proposition.subject.event_type)
+        assert len(below) > 1 and proposition.predicate.kind in CAUSAL_KINDS
+        for leaf in below:
+            entries = (
+                event_types[leaf]["effects"]
+                if proposition.predicate.kind == EFFECT
+                else event_types[leaf]["precondition"]["literals"]
+            )
+            assert any(
+                e["role"] == proposition.subject.role
+                and e["fluent"] == proposition.predicate.label
+                and "pair_fluent" not in e
+                and (
+                    (e["operator"] == "+=") == (proposition.predicate.direction == "raises")
+                    if "amount" in e
+                    else e["value"] == proposition.predicate.value
+                )
+                for e in entries
+            ), (proposition, leaf)
     if name in ("tiny", "default"):
         # these worlds have numeric fluents and conditional effects (stage b3b)
         assert numeric_statements > 0 and conditional_statements > 0
@@ -290,12 +317,20 @@ def record_entries(record: dict, label: str, key: str, config) -> list[dict]:
         return [
             e
             for e in entry["effects"]
-            if all(
-                stated_literal(lit, record, config) is not None
+            # a pair effect, and an effect under a pair condition, make no statement (stage
+            # c4a; the pair effects' statements are stage c5a's, WM.59 for the conditions)
+            if "pair_fluent" not in e
+            and all(
+                not lit["kind"].startswith("pair")
+                and stated_literal(lit, record, config) is not None
                 for lit in (e.get("condition") or {}).get("literals", [])
             )
         ]
-    return [lit for lit in entry["precondition"]["literals"] if "threshold" not in lit]
+    return [
+        lit
+        for lit in entry["precondition"]["literals"]
+        if "threshold" not in lit and "pair_fluent" not in lit
+    ]
 
 
 def entry_key(entry: dict, record: dict, config) -> tuple:
@@ -417,12 +452,16 @@ def test_capped_causal_sets_keep_every_statement(runs) -> None:
             assert set(counts) == set(every), test_set.name
         else:
             assert len(counts) == size
-        assert max(counts.values()) - min(counts.values()) <= 1, test_set.name
-        # a statement with more pairs than the rounds give is not exhausted before the others
+        # round after round: a statement whose pairs are all in the set ran out of them, and
+        # every other statement has the number of the last full round, or one more when the
+        # last, partial round reached it (a set whose pairs barely exceed the size exhausts
+        # most statements, so their counts differ by more than one)
         rounds = max(counts.values())
         for statement, pairs in every.items():
-            if statement in counts and counts[statement] < rounds:
-                assert counts[statement] == len(pairs) or counts[statement] == rounds - 1
+            kept = counts.get(statement, 0)
+            if kept == len(pairs):
+                continue
+            assert kept in (rounds - 1, rounds), (test_set.name, kept, rounds, len(pairs))
     assert capped > 0
 
 

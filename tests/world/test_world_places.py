@@ -20,6 +20,7 @@ import numpy as np
 import polars as pl
 import pytest
 import yaml
+from world_support import config_before_phase_c, mapping_before_phase_c
 
 from semantic_world.taxonomy import generate as generate_taxonomy
 from semantic_world.taxonomy import load_config as load_taxonomy_config
@@ -66,8 +67,12 @@ def worlds() -> dict[str, WorldResult]:
 
 
 def world_named(worlds: dict[str, WorldResult], name: str) -> WorldResult:
+    """The world of ``data/world/<name>.yaml`` with the phase (c) settings off (the tiny and
+    default worlds of stage c3b, before stage c4a moved the pair fluents, the location fluent,
+    the density band, and the habitat strength into their files): these tests are about the
+    static side and the places of stage c1."""
     if name not in worlds:
-        worlds[name] = define(load_config(DATA / f"{name}.yaml"))
+        worlds[name] = define(config_before_phase_c(name))
     return worlds[name]
 
 
@@ -82,7 +87,7 @@ def tiny_folder(tiny: WorldResult, tmp_path_factory: pytest.TempPathFactory) -> 
 
 
 def tiny_mapping(**overrides) -> dict:
-    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    data = mapping_before_phase_c()
     for key, value in overrides.items():
         if isinstance(value, dict) and isinstance(data.get(key), dict):
             data[key] = {**data[key], **value}
@@ -101,7 +106,7 @@ def test_the_places_block_is_read_validated_and_defaulted() -> None:
     assert config.places is not None and config.place_event_types is not None
     assert config.places.taxonomy.config == "data/taxonomy/places_default.yaml"
     assert config.places.taxonomy.seed is None
-    assert config.places.habitat_strength == 1.0
+    assert config.places.habitat_strength == 2.0  # since stage c4a (WM.63, WM.67)
     assert config.places.taxonomy_run.labels.kind == "place"
     # the place taxonomy's seed is the stream world:places (its low 64 bits)
     assert config.places.seed == WorldStreams(config.seed).seed("places") % 2**64

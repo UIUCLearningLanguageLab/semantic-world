@@ -22,12 +22,13 @@ from typing import Any
 import numpy as np
 import pytest
 import yaml
+from world_support import mapping_before_phase_c
 
 from semantic_world.figures import SNAPSHOT_FILE, load_snapshot
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.config import Config, config_from_mapping, load_config
 from semantic_world.world.definition import RuntimeDefinition, runtime_definition
-from semantic_world.world.dynamics import ConditionLiteral, Effect, parse_condition
+from semantic_world.world.dynamics import ConditionLiteral, Effect, PairLiteral, parse_condition
 from semantic_world.world.episodes import EpisodeGenerator, Relatedness
 from semantic_world.world.errors import DefinitionError, InterferenceError
 from semantic_world.world.event_types import check_dynamics
@@ -65,7 +66,9 @@ def a8_identity(name: str) -> str:
 
 
 def tiny_config(share: float, **effects: Any) -> Config:
-    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    # the tiny world of stage c3b: the phase (c) settings that tiny.yaml carries since stage
+    # c4a are off, so that these tests keep the conditional effects as their subject
+    data = mapping_before_phase_c()
     data.setdefault("event_types", {})["effects"] = {"conditional_share": share, **effects}
     return config_from_mapping(data, source=str(DATA / "tiny.yaml"))
 
@@ -175,7 +178,11 @@ def test_every_effect_of_the_conditional_tiny_world_has_a_condition(
 
 
 def test_the_record_and_the_identity_change_only_with_a_condition() -> None:
-    plain = define(tiny_config(0.0))
+    # the baseline of conditional_share 0 is kept on tiny.yaml as it is (with the phase (c)
+    # settings since stage c4a), so the plain world here is tiny.yaml with the share at 0
+    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    data.setdefault("event_types", {})["effects"] = {"conditional_share": 0.0}
+    plain = define(config_from_mapping(data, source=str(DATA / "tiny.yaml")))
     assert plain.rule_set_id == a8_identity("tiny")
     for et in plain.event_types.event_types:
         for effect in et.effects:
@@ -518,7 +525,9 @@ def _check_satisfiable(result: WorldResult) -> int:
         for i, f in enumerate(fluents.base)
         for v in np.unique(fluents.initial_values[:, i])
     }
-    for label, column in derived_initial_values(fluents, result.taxonomy, result.numeric).items():
+    for label, column in derived_initial_values(
+        fluents, result.taxonomy, result.numeric, result.pair_fluents
+    ).items():
         present |= {(label, bool(v)) for v in np.unique(column)}
     from semantic_world.world.event_types import produced_numeric
 
@@ -549,6 +558,11 @@ def _check_satisfiable(result: WorldResult) -> int:
                     assert (lit.symbol, lit.value) in produced | present
                     assert (lit.role, lit.symbol) not in pre
                     assert (lit.role, lit.symbol) != (effect.role, effect.fluent)
+                elif isinstance(lit, PairLiteral):
+                    # stage c2b: a pair condition literal is satisfiable when its pair fluent
+                    # can hold; tests/world/test_world_pair_generation.py checks the pair
+                    # conditions, and the default world has them since stage c4a
+                    assert lit.pair_fluent in result.pair_fluents.labels
                 else:
                     masks[lit.role] &= statics.values[lit.symbol] == int(lit.value)
             if not able[et.label].any():
@@ -570,7 +584,7 @@ def test_every_condition_is_satisfiable_and_no_effect_is_contradictory_or_empty(
     assert _check_satisfiable(conditional) > 0
     assert _check_satisfiable(default) > 0
     for seed in (2, 3):
-        data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+        data = mapping_before_phase_c()
         data["event_types"]["effects"] = {"conditional_share": 1.0}
         assert _check_satisfiable(define(config_from_mapping(data, seed=seed))) > 0
 
@@ -656,7 +670,7 @@ def test_replay_reproduces_every_recorded_change_under_conditions(
 
 def test_an_event_file_gives_conditional_effects(tmp_path: Path) -> None:
     base = define(tiny_config(0.0))
-    world = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
+    world = mapping_before_phase_c()
     world["event_types"]["effects"] = {"conditional_share": 0}
     entities = base.statics.values
     features = base.taxonomy.features

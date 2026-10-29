@@ -26,8 +26,8 @@ import numpy as np
 import polars as pl
 import pytest
 import yaml
+from world_support import config_before_phase_c
 
-from semantic_world.corpus.errors import CorpusError
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.config import config_from_mapping, load_config
 from semantic_world.world.definition import (
@@ -113,7 +113,9 @@ def pairs_folder(pairs_world: WorldResult, tmp_path_factory: pytest.TempPathFact
 
 @pytest.fixture(scope="module")
 def tiny() -> WorldResult:
-    return define(load_config(DATA / "tiny.yaml"))
+    """The tiny world without pair fluents (since stage c4a ``tiny.yaml`` carries them, WM.63):
+    the world of stage c3b, for the checks of a world without them."""
+    return define(config_before_phase_c())
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
@@ -1184,7 +1186,9 @@ def test_the_loader_validates_pair_records(pairs_folder: Path) -> None:
     assert follow["precondition"]["literals"][0]["kind"] == "pair"
 
 
-def test_a_corpus_run_on_a_world_with_pair_fluents_refuses(tmp_path: Path) -> None:
+def test_a_corpus_run_on_a_world_with_pair_fluents_loads(tmp_path: Path) -> None:
+    """Stage c2a's refusal of a world with pair fluents ended in stage c4a (WM.63): the corpus
+    loads the world, lists its pair fluents, and names no event of a place event type."""
     from semantic_world.corpus.config import load_config as load_corpus_config
     from semantic_world.corpus.world import load_world
 
@@ -1192,8 +1196,10 @@ def test_a_corpus_run_on_a_world_with_pair_fluents_refuses(tmp_path: Path) -> No
     corpus["world"] = {"config": str((DATA / "tiny_pairs.yaml").resolve())}
     path = tmp_path / "corpus.yaml"
     path.write_text(yaml.safe_dump(corpus), encoding="utf-8")
-    with pytest.raises(CorpusError, match="stage c4"):
-        load_world(load_corpus_config(path))
+    world = load_world(load_corpus_config(path))
+    assert list(world.pair_fluents) == ["PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4"]
+    for label in world.place_event_types:
+        assert world.is_place_event_type(label) and world.event_names(label) == ()
 
 
 def test_world_stats_count_pair_condition_literals_only_when_present(

@@ -32,7 +32,6 @@ import pytest
 import yaml
 
 from semantic_world.corpus.config import config_from_mapping as corpus_config_from_mapping
-from semantic_world.corpus.errors import CorpusError
 from semantic_world.taxonomy.config import ConfigError
 from semantic_world.world.config import config_from_mapping, load_config
 from semantic_world.world.definition import RuntimeDefinition, load_definition, runtime_definition
@@ -110,11 +109,12 @@ def chain_folder(chain: WorldResult, tmp_path_factory: pytest.TempPathFactory) -
 
 @pytest.fixture(scope="module")
 def tiny_full() -> WorldResult:
-    """The tiny full world without its location fluent (since stage c3b ``tiny_full.yaml`` has
-    one): the world of stage c2b, for the checks of a world without location fluents."""
-    data = yaml.safe_load((DATA / "tiny_full.yaml").read_text(encoding="utf-8"))
+    """The tiny world without its location fluent (since stage c4a ``tiny.yaml`` carries the
+    phase (c) settings, WM.63): a world with pair fluents between entities and places, but no
+    location fluent, for the checks of such a world."""
+    data = yaml.safe_load((DATA / "tiny.yaml").read_text(encoding="utf-8"))
     data["pair_fluents"]["locations"] = 0
-    return define(config_from_mapping(data, source=str(DATA / "tiny_full.yaml")))
+    return define(config_from_mapping(data, source=str(DATA / "tiny.yaml")))
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
@@ -206,8 +206,10 @@ def _place_of(
 # ---------------------------------------------------------------------------------------------
 
 
-def test_location_fluents_need_places_and_default_to_none() -> None:
-    assert config_from_mapping({}, source="<test>").pair_fluents.locations == 0
+def test_location_fluents_need_places_and_default_to_one_with_them() -> None:
+    # since stage c4a the code's default is one location fluent (WM.63), none without places
+    assert config_from_mapping({}, source="<test>").pair_fluents.locations == 1
+    assert config_from_mapping({"places": None}, source="<test>").pair_fluents.locations == 0
     with pytest.raises(ConfigError, match="locations"):
         config_from_mapping({"places": None, "pair_fluents": {"locations": 1}}, source="<test>")
     config = config_from_mapping({"pair_fluents": {"count": 2, "locations": 2}}, source="<test>")
@@ -840,8 +842,12 @@ def test_the_corpus_reads_the_scene_keys_and_refuses_the_chain_world(tmp_path: P
     data["world"] = {"config": str(DATA / "tiny_place_chain.yaml"), "seed": 1}
     from semantic_world.corpus import load_world
 
-    with pytest.raises(CorpusError, match="pair fluents"):
-        load_world(corpus_config_from_mapping(data, source=str(tmp_path / "corpus.yaml")))
+    # since stage c4a the corpus loads a world with location fluents and place event types
+    # (WM.63), and names no event of a place event type
+    world = load_world(corpus_config_from_mapping(data, source=str(tmp_path / "corpus.yaml")))
+    assert world.place_event_types
+    assert all(world.is_place_event_type(p) for p in world.place_event_types)
+    assert all(world.event_names(p) == () for p in world.place_event_types)
 
 
 # ---------------------------------------------------------------------------------------------

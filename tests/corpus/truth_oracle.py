@@ -53,6 +53,21 @@ numeric threshold literal ``> t`` (the high pole) or ``<= t`` (the low pole) who
 is exactly the point of the range at the form's cut, and its ``observed`` judges the
 participant's replayed value against that point as ``pole_at`` does.
 
+Since stage c4a the replay carries the pair fluents and the places (``docs/specs/WORLD_PHASE_C.md``,
+the c4a entry of "Build stages"): the pair part of the state is a set of ordered label pairs per
+pair fluent, started from the history's ``initial_pairs`` (the whole pair part among the
+participants, WM.38) and, for a location fluent, from the location column of ``entities.csv``
+with the history's ``initial_places`` written over it, so that every entity is at one place; the
+brute-force evaluator reads the places table (``places.csv``) for the place event types' bindings
+and requirements, replays every pair effect (both directions of a symmetric pair) and every move
+(the total functional replacement: the old place goes with the new one), judges legality with the
+pairs (``SAME`` on a location fluent, ``SOME`` and ``SOMEOF``, the compiled literals), and reads a
+derived fluent whose rule reads ``SOME`` or ``SOMEOF`` from the replayed pairs; the recorded pair
+changes of every event are checked against the replayed pairs, as ``history.replay`` checks them.
+``pairs_at``, ``place_at``, and ``pair_holds`` read the replayed pairs; ``able`` and ``legal``
+take a place as the patient of a place event type. The corpus states nothing about them in stage
+c4a: the readers are for the tests of this stage and of c4b.
+
 Comparisons of scalars (stage b3a) are recomputed from the ``SCALARDIM`` columns of
 ``entities.csv`` alone: a pole (kind ``comparison``) against the mean and the population standard
 deviation of its comparison class, the rows below the class's category or every row for
@@ -73,9 +88,13 @@ import numpy as np
 import polars as pl
 import yaml
 
-from semantic_world.world.fixtures import BruteEvent, BruteForce
+from semantic_world.world.fixtures import BruteEvent, BruteForce, BrutePairs
 
 THING = "THING"
+PLACE_EVENT_TYPE = "place_event_type"
+EVENT_TYPE_KINDS = ("event_type", PLACE_EVENT_TYPE)
+"""The kinds of event-type record that name events: an entity event type, and (stage c3a) a
+place event type with dynamics."""
 ENTITY = "ENTITY"
 NEC_ALL, ALL, MOST, SOME, NO, NEC_NO = "nec_all", "all", "most", "some", "no", "nec_no"
 
@@ -87,7 +106,15 @@ class Oracle:
         self.record = json.loads((folder / "definition.json").read_text(encoding="utf-8"))
         entities = pl.read_csv(folder / "entities.csv", infer_schema_length=None)
         self.rows = entities.to_dicts()
-        self.brute = BruteForce(self.record, self.rows)
+        # the places (stage c1), for the place event types' bindings and requirements
+        places_file = folder / "places.csv"
+        self.place_rows = (
+            pl.read_csv(places_file, infer_schema_length=None).to_dicts()
+            if places_file.is_file()
+            else []
+        )
+        self.place_labels = [str(row["label"]) for row in self.place_rows]
+        self.brute = BruteForce(self.record, self.rows, self.place_rows)
         self.labels = entities["label"].to_list()
         self.row = {label: i for i, label in enumerate(self.labels)}
         self.n = len(self.labels)
@@ -117,6 +144,15 @@ class Oracle:
             if s["kind"] in ("property", "part") and s["derived"]
         }
         self.scalars = [s["label"] for s in self.record["symbols"] if s["kind"] == "scalar"]
+        # The pair fluents (stage c2a) and the location fluents among them (stage c3a), whose
+        # initial places are the location columns of entities.csv, named by the fluent
+        pair_symbols = [s for s in self.record["symbols"] if s["kind"] == "pair_fluent"]
+        self.pair_fluents = [s["label"] for s in pair_symbols]
+        self.symmetric = {s["label"] for s in pair_symbols if s["symmetry"] == "symmetric"}
+        self.location_fluents = [s["label"] for s in pair_symbols if s.get("total")]
+        self.place_event_types = [
+            e["label"] for e in self.record["event_types"] if e["kind"] == PLACE_EVENT_TYPE
+        ]
         # Columns: free features and scalars from entities.csv; derived features and one-place
         # capacities by the brute-force evaluator; patient capacities from capacities.csv.
         self.column: dict[str, np.ndarray] = {}
@@ -172,8 +208,10 @@ class Oracle:
         self.drift = config["scalars"]["drift"]["values"]
         self.instance_drift = config["scalars"]["instance_drift"]
         self._matrices: dict[str, np.ndarray] = {}
+        self._place_matrices: dict[str, np.ndarray] = {}
         self._states: dict[str, list[dict[str, frozenset[str]]]] = {}
         self._numerics: dict[str, list[dict[str, dict[str, float]]]] = {}
+        self._pairs: dict[str, list[BrutePairs]] = {}
 
     # Sets of rows ----------------------------------------------------------------------------
 
@@ -364,20 +402,40 @@ class Oracle:
             self._matrices[event_type] = holds
         return self._matrices[event_type]
 
+    def place_matrix(self, event_type: str) -> np.ndarray:
+        """A place event type's requirement (stage c1) over every binding of an entity (rows)
+        and a place (columns), by the brute-force evaluator."""
+        if event_type not in self._place_matrices:
+            holds = np.zeros((self.n, len(self.place_labels)), dtype=bool)
+            for a, agent in enumerate(self.labels):
+                for p, place in enumerate(self.place_labels):
+                    event = BruteEvent(event_type, {"agent": agent, "patient": place})
+                    holds[a, p] = self.brute.able(event)
+            self._place_matrices[event_type] = holds
+        return self._place_matrices[event_type]
+
+    def is_place_event_type(self, label: str) -> bool:
+        return label in self.place_event_types
+
     def able(self, label: str, agent: str, patient: str | None) -> bool:
-        """Whether a binding's requirement holds: the one-place event type's for the agent, or
-        the two-place event type's (or category's) for the agent and the patient."""
+        """Whether a binding's requirement holds: the one-place event type's for the agent, the
+        two-place event type's (or category's) for the agent and the patient, or (stage c3a) the
+        place event type's for the agent and the place."""
         if patient is None:
             return bool(self.column[label][self.row[agent]] == 1)
+        if self.is_place_event_type(label):
+            return bool(self.place_matrix(label)[self.row[agent], self.place_labels.index(patient)])
         return bool(self.matrix(label)[self.row[agent], self.row[patient]])
 
     allows = able
 
     def able_somewhere(self, label: str) -> bool:
         """Whether the requirement of an event type (or the base relation of a category) holds
-        for some entity, or some ordered pair of entities."""
+        for some entity, some ordered pair of entities, or some entity at some place."""
         if self.event_types[label]["arity"] == 1:
             return bool((self.column[label] == 1).any())
+        if self.is_place_event_type(label):
+            return bool(self.place_matrix(label).any())
         return bool(self.matrix(label).any())
 
     # Events ----------------------------------------------------------------------------------
@@ -391,18 +449,55 @@ class Oracle:
         return found
 
     def leaves_below(self, label: str) -> list[str]:
-        if self.event_types[label]["kind"] == "event_type":
+        if self.event_types[label]["kind"] in EVENT_TYPE_KINDS:
             return [label]
         return [
             e
             for e, record in self.event_types.items()
-            if record["kind"] == "event_type" and label in self.names(e)
+            if record["kind"] in EVENT_TYPE_KINDS and label in self.names(e)
         ]
+
+    def initial_pairs(self, scene: dict[str, Any]) -> BrutePairs:
+        """The pair part of a scene's state at ``TIME.1`` (stage c4a): the history's
+        ``initial_pairs`` (every pair between entities that holds among the participants, and no
+        other, WM.38), and on each location fluent every entity's place of ``entities.csv`` with
+        the history's ``initial_places`` written over the participants'."""
+        pairs: dict[str, set[tuple[str, str]]] = {f: set() for f in self.pair_fluents}
+        for fluent, first, second in scene.get("initial_pairs") or []:
+            pairs[str(fluent)].add((str(first), str(second)))
+        for fluent in self.location_fluents:
+            for label, row in zip(self.labels, self.rows, strict=True):
+                pairs[fluent].add((label, str(row[fluent])))
+        for participant, at in (scene.get("initial_places") or {}).items():
+            for fluent, place in at.items():
+                pairs[str(fluent)] = {p for p in pairs[str(fluent)] if p[0] != participant}
+                pairs[str(fluent)].add((str(participant), str(place)))
+        return {f: frozenset(v) for f, v in pairs.items()}
+
+    def _recorded_pair_changes(self, event: dict[str, Any]) -> set[tuple[str, str, str, bool]]:
+        """An event's recorded pair changes, both directions of a symmetric pair, as
+        ``(pair fluent, first, second, to)``."""
+        found: set[tuple[str, str, str, bool]] = set()
+        for change in event["changes"]:
+            if "pair" not in change:
+                continue
+            fluent, first, second, to = (
+                str(change["pair"]),
+                str(change["first"]),
+                str(change["second"]),
+                bool(change["to"]),
+            )
+            found.add((fluent, first, second, to))
+            if fluent in self.symmetric:
+                found.add((fluent, second, first, to))
+        return found
 
     def states(self, scene: dict[str, Any]) -> list[dict[str, frozenset[str]]]:
         """The state at every time point of a scene, replayed with the brute-force evaluator
         from the entities' initial fluents and the history's initial fluents (the numeric values
-        beside them, in ``numerics``)."""
+        beside them, in ``numerics``, and since stage c4a the pairs, in ``pairs_at``). Every
+        event must be legal in the replayed state, and every step's recorded pair changes must
+        be exactly the pairs the replay changed, as ``history.replay`` checks."""
         if scene["label"] not in self._states:
             state = {
                 label: frozenset(f for f in self.base_fluents if row[f])
@@ -413,8 +508,10 @@ class Oracle:
             numeric = self.brute.initial_numeric()
             for participant, values in (scene.get("initial_numeric") or {}).items():
                 numeric[participant] = {f: float(v) for f, v in values.items()}
+            pairs = self.initial_pairs(scene)
             states = [state]
             numerics = [numeric]
+            pair_states = [pairs]
             for step in scene["steps"]:
                 events = [
                     BruteEvent(
@@ -427,16 +524,27 @@ class Oracle:
                     for e in step["events"]
                 ]
                 for event in events:
-                    assert self.brute.legal(event, state, numeric), (
+                    assert self.brute.legal(event, state, numeric, pairs), (
                         scene["label"],
                         step["step"],
                         event,
                     )
-                state, numeric, _ = self.brute.step(state, numeric, events)
+                state, numeric, _ = self.brute.step(state, numeric, events, pairs)
+                after = self.brute.pairs_after
+                changed = {
+                    (fluent, a, b, (a, b) in after[fluent])
+                    for fluent in self.pair_fluents
+                    for a, b in pairs[fluent] ^ after[fluent]
+                }
+                recorded = set().union(*(self._recorded_pair_changes(e) for e in step["events"]))
+                assert changed == recorded, (scene["label"], step["step"], changed ^ recorded)
+                pairs = after
                 states.append(state)
                 numerics.append(numeric)
+                pair_states.append(pairs)
             self._states[scene["label"]] = states
             self._numerics[scene["label"]] = numerics
+            self._pairs[scene["label"]] = pair_states
         return self._states[scene["label"]]
 
     def numerics(self, scene: dict[str, Any]) -> list[dict[str, dict[str, float]]]:
@@ -444,22 +552,51 @@ class Oracle:
         self.states(scene)
         return self._numerics[scene["label"]]
 
+    def pairs_at(self, scene: dict[str, Any], time: int | None = None) -> Any:
+        """The pair part of the state at ``TIME.<time>`` of a scene (stage c4a), or the list
+        of them at every time point when no time is given: for each pair fluent, the ordered
+        label pairs that hold, a place second for a location fluent."""
+        self.states(scene)
+        pair_states = self._pairs[scene["label"]]
+        return pair_states if time is None else pair_states[time - 1]
+
+    def place_at(self, scene: dict[str, Any], time: int, entity: str, fluent: str) -> str:
+        """The place of an entity on a location fluent at ``TIME.<time>`` (stage c4a)."""
+        (place,) = [b for a, b in self.pairs_at(scene, time)[fluent] if a == entity]
+        return place
+
+    def pair_holds(
+        self, scene: dict[str, Any], time: int, fluent: str, first: str, second: str
+    ) -> bool:
+        """Whether a pair holds at ``TIME.<time>`` (stage c4a)."""
+        return (first, second) in self.pairs_at(scene, time)[fluent]
+
+    def _at(self, scene: dict[str, Any], time: int) -> BruteForce:
+        """The brute-force evaluator set to the numeric values and the pairs at ``TIME.<time>``."""
+        return self.brute.with_numeric(self.numerics(scene)[time - 1]).with_pairs(
+            self.pairs_at(scene, time)
+        )
+
     def legal_at(
         self, scene: dict[str, Any], time: int, label: str, agent: str, patient: str | None
     ) -> bool:
-        """Whether the binding was legal at ``TIME.<time>`` of the scene."""
+        """Whether the binding was legal at ``TIME.<time>`` of the scene (with the pairs and
+        the places of the time point since stage c4a: ``SAME`` on a location fluent, ``SOME``,
+        ``SOMEOF``, the compiled literals, and a move's or an act's location literal)."""
         binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
         state = self.states(scene)[time - 1]
         numeric = self.numerics(scene)[time - 1]
+        pairs = self.pairs_at(scene, time)
         return any(
-            self.brute.legal(BruteEvent(event_type, binding), state, numeric)
+            self.brute.legal(BruteEvent(event_type, binding), state, numeric, pairs)
             for event_type in self.leaves_below(label)
         )
 
     def fluent_at(self, scene: dict[str, Any], time: int, entity: str, fluent: str) -> bool:
-        """A fluent's value, base or derived, of a participant at ``TIME.<time>``."""
-        self.brute.with_numeric(self.numerics(scene)[time - 1])
-        return bool(self.brute.fluent(fluent, entity, self.states(scene)[time - 1]))
+        """A fluent's value, base or derived, of a participant at ``TIME.<time>`` (a derived
+        fluent whose rule reads ``SOME`` or ``SOMEOF`` of a pair fluent from the replayed
+        pairs, stage c4a)."""
+        return bool(self._at(scene, time).fluent(fluent, entity, self.states(scene)[time - 1]))
 
     def changed(
         self, scene: dict[str, Any], entity: str, fluent: str, cut: float | None = None
@@ -510,7 +647,8 @@ class Oracle:
             return False
         if fluent in self.numeric_fluents:
             return any(
-                c["entity"] == entity
+                "pair" not in c
+                and c["entity"] == entity
                 and c["fluent"] == fluent
                 and "from" in c
                 and (
@@ -520,22 +658,39 @@ class Oracle:
                 for c in event["changes"]
             )
         if not self.symbols[fluent]["derived"]:
-            return any(c["entity"] == entity and c["fluent"] == fluent for c in event["changes"])
+            return any(
+                "pair" not in c and c["entity"] == entity and c["fluent"] == fluent
+                for c in event["changes"]
+            )
         before = self.states(scene)[time - 1]
         numeric_before = self.numerics(scene)[time - 1]
+        pairs_before = self.pairs_at(scene, time)
         after = {e: set(v) for e, v in before.items()}
         numeric_after = {e: dict(v) for e, v in numeric_before.items()}
+        pairs_after = {f: set(v) for f, v in pairs_before.items()}
         for change in event["changes"]:
-            if "from" in change:
+            if "pair" in change:
+                # a pair change (stage c4a): both directions of a symmetric pair; a move's two
+                # changes delete the old place and add the new one
+                for fluent_label, first, second, to in self._recorded_pair_changes(
+                    {"changes": [change]}
+                ):
+                    if to:
+                        pairs_after[fluent_label].add((first, second))
+                    else:
+                        pairs_after[fluent_label].discard((first, second))
+            elif "from" in change:
                 numeric_after[change["entity"]][change["fluent"]] = float(change["to"])
             elif change["to"]:
                 after[change["entity"]].add(change["fluent"])
             else:
                 after[change["entity"]].discard(change["fluent"])
         after_state = {e: frozenset(v) for e, v in after.items()}
-        self.brute.with_numeric(numeric_before)
+        self.brute.with_numeric(numeric_before).with_pairs(pairs_before)
         was = self.brute.fluent(fluent, entity, before)
-        self.brute.with_numeric(numeric_after)
+        self.brute.with_numeric(numeric_after).with_pairs(
+            {f: frozenset(v) for f, v in pairs_after.items()}
+        )
         return was != self.brute.fluent(fluent, entity, after_state)
 
     def state(self, form: dict[str, Any], scene: dict[str, Any]) -> bool:
@@ -594,9 +749,11 @@ class Oracle:
         for some event type below the category."""
         binding = {"agent": agent, **({"patient": patient} if patient is not None else {})}
         return any(
-            self.brute.legal(BruteEvent(event_type, binding), state, numeric)
+            self.brute.legal(BruteEvent(event_type, binding), state, numeric, pairs)
             for event_type in self.leaves_below(label)
-            for state, numeric in zip(self.states(scene), self.numerics(scene), strict=True)
+            for state, numeric, pairs in zip(
+                self.states(scene), self.numerics(scene), self.pairs_at(scene), strict=True
+            )
         )
 
     def matching(self, form: dict[str, Any], scene: dict[str, Any]) -> list[dict]:
@@ -632,11 +789,20 @@ class Oracle:
         out (stage b1): it holds only when its condition held, so it makes no unconditional
         causal statement true. A numeric effect (an ``amount``) and a numeric threshold literal
         (a ``threshold``) are left out too (stage b2): no statement of this stage is about
-        them."""
+        them. A pair effect and a pair literal (a ``pair_fluent``) are left out (stage c4a):
+        the statements with pair literals are stage c5a's."""
         record = self.event_types[event_type]
         if kind == "effect":
-            return [e for e in record["effects"] if not e.get("condition") and "amount" not in e]
-        return [lit for lit in record["precondition"]["literals"] if "threshold" not in lit]
+            return [
+                e
+                for e in record["effects"]
+                if not e.get("condition") and "amount" not in e and e.get("kind") != "pair"
+            ]
+        return [
+            lit
+            for lit in record["precondition"]["literals"]
+            if "threshold" not in lit and "pair_fluent" not in lit
+        ]
 
     def causal(self, form: dict[str, Any]) -> bool | None:
         """Whether a causal statement is true: every event type below its event type (itself,
@@ -667,7 +833,8 @@ class Oracle:
             record = self.event_types[label]
             if predicate["kind"] == "precondition":
                 found = any(
-                    lit["role"] == role
+                    "pair_fluent" not in lit
+                    and lit["role"] == role
                     and lit["fluent"] == fluent
                     and "threshold" not in lit
                     and lit["value"] == value
@@ -714,14 +881,16 @@ class Oracle:
         direction: str | None,
         condition: set[tuple],
     ) -> bool:
-        if effect["role"] != role or effect["fluent"] != fluent:
+        if effect.get("kind") == "pair" or effect["role"] != role or effect["fluent"] != fluent:
             return False
+        literals = (effect.get("condition") or {}).get("literals", [])
+        if any(lit["kind"].startswith("pair") for lit in literals):
+            return False  # a pair condition makes no statement in phase (c) (WM.59)
         if "amount" in effect:
             if direction is None or (effect["operator"] == "+=") != (direction == "raises"):
                 return False
         elif direction is not None or effect["value"] != value:
             return False
-        literals = (effect.get("condition") or {}).get("literals", [])
         return {self._record_literal_key(lit) for lit in literals} == condition
 
     def condition_held(self, scene: dict[str, Any], event: dict[str, Any], condition) -> bool:
@@ -768,7 +937,8 @@ class Oracle:
                     seen = True
                     if direction is not None:
                         recorded = any(
-                            c["entity"] == entity
+                            "pair" not in c
+                            and c["entity"] == entity
                             and c["fluent"] == predicate["label"]
                             and "from" in c
                             and ((float(c["to"]) > float(c["from"])) == (direction == "raises"))

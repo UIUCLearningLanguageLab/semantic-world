@@ -2,8 +2,8 @@
 
 One test compares the figures of the tiny world and corpus, regenerated in memory into a
 temporary folder, with the snapshot (the fast tier), and one the figures of the default world and
-corpus (the slow tier); the ``tiny_full``, ``default_full``, and ``tiny_pairs`` worlds (stage
-c2b) are compared the same way, without a corpus. The snapshot is rewritten on purpose by
+corpus (the slow tier); the ``tiny_pairs`` (stage c2b) and ``tiny_place_chain`` (stage c3a)
+worlds are compared the same way, without a corpus. The snapshot is rewritten on purpose by
 ``python -m semantic_world.figures snapshot``, which reads ``runs/`` and prints what moved; the
 tests never read ``runs/``. The baselines of the off settings in the same file are checked by
 ``tests/world/test_world_off_settings.py``.
@@ -37,8 +37,6 @@ NAMES = ["tiny", pytest.param("default", marks=SLOW)]
 WORLD_NAMES = [
     "tiny",
     pytest.param("default", marks=SLOW),
-    "tiny_full",
-    pytest.param("default_full", marks=SLOW),
     "tiny_pairs",
     "tiny_place_chain",
 ]

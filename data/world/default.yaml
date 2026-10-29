@@ -62,24 +62,24 @@ event_types:
 
 places:                                       # the places (stage c1): a second taxonomy run; null turns places off
   taxonomy: {config: data/taxonomy/places_default.yaml, seed: null}   # a taxonomy configuration with labels.kind: place; null: the seed of the stream world:places
-  habitat_strength: 1.0                       # the weight of an entity's capacities at a place in its initial place (stage c3; 0: uniform); default_full.yaml sets 2 until stage c4 moves the phase (c) settings here (WM.63, WM.67)
+  habitat_strength: 2                         # the weight of an entity's capacities at a place in its initial place, (1 + a(x, q)) ^ 2 (stage c3; 0: uniform); 2 since the stage c3b follow-up of October 28, 2026, with the density band below, so that the habitats are not flat (WM.67; in default.yaml since stage c4a, WM.63)
 
-place_event_types:                            # the place event types (stage c1: requirements only; their moves and acts come in stage c3)
+place_event_types:                            # the place event types (stage c1: their requirements; stage c3b: each a drawn move or act at a place)
   count: 4
   move_share: 0.5                             # the share that are moves (stage c3)
   constraints: {1: 0.6, 2: 0.4}               # weights over the number of constraints of a requirement
   constraint_families: {agent: 1, patient: 1, cross: 1, key_lock: 1}   # the comparison family (an entity scalar against a place scalar) is off by default
   rules: {}                                   # overrides of the taxonomy's rules settings for the constraints
-  density: null                               # the density band [low, high] of a drawn requirement over the bindings of an entity and a place (WM.67): outside it the requirement is drawn again, as a degenerate one is; null turns the band off; default_full.yaml sets [0.05, 0.5] until stage c4
+  density: [0.05, 0.5]                        # the density band [low, high] of a drawn requirement over the bindings of an entity and a place (WM.67): outside it the requirement is drawn again, as a degenerate one is; null turns the band off
 
-pair_fluents:                                 # the pair fluents between entities (stage c2b); count 0 until stage c4 moves the phase (c) settings here from default_full.yaml (Jon's ruling WM.63)
-  count: 0                                    # the specification's default is 4 (default_full.yaml); with 0 nothing is drawn, and the world is the world of stage c2a
-  locations: 0                                # location fluents come in stage c3; the specification's default of 1 waits for them
+pair_fluents:                                 # the pair fluents (stage c2b), in default.yaml since stage c4a (Jon's ruling WM.63); count 0 and locations 0 give the world without them
+  count: 4                                    # the pair fluents between entities, PAIRFL.1 to PAIRFL.4
+  locations: 1                                # the location fluent, PAIRFL.5 (stage c3b): general, functional, and total, from entities to places; 0 without places
   symmetry: {symmetric: 1, asymmetric: 1, general: 1}   # weights over a pair fluent's symmetry
   functional_rate: 0.25                       # the probability that a pair fluent is functional (at most one partner in each row)
   initial_rates: [0.0, 0.05, 0.2]             # each pair fluent's initial rate is drawn from this list
   literal_kinds: {pair: 0.6, same: 0.1, some: 0.3}   # weights over the kind of a drawn pair literal: a pair, SAME, or SOME and SOMEOF
-  same_rules: 2                               # two-place event types that must require SAME on a location fluent (stage c3; nothing without location fluents)
+  same_rules: 2                               # two-place event types that must require SAME on a location fluent (stage c3b; nothing without location fluents)
   derived_rules: 1                            # derived fluents whose rule must read a SOME or SOMEOF literal
   rule_weight: 1.0                            # the weight of a SOME or SOMEOF literal in the input pool of the other derived fluents' rules
   fluents: {}                                 # per-fluent overrides, PAIRFL.<n>: {symmetry, functional, initial_rate}

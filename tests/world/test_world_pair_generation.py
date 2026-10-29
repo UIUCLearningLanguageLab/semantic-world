@@ -2,9 +2,9 @@
 "Preconditions", "Effects", "Conditions (F5)", "Derived fluents", "World statistics",
 "Configuration", and "Determinism", read under Jon's ruling WM.63).
 
-The worlds of the stage are ``data/world/tiny_full.yaml`` (the fast tier) and
-``data/world/default_full.yaml`` (the slow tier): the tiny and default settings plus the pair
-settings of the specification, until stage c4 moves them into ``tiny.yaml`` and ``default.yaml``.
+The worlds of the stage are ``data/world/tiny.yaml`` (the fast tier) and
+``data/world/default.yaml`` (the slow tier), which carry the pair settings of the specification
+since stage c4a (until then they lived in ``tiny_full.yaml`` and ``default_full.yaml``, WM.63).
 Every test checks a property: the rules of the specification on the drawn literals, effects,
 and conditions; a rate against a bound stated from the configured share and a sampling margin;
 the off settings against the worlds without pair fluents; and the runtime against the
@@ -90,7 +90,7 @@ C2A_TINY_PAIRS_IDENTITY = "7585db2f22a8e41b0990d73bad462150d282e2da49a2cf4352b52
 leave as it is (WM.63)."""
 RANDOM_STATES = 1000
 SEEDS = (1, 2, 3, 4, 5)
-TINY_FULL_SEEDS = (1, 2, 3, 4, 5, 8, 10, 13, 15, 17, 18, 19, 20)
+TINY_SEEDS = (1, 2, 3, 4, 5, 8, 10, 13, 15, 17, 18, 19, 20)
 """Seeds on which the tiny world defines: on the others the tiny place taxonomy cannot place a
 superordinate within its similarity bound (the tiny world's own limit, the same with and without
 pair fluents)."""
@@ -134,12 +134,11 @@ FORCED_PROFILES = {
         },
     }
 }
-"""Overrides that give the tiny_full world an asymmetric functional and a symmetric functional
-pair fluent, so that the compiled literals, the ``SAME`` rule, and the adds that keep no
-condition are exercised in the fast tier whatever seed 1 draws; and no location fluent (since
-stage c3b ``tiny_full.yaml`` has one), so that the forced worlds test the pair fluents between
-entities alone, as this file does, and the location dynamics are tested in
-``test_world_location_generation.py``."""
+"""Overrides that give the tiny world an asymmetric functional and a symmetric functional pair
+fluent, so that the compiled literals, the ``SAME`` rule, and the adds that keep no condition
+are exercised in the fast tier whatever seed 1 draws; and no location fluent (``tiny.yaml`` has
+one), so that the forced worlds test the pair fluents between entities alone, as this file does,
+and the location dynamics are tested in ``test_world_location_generation.py``."""
 FULL_SHARES = {
     "event_types": {
         "preconditions": {"pair_share": 1.0},
@@ -149,19 +148,22 @@ FULL_SHARES = {
 
 
 @pytest.fixture(scope="module")
-def tiny_full() -> WorldResult:
-    return define(load_config(DATA / "tiny_full.yaml"))
-
-
-@pytest.fixture(scope="module")
 def tiny() -> WorldResult:
     return define(load_config(DATA / "tiny.yaml"))
 
 
 @pytest.fixture(scope="module")
+def without() -> WorldResult:
+    """The tiny world with the pair fluents off: no pair fluent between entities and no location
+    fluent (the density band of the place requirements stays, so this is the baseline
+    ``pair_fluents_off`` of the snapshot, not the tiny world of stage c2a)."""
+    return _world("tiny", pair_fluents={"count": 0, "locations": 0})
+
+
+@pytest.fixture(scope="module")
 def forced() -> WorldResult:
-    """tiny_full with forced profiles and every share at 1."""
-    return _world("tiny_full", None, FORCED_PROFILES, FULL_SHARES)
+    """The tiny world with forced profiles and every share at 1."""
+    return _world("tiny", None, FORCED_PROFILES, FULL_SHARES)
 
 
 def _performable(definition: RuntimeDefinition) -> list[str]:
@@ -177,7 +179,7 @@ def _random_state(definition: RuntimeDefinition, rng: np.random.Generator) -> St
     )
     pairs = []
     for fluent in definition.pair_fluents:
-        if fluent.total:  # a location fluent (stage c3b): every entity at a uniform place
+        if fluent.total:  # a location fluent: every entity at a uniform place
             matrix = np.zeros((shape[0], definition.place_count), dtype=bool)
             matrix[np.arange(shape[0]), rng.integers(0, definition.place_count, size=shape[0])] = (
                 True
@@ -209,7 +211,7 @@ def _brute_pairs(definition: RuntimeDefinition, state: State) -> dict[str, froze
     labels = definition.entity_labels
     return {
         fluent.label: frozenset(
-            # a location fluent's second argument is a place (stage c3b)
+            # a location fluent's second argument is a place
             (labels[int(i)], (definition.place_labels if fluent.total else labels)[int(j)])
             for i, j in zip(*np.nonzero(matrix), strict=True)
         )
@@ -218,7 +220,7 @@ def _brute_pairs(definition: RuntimeDefinition, state: State) -> dict[str, froze
 
 
 def _labels(definition: RuntimeDefinition, label: str, binding: tuple[int, ...]) -> dict:
-    # a place event's patient is a place (stage c3b: tiny_full has a location fluent)
+    # a place event's patient is a place (the tiny world has a location fluent)
     return Event(label, binding).binding_labels(definition)
 
 
@@ -238,7 +240,7 @@ def _check_acceptance(result: WorldResult) -> None:
     implied by, contradicted by, or implying another literal of it, compiled literals
     included."""
     pair_fluents = result.pair_fluents
-    # since stage c3b tiny_full has a location fluent beside the pair fluents between entities
+    # the tiny and default worlds have a location fluent beside the pair fluents between entities
     assert len(pair_fluents.between_entities) == result.config.pair_fluents.count
     assert len(pair_fluents.locations) == result.config.pair_fluents.locations
     adds = {e.fluent for et in result.event_types.leaves for e in et.effects if e.pair and e.value}
@@ -317,15 +319,17 @@ def _check_acceptance(result: WorldResult) -> None:
 
 
 def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
-    """WM.63: ``count`` 0 and ``locations`` 0 until c4 and c3; every other key, and the pair
-    shares and the pair condition weight, take the specification's defaults; ``default.yaml``
-    lists them all."""
+    """WM.63, carried out in stage c4a: the code's defaults are the specification's (``count`` 4,
+    ``locations`` 1, the pair shares and the pair condition weight, the habitat strength 2, and
+    the density band of the place requirements, WM.67), and ``default.yaml`` lists them all;
+    ``tiny.yaml`` carries 2 pair fluents between entities and the same location fluent, band,
+    and strength."""
     defaults = config_from_mapping({}, source="<test>")
     block = defaults.pair_fluents
     assert isinstance(block, PairFluentsConfig)
     assert block.resolved() == {
-        "count": 0,
-        "locations": 0,
+        "count": 4,
+        "locations": 1,
         "symmetry": {"symmetric": 1.0, "asymmetric": 1.0, "general": 1.0},
         "functional_rate": 0.25,
         "initial_rates": [0.0, 0.05, 0.2],
@@ -338,6 +342,9 @@ def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
     assert defaults.event_types.preconditions.pair_share == 0.2
     assert defaults.event_types.effects.pair_share == 0.2
     assert defaults.event_types.effects.condition_kinds["pair"] == 0.2
+    assert defaults.place_event_types is not None and defaults.places is not None
+    assert defaults.place_event_types.density == (0.05, 0.5)
+    assert defaults.places.habitat_strength == 2
     listed = load_config(DATA / "default.yaml")
     assert listed.pair_fluents == block
     assert listed.event_types.preconditions.pair_share == 0.2
@@ -345,37 +352,20 @@ def test_the_code_defaults_follow_default_yaml_and_the_specification() -> None:
     assert (
         listed.event_types.effects.condition_kinds == defaults.event_types.effects.condition_kinds
     )
-    # default_full.yaml is default.yaml with the specification's count, the location fluent,
-    # and, since the stage c3b follow-up (WM.67), the density band of the place requirements
-    # and the habitat strength 2 (and tiny_full.yaml is tiny.yaml with 2 pair fluents and the
-    # same three settings)
-    full = load_config(DATA / "default_full.yaml")
-    assert full.pair_fluents.count == 4 and full.pair_fluents.locations == 1  # stage c3b
-    assert dataclasses.replace(full.pair_fluents, count=0, locations=0) == block
-    assert full.place_event_types.density == (0.05, 0.5) and full.places.habitat_strength == 2
-    assert defaults.place_event_types.density is None and defaults.places.habitat_strength == 1
-    assert listed.place_event_types.density is None and listed.places.habitat_strength == 1
-    assert _without_phase_c(full, "default", block) == listed.resolved()
-    tiny_full = load_config(DATA / "tiny_full.yaml")
-    assert tiny_full.pair_fluents == dataclasses.replace(block, count=2, locations=1)
-    assert tiny_full.place_event_types.density == (0.05, 0.5)
-    assert tiny_full.places.habitat_strength == 2
-    assert _without_phase_c(tiny_full, "tiny", block) == load_config(DATA / "tiny.yaml").resolved()
-
-
-def _without_phase_c(full, name: str, block: PairFluentsConfig) -> dict:
-    """The resolved configuration of a full world with the phase (c) settings of WM.63 and
-    WM.67 put back to the code's defaults: the name, the ``pair_fluents`` block, the density
-    band, and the habitat strength (the four places where ``tiny_full.yaml`` and
-    ``default_full.yaml`` differ from ``tiny.yaml`` and ``default.yaml``)."""
-    resolved = full.resolved()
-    return {
-        **resolved,
-        "name": name,
-        "pair_fluents": block.resolved(),
-        "places": {**resolved["places"], "habitat_strength": 1.0},
-        "place_event_types": {**resolved["place_event_types"], "density": None},
-    }
+    assert listed.place_event_types is not None and listed.places is not None
+    assert listed.place_event_types.density == (0.05, 0.5)
+    assert listed.places.habitat_strength == 2
+    tiny = load_config(DATA / "tiny.yaml")
+    assert tiny.pair_fluents == dataclasses.replace(block, count=2, locations=1)
+    assert tiny.place_event_types is not None and tiny.places is not None
+    assert tiny.place_event_types.density == (0.05, 0.5)
+    assert tiny.places.habitat_strength == 2
+    # a world without places has no location fluent by default, and the band written null is
+    # the band off
+    no_places = config_from_mapping({"places": None}, source="<test>")
+    assert no_places.pair_fluents.locations == 0 and no_places.pair_fluents.count == 4
+    off = config_from_mapping({"place_event_types": {"density": None}}, source="<test>")
+    assert off.place_event_types is not None and off.place_event_types.density is None
 
 
 def test_the_pair_fluents_block_is_validated() -> None:
@@ -390,7 +380,7 @@ def test_the_pair_fluents_block_is_validated() -> None:
     # has fewer (fluents.count 0 turns the fluents off and leaves the quota empty)
     config = config_from_mapping({"pair_fluents": {"count": 1, "derived_rules": 5}}, source="<t>")
     assert config.pair_fluents.derived_rules == 5
-    no_fluents = _world("tiny_full", fluents={"count": 0})
+    no_fluents = _world("tiny", fluents={"count": 0})
     assert no_fluents.fluents.rules == () and len(no_fluents.pair_fluents.between_entities) == 2
     with pytest.raises(ConfigError, match="literal_kinds"):
         config_from_mapping({"pair_fluents": {"literal_kinds": {"pairs": 1}}}, source="<test>")
@@ -446,23 +436,23 @@ def test_the_three_new_streams_come_after_every_existing_stream() -> None:
 
 
 def test_profiles_are_drawn_in_label_order_and_an_override_shifts_no_other_draw(
-    tiny_full: WorldResult,
+    tiny: WorldResult,
 ) -> None:
-    between = tiny_full.pair_fluents.between_entities
+    between = tiny.pair_fluents.between_entities
     profiles = [(f.symmetry, f.functional, f.initial_rate) for f in between]
     assert tuple(f.label for f in between) == ("PAIRFL.1", "PAIRFL.2")
-    assert tiny_full.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3")  # the location
+    assert tiny.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3")  # the location
     assert all(rate in (0.0, 0.05, 0.2) for _, _, rate in profiles)
     # a third pair fluent keeps the first two (the draws are made in label order), and shifts
     # the location fluent's label (WM.54)
-    three = _world("tiny_full", pair_fluents={"count": 3})
+    three = _world("tiny", pair_fluents={"count": 3})
     assert [
         (f.symmetry, f.functional, f.initial_rate) for f in three.pair_fluents.between_entities
     ][:2] == profiles
     assert three.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4")
     # an override of PAIRFL.1 replaces its values and leaves PAIRFL.2's draws as they are
     forced = _world(
-        "tiny_full",
+        "tiny",
         pair_fluents={
             "fluents": {
                 "PAIRFL.1": {"symmetry": "general", "functional": True, "initial_rate": 0.05}
@@ -473,7 +463,7 @@ def test_profiles_are_drawn_in_label_order_and_an_override_shifts_no_other_draw(
     assert (first.symmetry, first.functional, first.initial_rate) == ("general", True, 0.05)
     assert (second.symmetry, second.functional, second.initial_rate) == profiles[1]
     # a partial override replaces that key alone
-    partial = _world("tiny_full", pair_fluents={"fluents": {"PAIRFL.1": {"initial_rate": 0.05}}})
+    partial = _world("tiny", pair_fluents={"fluents": {"PAIRFL.1": {"initial_rate": 0.05}}})
     first = partial.pair_fluents.fluents[0]
     assert (first.symmetry, first.functional) == profiles[0][:2] and first.initial_rate == 0.05
     # the initial pairs come from world:pair_initial by the c2a procedure (the location fluent's
@@ -502,40 +492,36 @@ def test_an_event_file_entry_must_be_among_the_configured_pair_fluents(tmp_path:
         _world("tiny_pairs", pair_fluents={"count": 0})
 
 
-def test_every_configuration_without_pair_fluents_is_the_world_of_stage_c2a(
-    tiny: WorldResult, tiny_full: WorldResult
+def test_a_configuration_with_the_pair_fluents_off_draws_nothing_from_the_pair_streams(
+    tiny: WorldResult, without: WorldResult
 ) -> None:
-    """A world whose configuration draws no pair fluent draws nothing from the new streams;
-    the snapshot's identities and baselines hold the rest."""
-    assert "pair_fluents" not in tiny.stats
-    assert "pair_changes_per_event" not in tiny.stats["episodes"]
-    assert tiny.event_types.pair_stats == {}
-    assert not any(rule.pair_inputs for rule in tiny.fluents.rules)
-    assert define(load_config(DATA / "tiny_chain.yaml")).pair_fluents.labels == ()
-    # tiny_full with count 0 and locations 0 was the tiny world until the stage c3b follow-up
-    # (WM.67): it keeps the density band of the place requirements and the habitat strength
-    # (the band changes the place draws, the strength draws nothing without location
-    # fluents), so the tiny world is tiny_full with the band off too
-    off = _world(
-        "tiny_full",
-        pair_fluents={"count": 0, "locations": 0},
-        place_event_types={"density": None},
-    )
-    assert off.rule_set_id == tiny.rule_set_id
-    banded = _world("tiny_full", pair_fluents={"count": 0, "locations": 0})
-    assert banded.rule_set_id != tiny.rule_set_id
-    assert baseline_identity("tiny_full", "pair_fluents_off") == banded.rule_set_id
-    assert tiny_full.rule_set_id != tiny.rule_set_id
+    """A world whose configuration turns the pair fluents off (``count`` 0, ``locations`` 0)
+    draws nothing from the pair streams and writes none of the pair keys; its identity is the
+    snapshot's baseline ``pair_fluents_off`` (the tiny world of stage c2a with the density band
+    of the place requirements, which stays, WM.67). Every configuration of ``data/world/`` has
+    pair fluents since stage c4a, the chain example's included, which takes the code's
+    defaults."""
+    assert "pair_fluents" not in without.stats
+    assert "pair_changes_per_event" not in without.stats["episodes"]
+    assert without.event_types.pair_stats == {}
+    assert not any(rule.pair_inputs for rule in without.fluents.rules)
+    assert without.pair_fluents.labels == ()
+    assert baseline_identity("tiny", "pair_fluents_off") == without.rule_set_id
+    assert tiny.rule_set_id != without.rule_set_id
+    chain = define(load_config(DATA / "tiny_chain.yaml"))
+    assert chain.pair_fluents.labels == ("PAIRFL.1", "PAIRFL.2", "PAIRFL.3", "PAIRFL.4", "PAIRFL.5")
+    chain_off = _world("tiny_chain", pair_fluents={"count": 0, "locations": 0})
+    assert chain_off.pair_fluents.labels == () and "pair_fluents" not in chain_off.stats
 
 
 # ---------------------------------------------------------------------------------------------
-# Acceptance on tiny_full and default_full
+# Acceptance on tiny and default
 # ---------------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("seed", TINY_FULL_SEEDS)
-def test_tiny_full_meets_the_acceptance_properties_on_every_seed(seed: int) -> None:
-    _check_acceptance(_world("tiny_full", seed=seed))
+@pytest.mark.parametrize("seed", TINY_SEEDS)
+def test_tiny_meets_the_acceptance_properties_on_every_seed(seed: int) -> None:
+    _check_acceptance(_world("tiny", seed=seed))
 
 
 def test_the_forced_profiles_exercise_the_compiled_literals_and_the_same_rule(
@@ -574,7 +560,7 @@ def test_same_literals_are_drawn_only_on_functional_pair_fluents_that_are_not_sy
     ``SAME`` on the asymmetric functional pair fluent, and a one-place event type, which draws
     ``some`` literals alone, gets none."""
     result = _world(
-        "tiny_full",
+        "tiny",
         None,
         FORCED_PROFILES,
         FULL_SHARES,
@@ -593,7 +579,7 @@ def test_same_literals_are_drawn_only_on_functional_pair_fluents_that_are_not_sy
         assert not any(isinstance(lit, PairLiteral) for lit in et.precondition)
     # with the weight on some alone, one-place event types read SOME and SOMEOF of the agent
     some = _world(
-        "tiny_full",
+        "tiny",
         None,
         FULL_SHARES,
         # the quota same_rules (stage c3b) would add SAME on the location fluent
@@ -616,8 +602,8 @@ def test_same_literals_are_drawn_only_on_functional_pair_fluents_that_are_not_sy
 
 @SLOW
 @pytest.mark.parametrize("seed", SEEDS)
-def test_default_full_meets_the_acceptance_properties_on_every_seed(seed: int) -> None:
-    result = _world("default_full", seed=seed)
+def test_default_meets_the_acceptance_properties_on_every_seed(seed: int) -> None:
+    result = _world("default", seed=seed)
     _check_acceptance(result)
     assert result.stats["pair_fluents"]["precondition_literals"]["total"] > 0
 
@@ -655,14 +641,14 @@ def _share_check(results: list[WorldResult], share: float) -> None:
         )
 
 
-def test_the_pair_shares_hold_within_a_sampling_margin_on_tiny_full() -> None:
-    results = [_world("tiny_full", seed=seed) for seed in TINY_FULL_SEEDS]
+def test_the_pair_shares_hold_within_a_sampling_margin_on_tiny() -> None:
+    results = [_world("tiny", seed=seed) for seed in TINY_SEEDS]
     _share_check(results, 0.2)
 
 
 @SLOW
-def test_the_pair_shares_hold_within_a_sampling_margin_on_default_full() -> None:
-    _share_check([_world("default_full", seed=seed) for seed in SEEDS], 0.2)
+def test_the_pair_shares_hold_within_a_sampling_margin_on_default() -> None:
+    _share_check([_world("default", seed=seed) for seed in SEEDS], 0.2)
 
 
 @pytest.mark.parametrize("seed", (1, 2, 3))
@@ -675,9 +661,9 @@ def test_with_the_pair_dynamics_off_the_event_types_are_those_of_the_world_witho
     ``pair_fluents.count`` 0, record for record. Both worlds are taken without the location
     fluent of stage c3b, whose dynamics (the drawn moves and acts, the quota ``same_rules``)
     are location dynamics, tested in ``test_world_location_generation.py``."""
-    without = _world("tiny_full", seed=seed, pair_fluents={"count": 0, "locations": 0})
+    without = _world("tiny", seed=seed, pair_fluents={"count": 0, "locations": 0})
     off = _world(
-        "tiny_full",
+        "tiny",
         seed=seed,
         pair_fluents={"rule_weight": 0, "derived_rules": 0, "locations": 0},
         event_types={
@@ -804,7 +790,7 @@ def test_dead_deletes_are_redrawn_and_implied_literals_too() -> None:
     drawn again, an inherited one dropped, counted), and keeps a pair fluent that never holds
     as it is. With the precondition share at 1 the implied literals are counted too."""
     result = _world(
-        "tiny_full",
+        "tiny",
         None,
         FULL_SHARES,
         {"pair_fluents": {"initial_rates": [0.0]}},
@@ -838,7 +824,7 @@ def test_pair_conditions_are_drawn_from_their_stream_and_obey_the_rules(
     # (the shares at 0) are those of the world without pair fluents (the test above); here,
     # that no condition holds a pair literal
     none = _world(
-        "tiny_full",
+        "tiny",
         None,
         FORCED_PROFILES,
         event_types={
@@ -929,8 +915,8 @@ def test_a_never_legal_redraw_draws_pair_replacements_from_its_own_part(
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-def test_the_quota_of_derived_rules_holds_on_every_seed_of_tiny_full(seed: int) -> None:
-    result = _world("tiny_full", seed=seed)
+def test_the_quota_of_derived_rules_holds_on_every_seed_of_tiny(seed: int) -> None:
+    result = _world("tiny", seed=seed)
     reading = [rule for rule in result.fluents.rules if rule.pair_inputs]
     assert len(reading) >= result.config.pair_fluents.derived_rules == 1
     for rule in reading:
@@ -945,11 +931,11 @@ def test_the_quota_of_derived_rules_holds_on_every_seed_of_tiny_full(seed: int) 
         assert set(rule.pair_inputs) <= kinds
 
 
-def test_derived_initial_values_read_the_initial_pairs(tiny_full: WorldResult) -> None:
+def test_derived_initial_values_read_the_initial_pairs(tiny: WorldResult) -> None:
     derived_initial = derived_initial_values(
-        tiny_full.fluents, tiny_full.taxonomy, tiny_full.numeric, tiny_full.pair_fluents
+        tiny.fluents, tiny.taxonomy, tiny.numeric, tiny.pair_fluents
     )
-    runtime = tiny_full.definition.runtime()
+    runtime = tiny.definition.runtime()
     true_fluents = derive(runtime, initial_state(runtime)).true_fluents(runtime)
     for label, column in derived_initial.items():
         for i, entity in enumerate(runtime.entity_labels):
@@ -961,13 +947,13 @@ def test_the_pool_leaves_the_pair_literals_out_at_weight_0_without_the_quota() -
     pair fluents (the pool reads the stream as before); with the quota alone, the quota rule
     reads a pair literal and the others draw from the old pool; with the weight alone, a rule
     may read one."""
-    without = _world("tiny_full", pair_fluents={"count": 0})
-    off = _world("tiny_full", pair_fluents={"rule_weight": 0, "derived_rules": 0})
+    without = _world("tiny", pair_fluents={"count": 0})
+    off = _world("tiny", pair_fluents={"rule_weight": 0, "derived_rules": 0})
     assert [r.record() for r in off.fluents.rules] == [r.record() for r in without.fluents.rules]
-    quota = _world("tiny_full", pair_fluents={"rule_weight": 0, "derived_rules": 1})
+    quota = _world("tiny", pair_fluents={"rule_weight": 0, "derived_rules": 1})
     assert quota.fluents.rules[0].pair_inputs
     heavy = _world(
-        "tiny_full", fluents={"count": 8}, pair_fluents={"rule_weight": 100, "derived_rules": 0}
+        "tiny", fluents={"count": 8}, pair_fluents={"rule_weight": 100, "derived_rules": 0}
     )
     assert any(rule.pair_inputs for rule in heavy.fluents.rules)
 
@@ -977,12 +963,12 @@ def test_the_pool_leaves_the_pair_literals_out_at_weight_0_without_the_quota() -
 # ---------------------------------------------------------------------------------------------
 
 
-def test_legal_and_derive_agree_with_brute_force_in_random_states_of_tiny_full(
-    tiny_full: WorldResult,
+def test_legal_and_derive_agree_with_brute_force_in_random_states_of_tiny(
+    tiny: WorldResult,
 ) -> None:
-    runtime = tiny_full.definition.runtime()
-    record, entities, _ = fixture_inputs(tiny_full.definition)
-    brute = BruteForce(record, entities, fixture_places(tiny_full.definition) or ())
+    runtime = tiny.definition.runtime()
+    record, entities, _ = fixture_inputs(tiny.definition)
+    brute = BruteForce(record, entities, fixture_places(tiny.definition) or ())
     rng = np.random.default_rng(20261021)
     legal_somewhere = {label: 0 for label in _performable(runtime)}
     for _ in range(RANDOM_STATES):
@@ -1001,18 +987,18 @@ def test_legal_and_derive_agree_with_brute_force_in_random_states_of_tiny_full(
 
 
 def test_no_profile_is_broken_in_the_statistics_episodes_and_replay_reproduces_every_change(
-    tiny_full: WorldResult,
+    tiny: WorldResult,
 ) -> None:
-    definition = tiny_full.definition.runtime()
+    definition = tiny.definition.runtime()
     generator = EpisodeGenerator(
         definition,
-        Relatedness.from_statics(tiny_full.statics, definition),
+        Relatedness.from_statics(tiny.statics, definition),
         EpisodeSettings(),
         record_legal=True,
     )
     labels = definition.entity_labels
     changes = 0
-    for history in generator.run(tiny_full.config.seed, STATS_EPISODES, STATS_STREAM):
+    for history in generator.run(tiny.config.seed, STATS_EPISODES, STATS_STREAM):
         assert history.initial_pairs is not None
         states = replay(definition, history)
         for state in states:
@@ -1035,7 +1021,7 @@ def test_no_profile_is_broken_in_the_statistics_episodes_and_replay_reproduces_e
             assert changed == recorded
         assert History.from_json(json.loads(json.dumps(history.to_json()))) == history
     assert changes > 0
-    assert tiny_full.stats["episodes"]["pair_changes_per_event"] > 0
+    assert tiny.stats["episodes"]["pair_changes_per_event"] > 0
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1044,9 +1030,9 @@ def test_no_profile_is_broken_in_the_statistics_episodes_and_replay_reproduces_e
 
 
 def test_the_statistics_and_figures_name_the_pair_fluents_only_when_present(
-    tiny_full: WorldResult, tiny: WorldResult, tmp_path: Path
+    tiny: WorldResult, without: WorldResult, tmp_path: Path
 ) -> None:
-    block = tiny_full.stats["pair_fluents"]
+    block = tiny.stats["pair_fluents"]
     assert set(block) == {
         "count",
         "by_symmetry",
@@ -1067,77 +1053,70 @@ def test_the_statistics_and_figures_name_the_pair_fluents_only_when_present(
     }
     assert sum(block["by_symmetry"].values()) == block["count"] == 3
     assert block["between_entities"] == 2 and block["locations"] == 1
-    assert block["initial_pairs"] == sum(int(m.sum()) for m in tiny_full.pair_fluents.initial_pairs)
+    assert block["initial_pairs"] == sum(int(m.sum()) for m in tiny.pair_fluents.initial_pairs)
     literals = block["precondition_literals"]
     assert (
         literals["total"]
         == sum(literals["by_kind"].values())
         == sum(literals["by_polarity"].values())
     )
-    assert "pair_fluents" not in tiny.stats
-    full_folder = tiny_full.write(tmp_path / "tiny_full")
+    assert "pair_fluents" not in without.stats
     tiny_folder = tiny.write(tmp_path / "tiny")
-    full_figures = world_figures(full_folder)
-    assert full_figures["pair_fluents"]["count"] == 3
-    assert "3 pair fluents (2 between entities, 1 location fluent)" in full_figures["wrote_line"]
-    assert "pair_fluents" not in world_figures(tiny_folder)
-    assert "pair fluents" not in world_figures(tiny_folder)["wrote_line"]
-    written = yaml.safe_load((full_folder / "world_stats.yaml").read_text(encoding="utf-8"))
-    assert written["pair_fluents"]["fix_ups"] == tiny_full.event_types.pair_stats
+    without_folder = without.write(tmp_path / "without")
+    figures = world_figures(tiny_folder)
+    assert figures["pair_fluents"]["count"] == 3
+    assert "3 pair fluents (2 between entities, 1 location fluent)" in figures["wrote_line"]
+    assert "pair_fluents" not in world_figures(without_folder)
+    assert "pair fluents" not in world_figures(without_folder)["wrote_line"]
+    written = yaml.safe_load((tiny_folder / "world_stats.yaml").read_text(encoding="utf-8"))
+    assert written["pair_fluents"]["fix_ups"] == tiny.event_types.pair_stats
 
 
-def test_the_tiny_full_fixtures_are_committed_and_reproducible(tiny_full: WorldResult) -> None:
+def test_the_tiny_fixtures_carry_the_pair_fluents_and_are_reproducible(tiny: WorldResult) -> None:
+    """Since stage c4a the committed tiny fixtures are those of a world with pair fluents and a
+    location fluent (``test_world_fixtures.py`` checks them byte for byte against
+    ``make-fixtures``); no ``tiny_full`` fixture remains."""
     names = {path.stem for path in fixture_paths(FIXTURES_DIR)}
-    assert {
-        "tiny_full_seed1",
-        "tiny_full_seed2",
-        "tiny_full_seed3",
-        "tiny_full_seed4",
-        "tiny_full_illegal",
-        "tiny_full_interference",
-    } <= names
-    for fixture in world_fixtures(tiny_full.definition, "tiny_full"):
+    assert not any(name.startswith("tiny_full") for name in names)
+    for fixture in world_fixtures(tiny.definition, "tiny"):
         path = FIXTURES_DIR / f"{fixture['name']}.json"
         assert (
             path.read_text(encoding="utf-8") == to_json(fixture, indent=1, sort_keys=False) + "\n"
         ), path
-        assert fixture["rule_set_id"] == tiny_full.rule_set_id
+        assert fixture["rule_set_id"] == tiny.rule_set_id
         assert fixture["initial_pairs"] or any(step["pairs"] for step in fixture["steps"])
+        assert fixture["initial_places"]
     for path in fixture_paths(FIXTURES_DIR):
-        if path.stem.startswith("tiny_full_"):
-            assert read_fixture(path)["rule_set_id"] == tiny_full.rule_set_id
+        if path.stem.startswith("tiny_"):
+            assert read_fixture(path)["rule_set_id"] == tiny.rule_set_id
 
 
 # ---------------------------------------------------------------------------------------------
-# The default world of stage c2a, unchanged
+# The default world without its pair fluents
 # ---------------------------------------------------------------------------------------------
 
 
 @SLOW
-def test_default_full_with_count_0_is_the_default_world_of_stage_c2a() -> None:
-    """With the pair fluents off and the density band of the place requirements off too (the
-    stage c3b follow-up, WM.67: the band stays in the baseline ``pair_fluents_off``, which is
-    therefore the default world with the band's place requirements, a world of its own)."""
-    default = define(load_config(DATA / "default.yaml"))
-    assert "pair_fluents" not in default.stats
-    off = _world(
-        "default_full",
-        pair_fluents={"count": 0, "locations": 0},
-        place_event_types={"density": None},
-    )
-    assert off.rule_set_id == default.rule_set_id
-    banded = baseline_identity("default_full", "pair_fluents_off")
-    assert banded != default.rule_set_id
-    assert banded == _world("default_full", pair_fluents={"count": 0, "locations": 0}).rule_set_id
+def test_default_with_the_pair_fluents_off_draws_nothing_from_the_pair_streams() -> None:
+    """With ``count`` 0 and ``locations`` 0 the default world writes no pair key and is the
+    snapshot's baseline ``pair_fluents_off`` (the default world of stage c2a with the density
+    band of the place requirements, which stays, WM.67, and with the Boolean rule of WM.70)."""
+    off = _world("default", pair_fluents={"count": 0, "locations": 0})
+    assert "pair_fluents" not in off.stats and off.pair_fluents.labels == ()
+    assert off.event_types.pair_stats == {}
+    assert baseline_identity("default", "pair_fluents_off") == off.rule_set_id
+    assert off.rule_set_id != define(load_config(DATA / "default.yaml")).rule_set_id
 
 
 @SLOW
-def test_with_the_pair_dynamics_off_default_full_has_the_default_event_types() -> None:
-    """Without the location fluent of stage c3b, whose place dynamics the default world lacks
+def test_with_the_pair_dynamics_off_default_has_the_event_types_of_the_world_without_pairs() -> (
+    None
+):
+    """Without the location fluent of stage c3b, whose place dynamics are location dynamics
     (``test_world_location_generation.py`` tests them)."""
-    default = define(load_config(DATA / "default.yaml"))
+    default = _world("default", pair_fluents={"count": 0, "locations": 0})
     off = _world(
-        "default_full",
+        "default",
         pair_fluents={"rule_weight": 0, "derived_rules": 0, "locations": 0},
         event_types={
             "preconditions": {"pair_share": 0},
@@ -1248,8 +1227,8 @@ def test_the_single_keys_give_the_verdicts_of_the_expanded_sets(forced: WorldRes
     assert compared > 1000
 
 
-def test_apply_shares_the_pair_matrices_no_effect_wrote(tiny_full: WorldResult) -> None:
-    runtime = tiny_full.definition.runtime()
+def test_apply_shares_the_pair_matrices_no_effect_wrote(tiny: WorldResult) -> None:
+    runtime = tiny.definition.runtime()
     state = initial_state(runtime)
     after = apply(runtime, state, [])
     for before_matrix, after_matrix in zip(state.pairs, after.pairs, strict=True):

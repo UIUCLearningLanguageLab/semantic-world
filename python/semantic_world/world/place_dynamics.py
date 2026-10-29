@@ -77,6 +77,7 @@ from semantic_world.world.event_file import EventFile, ExplicitPlaceEventType
 from semantic_world.world.event_types import (
     compiled_literals,
     condition_keys,
+    dead_boolean_values,
     fixed_condition_problem,
     fixed_pair_literals,
     implied_conflict,
@@ -112,6 +113,7 @@ class _Checker:
         signs: set[tuple[str, int]],
         adds: set[str],
         deletes: set[str],
+        dead: set[tuple[str, bool]] = frozenset(),  # type: ignore[assignment]
     ) -> None:
         self.fluents = fluents
         self.numeric = numeric
@@ -120,6 +122,9 @@ class _Checker:
         self.signs = signs
         self.adds = adds
         self.deletes = deletes
+        self.dead = dead
+        """The Boolean values an effect can never change (WM.70, stage c4a), checked on the
+        drawn place event types alone; empty for an explicit entry."""
 
     def literal_ok(self, lit: AnyLiteral, fail, location: str | None, kind: str | None) -> None:
         """A precondition literal of a place event type."""
@@ -215,6 +220,13 @@ class _Checker:
                     fail(f"{effect.text} writes unknown fluent {effect.fluent}")
                 if self.fluents[effect.fluent].derived:
                     fail(f"{effect.fluent} is a derived fluent; effects write base fluents only")
+                if (effect.fluent, bool(effect.value)) in self.dead:
+                    fail(
+                        f"{effect.text} can never change the state: the initial rate of "
+                        f"{effect.fluent} makes every entity "
+                        f"{'true' if effect.value else 'false'}, and no effect sets it "
+                        f"{'false' if effect.value else 'true'} (WM.70)"
+                    )
             key = (effect.role, effect.fluent)
         if key in seen:
             fail(
@@ -428,9 +440,10 @@ def check_place_dynamics(
     (exactly one add on a location fluent, of the agent at the patient, unconditional, with
     its compiled ``move`` literal) or an act (its location literal, positive, and no location
     effect); every further literal reads the agent, or ``SOMEOF`` of the place, and is
-    achievable; every effect writes the agent's base fluents; no literal twice; no condition
-    whose value the precondition fixes under ``fixed_pair_literals`` (WM.68); and a place event
-    type without dynamics has an empty precondition and no effects."""
+    achievable; every effect writes the agent's base fluents, and (WM.70, stage c4a) no drawn
+    Boolean effect can never change the state; no literal twice; no condition whose value the
+    precondition fixes under ``fixed_pair_literals`` (WM.68); and a place event type without
+    dynamics has an empty precondition and no effects."""
     if places is None:
         return
     numeric = numeric if numeric is not None else empty_numeric(0)
@@ -440,10 +453,13 @@ def check_place_dynamics(
     achievable = _achievable(fluents, initial_present, all_effects)
     adds = {e.fluent for e in all_effects if e.pair and e.value} | set(locations)
     deletes = {e.fluent for e in all_effects if e.pair and not e.value}
+    dead = dead_boolean_values(fluents, all_effects)
     checker = _Checker(fluents, numeric, pair_fluents, achievable, signs, adds, deletes)
     for et in places.event_types:
         if not et.performable:
             continue
+        # an event file's effects are what the file says (the dead-delete rule leaves them too)
+        checker.dead = frozenset() if et.explicit else dead  # type: ignore[assignment]
 
         def fail(message: str, label: str = et.label):
             raise ValueError(f"{label}: {message}")
@@ -533,6 +549,7 @@ PLACE_DYNAMICS_STATS = (
     "acts",
     "effects_drawn",
     "effects_redrawn",
+    "effects_redrawn_dead",
     "effects_dropped_no_slot",
     "numeric_effect_replacements",
     "literals_drawn",
@@ -550,7 +567,8 @@ PLACE_DYNAMICS_STATS = (
 )
 """The counts of the drawn place dynamics (``places.dynamics`` of ``world_stats.yaml``): the
 place event types drawn, the moves and the acts among them, the effects and literals drawn and
-drawn again (a slot taken, an empty effect, an unachievable or implied literal), the Boolean
+drawn again (a slot taken, a Boolean effect that can never change the state, WM.70, counted apart
+under ``effects_redrawn_dead``, an empty effect, an unachievable or implied literal), the Boolean
 effects and literals replaced by numeric ones and the literals replaced by pair literals (the
 draws against the share, the replacements, and the ones that found no pair literal), the pair
 literal candidates drawn again, and the conditions drawn, drawn again, and dropped."""
@@ -641,8 +659,11 @@ class _PlaceDrawer:
         return Effect("agent", fluent, sign * amount)
 
     def _draw_effect(self, rng: np.random.Generator, forbidden: set[tuple]) -> Effect | None:
-        """An effect on the agent whose slot is free, or None after ``MAX_TRIES``."""
+        """An effect on the agent whose slot is free and that can change the state (WM.70: a
+        Boolean effect ``:= v`` on a fluent that can never be ``not v``, over every effect of
+        the world known so far, is drawn again), or None after ``MAX_TRIES``."""
         share = self.effects_config.numeric_share
+        dead = dead_boolean_values(self.fluents, self.effects)
         for _ in range(MAX_TRIES):
             if self.base_labels:
                 fluent = self.base_labels[int(rng.integers(len(self.base_labels)))]
@@ -654,6 +675,10 @@ class _PlaceDrawer:
                 effect = self._numeric_effect(rng)
             if (effect.role, effect.fluent) in forbidden:
                 self.stats["effects_redrawn"] += 1
+                continue
+            if not effect.numeric and (effect.fluent, bool(effect.value)) in dead:
+                self.stats["effects_redrawn"] += 1
+                self.stats["effects_redrawn_dead"] += 1
                 continue
             return effect
         return None

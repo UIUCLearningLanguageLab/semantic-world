@@ -12,7 +12,10 @@ corpus seed, its number, its seed instance, and the scene settings. Scenes are a
 world, not about the language: the generator uses every event type, with a word or without one.
 
 This module gives the planner and the truth tests what they read of a history: its events in
-time order, each with its step and its scene, what happened, and what involves an entity.
+time order, each with its step and its scene, what happened, and what involves an entity. Since
+stage c4a a history may hold place events (``SceneEvent.place``) and pair changes; the readers
+that name an event's event type or read a change's fluent skip them, because the corpus says
+nothing about pairs and places until stages c4b and c4c.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ import numpy as np
 
 from semantic_world.corpus.config import Config, ConfigError
 from semantic_world.corpus.streams import Streams
-from semantic_world.corpus.world import World
+from semantic_world.corpus.world import PLACE_EVENT_PREFIX, World
 from semantic_world.world.episodes import EpisodeGenerator, EpisodeSettings
 from semantic_world.world.history import History, HistoryEvent
 
@@ -97,13 +100,20 @@ class SceneEvent:
     step: int
     """The step the event belongs to, from 1: it takes ``TIME.<step>`` to ``TIME.<step + 1>``."""
     type: str
-    """The event type: a one-place event type, or a two-place event type (never a category)."""
+    """The event type: a one-place event type, a two-place event type (never a category), or,
+    since stage c3b, a place event type, whose patient is a place."""
     agent: str
     patient: str | None = None
 
     @property
     def transitive(self) -> bool:
         return self.patient is not None
+
+    @property
+    def place(self) -> bool:
+        """Whether the event is of a place event type (a move or an act at a place, stage c3b),
+        whose patient is a place: never narrated in stage c4a."""
+        return self.type.startswith(PLACE_EVENT_PREFIX)
 
     @property
     def key(self) -> tuple[str, str, str | None]:
@@ -206,11 +216,14 @@ class SceneGenerator:
             raise KeyError(f"unknown instance {seed!r}")
         return self.generator.episode(rng, label, self.world.instance_index[seed])
 
-    def scene(self, streams: Streams, number: int, seed: str) -> History:
+    def scene(self, streams: Streams, number: int, seed: str, attempt: int = 0) -> History:
         """Scene ``SCENE.<number>``, seeded at an instance, from its own part of the
-        ``corpus:scenes`` stream."""
+        ``corpus:scenes`` stream; a scene drawn again for a document that had nothing to say
+        (``attempt`` 1 and up, stage c4a) comes from a further part named by the attempt, so
+        that the redraw does not repeat the scene."""
         label = scene_label(number)
-        return self.generate(streams.substream("scenes", label), seed, label)
+        key = label if attempt == 0 else f"{label}.REDRAW.{attempt}"
+        return self.generate(streams.substream("scenes", key), seed, label)
 
     def relatedness(self, history: History) -> tuple[float, float]:
         """The mean thematic relatedness, and the mean taxonomic similarity, of the seed's leaf
