@@ -519,6 +519,15 @@ class World:
         one without."""
         return self.definition.event_type(label).place_kind
 
+    def move_location(self, label: str) -> str:
+        """The location fluent a move writes (stage c4c): the pair fluent of its add."""
+        record = self.definition.event_type(label)
+        return next(
+            e.fluent
+            for e in record.effects
+            if e.pair and self.is_location_fluent(e.fluent) and e.value
+        )
+
     def event_types_below(self, label: str) -> tuple[str, ...]:
         """The event types that have events and are named by a label: the label itself when it
         is an event type (a place event type included), or the leaves below it when it is a
@@ -538,6 +547,21 @@ class World:
 
     def is_location_fluent(self, label: str) -> bool:
         return label in self.location_fluents
+
+    def is_same_literal(self, label: str) -> str | None:
+        """The pair fluent of a ``SAME`` concept (``SAME.PAIRFL.5``, stage c4c): a functional
+        pair fluent, on which two entities can have the same partner (at the same place, for a
+        location fluent). None for any other label."""
+        if not label.startswith(SAME_PREFIX):
+            return None
+        fluent = label[len(SAME_PREFIX) :]
+        info = self.pair_fluent_info.get(fluent)
+        return fluent if info is not None and info.functional else None
+
+    def pair_fluent_of(self, label: str) -> str:
+        """The pair fluent that a pair state's label reads: the label itself, or the fluent of
+        a ``SAME`` concept."""
+        return self.is_same_literal(label) or label
 
     def pair_fluents_read(self) -> tuple[str, ...]:
         """The pair fluents that some precondition literal or condition literal of some event

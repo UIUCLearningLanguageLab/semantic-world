@@ -145,6 +145,7 @@ from semantic_world.corpus.histories import (
 )
 from semantic_world.corpus.world import (
     ENTITY,
+    EVERYPLACE,
     FLUENT_PREFIX,
     NUMERIC_PREFIX,
     PART_PREFIX,
@@ -1134,6 +1135,24 @@ class Truth:
             self._masks[key] = (mask, mean, sd)
         return self._masks[key]
 
+    def place_pole_mask(self, pole: str, comparison: str) -> tuple[np.ndarray, float, float]:
+        """Which places count as a place pole against a category of places (or ``EVERYPLACE``)
+        at the language's ``z`` (stage c4c, Jon's ruling 2 of WM.73), as :meth:`pole_mask` does
+        for entities, from the runtime's comparison classes of places (stage c1)."""
+        key = (pole, comparison)
+        if key not in self._masks:
+            scalar, side = self.world.pole_parts(pole)
+            column = self.world.place_scalar_column(scalar)
+            _, mean, sd = self.comparison_class(comparison, scalar)
+            if sd == 0:
+                mask = np.zeros(len(self.world.places), dtype=bool)
+            elif side == HIGH:
+                mask = column >= mean + self.z * sd
+            else:
+                mask = column <= mean - self.z * sd
+            self._masks[key] = (mask, mean, sd)
+        return self._masks[key]
+
     def cut(self, pole: str) -> float:
         """The language's cut for a numeric pole: ``cut_high`` for the high adjective and
         ``cut_low`` for the low one."""
@@ -1281,7 +1300,9 @@ class Truth:
         world = self.world
         kind, label = predicate.kind, predicate.label
         if kind in FEATURE_KINDS:
-            if world.feature_kind.get(label) != kind:
+            # a place property or part (stage c4c) is a feature of a place
+            kind_of = world.feature_kind.get(label) or world.place_feature_kind.get(label)
+            if kind_of != kind:
                 what = {
                     IS: "a PROPERTY feature",
                     HAS: "a PART feature",
@@ -1293,6 +1314,15 @@ class Truth:
             if world.is_numeric_pole(label):
                 if comparison != RANGE:
                     return f"a numeric pole ({label}) compares with RANGE, the ends of its range"
+            elif world.is_place_pole(label):
+                # a place pole (stage c4c) compares with a category of places, or EVERYPLACE
+                if comparison is None:
+                    return "a comparison names its comparison class"
+                if comparison != EVERYPLACE and comparison not in world.place_category:
+                    return (
+                        f"unknown comparison class {comparison!r} for a place pole: a category "
+                        "of places, or EVERYPLACE"
+                    )
             elif not self.is_pole(label):
                 return f"unknown scalar pole {label!r}"
             elif comparison is None:
@@ -1300,17 +1330,21 @@ class Truth:
             elif comparison != ENTITY and comparison not in self.categories:
                 return f"unknown comparison class {comparison!r}: a category, or ENTITY"
         elif kind == COMPARATIVE:
-            if label not in world.scalars and label not in world.numeric_fluents:
+            if (
+                label not in world.scalars
+                and label not in world.numeric_fluents
+                and label not in world.place_scalars
+            ):
                 return (
-                    f"{label!r} is not a scalar dimension or a numeric fluent: a comparative "
-                    "is about one"
+                    f"{label!r} is not a scalar dimension, a numeric fluent, or a place scalar: "
+                    "a comparative is about one"
                 )
             if predicate.patient is None:
                 return "a comparative has a patient: the argument the subject exceeds"
             if predicate.comparison is not None:
                 return "a comparative has no comparison class: it compares two values"
         elif kind == MEMBER:
-            if label not in self.categories:
+            if label not in self.categories and label not in world.place_category:
                 return f"unknown category {label!r}"
         elif kind == PROJECTION:
             if label not in world.patient_capacities:
@@ -1330,9 +1364,10 @@ class Truth:
             elif predicate.direction is not None:
                 return f"the Boolean fluent {label} has no direction"
         elif kind == PAIR_STATE:
-            # a pair state (stage c4b): a pair fluent, with the second argument as its patient
-            if not world.is_pair_fluent(label):
-                return f"unknown pair fluent {label!r}"
+            # a pair state (stage c4b): a pair fluent, or (stage c4c, WM.73) SAME on a
+            # functional one, with the second argument as its patient
+            if not world.is_pair_fluent(label) and world.is_same_literal(label) is None:
+                return f"unknown pair fluent {label!r}: a pair fluent, or SAME on a functional one"
             if predicate.patient is None:
                 return "a pair state has a patient: the second argument of the pair"
         elif kind == PLACE_EVENT:
@@ -1573,6 +1608,8 @@ class Truth:
             return _invalid("only an event-level proposition has a scene and an event")
         if proposition.time is not None:
             return _invalid("only a state, a change, or an able_now proposition has a time point")
+        if isinstance(subject, str) and world.is_place(subject):
+            return self._evaluate_place(proposition)
         if not isinstance(subject, str) or subject not in self.instance_index:
             return _invalid(f"unknown instance {subject!r}")
         problem = self._predicate_problem(predicate)
@@ -1582,6 +1619,8 @@ class Truth:
             return _invalid("a fluent is stated at a time point of a scene, never timelessly")
         if predicate.kind == PLACE_EVENT:
             return _invalid("an event of a place event type is reported in a scene")
+        if self._about_a_place(predicate):
+            return _invalid(f"{predicate.label} is said of a place, and {subject} is an entity")
         index = self.instance_index[subject]
         kind, label = predicate.kind, predicate.label
         grounding: dict[str, Any]
@@ -1633,6 +1672,80 @@ class Truth:
                 return _invalid("an instance is never related to itself")
             value = bool(self.matrix(label)[index, self.instance_index[patient]])
             grounding = {"value": int(value), "test": VALUE}
+        true = value == proposition.polarity
+        return Evaluation(True, true, true, grounding)
+
+    def _about_a_place(self, predicate: Predicate) -> bool:
+        """Whether an instance-level predicate is about a place (stage c4c): a place property or
+        part, a category of places, a place pole, or a comparative on a place scalar."""
+        world, label = self.world, predicate.label
+        if predicate.kind in (IS, HAS):
+            return label in world.place_feature_kind
+        if predicate.kind == MEMBER:
+            return label in world.place_category
+        if predicate.kind == COMPARISON:
+            return world.is_place_pole(label)
+        if predicate.kind == COMPARATIVE:
+            return label in world.place_scalars
+        return False
+
+    def _evaluate_place(self, proposition: Proposition) -> Evaluation:
+        """An instance-level proposition about a place (stage c4c, Jon's ruling 3 of WM.73): a
+        place property or part, read from the places' static facts; membership in a category of
+        places, from the place tree; a place pole, judged by the runtime against a category of
+        places the place is below (or ``EVERYPLACE``) at the language's ``z``; or a comparative
+        with another place on a place scalar."""
+        subject, predicate = proposition.subject, proposition.predicate
+        world = self.world
+        assert isinstance(subject, str)
+        problem = self._predicate_problem(predicate)
+        if problem:
+            return _invalid(problem)
+        if predicate.kind not in (IS, HAS, MEMBER, COMPARISON, COMPARATIVE):
+            return _invalid("a place has features, categories, and scalars, and nothing else")
+        if not self._about_a_place(predicate):
+            return _invalid(f"{predicate.label} is said of an entity, and {subject} is a place")
+        index = world.place_index[subject]
+        kind, label = predicate.kind, predicate.label
+        path = world.place_path(subject)
+        grounding: dict[str, Any]
+        if kind in (IS, HAS):
+            value = bool(world.place_column(label)[index])
+            grounding = {"value": int(value), "test": VALUE}
+        elif kind == MEMBER:
+            value = label in path
+            grounding = {"value": int(value), "test": TREE}
+        elif kind == COMPARISON:
+            comparison = predicate.comparison
+            assert comparison is not None and predicate.operator is not None
+            if comparison != EVERYPLACE and comparison not in path:
+                return _invalid(f"{subject} is not below the comparison class {comparison!r}")
+            scalar = pole_dimension(label)
+            value = self.compare(predicate.operator, scalar, index, standard=comparison)
+            _, mean, sd = self.comparison_class(comparison, scalar)
+            grounding = {
+                "value": _number(world.place_scalar_column(scalar)[index]),
+                "mean": _number(mean),
+                "sd": _number(sd),
+                "z": self.z,
+                "test": VALUE,
+            }
+        else:
+            if not proposition.polarity:
+                return _invalid("a comparative is never negated: say it the other way round")
+            patient = predicate.patient
+            if not isinstance(patient, str) or not world.is_place(patient):
+                return _invalid(f"{patient!r} is not a place: a place is compared with a place")
+            if patient == subject:
+                return _invalid("a place is never compared with itself")
+            other = world.place_index[patient]
+            value = self.compare(GREATER, label, index, other)
+            column = world.place_scalar_column(label)
+            grounding = {
+                "value": _number(column[index]),
+                "other": _number(column[other]),
+                "test": VALUE,
+            }
         true = value == proposition.polarity
         return Evaluation(True, true, true, grounding)
 
@@ -2013,6 +2126,10 @@ class Truth:
                 state=self.states_of(scene)[time - 1],
                 threshold=self.cut(predicate.label),
             )
+        if predicate.kind == PAIR_STATE:
+            # a pair state (stage c4c): the pair, or SAME, from the entity to the patient
+            assert isinstance(predicate.patient, str)
+            return self.pair_holds_at(scene, time, predicate.label, entity, predicate.patient)
         return self.fluent_value(scene, time, entity, predicate.label)
 
     def numeric_value(self, scene: str, time: int, entity: str, fluent: str) -> float:
@@ -2080,6 +2197,30 @@ class Truth:
         k = definition.pair_index(fluent)
         j = self._pair_target(fluent, second)
         return bool(state.pairs[k][self.instance_index[first], j])
+
+    def pair_holds_at(self, scene: str, time: int, label: str, first: str, second: str) -> bool:
+        """Whether a pair state's label holds between two arguments at ``TIME.<time>`` (stage
+        c4c): the pair of a pair fluent (:meth:`pair_value`), or ``SAME`` on a functional pair
+        fluent, true when the two entities have the same partner (the same place, on a location
+        fluent), from the replayed pairs."""
+        fluent = self.world.is_same_literal(label)
+        if fluent is None:
+            return self.pair_value(scene, time, label, first, second)
+        matrix = self.states_of(scene)[time - 1].pairs[self.world.definition.pair_index(fluent)]
+        rows = self.instance_index
+        return bool((matrix[rows[first]] & matrix[rows[second]]).any())
+
+    def place_at(self, scene: str, time: int, entity: str, fluent: str) -> str:
+        """The place of a participant on a location fluent at ``TIME.<time>`` (stage c4c)."""
+        matrix = self.states_of(scene)[time - 1].pairs[self.world.definition.pair_index(fluent)]
+        (column,) = np.flatnonzero(matrix[self.instance_index[entity]])
+        return self.world.places[int(column)]
+
+    def at_the_place(self, scene: str, time: int, move: str, agent: str, place: str) -> bool:
+        """Whether the agent of a move is at the place at ``TIME.<time>`` on the move's location
+        fluent (stage c4c, WM.53): the compiled ``move`` literal then blocks the move, and a
+        blocked sentence never says that the agent could not go where it is."""
+        return self.place_at(scene, time, agent, self.world.move_location(move)) == place
 
     def _pair_target(self, fluent: str, second: str) -> int:
         if self.world.is_location_fluent(fluent):
@@ -2220,11 +2361,16 @@ class Truth:
             if predicate.kind in (VERB, PLACE_EVENT) and not isinstance(patient, str):
                 return _invalid("the patient of an able_now proposition is an instance or a place")
         elif predicate.kind == PAIR_STATE:
-            # a pair state or a pair change (stage c4b)
+            # a pair state or a pair change (stage c4b), or a SAME state (stage c4c, WM.73)
             if not isinstance(patient, str):
                 return _invalid("the second argument of a pair state is an instance or a place")
             if level == CHANGE and predicate.numeric:
                 return _invalid("a pair change has a value, not a direction")
+            if level == CHANGE and self.world.is_same_literal(predicate.label) is not None:
+                return _invalid(
+                    "SAME is stated at a time point and never as a change: no one event records "
+                    "a change of it"
+                )
         elif level == STATE and predicate.kind in COMPARISON_KINDS:
             # a numeric pole, or a numeric comparative, at a time point (stage b3b)
             if not predicate.numeric:
@@ -2323,9 +2469,9 @@ class Truth:
         subject, predicate = proposition.subject, proposition.predicate
         assert isinstance(subject, str) and isinstance(predicate.patient, str)
         fluent, patient = predicate.label, predicate.patient
-        value = self.pair_value(scene.label, time, fluent, subject, patient)
+        value = self.pair_holds_at(scene.label, time, fluent, subject, patient)
         if proposition.level == STATE:
-            initial = self.pair_value(scene.label, 1, fluent, subject, patient)
+            initial = self.pair_holds_at(scene.label, 1, fluent, subject, patient)
             grounding.update(
                 {
                     "value": int(value),
@@ -2335,7 +2481,7 @@ class Truth:
                 }
             )
             return Evaluation(True, value == proposition.polarity, True, grounding)
-        after = self.pair_value(scene.label, time + 1, fluent, subject, patient)
+        after = self.pair_holds_at(scene.label, time + 1, fluent, subject, patient)
         true = value != proposition.polarity and after == proposition.polarity
         grounding.update(
             {

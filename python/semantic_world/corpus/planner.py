@@ -33,10 +33,15 @@ a move or an act as a transitive verb with the place as its object ("the owl wen
 place"), a place being a referent introduced with ``a`` and mentioned later with ``the``, and a
 result sentence can state a pair change of the event's own effects, the new place of a move, or
 the loss of the old place, with ``become`` and the pair fluent's preposition ("the owl became at
-the dry place"; Jon's decision WM.72). The initial states with pairs and places, the blocked
-events of place event types, and the comparative descriptions of places are stage c4c's, so a
-place is never described or compared here, and a place introduced by an event sentence takes no
-initial-state sentence.
+the dry place"; Jon's decision WM.72). Since stage c4c (Jon's rulings WM.73) an initial-state
+sentence can state a participant's place, its pair with a referent already mentioned, or ``SAME``
+with one ("the owl was with the mouse": at the same place); a blocked sentence can say what a
+participant could not do at a place, a move to the agent's own place never among them (WM.53); a
+sentence that introduces a second place of the scene can be followed by a comparison of the two
+places on a place scalar (``documents.comparative_rate``); and an event sentence that mentions a
+place can be followed by a description of the place by its static place features
+(``documents.place_description_rate``). A place introduced by an event sentence takes no
+initial-state sentence, because a place has no fluent.
 
 In a narrative, an event sentence can be followed by five kinds of sentence, each at its rate,
 in this order: an initial-state sentence about each participant the event sentence first
@@ -130,12 +135,15 @@ from semantic_world.corpus.propositions import (
     DECREASE,
     EVENT,
     HAS,
+    HIGH,
     INCREASE,
     INSTANCE,
     IS,
+    LOW,
     MEMBER,
     MOST,
     PAIR_STATE,
+    PLACE_EVENT,
     PROGRESSIVE,
     SIMPLE,
     STATE,
@@ -186,6 +194,12 @@ RESULT = "result"
 BLOCKED = "blocked"
 COMPARATIVE_SECTION = "comparative"
 """A comparative description of the two participants of an event (stage b3a)."""
+PLACE_COMPARATIVE = "place_comparative"
+"""A comparison of a place just introduced with a place mentioned before, on a place scalar
+(stage c4c)."""
+PLACE_DESCRIPTION = "place_description"
+"""An instance-level description of a place by its static place features (stage c4c, Jon's
+ruling 3 of WM.73)."""
 NARRATIVE_SECTIONS = (
     EVENT_SECTION,
     INITIAL_STATE,
@@ -193,10 +207,13 @@ NARRATIVE_SECTIONS = (
     BLOCKED,
     COMPARATIVE_SECTION,
     DESCRIPTION,
+    PLACE_COMPARATIVE,
+    PLACE_DESCRIPTION,
 )
 """What a sentence of a narrative does: reports an event, states a participant's initial
 state, states a result of an event, says what a participant could or could not do then,
-compares the event's two participants, or describes a participant."""
+compares the event's two participants, describes a participant, compares two places, or
+describes a place."""
 POLE = "pole"
 """The strength of a scalar-pole fact, which takes no quantifier word."""
 COMPARATIVE_STRENGTH = "comparative"
@@ -1079,6 +1096,20 @@ class Planner:
         items: list[_Item] = []
         stated: set = set()
         settings = self.config.documents
+
+        def place_comparatives(known_before: set[str]) -> None:
+            # a place the last sentence introduced, compared with a place mentioned before
+            # (stage c4c), at documents.comparative_rate, from the comparatives stream
+            for place in [q for q in mentions.referents if q not in known_before]:
+                if not self.world.is_place(place) or len(items) >= length:
+                    continue
+                if comparative_rng.random() < settings.comparative_rate:
+                    compared = self._place_comparative(
+                        comparative_rng, mention_rng, place, mentions, known_before
+                    )
+                    if compared is not None:
+                        items.append(compared)
+
         for scene in scenes:
             events = involving(scene, seed) if kind == ENTITY else scene_events(scene)
             for event in events:
@@ -1094,9 +1125,9 @@ class Planner:
                     mention_rng, report, event, scene, mentions, aspects
                 )
                 items.append(sentence)
+                place_comparatives(known)
                 # the participants the sentence first mentioned, in the order of first mention
-                # (a place introduced by it takes no initial-state sentence in stage c4b: the
-                # initial states with pairs and places are stage c4c's)
+                # (a place introduced by it takes no initial-state sentence: it has no fluent)
                 introduced = [
                     p for p in mentions.referents if p not in known and not self.world.is_place(p)
                 ]
@@ -1104,15 +1135,19 @@ class Planner:
                     if len(items) < length and facts_rng.random() < settings.initial_state_rate:
                         assert sentence.plan is not None
                         step = self._first_step(sentence.plan, scene, participant, event)
+                        before_state = set(mentions.referents)
                         stated_state = self._initial_state(
                             facts_rng, mention_rng, participant, scene, step, mentions
                         )
                         if stated_state is not None:
                             items.append(stated_state)
+                            place_comparatives(before_state)
                 if len(items) < length and facts_rng.random() < settings.result_rate:
+                    before_result = set(mentions.referents)
                     result = self._result(facts_rng, mention_rng, event, scene, mentions)
                     if result is not None:
                         items.append(result)
+                        place_comparatives(before_result)
                 if len(items) < length and facts_rng.random() < settings.blocked_rate:
                     blocked = self._blocked(facts_rng, mention_rng, event, scene, mentions)
                     if blocked is not None:
@@ -1132,7 +1167,7 @@ class Planner:
                     if kind == ENTITY:
                         about = seed
                     else:
-                        # a place is never described (stage c4b): the participants of the event
+                        # the participants of the event (a place is described apart, below)
                         taking_part = [event.agent] + (
                             [event.patient] if event.patient and not event.place else []
                         )
@@ -1140,6 +1175,27 @@ class Planner:
                         pool = new or taking_part
                         about = pool[int(facts_rng.integers(len(pool)))]
                     described = self._description(facts_rng, mention_rng, about, mentions, stated)
+                    if described is not None:
+                        items.append(described)
+                # a description of a place the event sentence mentioned (stage c4c, Jon's
+                # ruling 3 of WM.73), a newly introduced one first, at its own rate
+                assert sentence.plan is not None
+                mentioned_places = [
+                    q
+                    for q in dict.fromkeys(x.referent for x in sentence.plan.noun_phrases())
+                    if self.world.is_place(q)
+                ]
+                if (
+                    mentioned_places
+                    and len(items) < length
+                    and facts_rng.random() < settings.place_description_rate
+                ):
+                    new_places = [q for q in mentioned_places if q not in known]
+                    pool = new_places or mentioned_places
+                    place = pool[int(facts_rng.integers(len(pool)))]
+                    described = self._place_description(
+                        facts_rng, mention_rng, place, mentions, stated
+                    )
                     if described is not None:
                         items.append(described)
         return _Draft(kind, topic, items, scenes, mentions, length)
@@ -1275,13 +1331,28 @@ class Planner:
         step: int,
         mentions: Mentions,
     ) -> _Item | None:
-        """A sentence stating one of a participant's fluents at ``TIME.<step>``, or a numeric
-        pole (stage b3b): the polarity at ``propositions.negation_rate.state``, the predicate
-        drawn among the Boolean fluents with a word and the numeric poles with words that have
-        the value then (the other polarity when none has)."""
-        truth = self.truth
+        """A sentence stating one of a participant's fluents at ``TIME.<step>``, a numeric pole
+        (stage b3b), or (stage c4c, ``WORLD_PHASE_C.md``, "Initial states", and Jon's ruling 1
+        of WM.73) its place on a location fluent with a preposition, its pair on a pair fluent
+        between entities with a preposition toward an entity already mentioned, or ``SAME`` with
+        an entity already mentioned: the polarity at ``propositions.negation_rate.state``, the
+        predicate drawn among those that have the value then (the other polarity when none
+        has). A positive location state names the participant's own place, mentioned or not; a
+        negative one a place of the scene already mentioned."""
+        truth, world = self.truth, self.world
         predicates = [Predicate(STATE_KIND, f) for f in self.facts.fluents]
         predicates += self.facts.numeric_pole_predicates()
+        mentioned = list(mentions.referents)
+        others = [p for p in mentioned if p in scene.participants and p != participant]
+        mentioned_places = [q for q in mentioned if world.is_place(q) and q in (scene.places or ())]
+        own_places = [
+            truth.place_at(scene.label, step, participant, fluent)
+            for fluent in self.facts.location_prepositions
+        ]
+        predicates += self.facts.pair_predicates(
+            others,
+            [q for q in dict.fromkeys(own_places + mentioned_places) if mentions.nameable(q)],
+        )
         if not predicates:
             return None
         negative = bool(facts_rng.random() < self.config.propositions.negation_rate[STATE])
@@ -1376,15 +1447,15 @@ class Planner:
         point (an event type with a word for which the binding is able and not legal), or, at
         one minus ``propositions.negation_rate.able_now``, could do and did not do in that
         step. The patient of a two-place event type is another participant of the scene."""
-        truth, facts = self.truth, self.facts
+        truth, facts, world = self.truth, self.facts, self.world
         step = event.step
         negative = bool(facts_rng.random() < self.config.propositions.negation_rate[ABLE_NOW])
-        # the entities of the event (a place event's place is none; the blocked events of
-        # place event types are stage c4c's, so the bindings below are the entity event types')
+        # the entities of the event (a place event's place is none)
         agents = [event.agent]
         if event.patient is not None and not event.place:
             agents.append(event.patient)
         done = [e for e in truth.events_of(scene.label) if e.step == step]
+        places = [q for q in (scene.places or ()) if mentions.nameable(q)]
 
         def happened(label: str, agent: str, patient: str | None) -> bool:
             return any(
@@ -1403,11 +1474,24 @@ class Planner:
                 for patient in scene.participants
                 if patient != agent
             ]
+            # the moves and the acts at the places of the scene (stage c4c, "Blocked events")
+            bindings += [
+                (PLACE_EVENT, label, place) for label in facts.place_verbs for place in places
+            ]
             for kind, label, patient in bindings:
                 if not truth.allows(label, agent, patient):
                     continue
                 legal_now = truth.legal_at(scene.label, step, label, agent, patient)
                 if negative and not legal_now:
+                    if (
+                        kind == PLACE_EVENT
+                        and world.place_event_kind(label) == "move"
+                        and patient is not None
+                        and truth.at_the_place(scene.label, step, label, agent, patient)
+                    ):
+                        # the agent is at the place, which the compiled move literal blocks:
+                        # "could not go to where it is" is odd (WM.53, review point 5)
+                        continue
                     candidates.append((kind, label, agent, patient))
                 elif not negative and legal_now and not happened(label, agent, patient):
                     candidates.append((kind, label, agent, patient))
@@ -1462,6 +1546,77 @@ class Planner:
         )
         mentions.end_sentence(agent)
         return _Item(COMPARATIVE_SECTION, fact, plan)
+
+    def _place_comparative(
+        self,
+        comparative_rng: np.random.Generator,
+        rng: np.random.Generator,
+        place: str,
+        mentions: Mentions,
+        known_before: set[str],
+    ) -> _Item | None:
+        """A comparison of a place that the last sentence introduced with a place mentioned
+        before it, on a place scalar with words where their values differ (stage c4c,
+        ``WORLD_PHASE_C.md``, "Comparative descriptions"): the other place and the scalar drawn
+        uniformly among the pairs that differ; the new place is the subject, "wider than" or
+        "narrower than" as its value stands. None when no pair differs."""
+        facts, world = self.facts, self.world
+        # the places mentioned before, in the order of first mention (a fixed order, so that
+        # the draw does not depend on the iteration order of a set)
+        earlier = [
+            q for q in mentions.referents if q in known_before and world.is_place(q) and q != place
+        ]
+        options = [
+            (other, scalar, fact)
+            for other in earlier
+            for scalar in facts.place_scalars
+            if (fact := facts.instance_comparison(place, other, scalar)) is not None
+        ]
+        if not options:
+            return None
+        other, dimension, fact = options[int(comparative_rng.integers(len(options)))]
+        low = fact.subject != place
+        avoid = (f"{dimension}.{HIGH}", f"{dimension}.{LOW}")
+        greater_phrase = mentions.noun_phrase(rng, place, avoid=avoid)
+        lesser_phrase = mentions.noun_phrase(rng, other, avoid=avoid)
+        if low:
+            greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
+        plan = comparative_plan(greater_phrase, lesser_phrase, dimension, low)
+        mentions.end_sentence(place)
+        return _Item(PLACE_COMPARATIVE, fact, plan)
+
+    def _place_description(
+        self,
+        facts_rng: np.random.Generator,
+        rng: np.random.Generator,
+        place: str,
+        mentions: Mentions,
+        stated: set,
+    ) -> _Item | None:
+        """An instance-level sentence about a place (stage c4c, Jon's ruling 3 of WM.73): a
+        fact drawn among its true facts, a place property or part, a place pole against a
+        category of places it is below, or membership in a category of places, with the place
+        as its subject. None when the document has stated it, or no noun can name the place
+        (a membership fact needs another noun than its own category)."""
+        fact = self.facts.draw_place(facts_rng, place)
+        if fact is None or self._key(fact) in stated:
+            return None
+        predicate = fact.predicate
+        known = dict(mentions.referents)
+        subject = mentions.noun_phrase(
+            rng,
+            place,
+            noun=predicate.comparison,
+            exclude=predicate.label if predicate.kind == MEMBER else None,
+            avoid=(predicate.label,),
+        )
+        if subject.pronoun:
+            mentions.drop_sentence(known)
+            return None
+        plan = SentencePlan(subject, Predication(predicate.kind, predicate.label, fact.polarity))
+        stated.add(self._key(fact))
+        mentions.end_sentence(place)
+        return _Item(PLACE_DESCRIPTION, fact, plan)
 
     def _description(
         self,

@@ -1,5 +1,5 @@
-"""Stages c4a and c4b of ``docs/specs/WORLD_PHASE_C.md``: the corpus on worlds with pair fluents
-and places, and its sentences about them.
+"""Stages c4a to c4c of ``docs/specs/WORLD_PHASE_C.md``: the corpus on worlds with pair fluents
+and places, and its sentences and test items about them.
 
 Since stage c4a ``data/world/tiny.yaml`` and ``data/world/default.yaml`` carry the phase (c)
 settings (Jon's ruling WM.63): pair fluents between entities, a location fluent, moves and acts
@@ -10,10 +10,14 @@ features, and event types get words, a narrative reports a move or an act as a t
 with the place as its object, a place is a referent introduced with ``a`` and mentioned later
 with ``the``, and a result sentence states a pair change of the event's own effects, a move's
 new place, or the loss of the old place, with ``become`` and the preposition (predicate kind
-``pair_state``; Jon's decision WM.72). The initial states, the blocked events, the comparative
-descriptions of places, and the test sets with pairs and places are stage c4c's, so no test item
-is made from this stage's sentences; the causal statements with pair literals are stage c5a's
-(a conditional effect whose condition holds a pair literal is stated in neither form, WM.59).
+``pair_state``; Jon's decision WM.72). Since stage c4c (Jon's rulings WM.73) an initial-state
+sentence states a participant's place, its pair with a referent already mentioned, or ``SAME``
+with one; place poles tell places apart; a place is described by its static features and two
+places are compared on a place scalar; a blocked sentence can be about a move or an act, never a
+move to the agent's own place (WM.53); and the state, event, and ``able_now`` sets hold pair,
+location, ``SAME``, and place event items, with the change ``object`` (WM.56). The causal
+statements with pair literals are stage c5a's (a conditional effect whose condition holds a pair
+literal is stated in neither form, WM.59).
 Every sentence must be true by the independent oracle, whose replay carries the pairs and the
 places, and whose pairs and places must agree with ``history.replay`` at every time point of
 every scene. The fast tier runs the tiny corpus, the slow tier the default one.
@@ -44,13 +48,26 @@ from semantic_world.corpus.histories import scene_events
 from semantic_world.corpus.interpret import interpret
 from semantic_world.corpus.lexicon import PREPOSITION
 from semantic_world.corpus.logical import logical_form, with_cut
-from semantic_world.corpus.planner import EVENT_SECTION, RESULT
+from semantic_world.corpus.planner import (
+    BLOCKED,
+    EVENT_SECTION,
+    INITIAL_STATE,
+    PLACE_COMPARATIVE,
+    PLACE_DESCRIPTION,
+    RESULT,
+)
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     CHANGE,
     CLASS,
+    COMPARATIVE,
+    COMPARISON,
     EFFECT,
     EVENT,
+    HAS,
+    INSTANCE,
+    IS,
+    MEMBER,
     PAIR_STATE,
     PLACE_EVENT,
     STATE,
@@ -72,15 +89,22 @@ from semantic_world.world.history import replay
 
 WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow))
 UNNAMED_LABELS = ("SOME.", "SOMEOF.", "EVERYPLACE", "SOMEPLACE")
-"""The labels of phase (c) that no word of the corpus carries in stage c4b: ``SOME`` and
-``SOMEOF`` (WM.55, stage c5a), and the bare symbols for places."""
+"""The labels of phase (c) that no word of the corpus carries before stage c5a: ``SOME`` and
+``SOMEOF`` (WM.55), and the bare symbols for places."""
 PHASE_C_LABELS = ("PAIRFL", "PLACE", "SAME.") + UNNAMED_LABELS
-"""Every label of phase (c): what no test item may carry in stage c4b."""
+"""Every label of phase (c)."""
 MANY = {
-    "documents": {"initial_state_rate": 0.6, "result_rate": 0.9, "blocked_rate": 0.5},
+    "documents": {
+        "initial_state_rate": 0.6,
+        "result_rate": 0.9,
+        "blocked_rate": 0.5,
+        "comparative_rate": 0.5,
+        "place_description_rate": 0.5,
+    },
     "propositions": {"negation_rate": {"able_now": 0.6}},
 }
-"""Many state, result, and blocked sentences, so that the tests see every kind."""
+"""Many state, result, blocked, comparative, and place description sentences, so that the tests
+see every kind."""
 CLAUSE_ORDERS = ("SVO", "SOV", "VSO", "VOS", "OVS", "OSV")
 ADPOSITIONS = ("preposition", "postposition")
 
@@ -199,9 +223,8 @@ def test_blocked_sentences_are_judged_with_the_pairs_and_the_places(cases, runs,
     """A negative ``ABLE_NOW`` sentence is blocked by a precondition that the replayed state
     fails, and since stage c4a that precondition may be a pair literal: ``SAME`` on the location
     fluent, a pair between the two participants, ``SOME`` or ``SOMEOF``, or a compiled literal.
-    The oracle, replaying the pairs, agrees with the corpus on every such sentence. The blocked
-    sentences are about the entity event types alone: those of place event types are stage
-    c4c's."""
+    The oracle, replaying the pairs, agrees with the corpus on every such sentence, the blocked
+    moves and acts of stage c4c included."""
     case = cases(name)
     corpus = runs(name, **MANY)
     oracle = case.oracle(**MANY)
@@ -213,7 +236,6 @@ def test_blocked_sentences_are_judged_with_the_pairs_and_the_places(cases, runs,
             proposition = sentence.proposition
             if proposition.level != ABLE_NOW:
                 continue
-            assert proposition.predicate.kind != PLACE_EVENT
             if proposition.polarity:
                 continue
             blocked += 1
@@ -416,22 +438,23 @@ def test_result_sentences_state_pair_changes(cases, runs, name) -> None:
             assert predication.object.place == world.is_place(second)
             assert sentence.readings == ("state",)
     assert found["new place"] > 0 and found["old place"] > 0
-    # no pair state at a time point (HOLDS) is stated in stage c4b: the initial states with
-    # pairs and places are stage c4c's
+    # a pair change is a result sentence, and a pair state at a time point an initial state or
+    # (stage c4c) a test item
     for document in corpus.documents:
         for sentence in document.sentences:
             if sentence.proposition.predicate.kind == PAIR_STATE:
-                assert sentence.proposition.level == CHANGE and sentence.section == RESULT
+                assert (sentence.proposition.level == CHANGE) == (sentence.section == RESULT)
 
 
 @pytest.mark.parametrize("name", WORLDS)
 def test_places_are_referents(cases, runs, name) -> None:
     """A place is introduced with ``a`` and mentioned later with ``the``, numbered among the
     referents of its document with the entities, named by a category of places above it, told
-    apart from the other places of the document's scenes by place properties and parts (and
-    kept, counted as not distinguished, when they cannot), never a pronoun, never with a
-    relative clause, and never the subject; no mention of anything carries a pair fluent or a
-    location as a modifier."""
+    apart from the other places of the document's scenes by place properties, parts, and (stage
+    c4c) poles (and kept, counted as not distinguished, when they cannot), never a pronoun,
+    never with a relative clause, and the subject of a description of a place or a comparison
+    of places alone; no mention of anything carries a pair fluent or a location as a
+    modifier."""
     corpus = runs(name, **MANY)
     world = cases(name).world
     rules = corpus.planner.rules
@@ -440,7 +463,9 @@ def test_places_are_referents(cases, runs, name) -> None:
         seen: set[str] = set()
         places = tuple(dict.fromkeys(q for scene in document.scenes for q in (scene.places or ())))
         for sentence in document.sentences:
-            assert not sentence.plan.subject.place
+            if sentence.plan.subject.place:
+                assert sentence.section in (PLACE_DESCRIPTION, PLACE_COMPARATIVE)
+                assert sentence.proposition.level == INSTANCE
             for phrase in sentence.plan.noun_phrases():
                 for literal in phrase.restriction:
                     assert not literal.feature.startswith(("PAIRFL.", "SAME."))
@@ -547,6 +572,31 @@ def _tiny_plans() -> dict[str, SentencePlan]:
                 "simple",
             ),
         ),
+        # stage c4c: a SAME state, a description of a place, a comparison of two places, and a
+        # blocked move
+        "same": SentencePlan(
+            owl,
+            Predication(
+                PAIR_STATE,
+                "SAME.PAIRFL.3",
+                True,
+                the("INSTANCE.2.1.1", "CATEGORY.2.1"),
+                tense="past",
+                time=time,
+            ),
+        ),
+        "described": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1", Literal("PLACESCALARDIM.1.HIGH")),
+            Predication("property", "PLACEPROPERTY.1", False),
+        ),
+        "wider": SentencePlan(
+            place,
+            Predication("comparative", "PLACESCALARDIM.1.HIGH", True, other_place),
+        ),
+        "could_not": SentencePlan(
+            owl,
+            Predication(PLACE_EVENT, "PLACEEVENTTYPE.1", False, place, tense="past", time=time),
+        ),
     }
 
 
@@ -557,7 +607,16 @@ ENGLISH = {
     "clause": (
         "the CATEGORY.1.1 that PLACEEVENTTYPE.1 the PLACECATEGORY.1 EVENTTYPE2.1.1 the CATEGORY.2.1"
     ),
+    "same": "the CATEGORY.1.1 is SAME.PAIRFL.3 the CATEGORY.2.1",
+    "described": "the PLACESCALARDIM.1.HIGH PLACECATEGORY.1 is not PLACEPROPERTY.1",
+    "wider": (
+        "the PLACECATEGORY.1 is PLACESCALARDIM.1.HIGH-COMPARATIVE than the PLACEPROPERTY.1 "
+        "PLACECATEGORY.2"
+    ),
+    "could_not": "the CATEGORY.1.1 can not PLACEEVENTTYPE.1 the PLACECATEGORY.1",
 }
+TIMELESS = ("described", "wider")
+"""The fixed plans about no time point: the instance-level sentences about places."""
 LOCATION_ORDERS = {
     ("SVO", "preposition"): "the CATEGORY.1.1 is PAIRFL.3 the PLACECATEGORY.1",
     ("SVO", "postposition"): "the CATEGORY.1.1 is the PLACECATEGORY.1 PAIRFL.3",
@@ -610,16 +669,26 @@ def test_prepositional_predicates_in_the_six_clause_orders(cases) -> None:
             parsed = parse_propositional(text)
             assert parsed == formula(form)
             assert proposition_of(parsed) == proposition
-            assert sentence.events[0] is not None
+            assert (sentence.events[0] is not None) == (name not in TIMELESS)
         if (order, adposition) in LOCATION_ORDERS:
             assert (
                 glosses(_realize(tiny, plans["location"], **grammar))
                 == LOCATION_ORDERS[order, adposition]
             )
-    # the readings: a pair state and a pair change read as a state, a move as an event
-    for name, reading in (("location", "state"), ("left", "state"), ("went", "event")):
+    # the readings: a pair state, a pair change, and a SAME state read as a state, a move as an
+    # event, a description or a comparison of a place as an instance-level sentence does, and
+    # a blocked move as every "can" sentence about an instance
+    for name, reading in (
+        ("location", ("state",)),
+        ("left", ("state",)),
+        ("same", ("state",)),
+        ("went", ("event",)),
+        ("described", ("capacity",)),
+        ("wider", ("capacity",)),
+        ("could_not", ("capacity", "able_now")),
+    ):
         sentence = _realize(tiny, plans[name])
-        assert readings(sentence.tree, tiny.lexicon(), tiny.config()) == (reading,)
+        assert readings(sentence.tree, tiny.lexicon(), tiny.config()) == reading
     # the renderings of the fixed plans
     forms = {
         name: propositional(logical_form(plan, plan.proposition(), {}, 1.0))
@@ -637,6 +706,23 @@ def test_prepositional_predicates_in_the_six_clause_orders(cases) -> None:
     assert forms["went"] == (
         "CATEGORY.1.1(INSTANCE.1.1.1) AND PLACECATEGORY.2(PLACE.2.1) AND "
         "EVENT(SCENE.1.EVENTINSTANCE.2, PAST, SIMPLE, PLACEEVENTTYPE.1(INSTANCE.1.1.1, PLACE.2.1))"
+    )
+    assert forms["same"] == (
+        "{CATEGORY.1.1(INSTANCE.1.1.1) AND CATEGORY.2.1(INSTANCE.2.1.1)} "
+        "HOLDS(SCENE.1, TIME.2, PAST, SAME.PAIRFL.3(INSTANCE.1.1.1, INSTANCE.2.1.1))"
+    )
+    assert forms["described"] == (
+        "{PLACECATEGORY.1(PLACE.1.1) AND ABOVE(PLACESCALARDIM.1, PLACE.1.1, PLACECATEGORY.1, 1.0)} "
+        "NOT PLACEPROPERTY.1(PLACE.1.1)"
+    )
+    assert forms["wider"] == (
+        "{PLACECATEGORY.1(PLACE.1.1) AND PLACECATEGORY.2(PLACE.2.1) AND "
+        "PLACEPROPERTY.1(PLACE.2.1)} "
+        "GREATER(PLACESCALARDIM.1, PLACE.1.1, PLACE.2.1)"
+    )
+    assert forms["could_not"] == (
+        "{CATEGORY.1.1(INSTANCE.1.1.1) AND PLACECATEGORY.1(PLACE.1.1)} "
+        "NOT ABLE_NOW(SCENE.1, TIME.2, PAST, PLACEEVENTTYPE.1(INSTANCE.1.1.1, PLACE.1.1))"
     )
 
 
@@ -709,8 +795,9 @@ def test_pairs_between_entities_in_the_six_clause_orders(tmp_path: Path) -> None
 def test_plans_the_grammar_refuses(cases) -> None:
     """The limits of "Grammar" (``WORLD_PHASE_C.md``): a pair fluent or a location is never a
     modifier of a mention, a pair state is never in a relative clause, a place is never a
-    pronoun, never takes a relative clause, and is never the subject, and the object of a place
-    event type is a place."""
+    pronoun, never takes a relative clause, and is the subject of a description of its own
+    features or a comparison of places alone (stage c4c), a place feature is said of a place,
+    the object of a place event type is a place, and the object of ``SAME`` an entity."""
     from semantic_world.corpus.grammar import GrammarError
 
     tiny = cases("tiny")
@@ -762,8 +849,41 @@ def test_plans_the_grammar_refuses(cases) -> None:
                 time="SCENE.1.TIME.2",
             ),
         ),
-        "a place as the subject": SentencePlan(
-            the("PLACE.1.1", "PLACECATEGORY.1"), Predication("property", "PLACEPROPERTY.1")
+        "a place as the subject of a pair state": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1"), plans["location"].predication
+        ),
+        "a place as the subject of an event": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1"),
+            Predication(
+                "event_type1",
+                "EVENTTYPE1.1",
+                event="SCENE.1.EVENTINSTANCE.1",
+                tense="past",
+                aspect="simple",
+            ),
+        ),
+        "a place as the subject of a capacity": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1"), Predication("event_type1", "EVENTTYPE1.1")
+        ),
+        "a place feature said of an entity": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1"), Predication("property", "PLACEPROPERTY.1")
+        ),
+        "a place compared with an entity": SentencePlan(
+            the("PLACE.1.1", "PLACECATEGORY.1"),
+            Predication(
+                "comparative", "PLACESCALARDIM.1.HIGH", True, the("INSTANCE.1.1.1", "CATEGORY.1.1")
+            ),
+        ),
+        "a place as the object of SAME": SentencePlan(
+            the("INSTANCE.1.1.1", "CATEGORY.1.1"),
+            Predication(
+                PAIR_STATE,
+                "SAME.PAIRFL.3",
+                True,
+                the("PLACE.1.1", "PLACECATEGORY.1"),
+                tense="past",
+                time="SCENE.1.TIME.2",
+            ),
         ),
         "an entity as the object of a move": SentencePlan(
             plans["went"].subject,
@@ -795,26 +915,350 @@ def test_plans_the_grammar_refuses(cases) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------------------------
+# Acceptance (stage c4c): the initial states, the place poles, the descriptions and comparisons
+# of places, and the blocked place events
+# ---------------------------------------------------------------------------------------------
+
+
+def _preceding(document, index: int, section: str | None = None):
+    """The sentence before ``index`` of a section (the event sentence by default)."""
+    wanted = EVENT_SECTION if section is None else section
+    return next(s for s in reversed(document.sentences[:index]) if s.section == wanted)
+
+
+def _mentioned_before(document, index: int) -> set[str]:
+    return {p.referent for s in document.sentences[:index] for p in s.plan.noun_phrases()}
+
+
 @pytest.mark.parametrize("name", WORLDS)
-def test_no_test_item_is_made_from_this_stages_sentences(cases, runs, name) -> None:
-    """No item of any set names a pair fluent, a place, a place feature, a place event type, or
-    ``SAME`` (the state, event, ``able_now``, and false-event sets with them are stage c4c's),
-    and every item's referents are entities."""
+def test_initial_states_state_pairs_places_and_same(cases, runs, name) -> None:
+    """An initial-state sentence can state the participant's place on a location fluent, its
+    pair with an entity already mentioned, or ``SAME`` with one (``WORLD_PHASE_C.md``, "Initial
+    states"; Jon's ruling 1 of WM.73): a pair state at the time point before the participant's
+    first reported event, true by the oracle from the replayed pairs and places; a positive
+    location names the participant's own place, a negative one a place already mentioned; the
+    second argument of a pair or of ``SAME`` is an entity already mentioned."""
+    case = cases(name)
+    corpus = runs(name, **MANY)
+    oracle = case.oracle(**MANY)
+    world = case.world
+    scenes = scenes_json(corpus)
+    found: Counter = Counter()
+    for document in corpus.documents:
+        for index, sentence in enumerate(document.sentences):
+            proposition = sentence.proposition
+            if sentence.section != INITIAL_STATE or proposition.predicate.kind != PAIR_STATE:
+                continue
+            assert proposition.level == STATE
+            scene = scenes[proposition.scene]
+            assert oracle.state(sentence.logical_form, scene) is True
+            label, second = proposition.predicate.label, proposition.predicate.patient
+            time = int(proposition.time.split(".")[1])
+            before = _mentioned_before(document, index)
+            if world.is_location_fluent(label):
+                assert world.is_place(second) and second in scene["places"]
+                if proposition.polarity:
+                    assert oracle.place_at(scene, time, proposition.subject, label) == second
+                    found["place"] += 1
+                else:
+                    assert oracle.place_at(scene, time, proposition.subject, label) != second
+                    assert second in before
+                    found["not at a place"] += 1
+            else:
+                assert not world.is_place(second) and second in before
+                assert second in scene["participants"]
+                found["same" if label.startswith("SAME.") else "pair"] += 1
+            assert sentence.readings == ("state",)
+            # the plan: the copula, the preposition, and the second argument as the object
+            predication = sentence.plan.predication
+            assert not predication.become and predication.object is not None
+            assert predication.object.referent == second
+    assert found["place"] > 0 and found["same"] > 0, found
+    if world.pair_fluents_read() != tuple(world.location_fluents):
+        assert found["pair"] > 0, found  # a pair fluent between entities has a preposition
+    # a document states them at the rate, and none with the rate at 0
+    silent = runs(name, documents={"initial_state_rate": 0.0})
+    assert not any(s.section == INITIAL_STATE for d in silent.documents for s in d.sentences)
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_place_poles_tell_places_apart(cases, runs, name) -> None:
+    """A place scalar's poles tell a place from the other places of the document's scenes, as
+    entity poles do, relative to the noun's category of places (Jon's ruling 2 of WM.73): every
+    definite place mention is distinguished where the place features and poles allow, and the
+    tiny corpus, whose two places of a category share every place property, has distinguished
+    definite place mentions by their place scalar (ruling 4)."""
+    corpus = runs(name, **MANY)
+    world = cases(name).world
+    rules = corpus.planner.rules
+    truth = corpus.planner.truth
+    poles = distinguished = undistinguished = 0
+    for document in corpus.documents:
+        places = tuple(dict.fromkeys(q for scene in document.scenes for q in (scene.places or ())))
+        for sentence in document.sentences:
+            for phrase, flag in zip(sentence.sentence.phrases, sentence.distinguished, strict=True):
+                if not phrase.place or phrase.determiner != "the":
+                    continue
+                place, noun = phrase.referent, phrase.noun
+                row = world.place_index[place]
+                for literal in phrase.restriction:
+                    if literal.pole:
+                        poles += 1
+                        assert world.is_place_pole(literal.feature)
+                        # the pole holds of the place against the noun's category, by the
+                        # runtime's comparison classes
+                        assert truth.place_pole_mask(literal.feature, noun)[0][row]
+                if flag:
+                    distinguished += 1
+                    continue
+                undistinguished += 1
+                # not distinguished: no attribute of the preference order, over the limits of
+                # the mention settings, tells the place from the other places the noun fits,
+                # apart from what the sentence itself states (a description's feature, or the
+                # poles of the scalar a comparison of places is on)
+                predicate = sentence.proposition.predicate
+                avoided = {literal.feature for literal in phrase.restriction} | {predicate.label}
+                if predicate.kind == COMPARATIVE:
+                    avoided |= {f"{predicate.label}.HIGH", f"{predicate.label}.LOW"}
+                others = [q for q in rules.matches(phrase, places) if q != place]
+                assert others, "an undistinguished mention has another fitting place"
+                for attribute in rules.place_preference:
+                    literal = rules.value(place, attribute, noun)
+                    if literal is None or literal.feature in avoided:
+                        continue
+                    assert all(rules.fits(world.place_index[q], literal, noun) for q in others), (
+                        phrase,
+                        attribute,
+                    )
+    assert distinguished > 0 and poles > 0, (distinguished, poles)
+    stats = corpus.stats["mentions"]
+    assert stats["place_definite_not_distinguished"] == undistinguished
+    assert stats["place_definite"] == distinguished + undistinguished
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_places_are_described(cases, runs, name) -> None:
+    """A narrative describes a place that an event sentence mentioned, at
+    ``documents.place_description_rate`` (Jon's ruling 3 of WM.73): an instance-level sentence
+    with the place as its subject and a place property or part, membership in a category of
+    places, or a place pole as its predicate, true by the oracle from the places' table; the
+    predicate's feature is no modifier of the subject; and none with the rate at 0."""
+    case = cases(name)
+    corpus = runs(name, **MANY)
+    oracle = case.oracle(**MANY)
+    world = case.world
+    kinds: Counter = Counter()
+    for document in corpus.documents:
+        for index, sentence in enumerate(document.sentences):
+            if sentence.section != PLACE_DESCRIPTION:
+                continue
+            proposition = sentence.proposition
+            assert proposition.level == INSTANCE and world.is_place(proposition.subject)
+            kind, label = proposition.predicate.kind, proposition.predicate.label
+            assert kind in (IS, HAS, MEMBER, COMPARISON)
+            assert label.startswith(
+                ("PLACEPROPERTY.", "PLACEPART.", "PLACECATEGORY.", "PLACESCALARDIM.")
+            )
+            assert oracle.truth(sentence.logical_form) is True
+            assert corpus.planner.truth.is_true(proposition)
+            subject = sentence.plan.subject
+            assert subject.place and subject.determiner == "the" and subject.clause is None
+            assert label not in {literal.feature for literal in subject.restriction}
+            if kind == MEMBER:
+                assert subject.noun != label
+            if kind == COMPARISON:
+                assert proposition.predicate.comparison == subject.noun
+            # after the event sentence that mentioned the place
+            before = _preceding(document, index)
+            assert proposition.subject in {p.referent for p in before.plan.noun_phrases()}
+            kinds[kind] += 1
+    assert kinds[IS] > 0 and kinds[COMPARISON] > 0, kinds
+    silent = runs(name, documents={"place_description_rate": 0.0})
+    assert not any(s.section == PLACE_DESCRIPTION for d in silent.documents for s in d.sentences)
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_places_are_compared(cases, runs, name) -> None:
+    """A sentence that introduces a second place of the scene can be followed, at
+    ``documents.comparative_rate``, by a comparison of the two places on a place scalar
+    (``WORLD_PHASE_C.md``, "Comparative descriptions"): the new place is the subject, the other
+    was mentioned before, both are places, the comparative is true by the oracle, and none is
+    made with the rate at 0."""
+    case = cases(name)
+    corpus = runs(name, **MANY)
+    oracle = case.oracle(**MANY)
+    world = case.world
+    found = 0
+    for document in corpus.documents:
+        for index, sentence in enumerate(document.sentences):
+            if sentence.section != PLACE_COMPARATIVE:
+                continue
+            proposition = sentence.proposition
+            assert proposition.level == INSTANCE and proposition.predicate.kind == COMPARATIVE
+            assert proposition.predicate.label in world.place_scalars
+            plan = sentence.plan
+            subject, target = plan.subject, plan.predication.object
+            assert subject.place and target is not None and target.place
+            assert oracle.truth(sentence.logical_form) is True
+            # the subject was first mentioned by the sentence before, the object earlier
+            previous = document.sentences[index - 1]
+            assert subject.referent in {p.referent for p in previous.plan.noun_phrases()}
+            assert subject.referent not in _mentioned_before(document, index - 1)
+            assert target.referent in _mentioned_before(document, index)
+            assert previous.section in (EVENT_SECTION, INITIAL_STATE, RESULT)
+            found += 1
+    assert found > 0
+    silent = runs(name, documents={"comparative_rate": 0.0})
+    assert not any(s.section == PLACE_COMPARATIVE for d in silent.documents for s in d.sentences)
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_blocked_sentences_cover_place_events_and_skip_a_move_to_the_agents_own_place(
+    cases, runs, name
+) -> None:
+    """A blocked sentence can say what a participant could not do, or could do and did not do,
+    at a place (``WORLD_PHASE_C.md``, "Blocked events"): a move or an act with a place of the
+    scene as its object, true by the oracle; and no blocked sentence says that an agent could
+    not go to the place it was at (WM.53, review point 5)."""
+    case = cases(name)
+    corpus = runs(name, **MANY)
+    oracle = case.oracle(**MANY)
+    world = case.world
+    definition = world.definition
+    scenes = scenes_json(corpus)
+    kinds: Counter = Counter()
+    for document in corpus.documents:
+        for sentence in document.sentences:
+            proposition = sentence.proposition
+            if sentence.section != BLOCKED or proposition.predicate.kind != PLACE_EVENT:
+                continue
+            label, place = proposition.predicate.label, proposition.predicate.patient
+            scene = scenes[proposition.scene]
+            assert world.is_place(place) and place in scene["places"]
+            assert oracle.able_now(sentence.logical_form, scene) is True
+            time = int(proposition.time.split(".")[1])
+            kind = world.place_event_kind(label)
+            kinds[kind, proposition.polarity] += 1
+            if kind == "move":
+                location = world.move_location(label)
+                if not proposition.polarity:
+                    assert oracle.place_at(scene, time, proposition.subject, location) != place
+            assert sentence.plan.predication.object is not None
+            assert sentence.plan.predication.object.place
+    assert sum(kinds.values()) > 0, kinds
+    # a negative sentence about a move needs a move with a literal beyond its compiled one
+    # (the compiled literal alone blocks a move to the agent's own place, which is skipped);
+    # the default run, with its many blocked sentences, holds every kind
+    blockable_moves = [
+        label
+        for label in world.place_event_types
+        if world.place_event_kind(label) == "move"
+        and any(
+            getattr(lit, "origin", None) != "move"
+            for lit in definition.event_type(label).precondition
+        )
+    ]
+    if name == "default":
+        assert blockable_moves and kinds["move", False] > 0, kinds
+        assert kinds["move", True] > 0 and kinds["act", False] > 0, kinds
+
+
+# ---------------------------------------------------------------------------------------------
+# Acceptance (stage c4c): the test sets
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", WORLDS)
+def test_the_test_sets_hold_pair_location_same_and_place_event_items(cases, runs, name) -> None:
+    """The state sets hold pair, location, and ``SAME`` items at the scene's final time point,
+    with the changes predicate (another pair fluent of the same kind), subject (another
+    participant), role (the arguments exchanged, for a pair fluent between entities that is not
+    symmetric alone), and object (another referent, or another place, of the same kind); the
+    event and ``able_now`` sets hold events of place event types, with the object change in place
+    of the role change (WM.56); an item mentions places the document mentioned; and the
+    statistics count the items by kind."""
     corpus = runs(name)
     world = cases(name).world
-    items = 0
+    documents = {d.label: d for d in corpus.documents}
+    state_kinds: Counter = Counter()
+    event_kinds: Counter = Counter()
     for test_set in corpus.test_sets:
-        for item in test_set.items:
-            items += 1
-            assert not _carries(item.input), (test_set.name, item.input["propositional"])
-            form = item.input["logical_form"]
-            assert form["predicate"]["kind"] not in (PAIR_STATE, PLACE_EVENT)
-            for mention in item.input["referents"]:
-                assert not world.is_place(mention["referent"])
-    assert items > 100
-    # while the documents do state them
-    assert corpus.stats["states"]["pair_change_sentences"] > 0
-    assert corpus.stats["states"]["move_sentences"] > 0
+        for true, false in test_set.pairs:
+            a, b = true.proposition, false.proposition
+            document = documents[true.input["document"]] if true.input["document"] else None
+            for item in (true, false):
+                for mention in item.input["referents"]:
+                    referent = mention["referent"]
+                    if world.is_place(referent):
+                        assert document is not None and referent in document.referents.values()
+            if test_set.level == STATE and a.predicate.kind == PAIR_STATE:
+                assert document is not None
+                label = a.predicate.label
+                kind = (
+                    "same"
+                    if label.startswith("SAME.")
+                    else "location"
+                    if world.is_location_fluent(label)
+                    else "pair"
+                )
+                state_kinds[kind, test_set.change] += 1
+                assert world.is_place(a.predicate.patient) == (kind == "location")
+                if test_set.change == "predicate":
+                    assert b.predicate.patient == a.predicate.patient
+                    other = b.predicate.label
+                    assert other.startswith("SAME.") == (kind == "same")
+                    assert world.is_location_fluent(world.pair_fluent_of(other)) == (
+                        kind == "location"
+                    )
+                elif test_set.change == "role":
+                    assert kind == "pair" and not world.pair_fluent_info[label].symmetric
+                    assert (b.subject, b.predicate.patient) == (a.predicate.patient, a.subject)
+                elif test_set.change == "object":
+                    assert b.subject == a.subject and b.predicate.label == label
+                    assert world.is_place(b.predicate.patient) == world.is_place(
+                        a.predicate.patient
+                    )
+                    assert b.predicate.patient != a.predicate.patient
+                else:
+                    assert test_set.change == "subject" and b.predicate == a.predicate
+            if test_set.level in (EVENT, ABLE_NOW) and a.predicate.kind == PLACE_EVENT:
+                event_kinds[test_set.level, test_set.change, test_set.kind] += 1
+                assert test_set.change != "role"
+                assert world.is_place(a.predicate.patient) and world.is_place(b.predicate.patient)
+                if test_set.change == "object":
+                    assert b.predicate.patient != a.predicate.patient
+                    assert b.predicate.label == a.predicate.label and b.subject == a.subject
+                elif test_set.change == "predicate":
+                    assert (
+                        b.predicate.kind == PLACE_EVENT and b.predicate.label != a.predicate.label
+                    )
+        if test_set.level == STATE:
+            stats = test_set.stats()["pairs_by_item_kind"]
+            assert sum(stats.values()) == len(test_set.pairs)
+            assert stats["location"] + stats["pair"] + stats["same"] == sum(
+                true.proposition.predicate.kind == PAIR_STATE for true, _ in test_set.pairs
+            )
+    assert state_kinds["location", "object"] > 0 and state_kinds["same", "subject"] > 0
+    assert state_kinds["location", "subject"] > 0 and state_kinds["same", "object"] > 0
+    # a world with one location fluent has no predicate swap of a location
+    if len(world.location_fluents) == 1:
+        assert state_kinds["location", "predicate"] == 0
+    assert event_kinds[EVENT, "object", "possible"] > 0
+    assert any(level == ABLE_NOW for level, _, _ in event_kinds), event_kinds
+    assert any(change == "subject" for level, change, _ in event_kinds if level == EVENT)
+    # the role swap of a pair state: a pair fluent between entities that is not symmetric
+    swappable = [
+        f
+        for f in world.pair_fluents_read()
+        if not world.is_location_fluent(f) and not world.pair_fluent_info[f].symmetric
+    ]
+    if not swappable:
+        assert state_kinds["pair", "role"] == 0
+    if name == "default":
+        assert state_kinds["pair", "object"] > 0 and state_kinds["pair", "subject"] > 0
+        assert event_kinds[EVENT, "object", "impossible"] > 0
+        assert event_kinds[EVENT, "object", "blocked"] > 0
 
 
 @pytest.mark.parametrize("name", WORLDS)
@@ -833,7 +1277,25 @@ def test_the_statistics_count_the_new_sentences_and_the_place_events(cases, runs
     assert states["location_sentences"] == sum(
         world.is_location_fluent(s.proposition.predicate.label) for s in pairs
     )
-    assert states["pair_state_sentences"] == 0  # the initial states with pairs are stage c4c's
+    # stage c4c: the SAME states, the blocked place events, the place descriptions, and the
+    # comparisons of places
+    assert states["same_state_sentences"] == sum(
+        s.proposition.level == STATE and s.proposition.predicate.label.startswith("SAME.")
+        for s in pairs
+    )
+    blocked_place = [
+        s for s in sentences if s.section == BLOCKED and s.proposition.predicate.kind == PLACE_EVENT
+    ]
+    assert states["blocked_place_sentences"] == len(blocked_place)
+    assert states["blocked_move_sentences"] == sum(
+        world.place_event_kind(s.proposition.predicate.label) == "move" for s in blocked_place
+    )
+    assert states["place_description_sentences"] == sum(
+        s.section == PLACE_DESCRIPTION for s in sentences
+    )
+    assert corpus.stats["comparisons"]["place_comparative_sentences"] == sum(
+        s.section == PLACE_COMPARATIVE for s in sentences
+    )
     place_events = [
         s
         for s in sentences

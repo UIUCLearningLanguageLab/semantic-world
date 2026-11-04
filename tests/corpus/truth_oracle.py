@@ -599,12 +599,26 @@ class Oracle:
         return bool(self._at(scene, time).fluent(fluent, entity, self.states(scene)[time - 1]))
 
     def changed(
-        self, scene: dict[str, Any], entity: str, fluent: str, cut: float | None = None
+        self,
+        scene: dict[str, Any],
+        entity: str,
+        fluent: str,
+        cut: float | None = None,
+        second: str | None = None,
     ) -> bool:
         """Whether the fluent's value at the scene's final time point differs from its value
         at ``TIME.1``; for a numeric pole (``NUMFL.1.HIGH``, with the form's ``cut``), whether
-        the pole holds at one of the two time points and not at the other."""
+        the pole holds at one of the two time points and not at the other; for a pair state
+        (stage c4c: a pair fluent or ``SAME`` on one, toward ``second``), whether it holds at
+        one of the two time points and not at the other."""
         final = int(scene["final"].split(".")[1])
+        if fluent.startswith(("PAIRFL.", "SAME.")):
+            assert second is not None
+            predicate = {"kind": "pair_state", "label": fluent, "patient": {"instance": second}}
+            form = {"predicate": predicate, "subject": {"instance": entity}, "polarity": True}
+            at_final = self.state({**form, "time": scene["final"]}, scene)
+            at_start = self.state({**form, "time": "TIME.1"}, scene)
+            return at_final != at_start
         if fluent.startswith("NUMFL."):
             assert cut is not None
             return self.pole_at(scene, final, entity, fluent, cut) != self.pole_at(
@@ -717,9 +731,20 @@ class Oracle:
         entity = form["subject"]["instance"]
         if predicate["kind"] == "pair_state":
             other = predicate["patient"]["instance"]
-            if other == entity or predicate["label"] not in self.pair_fluents:
+            label = predicate["label"]
+            if label.startswith("SAME."):
+                # a SAME state (stage c4c, WM.73): the two entities have the same partner on
+                # the functional pair fluent, the same place on a location fluent
+                fluent = label[len("SAME.") :]
+                if other == entity or fluent not in self.pair_fluents:
+                    return None  # type: ignore[return-value]
+                pairs = self.pairs_at(scene, time)[fluent]
+                partners = {b for a, b in pairs if a == entity}
+                held = any(b in partners for a, b in pairs if a == other)
+                return held == form["polarity"]
+            if other == entity or label not in self.pair_fluents:
                 return None  # type: ignore[return-value]
-            held = self.pair_holds(scene, time, predicate["label"], entity, other)
+            held = self.pair_holds(scene, time, label, entity, other)
             return held == form["polarity"]
         if predicate["kind"] == "comparison":
             if predicate["class"] != "RANGE":
@@ -1097,8 +1122,71 @@ class Oracle:
             return asserted > total / 2
         return asserted > 0
 
+    def place_path(self, place: str) -> list[str]:
+        """The categories of places a place is below, from its label (``PLACE.1.2.1`` is below
+        ``PLACECATEGORY.1.2`` and ``PLACECATEGORY.1``), independently of the world's tables."""
+        numbers = place.split(".")[1:-1]
+        return ["PLACECATEGORY." + ".".join(numbers[: k + 1]) for k in range(len(numbers))]
+
+    def place_column(self, label: str) -> np.ndarray:
+        """A place feature's or a place scalar's values over the places, from ``places.csv`` and
+        the brute-force evaluator for a determined place feature."""
+        if label in self.place_rows[0]:
+            return np.array([row[label] for row in self.place_rows])
+        return np.array(
+            [self.brute.feature(label, place) for place in self.place_labels], dtype=np.int64
+        )
+
+    def _place(self, form: dict[str, Any]) -> bool | None:
+        """An instance-level form about a place (stage c4c, Jon's ruling 3 of WM.73): a place
+        property or part, membership in a category of places, a place pole against a category of
+        places (or ``EVERYPLACE``) at the form's ``z``, or a comparative with another place on a
+        place scalar, from the places' table alone."""
+        subject, predicate = form["subject"]["instance"], form["predicate"]
+        kind = predicate["kind"]
+        row = self.place_labels.index(subject)
+        path = self.place_path(subject)
+        if kind in ("property", "part"):
+            value = self.place_column(predicate["label"])[row] == 1
+        elif kind == "member":
+            value = predicate["label"] in path
+        elif kind == "comparison":
+            comparison = predicate["class"]
+            if comparison != "EVERYPLACE" and comparison not in path:
+                return None
+            scalar, side = predicate["label"].rsplit(".", 1)
+            values = self.place_column(scalar).astype(float)
+            rows = np.array(
+                [
+                    comparison == "EVERYPLACE" or comparison in self.place_path(q)
+                    for q in self.place_labels
+                ]
+            )
+            mean, sd = values[rows].mean(), values[rows].std()
+            z = form.get("z", self.z)
+            if sd == 0:
+                value = False
+            elif side == "HIGH":
+                value = values[row] >= mean + z * sd
+            else:
+                value = values[row] <= mean - z * sd
+        elif kind == "comparative":
+            other = predicate["patient"]["instance"]
+            if other == subject or not form["polarity"] or other not in self.place_labels:
+                return None
+            values = self.place_column(predicate["label"]).astype(float)
+            first, second = values[row], values[self.place_labels.index(other)]
+            if self._low_word(predicate):
+                first, second = second, first
+            return bool(first > second)
+        else:
+            return None
+        return bool(value) == form["polarity"]
+
     def _instance(self, form: dict[str, Any]) -> bool | None:
         subject, predicate = form["subject"]["instance"], form["predicate"]
+        if subject in self.place_labels:
+            return self._place(form)
         row, kind = self.row[subject], predicate["kind"]
         path = self.path[subject]
         if kind in ("property", "part", "event_type1", "patient_capacity"):

@@ -60,6 +60,7 @@ effects that make no statement, and why.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -86,6 +87,7 @@ from semantic_world.corpus.propositions import (
     NEC_NO,
     NEGATIVE_ORDER,
     NO,
+    PAIR_STATE,
     PLACE_EVENT,
     POSITIVE_ORDER,
     PRECONDITION,
@@ -194,6 +196,17 @@ class Facts:
         self.place_categories = of_type("place_category")
         self.place_features = {IS: of_type("place_is"), HAS: of_type("place_has")}
         self.place_poles = of_type("place_scalar")
+        self.place_scalars: tuple[str, ...] = tuple(
+            dict.fromkeys(pole_dimension(p) for p in self.place_poles)
+        )
+        """The place scalars whose poles have words (stage c4c): what tells places apart, what
+        a place is described by, and what two places are compared on."""
+        self.location_prepositions = tuple(
+            f for f in self.pair_prepositions if world.is_location_fluent(f)
+        )
+        self.entity_pair_prepositions = tuple(
+            f for f in self.pair_prepositions if not world.is_location_fluent(f)
+        )
         self.place_verbs = of_type("place_event")
         """The place event types that have a word: the moves and the acts a narrative can
         report. Kept apart from ``verbs``, which the relation facts, the causal statements, the
@@ -346,6 +359,60 @@ class Facts:
         ]
         return tuple(f for f in facts if f is not None)
 
+    # Places, and pairs at a time point (stage c4c) ----------------------------------------------
+
+    def place_predicates(self, place: str) -> list[Predicate]:
+        """Every predicate that a description of a place could have (Jon's ruling 3 of WM.73):
+        its place properties and parts, a place pole against every named category of places it
+        is below, and membership in a category of places."""
+        predicates = [Predicate(IS, f) for f in self.place_features[IS]]
+        predicates += [Predicate(HAS, f) for f in self.place_features[HAS]]
+        path = [c for c in self.world.place_path(place) if c in self.named]
+        predicates += [
+            Predicate(COMPARISON, p, comparison=c) for p in self.place_poles for c in path
+        ]
+        predicates += [Predicate(MEMBER, c) for c in self.place_categories]
+        return predicates
+
+    def place_facts(self, place: str, negative: bool = False) -> tuple[Proposition, ...]:
+        """Every true proposition about a place, in the order of :meth:`place_predicates`."""
+        facts = [
+            self.instance_fact(place, predicate, negative)
+            for predicate in self.place_predicates(place)
+        ]
+        return tuple(f for f in facts if f is not None)
+
+    def draw_place(self, rng: np.random.Generator, place: str) -> Proposition | None:
+        """One true instance-level proposition about a place, negative at the instance-level
+        negation rate, as :meth:`draw_instance` draws one about an entity."""
+        negative = rng.random() < self.config.propositions.negation_rate[INSTANCE]
+        pool = self.place_facts(place, negative) or self.place_facts(place, not negative)
+        if not pool:
+            return None
+        return pool[int(rng.integers(len(pool)))]
+
+    def pair_predicates(self, others: Sequence[str], places: Sequence[str]) -> list[Predicate]:
+        """The pair-state predicates a sentence about a participant could have (stage c4c): a
+        pair fluent between entities with a preposition toward each of ``others``, a location
+        fluent with a preposition toward each of ``places``, and ``SAME`` with a preposition
+        toward each of ``others``; in that order."""
+        predicates = [
+            Predicate(PAIR_STATE, fluent, other)
+            for fluent in self.entity_pair_prepositions
+            for other in others
+        ]
+        predicates += [
+            Predicate(PAIR_STATE, fluent, place)
+            for fluent in self.location_prepositions
+            for place in places
+        ]
+        predicates += [
+            Predicate(PAIR_STATE, same, other)
+            for same in self.same_prepositions
+            for other in others
+        ]
+        return predicates
+
     # Restricted subjects ---------------------------------------------------------------------
 
     def restriction_options(self, term: CategoryTerm) -> tuple[Literal, ...]:
@@ -485,9 +552,9 @@ class Facts:
         return None
 
     def instance_comparison(self, x: str, y: str, dimension: str) -> Proposition | None:
-        """The true comparative between two instances on a scalar: ``GREATER`` of ``x`` over
-        ``y``, or the other way round; None when the values are equal, or when the language
-        cannot state it."""
+        """The true comparative between two instances on a scalar, or (stage c4c) between two
+        places on a place scalar: ``GREATER`` of ``x`` over ``y``, or the other way round; None
+        when the values are equal, or when the language cannot state it."""
         for first, second in ((x, y), (y, x)):
             candidate = Proposition(INSTANCE, first, Predicate(COMPARATIVE, dimension, second))
             if not self.expressible(candidate):

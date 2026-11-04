@@ -824,11 +824,13 @@ def test_the_record_of_which_state_item_changed_agrees_with_the_history(cases, r
             marks = []
             for item in (true, false):
                 form = item.input["logical_form"]
+                patient = form["predicate"].get("patient")
                 changed = oracle.changed(
                     scenes[form["scene"]],
                     form["subject"]["instance"],
                     form["predicate"]["label"],
                     form["predicate"].get("cut"),
+                    None if patient is None else patient["instance"],
                 )
                 assert item.meta["changed"] == changed
                 marks.append(changed)

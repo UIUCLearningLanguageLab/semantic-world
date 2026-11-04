@@ -33,6 +33,7 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.testsets import (
     CHANGES,
+    OBJECT,
     PREDICATE,
     QUANTIFIER,
     ROLE,
@@ -129,7 +130,10 @@ def test_every_false_item_fails_and_differs_by_exactly_one_change(cases, name) -
                 assert false.subject == item.predicate.patient
                 assert false.predicate.patient == item.subject
                 assert false.predicate.label == item.predicate.label
-    assert all(count > 10 for count in made.values()), made
+    # the object change (stage c4c) applies to pair, location, and SAME states and to events of
+    # place event types, all about a time point: test_corpus_pairs_places.py tests it
+    assert made[OBJECT] == 0
+    assert all(count > 10 for change, count in made.items() if change != OBJECT), made
 
 
 def test_changes_that_can_apply(cases) -> None:
@@ -168,13 +172,13 @@ def test_false_events_did_not_happen_in_their_scene(cases) -> None:
                 continue
             assert facts.truth.is_true(report)
             if event.place:
-                # a move or an act at a place (stage c4b) takes no change: its false items,
-                # with the change ``object``, are stage c4c's
-                assert changes_for(report) == ()
-                continue
-            assert changes_for(report) == (
-                (PREDICATE, SUBJECT, ROLE) if event.transitive else (PREDICATE, SUBJECT)
-            )
+                # a move or an act at a place (stage c4c): another place verb, another agent,
+                # or another place of the scene (the change ``object``, WM.56), never a role swap
+                assert changes_for(report) == (PREDICATE, SUBJECT, OBJECT)
+            else:
+                assert changes_for(report) == (
+                    (PREDICATE, SUBJECT, ROLE) if event.transitive else (PREDICATE, SUBJECT)
+                )
             assert falsify(facts, report, QUANTIFIER, rng) is None
             for change in changes_for(report):
                 false = falsify(facts, report, change, rng)

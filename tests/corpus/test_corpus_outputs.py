@@ -355,6 +355,8 @@ def test_test_set_settings_change_no_document(folders) -> None:
         "tests/state_subject_changed.jsonl",
         "tests/state_comparison_role.jsonl",
         "tests/state_subject_unchanged.jsonl",
+        "tests/state_role_changed.jsonl",  # the role swap of a pair state (stage c4c)
+        "tests/state_role_unchanged.jsonl",
         "tests/able_now_subject_blocked.jsonl",
         "tests/able_now_subject_impossible.jsonl",
         "tests/causal_effect_role.jsonl",

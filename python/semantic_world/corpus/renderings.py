@@ -161,6 +161,7 @@ from semantic_world.corpus.world import (
     PLACE_PATIENT_CAPACITY_PREFIX,
     PLACE_PROPERTY_PREFIX,
     PROPERTY_PREFIX,
+    SAME_PREFIX,
     TWO_PLACE_PREFIX,
 )
 from semantic_world.world.runtime import RANGE
@@ -904,6 +905,7 @@ def _kind(label: str) -> str:
         # phase (c) (stage c4b): a pair fluent's atom is a pair state, a place event type's an
         # event, and the places' categories and features are named as the entities' are
         (PAIR_PREFIX, PAIR_STATE),
+        (SAME_PREFIX, PAIR_STATE),  # SAME on a functional pair fluent (stage c4c, WM.73)
         (PLACE_EVENT_PREFIX, PLACE_EVENT),
         (PLACE_CATEGORY_PREFIX, MEMBER),
         (PLACE_PROPERTY_PREFIX, IS),

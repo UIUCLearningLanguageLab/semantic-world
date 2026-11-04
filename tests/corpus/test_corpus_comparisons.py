@@ -31,7 +31,7 @@ from semantic_world.corpus.grammar import (
 )
 from semantic_world.corpus.logical import has_pole
 from semantic_world.corpus.mentions import comparative_plan
-from semantic_world.corpus.planner import COMPARATIVE_SECTION, COMPARISON_KIND
+from semantic_world.corpus.planner import COMPARATIVE_SECTION, COMPARISON_KIND, PLACE_COMPARATIVE
 from semantic_world.corpus.propositions import (
     ABOVE,
     BELOW,
@@ -140,6 +140,13 @@ def test_every_comparison_sentence_is_true_by_the_oracle(cases, runs, name) -> N
             if proposition.level == CLASS:
                 assert sentence.section == "characteristic"
                 counts["class comparative"] += 1
+            elif sentence.plan.subject.place:
+                # a comparison of two places (stage c4c): the place just introduced, as the
+                # subject, with a place mentioned before, on a place scalar
+                assert sentence.section == PLACE_COMPARATIVE
+                assert sentence.plan.predication.object.place
+                counts["place comparative"] += 1
+                continue
             else:
                 assert sentence.section == COMPARATIVE_SECTION
                 # the two participants of the event sentence before it, the agent as the subject
@@ -562,7 +569,11 @@ def test_the_comparative_rate_and_the_statistics(cases, runs) -> None:
     # the comparative descriptions: the comparatives of scalars, and since stage b3b those of
     # numeric fluents at the event's time point, state-level propositions
     assert stats["numeric_comparative_sentences"] == by_kind[(COMPARATIVE, STATE)]
-    assert stats["comparative_descriptions"] == (
+    # and since stage c4c the comparisons of two places, counted apart
+    assert stats["place_comparative_sentences"] == sum(
+        s.section == PLACE_COMPARATIVE for s in sentences
+    )
+    assert stats["comparative_descriptions"] + stats["place_comparative_sentences"] == (
         by_kind[(COMPARATIVE, INSTANCE)] + by_kind[(COMPARATIVE, STATE)]
     )
     assert by_kind[(COMPARATIVE, INSTANCE)] > 0
