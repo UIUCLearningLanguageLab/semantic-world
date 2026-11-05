@@ -403,7 +403,10 @@ def test_conditional_statements_are_true_and_never_without_their_condition(heavy
     assert report["conditional_effects"] > 0
     assert report["unstated"]["numeric_condition"] > 0
     assert report["stated"] + sum(report["unstated"].values()) == report["conditional_effects"]
-    assert corpus.stats["causal"]["conditional_effects"] == report
+    # stats.yaml writes the report of the pair entries (stage c5a) under its own key
+    conditional = {key: value for key, value in report.items() if key != "pair_entries"}
+    assert corpus.stats["causal"]["conditional_effects"] == conditional
+    assert corpus.stats["causal"]["pair_entries"] == report["pair_entries"]
     # the sentences: the condition in the restrictor, after the bound event
     said = 0
     for document, sentence in sentences_of(corpus):

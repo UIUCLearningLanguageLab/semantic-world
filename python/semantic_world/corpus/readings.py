@@ -20,7 +20,10 @@ one of three kinds of logical form, one for each level:
 - ``causal``: a class-level sentence with ``become`` or with ``before`` ("things that things
   catch become caught"), which states what events do or need. It takes the place of
   ``generic``, and the quantifier readings of its words follow it as for any class-level
-  sentence.
+  sentence;
+- ``profile`` (stage c5a): a class-level sentence whose predicate is the copula with a
+  prepositional phrase and no ``before`` ("things that things are near are near them"), which
+  states what a pair fluent's symmetry guarantees. It takes the place of ``generic`` too.
 
 A noun phrase shows whether it names a category or an instance, so a class-level sentence has the
 one level reading ``generic``, followed by its quantifier readings: the quantifiers that its
@@ -71,7 +74,8 @@ EVENT = "event"
 STATE = "state"
 ABLE_NOW = "able_now"
 CAUSAL = "causal"
-READINGS = (GENERIC, CAPACITY, EVENT, STATE, ABLE_NOW, CAUSAL)
+PROFILE = "profile"
+READINGS = (GENERIC, CAPACITY, EVENT, STATE, ABLE_NOW, CAUSAL, PROFILE)
 LEVEL_READINGS = READINGS
 """The readings that name a level, in the order they are listed."""
 QUANTIFIER_READINGS = (NEC_ALL, ALL, MOST, SOME, NO, NEC_NO)
@@ -167,7 +171,10 @@ class _Reader:
         if subject is None:
             raise ValueError("a sentence has a subject")
         if not self.names_an_instance(subject):
-            level = CAUSAL if self.causal(tree) else GENERIC
+            if self.causal(tree):
+                level = CAUSAL
+            else:
+                level = PROFILE if self.profile(tree) else GENERIC
             return (level, *self.quantifier_readings(tree, subject))
         allowed = self.walk(tree)
         return tuple(reading for reading in READINGS if reading in allowed)
@@ -183,8 +190,14 @@ class _Reader:
                 return ()
         determiner = self.child(subject, "Det")
         if determiner is None:
-            # the "not" of a causal statement gives the fluent's value, and negates nothing
-            if verb_phrase is None or not self.negated(verb_phrase) or self.causal(tree):
+            # the "not" of a causal statement gives the fluent's value, and negates nothing; the
+            # "not" of a profile statement gives its form (stage c5a)
+            if (
+                verb_phrase is None
+                or not self.negated(verb_phrase)
+                or self.causal(tree)
+                or self.profile(tree)
+            ):
                 return self.bare_quantifiers
             readings = self.negated_bare_quantifiers
             if self.names_a_category(verb_phrase) and NEC_ALL in self.bare_quantifiers:
@@ -203,6 +216,15 @@ class _Reader:
         return (auxiliary is not None and self.gloss(auxiliary) == "become") or (
             adverb is not None and self.gloss(adverb) == BEFORE_WORD
         )
+
+    def profile(self, tree: Tree) -> bool:
+        """Whether a class-level sentence that is no causal statement is a profile statement
+        (stage c5a): its verb phrase has no predicate word of its own, so its predicate is the
+        copula with a prepositional phrase."""
+        verb_phrase = self.child(tree, "VP")
+        if verb_phrase is None or self.causal(tree):
+            return False
+        return all(self.child(verb_phrase, label) is None for label in ("V", "A", "NP-PRD"))
 
     def negated(self, verb_phrase: Tree) -> bool:
         """Whether a verb phrase is negated: by ``not``, or by ``no`` on its predicate noun."""

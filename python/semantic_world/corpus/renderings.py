@@ -65,7 +65,14 @@ it, whatever the grammar settings. It is made from the JSON logical form alone
   conditional statement's condition joins the restrictor after the bound event, a static literal
   as an atom and a fluent literal under ``BEFORE``: ``NEC(ALL(EVENT(EVENTVAR.1,
   EVENTTYPE2.1.2(VAR.1, VAR.2)) AND PROPERTY.4(VAR.2) AND BEFORE(EVENTVAR.1, BOOLFL.2(VAR.1)),
-  AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``.
+  AFTER(EVENTVAR.1, BOOLFL.3(VAR.2))))``. A pair literal (stage c5a) is an atom over the
+  two participants, the statement's role first, ``AFTER(EVENTVAR.1, PAIRFL.2(VAR.1, VAR.2))``
+  for "things that approach things become near them", ``BEFORE(EVENTVAR.1, SAME.PAIRFL.5(
+  VAR.1, VAR.2))`` for ``SAME``, and ``SOME`` an atom of the role alone, ``BEFORE(EVENTVAR.1,
+  NOT SOME.PAIRFL.2(VAR.1))`` for "are near no things before";
+- a profile statement (stage c5a) quantifies over the pairs of a pair fluent:
+  ``NEC(ALL(PAIRFL.2(VAR.2, VAR.1), PAIRFL.2(VAR.1, VAR.2)))`` for "things that things are near
+  are near them", and with ``NOT`` in the scope for the asymmetric form.
 
 A sentence about instances is a conjunction. Each noun phrase gives its noun and its modifiers,
 then the propositions of its relative clause, and the proposition of the main clause comes last.
@@ -96,6 +103,7 @@ from semantic_world.corpus.propositions import (
     ABOVE,
     AGENT,
     ALL,
+    ASYMMETRIC,
     CAN,
     CHANGE,
     CLASS,
@@ -123,11 +131,13 @@ from semantic_world.corpus.propositions import (
     PATIENT,
     PLACE_EVENT,
     PRECONDITION,
+    PROFILE,
     PROJECTION,
     RAISES,
     SOME,
     STATE,
     STATE_KIND,
+    SYMMETRIC,
     TIMED_LEVELS,
     VERB,
     CategoryTerm,
@@ -135,14 +145,19 @@ from semantic_world.corpus.propositions import (
     Condition,
     EventTerm,
     Literal,
+    PairTerm,
     Predicate,
     Proposition,
     comparison_class_of,
     event_of,
     is_event_variable,
     is_numeric,
+    is_pair_label,
+    is_same_label,
     is_scalar_pole,
+    is_some_label,
     low_word,
+    other_role,
     pole_dimension,
     pole_operator,
     scene_of,
@@ -597,7 +612,15 @@ def _causal(form: dict[str, Any]) -> Formula:
             restrictor.append(Temporal(CAUSAL_OPERATORS[PRECONDITION], "EVENTVAR.1", body))
         else:
             restrictor.append(body)
-    atom = Atom(predicate[LABEL_KEY], (variables[role],))
+    label = predicate[LABEL_KEY]
+    if is_pair_label(label) or is_same_label(label):
+        # a pair literal (stage c5a): the statement's role first, then the other participant
+        other = other_role(role)
+        if other not in variables:
+            raise RenderingError(f"{event_type} has one participant, and {label} relates two")
+        atom = Atom(label, (variables[role], variables[other]))
+    else:
+        atom = Atom(label, (variables[role],))  # a fluent, or SOME of the role (stage c5a)
     direction = predicate.get("direction")
     if direction is not None:
         if predicate["kind"] != EFFECT:
@@ -607,6 +630,22 @@ def _causal(form: dict[str, Any]) -> Formula:
         operator = CAUSAL_OPERATORS[predicate["kind"]]
         scope = Temporal(operator, "EVENTVAR.1", atom if predicate["value"] else Not(atom))
     return (Quantified(form["quantifier"], tuple(restrictor), scope),)
+
+
+def _profile(form: dict[str, Any]) -> Formula:
+    """The formula of a profile statement (stage c5a): ``NEC(ALL(PAIRFL.2(VAR.2, VAR.1),
+    PAIRFL.2(VAR.1, VAR.2)))`` for the symmetric form, and with ``NOT`` in the scope for the
+    asymmetric form. ``VAR.1`` is the subject, the second argument of the restrictor's pair."""
+    predicate = form["predicate"]
+    label = predicate[LABEL_KEY]
+    if form["subject"].get("pair") != label:
+        raise RenderingError("a profile statement is about one pair fluent")
+    if predicate.get("form") not in (SYMMETRIC, ASYMMETRIC):
+        raise RenderingError("a profile statement has a form, symmetric or asymmetric")
+    scope: Any = Atom(label, ("VAR.1", "VAR.2"))
+    if predicate["form"] == ASYMMETRIC:
+        scope = Not(scope)
+    return (Quantified(form["quantifier"], (Atom(label, ("VAR.2", "VAR.1")),), scope),)
 
 
 def formula(form: dict[str, Any], referents: str = "local", descriptions: str = MARKED) -> Formula:
@@ -621,6 +660,8 @@ def formula(form: dict[str, Any], referents: str = "local", descriptions: str = 
     predicate = form["predicate"]
     z = form.get("z")
     if form["level"] == CLASS:
+        if predicate["kind"] == PROFILE:
+            return _profile(form)
         if "head" in form["subject"] or predicate["kind"] in CAUSAL_OPERATORS:
             return _causal(form)
         if predicate["kind"] in (COMPARISON, COMPARATIVE):
@@ -1039,6 +1080,15 @@ def _causal_proposition(main: Quantified) -> Proposition:
     value = not isinstance(scope.body, Not)
     atom = scope.body if value else scope.body.body
     role = role_of(atom.arguments[0])
+    two = is_pair_label(atom.label) or is_same_label(atom.label)
+    if len(atom.arguments) != (2 if two else 1):
+        raise RenderingError(
+            f"{atom.label} takes {'two arguments' if two else 'one argument'} in a causal statement"
+        )
+    if two and role_of(atom.arguments[1]) == role:
+        raise RenderingError(f"{atom.label} relates the two participants of the event")
+    if is_some_label(atom.label) and scope.operator != CAUSAL_OPERATORS[PRECONDITION]:
+        raise RenderingError(f"{atom.label} is a precondition: no effect sets it")
     if scope.operator in _DIRECTION_OF_EFFECT_OPERATOR:
         predicate = Predicate(
             EFFECT, atom.label, direction=_DIRECTION_OF_EFFECT_OPERATOR[scope.operator]
@@ -1051,6 +1101,42 @@ def _causal_proposition(main: Quantified) -> Proposition:
     )
 
 
+def _is_profile(main: Quantified) -> bool:
+    """Whether a quantified formula is a profile statement (stage c5a): its restrictor is one
+    atom of a pair fluent over two variables."""
+    restrictor = main.restrictor
+    return (
+        len(restrictor) == 1
+        and isinstance(restrictor[0], Atom)
+        and is_pair_label(restrictor[0].label)
+        and len(restrictor[0].arguments) == 2
+    )
+
+
+def _profile_proposition(main: Quantified) -> Proposition:
+    """The profile statement that a quantified formula over the pairs of a pair fluent says:
+    the same pair fluent the other way round in its scope, negated for the asymmetric form."""
+    pair = main.restrictor[0]
+    positive = not isinstance(main.scope, Not)
+    atom = main.scope if positive else main.scope.body
+    if (
+        not isinstance(atom, Atom)
+        or atom.label != pair.label
+        or atom.arguments != (pair.arguments[1], pair.arguments[0])
+    ):
+        raise RenderingError(
+            "a profile statement says the pair of its restrictor the other way round"
+        )
+    form = SYMMETRIC if positive else ASYMMETRIC
+    return Proposition(
+        CLASS,
+        PairTerm(pair.label),
+        Predicate(PROFILE, pair.label, form=form),
+        True,
+        main.quantifier,
+    )
+
+
 def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None) -> Proposition:
     """The proposition of a formula: the whole logical form of a class-level sentence, and the
     proposition of the main clause of a sentence about instances, which is the last part of the
@@ -1060,6 +1146,8 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
     main = formula[-1]
     if isinstance(main, Quantified) and isinstance(main.scope, Temporal):
         return _causal_proposition(main)
+    if isinstance(main, Quantified) and _is_profile(main):
+        return _profile_proposition(main)
     if isinstance(main, Quantified):
         scope = main.scope
         polarity = not isinstance(scope, Not)

@@ -133,6 +133,7 @@ def test_default_values() -> None:
         "with_phrase": "after",
         "relative_clause": "after",
         "adposition": "preposition",
+        "stranding": "strand",
         "auxiliary": "before",
         "negation": "after_auxiliary",
         "before": "after_predicate",

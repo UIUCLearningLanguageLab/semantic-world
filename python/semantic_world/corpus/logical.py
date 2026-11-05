@@ -54,6 +54,15 @@ a conditional statement, stage b3b), the predicate an effect or a precondition w
 (or, for a numeric effect statement, its ``direction``), and ``causal`` the definition entry
 that the statement states.
 
+**Pair literals and profiles** (stage c5a). A causal statement about a pair literal has the
+pair fluent (``PAIRFL.2``), ``SAME`` on it (``SAME.PAIRFL.2``), or ``SOME`` on it
+(``SOME.PAIRFL.2``) as the ``label`` of its predicate, with its ``value``; the subject's role is
+the literal's first argument, and the ``causal`` record names the role of the second argument of
+a pair or of ``SAME`` under ``second``. A profile statement's subject is the pair term
+(``{"head": "THING", "pair": "PAIRFL.2", "role": "second"}``: the things that stand second in a
+pair) and its predicate ``{"kind": "profile", "label": "PAIRFL.2", "form": "symmetric"}``, or
+``"asymmetric"``.
+
 **Numeric fluents** (stage b3b). A numeric pole at a time point (kind ``comparison``, class
 ``RANGE``) records the language's cut for its adjective under ``cut`` in the predicate
 (``numeric_adjectives.cut_high`` or ``cut_low``), as every proposition with a numeric pole

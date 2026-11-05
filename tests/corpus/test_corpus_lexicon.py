@@ -93,7 +93,9 @@ def test_concepts_of_the_default_world(default_world) -> None:
     assert labels["scalar"] == [
         f"{dimension}.{pole}" for dimension in world.scalars for pole in ("HIGH", "LOW")
     ]
-    assert [c.label for c in lexicon.of_type(GENERIC)] == [THING]
+    # the generic noun, and since stage c5a the generic noun for places, the last content concept
+    assert [c.label for c in lexicon.of_type(GENERIC)] == [THING, "SOMEPLACE"]
+    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
     # no agent capacity is a concept: the event type itself is the word
     assert not any(c.label.startswith("CAN.") for c in lexicon.concepts)
 
@@ -138,7 +140,8 @@ def test_concept_order_follows_the_specification_table(default_world) -> None:
     # (stage c4b), so that every content lexeme of a world without them keeps its label; the
     # tiny and default place taxonomies have no place parts, so place_has is empty
     phase_c = [t for t in PHASE_C_TYPES if t != "place_has"]
-    order = list(CONCEPT_TYPES[: -len(PHASE_C_TYPES)]) + [GENERIC] + phase_c + [FUNCTION]
+    # and the generic noun for places (stage c5a) stands last among the content concepts
+    order = list(CONCEPT_TYPES[: -len(PHASE_C_TYPES)]) + [GENERIC] + phase_c + [GENERIC, FUNCTION]
     assert [t for i, t in enumerate(types) if i == 0 or types[i - 1] != t] == order
 
 
@@ -156,9 +159,11 @@ def test_a_world_without_two_place_event_types_or_scalars(world_files) -> None:
     assert len(lexicon.of_type("place_category")) > 0
     assert len(lexicon.content_lexemes) == sum(
         len(lexicon.of_type(t)) for t in ("category", "property", "part", "event_unary")
-    ) + 1 + sum(len(lexicon.of_type(t)) for t in place_types) + sum(
+    ) + 2 + sum(len(lexicon.of_type(t)) for t in place_types) + sum(
         lexicon.is_named(c.label) for c in lexicon.of_type("place_patient_projection")
-    )  # and the generic noun
+    )  # and the two generic nouns, of things and (stage c5a) of places
+    assert [c.label for c in lexicon.of_type(GENERIC)] == ["THING", "SOMEPLACE"]
+    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"  # last: the others keep their labels
     assert lexicon.stats()["lexemes_by_pos"][TRANSITIVE_VERB] == 0
 
 
@@ -287,7 +292,8 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
     assert concepts["category"] == len(default_world.categories)
     assert concepts["state"] == len(default_world.fluents)
     assert concepts["scalar"] == 2 * len(default_world.scalars)
-    assert counts["concepts"] == {**concepts, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
+    # two generic nouns: of things, and (stage c5a) of places
+    assert counts["concepts"] == {**concepts, GENERIC: 2, FUNCTION: len(FUNCTION_WORDS)}
     # the default proportion of a type the test leaves out is 1.0, and a quarter for the place
     # patient capacities (stage c4b), as for the entities'
     named = {
@@ -298,7 +304,7 @@ def test_each_type_has_its_own_proportion(default_world) -> None:
         * (2 if t in ("scalar", "numeric", "place_scalar") else 1)
         for t in CONCEPT_TYPES
     }
-    assert counts["named_concepts"] == {**named, GENERIC: 1, FUNCTION: len(FUNCTION_WORDS)}
+    assert counts["named_concepts"] == {**named, GENERIC: 2, FUNCTION: len(FUNCTION_WORDS)}
     assert 0 < named["category"] < concepts["category"] and named["event_category"] == 0
 
 
@@ -391,12 +397,15 @@ def test_lexeme_labels(default_world) -> None:
     phase_c = [
         x for x in lexicon.content_lexemes if lexicon.concept(x.concept).type in PHASE_C_TYPES
     ]
-    assert phase_c and lexicon.content_lexemes[-len(phase_c) - 1].concept == THING
-    assert lexicon.lexeme(f"LEXEME.{content - len(phase_c)}").concept == THING
+    # and the generic noun for places (stage c5a) is the last content lexeme of all
+    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
+    assert phase_c and lexicon.content_lexemes[-len(phase_c) - 2].concept == THING
+    assert lexicon.lexeme(f"LEXEME.{content - len(phase_c) - 1}").concept == THING
     assert lexicon.lexeme(f"LEXEME.{content + 1}").gloss == "a"
-    assert lexicon.lexeme(f"LEXEME.{total - 2}").gloss == "become"
-    assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "before"
-    assert lexicon.lexeme(f"LEXEME.{total}").gloss == "than"
+    assert lexicon.lexeme(f"LEXEME.{total - 3}").gloss == "become"
+    assert lexicon.lexeme(f"LEXEME.{total - 2}").gloss == "before"
+    assert lexicon.lexeme(f"LEXEME.{total - 1}").gloss == "than"
+    assert lexicon.lexeme(f"LEXEME.{total}").gloss == "them"  # the last base word (stage c5a)
     with pytest.raises(KeyError, match="unknown lexeme"):
         lexicon.lexeme(f"LEXEME.{total + 1}")
     with pytest.raises(KeyError, match="unknown concept"):
@@ -436,8 +445,9 @@ def function_glosses(world, can_words: str = "shared", **morphology: Any) -> lis
 def test_function_words(tiny_world) -> None:
     base = [
         "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-        "and", "that", "it", "become", "before", "than",
+        "and", "that", "it", "become", "before", "than", "them",
     ]  # fmt: skip
+    # them, the bound pronoun of stage c5a, is appended last: the words before it keep their order
     assert list(FUNCTION_WORDS) == base and AGREEMENT_WORDS == ("are", "have")
     assert function_glosses(tiny_world) == base
     # with distinct words for ABLE and ABLE_NOW, the language has can_now too

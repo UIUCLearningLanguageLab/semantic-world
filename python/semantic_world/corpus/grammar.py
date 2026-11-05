@@ -64,6 +64,21 @@ red things", "things that strike things that are asleep before"). An object rela
 verb, so a negated PROPERTY literal or a fluent literal of the patient's role has no place in a
 statement about the patient, and such a statement is not made.
 
+**Pair literals and profiles at the class level** (stage c5a). A causal statement about a
+pair literal has a prepositional predicate: an ``effect`` or a ``precondition`` whose label is
+a pair fluent's preposition (or a ``SAME`` preposition) and whose object is the **bound
+pronoun** ``them``, a class-level noun phrase without a noun that refers back to the other
+participant of the subject's relative clause ("things that approach things become near them"),
+or, for ``SOME``, a **quantified object**, the generic noun with ``some`` or ``no`` ("are near
+no things before"), whose determiner carries the value, so the verb phrase is never negated.
+The subject of a statement about a place event type has the generic noun for places as its
+other participant ("things that go to places become at them"). A **profile statement** has the
+generic noun as its subject, with an object relative whose predicate is the pair fluent's
+preposition and whose gap is the preposition's object ("things that things are near"), and a
+predication of kind ``profile``: the same preposition with the bound pronoun, negated for the
+asymmetric form ("are not above them"). The limits stay: one relative clause per noun phrase,
+and an object relative, prepositional or not, with one predicate.
+
 How a restriction is realized is fixed, so that a tree has one reading:
 
 - a positive IS literal and a scalar pole are adjectives;
@@ -83,6 +98,7 @@ from semantic_world.corpus.propositions import (
     AGENT,
     ALL,
     ASPECTS,
+    ASYMMETRIC,
     CAN,
     CAUSAL_KINDS,
     CHANGE,
@@ -109,11 +125,14 @@ from semantic_world.corpus.propositions import (
     PLACE_EVENT,
     PRECONDITION,
     PRESENT,
+    PROFILE,
     PROJECTION,
     QUANTIFIERS,
     SOME,
+    SOME_PREFIX,
     STATE,
     STATE_KIND,
+    SYMMETRIC,
     TENSES,
     VERB,
     CategoryTerm,
@@ -121,6 +140,7 @@ from semantic_world.corpus.propositions import (
     Condition,
     EventTerm,
     Literal,
+    PairTerm,
     Predicate,
     Proposition,
     event_of,
@@ -128,13 +148,16 @@ from semantic_world.corpus.propositions import (
     is_numeric,
     is_part_feature,
     is_property_feature,
+    is_same_label,
     pole_dimension,
     pole_direction,
     scene_of,
 )
 from semantic_world.corpus.world import (
     FLUENT_PREFIX,
+    PAIR_PREFIX,
     PLACE_CATEGORY_PREFIX,
+    PLACE_EVENT_PREFIX,
     PLACE_PART_PREFIX,
     PLACE_PREFIX,
     PLACE_PROPERTY_PREFIX,
@@ -154,6 +177,9 @@ QUANTIFIER_WORDS = ("all", "most", "some", "no")
 a language setting; "most" and "some" express ``most`` and ``some``."""
 WORD_OF = {NEC_ALL: "all", ALL: "all", MOST: "most", SOME: "some", NO: "no", NEC_NO: "no"}
 """The determiner word that states each quantifier."""
+OBJECT_QUANTIFIERS = ("some", "no")
+"""The determiner words of a quantified object of a preposition (stage c5a, WM.55): "near some
+things" says ``SOME`` of the pair fluent, and "near no things" its negation."""
 CLAUSE_KINDS = (CAN, VERB, PLACE_EVENT, PROJECTION, MEMBER)
 PLACE_FEATURE_PREFIXES = (
     PLACE_PROPERTY_PREFIX,
@@ -197,6 +223,14 @@ class NounPhrase:
     @property
     def pronoun(self) -> bool:
         return self.kind == INSTANCE_NP and self.noun is None
+
+    @property
+    def bound_pronoun(self) -> bool:
+        """Whether the phrase is the bound pronoun ``them`` (stage c5a): a class-level noun
+        phrase without a noun, which refers back to the other participant of a class-level
+        statement's restrictor ("things that approach things become near them"). Its referent
+        is that participant's generic noun, ``THING`` or ``SOMEPLACE``."""
+        return self.kind == CLASS_NP and self.noun is None
 
     @property
     def place(self) -> bool:
@@ -267,6 +301,13 @@ class Predication:
     @property
     def timed(self) -> bool:
         return self.time is not None
+
+    @property
+    def prepositional(self) -> bool:
+        """Whether the predicate word is a preposition: the word of a pair fluent, or of
+        ``SAME`` on one (stage c4b). An effect, a precondition, or a profile with one is a
+        prepositional predicate with an object (stage c5a)."""
+        return self.label.startswith((PAIR_PREFIX, SAME_PREFIX))
 
     @property
     def low(self) -> bool:
@@ -351,14 +392,44 @@ class SentencePlan:
         """Whether the plan is a causal statement: an effect or a precondition."""
         return self.predication.kind in CAUSAL_KINDS
 
+    @property
+    def profile(self) -> bool:
+        """Whether the plan is a profile statement (stage c5a)."""
+        return self.predication.kind == PROFILE
+
     def proposition(self) -> Proposition:
         """The proposition of the main clause, as the truth tests judge it: the subject, the
         predicate, the quantifier, and the polarity, without the mentions and the relative
         clauses."""
         predication = self.predication
         target = predication.object
+        if self.profile:
+            form = SYMMETRIC if predication.polarity else ASYMMETRIC
+            return Proposition(
+                CLASS,
+                pair_term_of(self.subject),
+                Predicate(PROFILE, predication.label, form=form),
+                True,
+                NEC_ALL,
+            )
         if self.causal:
-            if predication.numeric:
+            if predication.prepositional:
+                # a pair literal (stage c5a): with the bound pronoun, the pair or SAME between
+                # the two participants; with a quantified generic noun, SOME of the subject's
+                # role, its value in the determiner
+                if target is None:
+                    raise GrammarError("a preposition has an object")
+                if target.bound_pronoun:
+                    predicate = Predicate(
+                        predication.kind, predication.label, value=predication.polarity
+                    )
+                else:
+                    predicate = Predicate(
+                        predication.kind,
+                        f"{SOME_PREFIX}{predication.label}",
+                        value=target.determiner == "some",
+                    )
+            elif predication.numeric:
                 predicate = Predicate(
                     EFFECT, pole_dimension(predication.label), direction=predication.direction
                 )
@@ -537,16 +608,64 @@ def bare_things() -> NounPhrase:
     return NounPhrase(CLASS_NP, THING, THING)
 
 
-def _things_under(condition: tuple[Condition, ...], role: str) -> NounPhrase:
+def them(referent: str = THING) -> NounPhrase:
+    """The bound pronoun (stage c5a): the other participant of the restrictor, a thing or
+    (``SOMEPLACE``) a place."""
+    return NounPhrase(CLASS_NP, referent)
+
+
+def quantified_things(some: bool) -> NounPhrase:
+    """The quantified object of a preposition (stage c5a, WM.55): "some things" for ``SOME``
+    of a pair fluent, and "no things" for its negation."""
+    return NounPhrase(CLASS_NP, THING, THING, "some" if some else "no")
+
+
+def event_kind(event_type: str) -> str:
+    """The predicate kind of the verb that names the events of an event type: a one-place
+    event type, a place event type (stage c5a), or a two-place event type or category."""
+    if event_type.startswith("EVENTTYPE1."):
+        return CAN
+    return PLACE_EVENT if event_type.startswith(PLACE_EVENT_PREFIX) else VERB
+
+
+def pair_phrase_of(term: PairTerm, determiner: str | None = None) -> NounPhrase:
+    """The subject noun phrase of a profile statement (stage c5a): the generic noun with an
+    object relative whose subject is the bare generic noun and whose predicate is the copula
+    with the pair fluent's preposition, the head being the preposition's object: "things that
+    things are near"."""
+    clause = RelativeClause((Predication(PAIR_STATE, term.pair_fluent),), bare_things())
+    return NounPhrase(CLASS_NP, THING, THING, determiner, (), clause)
+
+
+def pair_term_of(phrase: NounPhrase) -> PairTerm:
+    """The pair term of the subject of a profile statement."""
+    clause = phrase.clause
+    if (
+        phrase.kind != CLASS_NP
+        or phrase.referent != THING
+        or clause is None
+        or not clause.object_relative
+        or len(clause.predications) != 1
+        or clause.predications[0].kind != PAIR_STATE
+    ):
+        raise GrammarError(
+            "the subject of a profile statement is the generic noun with a relative clause "
+            "whose predicate is a pair fluent's preposition, with the head as its object"
+        )
+    return PairTerm(clause.predications[0].label)
+
+
+def _things_under(condition: tuple[Condition, ...], role: str, noun: str = THING) -> NounPhrase:
     """The bare generic noun with the condition literals of one role on it (stage b3b): the
     static literals as its restriction, and the timed literals, Boolean fluents and numeric
-    poles (WM.35), as ``before`` predications of a relative clause."""
+    poles (WM.35), as ``before`` predications of a relative clause. ``noun`` is the generic
+    noun: ``SOMEPLACE`` for the place of a place event type (stage c5a)."""
     literals = tuple(Literal(c.label, c.value) for c in condition if c.role == role and not c.timed)
     before = tuple(
         Predication(PRECONDITION, c.label, c.value) for c in condition if c.role == role and c.timed
     )
     clause = RelativeClause(before) if before else None
-    return NounPhrase(CLASS_NP, THING, THING, None, literals, clause)
+    return NounPhrase(CLASS_NP, noun, noun, None, literals, clause)
 
 
 def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhrase:
@@ -556,7 +675,7 @@ def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhras
     (an object relative: "things that things catch"). The condition of a conditional statement
     (stage b3b) goes on the head (its static literals as modifiers, its fluent literals as
     ``before`` predications joined to the subject relative) and on the other participant."""
-    kind = CAN if term.event_type.startswith("EVENTTYPE1.") else VERB
+    kind = event_kind(term.event_type)
     head = _things_under(term.condition, term.role)
     other_role = AGENT if term.role == PATIENT else PATIENT
     if term.role == PATIENT:
@@ -568,7 +687,7 @@ def event_phrase_of(term: EventTerm, determiner: str | None = None) -> NounPhras
             )
         clause = RelativeClause((bound,), _things_under(term.condition, other_role))
     else:
-        target = _things_under(term.condition, other_role) if kind == VERB else None
+        target = _things_under(term.condition, other_role, term.other_noun) if kind != CAN else None
         bound = Predication(kind, term.event_type, True, target, EVENT_VARIABLE, PRESENT)
         before = head.clause.predications if head.clause is not None else ()
         clause = RelativeClause((bound, *before))
@@ -603,6 +722,8 @@ def phrase_of(term: CategoryTerm | EventTerm, determiner: str | None = None) -> 
     event term gives the subject of a causal statement."""
     if isinstance(term, EventTerm):
         return event_phrase_of(term, determiner)
+    if isinstance(term, PairTerm):
+        return pair_phrase_of(term, determiner)
     clause: RelativeClause | None = None
     if any(c.agent is not None for c in term.clauses):
         if len(term.clauses) != 1:
@@ -645,6 +766,9 @@ def check_plan(plan: SentencePlan) -> None:
     if plan.causal:
         _check_causal(plan)
         _check_phrase(subject, CLASS, top=True, causal=True)
+        return
+    if plan.profile:
+        _check_profile(plan)
         return
     if subject.kind == CLASS_NP:
         quantifier = plan.quantifier
@@ -767,15 +891,16 @@ def _check_causal(plan: SentencePlan) -> None:
     if subject.determiner not in (WORD_OF[NEC_ALL], None):
         raise GrammarError("a causal statement says all, or uses the bare plural")
     if (
-        predication.object is not None
+        (predication.object is not None) != predication.prepositional
         or predication.time is not None
         or predication.tense is not None
         or predication.aspect is not None
         or predication.become
     ):
         raise GrammarError(
-            "an effect or a precondition has no object, no event, no time point, and no tense: "
-            "a causal statement is timeless"
+            "an effect or a precondition has no event, no time point, and no tense: a causal "
+            "statement is timeless; and it has an object exactly when its predicate is a pair "
+            "fluent's preposition"
         )
     if predication.numeric and predication.kind != EFFECT:
         raise GrammarError(
@@ -788,11 +913,11 @@ def _check_causal(plan: SentencePlan) -> None:
     clause = subject.clause
     assert clause is not None
     bound = bound_predication(clause)
-    kind = CAN if term.event_type.startswith("EVENTTYPE1.") else VERB
+    kind = event_kind(term.event_type)
     if bound.kind != kind or bound.event != EVENT_VARIABLE:
         raise GrammarError(
-            "the relative clause of a causal statement names the events of a one-place or a "
-            f"two-place event type, bound to {EVENT_VARIABLE}"
+            "the relative clause of a causal statement names the events of a one-place, a "
+            f"two-place, or a place event type, bound to {EVENT_VARIABLE}"
         )
     if bound.tense != PRESENT or bound.aspect is not None or not bound.polarity:
         raise GrammarError(
@@ -803,10 +928,15 @@ def _check_causal(plan: SentencePlan) -> None:
     if kind == CAN:
         if other is not None or clause.object_relative:
             raise GrammarError("a one-place event type has an agent only")
-    elif other is None or other.kind != CLASS_NP or other.referent != THING:
+    elif other is None or other.kind != CLASS_NP or other.referent != term.other_noun:
         raise GrammarError(
-            "the other participant of the event of a causal statement is the generic noun"
+            "the other participant of the event of a causal statement is the generic noun, of "
+            "places for a place event type"
         )
+    if kind == PLACE_EVENT and clause.object_relative:
+        raise GrammarError("a causal statement about a place event type is about its agent")
+    if predication.prepositional:
+        _check_pair_literal(predication, other)
     if predication.kind == PRECONDITION and term.condition:
         raise GrammarError("a precondition statement has no condition: only an effect does")
     for phrase in (subject, other):
@@ -833,6 +963,89 @@ def _check_causal(plan: SentencePlan) -> None:
         )
 
 
+def _check_pair_literal(predication: Predication, other: NounPhrase | None) -> None:
+    """The prepositional predicate of a causal statement (stage c5a): the pair fluent's
+    preposition, or a ``SAME`` preposition, with the bound pronoun for the other participant
+    ("become near them", "are at them before"), or the pair fluent's preposition with a
+    quantified generic noun ("are near no things before": ``SOME`` of the subject's role,
+    never negated, because the determiner carries the value)."""
+    target = predication.object
+    assert target is not None
+    if target.kind != CLASS_NP or target.restriction or target.clause is not None:
+        raise GrammarError(
+            "the object of the preposition of a causal statement is the bound pronoun or a "
+            "quantified generic noun"
+        )
+    if target.bound_pronoun:
+        if target.determiner is not None:
+            raise GrammarError("the bound pronoun takes no determiner")
+        if other is None:
+            raise GrammarError(
+                "the bound pronoun refers back to the other participant, and a one-place "
+                "event type has none"
+            )
+        if target.referent != other.referent:
+            raise GrammarError(
+                "the bound pronoun refers back to the other participant of the restrictor"
+            )
+        if is_same_label(predication.label) and predication.kind != PRECONDITION:
+            raise GrammarError("SAME is a precondition: no effect sets it")
+        return
+    if (
+        target.referent != THING
+        or target.noun != THING
+        or target.determiner not in OBJECT_QUANTIFIERS
+    ):
+        raise GrammarError("a quantified object of a preposition is some things or no things")
+    if is_same_label(predication.label) or predication.kind != PRECONDITION:
+        raise GrammarError(
+            "a quantified object states SOME of a pair fluent, in a precondition statement"
+        )
+    if not predication.polarity:
+        raise GrammarError(
+            "a preposition with a quantified object is never negated: no things says it"
+        )
+
+
+def _check_profile(plan: SentencePlan) -> None:
+    """A profile statement (stage c5a): the generic noun with an object relative whose
+    predicate is a pair fluent's preposition ("things that things are near"), ``nec_all``,
+    said with "all" or bare, and the same preposition with the bound pronoun as its object,
+    negated for the asymmetric form ("are not above them"); timeless."""
+    subject, predication = plan.subject, plan.predication
+    if plan.quantifier != NEC_ALL:
+        raise GrammarError("a profile statement is nec_all: the definition guarantees it")
+    if subject.determiner not in (WORD_OF[NEC_ALL], None):
+        raise GrammarError("a profile statement says all, or uses the bare plural")
+    term = pair_term_of(subject)
+    if subject != pair_phrase_of(term, subject.determiner):
+        raise GrammarError(
+            "the subject of a profile statement is the generic noun, and its relative clause "
+            "has the bare generic noun as its subject"
+        )
+    if not predication.label.startswith(PAIR_PREFIX) or predication.label != term.pair_fluent:
+        raise GrammarError("a profile statement is about one pair fluent")
+    target = predication.object
+    if (
+        target is None
+        or not target.bound_pronoun
+        or target.referent != THING
+        or target.determiner is not None
+        or target.restriction
+        or target.clause is not None
+    ):
+        raise GrammarError("the object of a profile statement's preposition is the bound pronoun")
+    if (
+        predication.time is not None
+        or predication.event is not None
+        or predication.tense is not None
+        or predication.aspect is not None
+        or predication.become
+        or predication.standard is not None
+    ):
+        raise GrammarError("a profile statement is timeless")
+
+
 def _check_phrase(phrase: NounPhrase, level: str, top: bool = False, causal: bool = False) -> None:
     """``causal`` says the phrase is in a causal statement, whose class-level relative clauses
     may hold ``before`` predications (a fluent condition, stage b3b)."""
@@ -843,6 +1056,11 @@ def _check_phrase(phrase: NounPhrase, level: str, top: bool = False, causal: boo
             "a class-level sentence is about categories, and the other levels about instances"
         )
     if phrase.kind == CLASS_NP:
+        if phrase.bound_pronoun:
+            raise GrammarError(
+                "the bound pronoun is the object of the preposition of a causal or a profile "
+                "statement, and of nothing else"
+            )
         if phrase.noun != phrase.referent:
             raise GrammarError("the noun of a class-level noun phrase names its own category")
         allowed: tuple = QUANTIFIER_WORDS + (None,) if top else (None,)

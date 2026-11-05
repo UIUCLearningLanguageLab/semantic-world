@@ -843,21 +843,41 @@ class Oracle:
         type, as ``definition.json`` records them. An effect with a ``condition`` key is left
         out (stage b1): it holds only when its condition held, so it makes no unconditional
         causal statement true. A numeric effect (an ``amount``) and a numeric threshold literal
-        (a ``threshold``) are left out too (stage b2): no statement of this stage is about
-        them. A pair effect and a pair literal (a ``pair_fluent``) are left out (stage c4a):
-        the statements with pair literals are stage c5a's."""
+        (a ``threshold``) are left out too (stage b2): no unconditional Boolean statement is
+        about them. Since stage c5a the pair effects and the pair literals are entries: a pair
+        effect is ``{"kind": "pair", "pair_fluent", "first", "second", "value"}`` and a pair
+        literal has one of the kinds ``pair``, ``pair_same``, ``pair_some``, and
+        ``pair_someof`` (the last the entry of no statement, WM.55)."""
         record = self.event_types[event_type]
         if kind == "effect":
-            return [
-                e
-                for e in record["effects"]
-                if not e.get("condition") and "amount" not in e and e.get("kind") != "pair"
-            ]
-        return [
-            lit
-            for lit in record["precondition"]["literals"]
-            if "threshold" not in lit and "pair_fluent" not in lit
-        ]
+            return [e for e in record["effects"] if not e.get("condition") and "amount" not in e]
+        return [lit for lit in record["precondition"]["literals"] if "threshold" not in lit]
+
+    def _pair_statement(self, fluent: str) -> tuple[str, str] | None:
+        """The kind of pair literal that a causal statement's ``fluent`` names (stage c5a), and
+        its pair fluent: ``PAIRFL.2`` is a ``pair``, ``SAME.PAIRFL.2`` a ``pair_same``, and
+        ``SOME.PAIRFL.2`` a ``pair_some``. None for a Boolean or a numeric fluent."""
+        for prefix, kind in (("SAME.", "pair_same"), ("SOME.", "pair_some"), ("", "pair")):
+            if fluent.startswith(prefix + "PAIRFL."):
+                return kind, fluent[len(prefix) :]
+        return None
+
+    def _pair_entry_matches(
+        self, entry: dict[str, Any], role: str, kind: str, pair_fluent: str, value: bool
+    ) -> bool:
+        """Whether a pair effect or a pair literal of ``definition.json`` is the entry of a
+        statement about a role (stage c5a): the same kind, pair fluent, and value, and the
+        role as its first argument; on a symmetric pair fluent, and for ``SAME``, either role,
+        because the pair holds, and the partner is shared, both ways."""
+        if entry.get("kind") != kind or entry.get("pair_fluent") != pair_fluent:
+            return False
+        if bool(entry["value"]) != value:
+            return False
+        if kind == "pair_some":
+            return entry["role"] == role
+        if kind == "pair_same" or pair_fluent in self.symmetric:
+            return role in (entry["first"], entry["second"])
+        return entry["first"] == role
 
     def causal(self, form: dict[str, Any]) -> bool | None:
         """Whether a causal statement is true: every event type below its event type (itself,
@@ -865,9 +885,14 @@ class Oracle:
         numeric effect of the ``direction``'s sign (``raises``: ``+=``), under exactly the
         ``condition`` the form's subject records (none for an unconditional statement; a
         numeric condition literal with its ``cut`` matches the record's threshold literal at
-        exactly that point, WM.35, and any other numeric threshold condition is no entry). None
-        for a statement about a
-        derived fluent, or about a role the event type lacks."""
+        exactly that point, WM.35, and any other numeric threshold condition is no entry); or,
+        since stage c5a, the pair effect or the pair literal that the statement's ``fluent``
+        names (``PAIRFL.2``, ``SAME.PAIRFL.2``, ``SOME.PAIRFL.2``), compiled literals
+        included. An effect under a pair condition is the entry of no statement (WM.59). None
+        for a statement about a derived fluent, about a role the event type lacks, about the
+        place of a place event type, or about a pair literal that its event type cannot have
+        (a pair or ``SAME`` of a one-place event type, ``SAME`` or ``SOME`` as an effect, a
+        location fluent between two entities)."""
         subject, predicate = form["subject"], form["predicate"]
         event_type, role = subject["event"], subject["role"]
         fluent, value = predicate["label"], predicate.get("value")
@@ -875,9 +900,31 @@ class Oracle:
         condition = {self._literal_key(c) for c in subject.get("condition", ())}
         if form["quantifier"] != NEC_ALL or not form["polarity"]:
             return None
-        if role not in self.event_types[event_type]["roles"]:
+        record = self.event_types[event_type]
+        if role not in record["roles"]:
             return None
-        if fluent in self.numeric_fluents:
+        place = record["kind"] == "place_event_type"
+        if place and role != "agent":
+            return None
+        pair = self._pair_statement(fluent)
+        if pair is not None:
+            kind, pair_fluent = pair
+            if pair_fluent not in self.pair_fluents or direction is not None:
+                return None
+            if not isinstance(value, bool):
+                return None
+            if kind != "pair" and predicate["kind"] != "precondition":
+                return None
+            location = pair_fluent in self.location_fluents
+            if kind == "pair_some" and location:
+                return None
+            if kind != "pair_some" and len(record["roles"]) < 2:
+                return None
+            if kind == "pair" and place != location:
+                return None
+            if kind == "pair_same" and place:
+                return None
+        elif fluent in self.numeric_fluents:
             if predicate["kind"] != "effect" or direction not in ("raises", "lowers"):
                 return None
         elif fluent not in self.base_fluents or direction is not None:
@@ -886,7 +933,12 @@ class Oracle:
             return None
         for label in self.leaves_below(event_type):
             record = self.event_types[label]
-            if predicate["kind"] == "precondition":
+            if predicate["kind"] == "precondition" and pair is not None:
+                found = any(
+                    self._pair_entry_matches(lit, role, pair[0], pair[1], value)
+                    for lit in record["precondition"]["literals"]
+                )
+            elif predicate["kind"] == "precondition":
                 found = any(
                     "pair_fluent" not in lit
                     and lit["role"] == role
@@ -902,6 +954,38 @@ class Oracle:
                 )
             if not found:
                 return False
+        return True
+
+    def profile(self, form: dict[str, Any]) -> bool | None:
+        """Whether a profile statement (stage c5a) is true: the pair fluent's symmetry, as
+        ``definition.json`` records it in its symbol, is the statement's form. None for a
+        statement that is not about one pair fluent between entities, or has no form."""
+        subject, predicate = form["subject"], form["predicate"]
+        label = predicate["label"]
+        if form["quantifier"] != NEC_ALL or not form["polarity"]:
+            return None
+        if subject.get("pair") != label or predicate.get("form") not in (
+            "symmetric",
+            "asymmetric",
+        ):
+            return None
+        if label not in self.pair_fluents or label in self.location_fluents:
+            return None
+        (symbol,) = [s for s in self.record["symbols"] if s["label"] == label]
+        return symbol["symmetry"] == predicate["form"]
+
+    def profile_held(self, form: dict[str, Any], scenes: list[dict[str, Any]]) -> bool:
+        """Whether a profile statement held of every pair at every time point of the scenes,
+        by the replayed pairs (stage c5a): for each pair ``(y, x)`` of the pair fluent, the
+        pair ``(x, y)`` held too (the symmetric form) or did not (the asymmetric form)."""
+        label = form["predicate"]["label"]
+        symmetric = form["predicate"]["form"] == "symmetric"
+        for scene in scenes:
+            for pairs in self.pairs_at(scene):
+                held = pairs[label]
+                for first, second in held:
+                    if ((second, first) in held) != symmetric:
+                        return False
         return True
 
     def _literal_key(self, literal: dict[str, Any]) -> tuple:
@@ -936,11 +1020,19 @@ class Oracle:
         direction: str | None,
         condition: set[tuple],
     ) -> bool:
-        if effect.get("kind") == "pair" or effect["role"] != role or effect["fluent"] != fluent:
-            return False
         literals = (effect.get("condition") or {}).get("literals", [])
         if any(lit["kind"].startswith("pair") for lit in literals):
             return False  # a pair condition makes no statement in phase (c) (WM.59)
+        if effect.get("kind") == "pair":
+            # a pair effect (stage c5a): the entry of a statement about its pair fluent
+            pair = self._pair_statement(fluent)
+            if pair is None or pair[0] != "pair" or direction is not None:
+                return False
+            if not self._pair_entry_matches(effect, role, "pair", pair[1], bool(value)):
+                return False
+            return {self._record_literal_key(lit) for lit in literals} == condition
+        if effect["role"] != role or effect["fluent"] != fluent:
+            return False
         if "amount" in effect:
             if direction is None or (effect["operator"] == "+=") != (direction == "raises"):
                 return False
@@ -1010,6 +1102,8 @@ class Oracle:
     # Truth -----------------------------------------------------------------------------------
 
     def truth(self, form: dict[str, Any], scene: dict[str, Any] | None = None) -> bool | None:
+        if form["level"] == "class" and form["predicate"]["kind"] == "profile":
+            return self.profile(form)
         if form["level"] == "class" and "head" in form["subject"]:
             return self.causal(form)
         if form["level"] == "class":

@@ -76,6 +76,7 @@ from semantic_world.corpus.propositions import (
     Literal,
     condition_of,
     effect_matches,
+    effect_states,
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import Realizer, leaves
@@ -88,9 +89,11 @@ from semantic_world.corpus.renderings import (
 from semantic_world.world.history import replay
 
 WORLDS = ("tiny", pytest.param("default", marks=pytest.mark.slow))
-UNNAMED_LABELS = ("SOME.", "SOMEOF.", "EVERYPLACE", "SOMEPLACE")
-"""The labels of phase (c) that no word of the corpus carries before stage c5a: ``SOME`` and
-``SOMEOF`` (WM.55), and the bare symbols for places."""
+UNNAMED_LABELS = ("SOME.", "SOMEOF.", "EVERYPLACE")
+"""The labels of phase (c) that no word of the corpus carries: ``SOME`` and ``SOMEOF`` (WM.55;
+since stage c5a ``SOME`` is said with the pair fluent's preposition and a quantified object, and
+``SOMEOF`` is not said), and the comparison class of every place. ``SOMEPLACE``, the generic
+head noun for places, is a word since stage c5a."""
 PHASE_C_LABELS = ("PAIRFL", "PLACE", "SAME.") + UNNAMED_LABELS
 """Every label of phase (c)."""
 MANY = {
@@ -309,7 +312,10 @@ def test_the_lexicon_names_the_pair_fluents_and_the_places(cases, runs, name) ->
     for concept_type in ("pair", "same", "place_category", "place_is", "place_event"):
         assert all(lexicon.is_named(c.label) for c in of(concept_type))
     assert not any(_carries(c.label, UNNAMED_LABELS) for c in lexicon.concepts)
-    assert not any(x.gloss == "them" for x in lexicon.lexemes)
+    # since stage c5a the lexicon has the bound pronoun and the generic noun for places, the
+    # last content lexeme (tests/corpus/test_corpus_class_pairs.py)
+    assert any(x.gloss == "them" for x in lexicon.lexemes)
+    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
     # the earlier content lexemes keep their labels: every lexeme before the first phase (c)
     # lexeme names no phase (c) concept, and the generic noun stands right before them
     first = next(i for i, x in enumerate(lexicon.content_lexemes) if _carries(x.concept))
@@ -1334,27 +1340,45 @@ def test_the_statistics_count_the_new_sentences_and_the_place_events(cases, runs
 
 
 @pytest.mark.parametrize("name", WORLDS)
-def test_no_causal_statement_states_a_pair_literal(cases, runs, name) -> None:
-    """Every causal statement is about a base or a numeric fluent, none about a pair fluent;
-    no event term's condition holds a pair literal; and the conditional effects with a pair
-    condition are counted among the unstated."""
+def test_causal_statements_state_pair_literals_and_no_pair_condition(cases, runs, name) -> None:
+    """Since stage c5a the causal statements state pair literals (stage c4a's test, that none
+    did, turned into its opposite): some statement's predicate is a pair fluent, ``SAME`` on
+    one, or (in the default world) ``SOME`` on one, and some statement is about a place event
+    type. What stays of stage c4a: no event term's condition holds a pair literal, and the
+    conditional effects with a pair condition are counted among the unstated (WM.59)."""
     corpus = runs(name)
     facts = corpus.planner.facts
     statements = facts.causal_statements()
     assert statements
+    labels = {statement.predicate.label for statement in statements}
+    assert any(label.startswith("PAIRFL.") for label in labels)
+    assert any(label.startswith("SAME.") for label in labels)
+    if name == "default":
+        assert any(label.startswith("SOME.") for label in labels)
+    assert any(statement.subject.place for statement in statements)
     for statement in statements:
         assert isinstance(statement.subject, EventTerm)
-        assert not _carries(statement.predicate.label)
-        assert not _carries(statement.subject.event_type)
         assert not any(_carries(c.label) for c in statement.subject.condition)
+        assert "SOMEOF" not in statement.predicate.label
     report = facts.causal_report
-    assert {"pair_condition", "pair_effect"} <= set(report["unstated"])
+    assert set(report["unstated"]) == {
+        "numeric_condition",
+        "patient_relative",
+        "no_word",
+        "pair_condition",
+    }
     definition = cases(name).world.definition
+    world = corpus.planner.world
+    with_events = (
+        world.binary_leaves
+        + world.unary
+        + tuple(label for label in world.place_event_types if world.event_names(label))
+    )
     pair_conditions = sum(
         1
-        for label in corpus.planner.world.binary_leaves + corpus.planner.world.unary
+        for label in with_events
         for effect in definition.event_type(label).effects
-        if effect.condition and not effect.pair and any(lit.pair for lit in effect.condition)
+        if effect.condition and any(lit.pair for lit in effect.condition)
     )
     assert report["unstated"]["pair_condition"] == pair_conditions
 
@@ -1386,10 +1410,18 @@ def test_a_conditional_effect_with_a_pair_condition_is_stated_in_neither_form(
 
     oracle = Oracle(folder, z=config.scalar_z)
     with_pair_condition = 0
-    for label in world.binary_leaves + world.unary:
+    symmetric = truth.symmetric_pairs
+    # every event type with events, the place event types included, and every effect, a pair
+    # effect included (stage c5a states pair effects, and still none under a pair condition)
+    with_events = (
+        world.binary_leaves
+        + world.unary
+        + tuple(label for label in world.place_event_types if world.event_names(label))
+    )
+    for label in with_events:
         record = definition.event_type(label)
         for effect in record.effects:
-            if effect.pair or not any(lit.pair for lit in effect.condition):
+            if not any(lit.pair for lit in effect.condition):
                 continue
             with_pair_condition += 1
             assert condition_of(effect, truth.cut_points) is None
@@ -1399,17 +1431,22 @@ def test_a_conditional_effect_with_a_pair_condition_is_stated_in_neither_form(
             )
             # the unconditional form is no entry of this effect
             assert not effect_matches(
-                effect, effect.role, effect.fluent, value, direction, (), truth.cut_points
+                effect,
+                effect.role,
+                effect.fluent,
+                value,
+                direction,
+                (),
+                truth.cut_points,
+                symmetric,
             )
             # and the statement holds only if another, unconditional, effect carries it
             others = [
                 e
                 for e in record.effects
                 if e is not effect
-                and not e.pair
-                and e.role == effect.role
-                and e.fluent == effect.fluent
                 and not e.condition
+                and effect_states(e, effect.role, effect.fluent, value, direction, symmetric)
             ]
             unconditional = truth.has_entry(
                 label, EFFECT, effect.role, effect.fluent, value, direction, ()
@@ -1426,7 +1463,8 @@ def test_a_conditional_effect_with_a_pair_condition_is_stated_in_neither_form(
                     **({"value": value} if direction is None else {"direction": direction}),
                 },
             }
-            if effect.fluent in world.base_fluents or effect.fluent in world.numeric_fluents:
+            stated = effect.fluent in world.base_fluents or effect.fluent in world.numeric_fluents
+            if stated or effect.pair:
                 assert oracle.causal(form) is unconditional, (label, effect.text)
     assert with_pair_condition > 0
     # no statement of the world carries a condition: every condition holds a pair literal

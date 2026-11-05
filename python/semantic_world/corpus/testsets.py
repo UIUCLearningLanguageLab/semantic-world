@@ -1124,7 +1124,14 @@ class TestSetBuilder:
         candidates_by_kind: dict[str, list[tuple[Proposition, Proposition]]] = {
             kind: [] for kind in kinds
         }
-        pool = self.facts.causal_statements(kind=_CAUSAL_KIND[level])
+        # the causal sets keep to the statements of stage c4c (stage c5a's filter): a
+        # statement with a pair literal, or about a place event type, enters the sets in stage
+        # c5b, with the role swap that skips symmetric pair fluents
+        pool = tuple(
+            p
+            for p in self.facts.causal_statements(kind=_CAUSAL_KIND[level])
+            if not p.predicate.pair_literal and not p.subject.place
+        )
         for true in pool:
             for false in false_items(self.facts, true, change):
                 kind = LAWLIKE if self.truth.observed(false) else _ORDINARY

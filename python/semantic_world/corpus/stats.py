@@ -78,8 +78,10 @@ from semantic_world.corpus.planner import (
     COMPARATIVE_STRENGTH,
     EVENT_SECTION,
     INITIAL_STATE,
+    PARTICIPANTS,
     PLACE_COMPARATIVE,
     PLACE_DESCRIPTION,
+    PLACES,
     POLE,
     RESULT,
     Document,
@@ -100,12 +102,16 @@ from semantic_world.corpus.propositions import (
     PAIR_STATE,
     PLACE_EVENT,
     PRECONDITION,
+    PROFILE_FORMS,
     PROGRESSIVE,
     QUANTIFIERS,
     RAISES,
     STATE,
     CategoryTerm,
     EventTerm,
+    is_same_label,
+    is_some_label,
+    pole_dimension,
 )
 from semantic_world.corpus.realize import token_parts
 from semantic_world.corpus.testsets import ItemSet
@@ -387,7 +393,19 @@ def _causal(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
         isinstance(s.proposition.subject, EventTerm) and bool(s.proposition.subject.condition)
         for s in sentences
     )
-    planner.facts.causal_statements()  # the report on the conditional effects is made with them
+    statements = planner.facts.causal_statements()  # the reports are made with them
+    report = dict(planner.facts.causal_report)
+    pair_entries = report.pop("pair_entries", {})
+    # the statements with pair literals and about place event types (stage c5a), among the
+    # statements the language can make and among the sentences of the documents
+    pair_sentences = [s for s in sentences if s.proposition.predicate.pair_literal]
+    labels = Counter(
+        "same" if is_same_label(p.predicate.label)
+        else "some" if is_some_label(p.predicate.label)
+        else "pair"
+        for p in statements
+        if p.predicate.pair_literal
+    )  # fmt: skip
     return {
         "causal_sentences": len(sentences),
         "effect_sentences": kinds[EFFECT],
@@ -395,14 +413,55 @@ def _causal(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
         "raises_sentences": directions[RAISES],
         "lowers_sentences": directions[LOWERS],
         "conditional_sentences": conditional,
-        "conditional_effects": dict(planner.facts.causal_report),
+        "conditional_effects": report,
+        "statements": len(statements),
+        "pair_literal_statements": {
+            "pair": labels["pair"],
+            "same": labels["same"],
+            "some": labels["some"],
+        },
+        "place_event_statements": sum(p.subject.place for p in statements),
+        "pair_literal_sentences": len(pair_sentences),
+        "place_event_sentences": sum(
+            isinstance(s.proposition.subject, EventTerm) and s.proposition.subject.place
+            for s in sentences
+        ),
+        "pair_entries": pair_entries,
+        "profile_statements": {
+            form: sum(p.predicate.form == form for p in planner.facts.profile_statements())
+            for form in PROFILE_FORMS
+        },
     }
 
 
-def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
+def _compared_poles(sentence: Any) -> bool:
+    """Whether a comparative between two instances, or two places, uses a pole of the compared
+    scalar as a modifier of one of its two mentions (Jon's ruling WM.74, stage c5a), which the
+    planner allows only when the two nouns name different comparison classes."""
+    predication = sentence.plan.predication
+    if predication.kind != COMPARATIVE or predication.object is None:
+        return False
+    dimension = pole_dimension(predication.label)
+    return any(
+        literal.pole and pole_dimension(literal.feature) == dimension
+        for phrase in (sentence.plan.subject, predication.object)
+        if phrase.kind == INSTANCE_NP
+        for literal in phrase.restriction
+    )
+
+
+def _comparisons(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
     """The comparison and comparative sentences, by level, and the pole adjectives used as
-    modifiers of mentions and as restrictions of class-level subjects."""
+    modifiers of mentions and as restrictions of class-level subjects; and, under Jon's ruling
+    WM.74 (stage c5a), the comparisons of participants and of places that use the compared
+    scalar's poles across comparison classes, and the comparisons that were not made because
+    nothing told their two mentions apart."""
     sentences = [s for d in documents for s in d.sentences]
+    across = Counter(
+        PLACES if s.section == PLACE_COMPARATIVE else PARTICIPANTS
+        for s in sentences
+        if _compared_poles(s)
+    )
     comparison = Counter(
         s.proposition.level for s in sentences if s.proposition.predicate.kind == COMPARISON
     )
@@ -430,6 +489,11 @@ def _comparisons(documents: Sequence[Document]) -> dict[str, Any]:
         "numeric_comparative_sentences": numeric_comparatives,
         "pole_modifiers": modifiers,
         "pole_restrictions": restrictions,
+        "compared_poles_across_classes": {
+            PARTICIPANTS: across[PARTICIPANTS],
+            PLACES: across[PLACES],
+        },
+        "skipped_not_told_apart": dict(planner.skipped_comparisons),
     }
 
 
@@ -476,11 +540,20 @@ def _mentions(documents: Sequence[Document]) -> dict[str, Any]:
                 kinds["pronoun" if phrase.pronoun else str(phrase.determiner)] += 1
                 undistinguished += mark is False
     definite = kinds["the"]
+    # the bound pronouns of the class-level statements about pair literals (stage c5a), which
+    # refer back to the other participant of the restrictor and mention no instance
+    bound = sum(
+        phrase.bound_pronoun
+        for document in documents
+        for sentence in document.sentences
+        for phrase in sentence.sentence.phrases
+    )
     return {
         "instance_mentions": int(sum(kinds.values())),
         "indefinite": kinds["a"],
         "definite": definite,
         "pronouns": kinds["pronoun"],
+        "bound_pronouns": int(bound),
         "definite_not_distinguished": undistinguished,
         "definite_not_distinguished_share": _share(undistinguished, definite),
         "place_mentions": int(sum(place_kinds.values())),
@@ -547,7 +620,7 @@ def corpus_stats(
         "sentences": _sentences(documents),
         "states": _states(planner, documents),
         "causal": _causal(planner, documents),
-        "comparisons": _comparisons(documents),
+        "comparisons": _comparisons(planner, documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,
         "ambiguity": ambiguity,
