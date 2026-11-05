@@ -177,7 +177,10 @@ PARTICIPANTS = "participants"
 PLACES = "places"
 """The two kinds of comparison that Jon's ruling WM.74 counts: of two participants of an event,
 and of two places."""
-TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE, CAUSAL)
+PROFILE_SECTION = "profile"
+"""The section of a profile statement (stage c5b), in a document about a pair fluent, before
+its causal statements."""
+TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE, PROFILE_SECTION, CAUSAL)
 """The sections of an encyclopedic document, in the order of the template."""
 TOPIC = "topic"
 SUBCATEGORY = "subcategory"
@@ -436,6 +439,10 @@ class Planner:
         """The comparisons of the documents made so far that were not made because nothing
         told their two mentions apart (Jon's ruling WM.74, stage c5a), of participants and of
         places."""
+        self.other_scalar_comparisons = {PARTICIPANTS: 0, PLACES: 0}
+        """The comparisons of the documents made so far that were made on another dimension
+        than the one first drawn, because nothing told the two mentions apart on the first
+        (Jon's ruling 3 of WM.75, stage c5b), of participants and of places."""
         self.redrawn_drafts = 0
         """Drafts with nothing to say that ``next_document`` drew again (stage c4a)."""
         """Every scene of the documents made so far, in order."""
@@ -458,6 +465,25 @@ class Planner:
         for group in parents.values():
             for category in group:
                 self._siblings[category] = [c for c in group if c != category]
+        # The categories of places (stage c5b, ``WORLD_PHASE_C.md``, "Places in documents"):
+        # topics of category documents, drawn uniformly with the categories of entities of
+        # their level, with their own children and siblings in the place tree.
+        for category in facts.place_categories:
+            self._by_level.setdefault(facts.place_level[category], []).append(category)
+            self._children[category] = []
+        place_parents: dict[str | None, list[str]] = {}
+        for label, info in self.world.place_category.items():
+            if label not in facts.named:
+                continue
+            place_parents.setdefault(info.parent, []).append(label)
+            if info.parent in self._children:
+                self._children[info.parent].append(label)
+        for group in place_parents.values():
+            for category in group:
+                self._siblings[category] = [c for c in group if c != category]
+        # The topics of feature documents: the features, the event types, and the fluents of
+        # the entities; then (stage c5b) the place properties and parts, the place event types
+        # with a verb, and the pair fluents with a preposition.
         self._feature_topics = (
             facts.features[IS]
             + facts.features[HAS]
@@ -465,6 +491,10 @@ class Planner:
             + facts.verbs
             + facts.base_fluents
             + facts.numeric_fluents
+            + facts.place_features[IS]
+            + facts.place_features[HAS]
+            + facts.place_verbs
+            + facts.pair_prepositions
         )
         self._available: dict[str, dict[str, tuple[tuple, ...]]] = {}
         self._tense = config.propositions.event_tense
@@ -519,6 +549,8 @@ class Planner:
         if draft.mentions is not None:
             for skipped in draft.mentions.skipped_comparisons:
                 self.skipped_comparisons[skipped] += 1
+            for moved in draft.mentions.other_scalar_comparisons:
+                self.other_scalar_comparisons[moved] += 1
         return self._realize(label, draft, rngs["grammar"])
 
     def _realize(self, label: str, draft: _Draft, rng: np.random.Generator) -> Document:
@@ -576,13 +608,15 @@ class Planner:
 
     def _section(self, fact: Proposition) -> str:
         kind = fact.predicate.kind
+        if fact.profile:
+            return PROFILE_SECTION
         if fact.causal:
             return CAUSAL
         if fact.rule is not None:
             return RULE
         if kind == MEMBER:
             return MEMBERSHIP
-        if kind == VERB:
+        if kind in (VERB, PLACE_EVENT):
             return RELATION
         if kind in (COMPARISON, COMPARATIVE) or fact.quantifier == MOST:
             return CHARACTERISTIC
@@ -721,10 +755,11 @@ class Planner:
     ) -> list[tuple[CategoryTerm, Predicate]]:
         facts = self.facts
         if negative:
+            # a category of the topic's own tree: of entities, or (stage c5b) of places
             return [
                 (CategoryTerm(topic), Predicate(MEMBER, c))
-                for c in facts.categories
-                if facts.level[c] <= facts.level[topic] and self.truth.disjoint(topic, c)
+                for c in facts.categories_like(topic)
+                if facts.level_of(c) <= facts.level_of(topic) and self.truth.disjoint(topic, c)
             ]
         above = [
             (CategoryTerm(topic), Predicate(MEMBER, a))
@@ -744,6 +779,17 @@ class Planner:
         self, topic: CategoryTerm, as_agent: bool
     ) -> list[tuple[CategoryTerm, Predicate]]:
         facts = self.facts
+        if facts.is_place_category(topic.category):
+            # a category of places (stage c5b) is the patient of the place event types with a
+            # verb, with a category of entities as the agent ("owls can go to deserts"), and
+            # the agent of nothing
+            if as_agent:
+                return []
+            return [
+                (CategoryTerm(other), Predicate(PLACE_EVENT, verb, topic))
+                for verb in facts.place_verbs
+                for other in facts.categories
+            ]
         pairs = [(verb, other) for verb in facts.verbs for other in facts.categories]
         if as_agent:
             return [(topic, Predicate(VERB, verb, CategoryTerm(other))) for verb, other in pairs]
@@ -796,8 +842,10 @@ class Planner:
     def _comparison_candidates(self, topic: str) -> list[tuple[str, str]]:
         """The partner and the scalar of every comparison fact a document about a category
         could state."""
-        partners = self.facts.comparison_partners(topic)
-        return [(partner, scalar) for partner in partners for scalar in self.facts.scalars]
+        facts = self.facts
+        partners = facts.comparison_partners(topic)
+        scalars = facts.place_scalars if facts.is_place_category(topic) else facts.scalars
+        return [(partner, scalar) for partner in partners for scalar in scalars]
 
     def _comparison_fact(
         self, rng: np.random.Generator, topic: str, stated: set
@@ -895,6 +943,14 @@ class Planner:
             return None
         return kinds[int(rng.choice(len(kinds), p=counts / counts.sum()))]
 
+    def _has_relations(self, topic: str) -> bool:
+        """Whether a category has relation facts to state at all: the two-place event types
+        with a word for a category of entities, the place event types with a verb for a
+        category of places (stage c5b)."""
+        if self.facts.is_place_category(topic):
+            return bool(self.facts.place_verbs and self.facts.categories)
+        return bool(self.facts.verbs)
+
     def _category_document(self, kind: str, rngs: dict[str, np.random.Generator]) -> _Draft:
         rng, facts_rng = rngs["documents"], rngs["propositions"]
         weights = np.array(
@@ -912,7 +968,7 @@ class Planner:
         kinds = [MEMBERSHIP, TOPIC]
         if children:
             kinds.append(SUBCATEGORY)
-        if self.facts.verbs:
+        if self._has_relations(topic):
             kinds.append(RELATION)
         if self._comparison_candidates(topic):
             kinds.append(COMPARISON_KIND)
@@ -962,26 +1018,53 @@ class Planner:
         length = self._length(kind, rng)
         is_verb = topic in facts.verbs
         is_fluent = topic in facts.base_fluents or topic in facts.numeric_fluents
+        # stage c5b: a pair fluent with a preposition, a place event type with a verb, and a
+        # place property or part are topics too
+        is_pair = topic in facts.pair_prepositions
+        is_place_verb = topic in facts.place_verbs
+        place_kind = next((k for k in (IS, HAS) if topic in facts.place_features[k]), None)
         rules: list[Proposition] = []
         causal: list[Proposition] = []
+        profiles: list[Proposition] = []
         topic_kind = VERB
-        if is_fluent:
+        if is_pair:
+            # a document about a pair fluent (``WORLD_PHASE_C.md``, "Feature documents about a
+            # pair fluent"): its profile statement, if it has one, then the causal statements
+            # about the event types that add it, delete it, and need it, its SAME and SOME
+            # statements among them
+            profiles = list(facts.profile_statements(topic))
+            causal = list(facts.causal_statements(pair_fluent=topic))
+        elif is_fluent:
             causal = list(facts.causal_statements(fluent=topic))
-        elif not is_verb:
+        elif not (is_verb or is_place_verb or place_kind):
             topic_kind = next(k for k in (IS, HAS, CAN) if topic in facts.features[k])
             rules = list(
                 dict.fromkeys(facts.rule_statements(topic) + facts.rule_statements_reading(topic))
             )
-        if is_verb or topic_kind == CAN:
+        if is_verb or is_place_verb or topic_kind == CAN:
             causal = list(facts.causal_statements(event_type=topic))
         categories = facts.categories
-        if is_fluent:
+        statements_only = is_fluent or is_pair
+        if statements_only:
             candidates = []
         elif is_verb:
             candidates = [
                 (CategoryTerm(agent), Predicate(VERB, topic, CategoryTerm(patient)))
                 for agent in categories
                 for patient in categories
+            ]
+        elif is_place_verb:
+            # the capacity facts about the places: a category of entities as the agent, a
+            # category of places as the patient
+            candidates = [
+                (CategoryTerm(agent), Predicate(PLACE_EVENT, topic, CategoryTerm(place)))
+                for agent in categories
+                for place in facts.place_categories
+            ]
+        elif place_kind:
+            # which categories of places have the place feature, and which lack it
+            candidates = [
+                (CategoryTerm(c), Predicate(place_kind, topic)) for c in facts.place_categories
             ]
         else:
             candidates = [(CategoryTerm(c), Predicate(topic_kind, topic)) for c in categories]
@@ -994,12 +1077,18 @@ class Planner:
                 break
             left = [r for r in rules if self._key(r) not in stated]
             causal_left = [c for c in causal if self._key(c) not in stated]
-            if is_fluent:
-                # a document about a fluent holds causal statements alone, one per sentence,
-                # until it reaches its length or has stated every statement about its fluent
+            profiles_left = [c for c in profiles if self._key(c) not in stated]
+            fact: Proposition | None
+            if profiles_left:
+                # the profile statement of a pair fluent comes first (stage c5b)
+                fact = profiles_left[0]
+            elif statements_only:
+                # a document about a fluent, or about a pair fluent, holds causal statements
+                # alone, one per sentence, until it reaches its length or has stated every
+                # statement about its topic
                 if not causal_left:
                     break
-                fact: Proposition | None = causal_left[int(facts_rng.integers(len(causal_left)))]
+                fact = causal_left[int(facts_rng.integers(len(causal_left)))]
             elif causal_left and facts_rng.random() < causal_rate:
                 fact = causal_left[int(facts_rng.integers(len(causal_left)))]
             elif left and facts_rng.random() < rule_rate:
@@ -1058,7 +1147,7 @@ class Planner:
         elif content == MEMBERSHIP:
             fact = self._membership_fact(rng, topic, negative, stated)
         elif content == RELATION:
-            if not self.facts.verbs:
+            if not self._has_relations(topic):
                 return None
             term = self._restricted(rng, CategoryTerm(topic))
             fact = self._relation_fact(rng, term, negative, stated)
@@ -1545,19 +1634,21 @@ class Planner:
         ]
         if not options:
             return None
-        dimension, fact = options[int(comparative_rng.integers(len(options)))]
-        low = fact.subject != agent
         # the two mentions under Jon's ruling WM.74 (stage c5a): the compared scalar's poles
         # are modifiers only across comparison classes, and a comparison whose two mentions
-        # nothing tells apart is not made (a numeric fluent has no pole among the modifiers)
-        known = dict(mentions.referents)
-        greater_phrase, lesser_phrase, apart = mentions.comparison_phrases(
-            rng, agent, patient, dimension if dimension in facts.scalars else None
+        # nothing tells apart is not made (a numeric fluent has no pole among the modifiers);
+        # under ruling 3 of WM.75 (stage c5b) the other dimensions are tried first
+        made = self._told_apart_comparison(
+            comparative_rng,
+            rng,
+            mentions,
+            [(agent, patient, dimension, fact) for dimension, fact in options],
+            PARTICIPANTS,
         )
-        if not apart:
-            mentions.drop_sentence(known)
-            mentions.skipped_comparisons.append(PARTICIPANTS)
+        if made is None:
             return None
+        dimension, fact, greater_phrase, lesser_phrase = made
+        low = fact.subject != agent
         if low:
             greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
         when = None if fact.time is None else time_key(scene.label, fact.time)
@@ -1566,6 +1657,43 @@ class Planner:
         )
         mentions.end_sentence(agent)
         return _Item(COMPARATIVE_SECTION, fact, plan)
+
+    def _told_apart_comparison(
+        self,
+        comparative_rng: np.random.Generator,
+        rng: np.random.Generator,
+        mentions: Mentions,
+        options: list[tuple[str, str, str, Proposition]],
+        kind: str,
+    ) -> tuple[str, Proposition, NounPhrase, NounPhrase] | None:
+        """The comparison that a narrative makes among ``options``, each the two arguments (the
+        sentence's subject first), the dimension, and the true comparative: one option is
+        drawn uniformly, and its two mentions are made under WM.74. When nothing tells the two
+        mentions apart, the other dimensions of the same two arguments are tried, in a random
+        order (Jon's ruling 3 of WM.75, stage c5b): on another dimension the poles of the first
+        one may be modifiers, and they may tell the two apart. Returns the dimension, the fact,
+        and the mentions of the first and the second argument; None when no dimension allows
+        the comparison, which is then not made, and counted."""
+        facts = self.facts
+        known = dict(mentions.referents)
+        drawn = options[int(comparative_rng.integers(len(options)))]
+        queue = [drawn]
+        while queue:
+            first, second, dimension, fact = queue.pop(0)
+            poles = facts.scalars + facts.place_scalars
+            first_phrase, second_phrase, apart = mentions.comparison_phrases(
+                rng, first, second, dimension if dimension in poles else None
+            )
+            if apart:
+                if dimension != drawn[2]:
+                    mentions.other_scalar_comparisons.append(kind)
+                return dimension, fact, first_phrase, second_phrase
+            mentions.drop_sentence(known)
+            if dimension == drawn[2]:
+                others = [o for o in options if o[:2] == drawn[:2] and o[2] != drawn[2]]
+                queue = [others[int(i)] for i in comparative_rng.permutation(len(others))]
+        mentions.skipped_comparisons.append(kind)
+        return None
 
     def _place_comparative(
         self,
@@ -1594,17 +1722,19 @@ class Planner:
         ]
         if not options:
             return None
-        other, dimension, fact = options[int(comparative_rng.integers(len(options)))]
-        low = fact.subject != place
-        # the two mentions under Jon's ruling WM.74 (stage c5a), as for participants
-        known = dict(mentions.referents)
-        greater_phrase, lesser_phrase, apart = mentions.comparison_phrases(
-            rng, place, other, dimension
+        # the two mentions under Jon's rulings WM.74 (stage c5a) and WM.75 (stage c5b), as for
+        # participants: the other place scalars of the drawn pair of places are tried first
+        made = self._told_apart_comparison(
+            comparative_rng,
+            rng,
+            mentions,
+            [(place, other, scalar, fact) for other, scalar, fact in options],
+            PLACES,
         )
-        if not apart:
-            mentions.drop_sentence(known)
-            mentions.skipped_comparisons.append(PLACES)
+        if made is None:
             return None
+        dimension, fact, greater_phrase, lesser_phrase = made
+        low = fact.subject != place
         if low:
             greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
         plan = comparative_plan(greater_phrase, lesser_phrase, dimension, low)

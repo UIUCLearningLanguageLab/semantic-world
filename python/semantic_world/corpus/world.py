@@ -242,6 +242,19 @@ class RuleTerm:
     """Whether the term reads a scalar threshold, which no pole adjective states."""
 
 
+class _FixedSide:
+    """What the fixed test reads of one taxonomy (stage c5b): the entities' features and rules
+    (the one-place requirements included), or the place taxonomy's own."""
+
+    def __init__(self, features: Any, rules: Any, categories: Any, scalars: Any) -> None:
+        self.features = features
+        self.rules = rules
+        self.rules_by_output = {r.output.label: r for r in rules.rules}
+        self.free_index = {f.label: i for i, f in enumerate(features.free)}
+        self.category_of = {c.label: c for c in categories}
+        self.scalars = scalars
+
+
 class World:
     """The corpus's view of a world run."""
 
@@ -455,6 +468,20 @@ class World:
         self._free_index = {f.label: i for i, f in enumerate(features.free)}
         self._category_of = {c.label: c for c in taxonomy.tree.categories}
         self._category_values = statics.unary.category_values
+        self._entity_side = _FixedSide(
+            features, statics.rules, taxonomy.tree.categories, taxonomy.config.scalars
+        )
+        # the place taxonomy's side of the fixed test (stage c5b): its own features, rules,
+        # tree, and scalar settings, with nothing of the entities'
+        self._place_side: _FixedSide | None = None
+        if result.places is not None:
+            place_taxonomy = result.places.taxonomy
+            self._place_side = _FixedSide(
+                place_taxonomy.features,
+                place_taxonomy.rules,
+                place_taxonomy.tree.categories,
+                place_taxonomy.config.scalars,
+            )
 
     # Sets of instances -----------------------------------------------------------------------
 
@@ -573,6 +600,16 @@ class World:
         found = {lit.pair_fluent for lit in self._pair_literals() if lit.kind == "pair"}
         return tuple(f for f in self.pair_fluents if f in found)
 
+    def pair_fluents_used(self) -> tuple[str, ...]:
+        """The pair fluents that the dynamics use (Jon's ruling 1 of WM.75, stage c5b), in
+        label order: those that some precondition literal or condition literal reads in any
+        form (a pair, ``SAME``, ``SOME``, or ``SOMEOF``, compiled literals included) or that
+        some effect writes. Every one gets a preposition; a pair fluent that nothing reads or
+        writes gets none."""
+        found = {lit.pair_fluent for lit in self._pair_literals()}
+        found |= {e.fluent for et in self.definition.event_types for e in et.effects if e.pair}
+        return tuple(f for f in self.pair_fluents if f in found)
+
     def same_read(self) -> tuple[str, ...]:
         """The ``SAME`` literals that some precondition or condition reads, as concepts
         (``SAME.PAIRFL.5``), in the order of the pair fluents."""
@@ -641,9 +678,35 @@ class World:
         to vary. A restriction's literal on a determined feature keeps only the settings that
         satisfy it. Above ``2 ** cone_limit`` settings, the local test is used instead.
         """
-        features = self._statics.features
+        return self._fixed_on(self._entity_side, category, restriction, feature, cone_limit)
+
+    def place_fixed(
+        self,
+        category: str,
+        restriction: tuple[tuple[str, bool], ...],
+        feature: str,
+        cone_limit: int = CONE_ENUMERATION_LIMIT,
+    ) -> tuple[int | None, str]:
+        """Whether a place property or part is fixed for a category of places restricted by
+        place feature literals (stage c5b, ``WORLD_PHASE_C.md``, "Places in documents"): the
+        fixed test of :meth:`fixed`, over the place taxonomy's own features, rules, tree, and
+        scalar settings."""
+        assert self._place_side is not None
+        return self._fixed_on(self._place_side, category, restriction, feature, cone_limit)
+
+    def _fixed_on(
+        self,
+        side: _FixedSide,
+        category: str,
+        restriction: tuple[tuple[str, bool], ...],
+        feature: str,
+        cone_limit: int,
+    ) -> tuple[int | None, str]:
+        """The fixed test over one taxonomy: the entities' (with the one-place requirements)
+        or the places'."""
+        features = side.features
         target = features[feature]
-        node = None if category == THING else self._category_of[category]
+        node = None if category in (THING, SOMEPLACE) else side.category_of[category]
         n_free = len(features.free)
         if node is None:
             base = np.zeros(n_free, dtype=np.uint8)
@@ -655,7 +718,7 @@ class World:
         for label, positive in restriction:
             restricted = features[label]
             if restricted.free:
-                index = self._free_index[restricted.label]
+                index = side.free_index[restricted.label]
                 if held[index] and base[index] != int(positive):
                     return None, EXACT  # no member can satisfy the restriction
                 base[index] = int(positive)
@@ -663,12 +726,12 @@ class World:
             else:
                 filters.append((restricted, int(positive)))
 
-        rules = self._rules
+        rules = side.rules
         targets = [target] + [f for f, _ in filters]
-        cone = sorted({self._free_index[f.label] for t in targets for f in rules.cone(t)})
+        cone = sorted({side.free_index[f.label] for t in targets for f in rules.cone(t)})
         open_features = [i for i in cone if not held[i]]
         thresholds = {t.key: t for t in targets for t in rules.thresholds_of(t)}
-        scalar_config = self._taxonomy.config.scalars
+        scalar_config = side.scalars
         scalars_fixed = node is not None and scalar_config.fixed_below(node.level)
         literal_values: dict[str, np.ndarray] = {}
         groups: dict[int, list[Threshold]] = {}
@@ -680,7 +743,7 @@ class World:
         for group in open_groups:
             rows *= len(group) + 1
         if rows > 2**cone_limit:
-            return self._fixed_local(node, base, held, target, cone_limit)
+            return self._fixed_local(side, node, base, held, target, cone_limit)
 
         grid = settings_array(len(open_features))
         if open_groups:
@@ -708,7 +771,7 @@ class World:
 
         def column(item) -> np.ndarray:
             return evaluate_feature(
-                item, free_values, features, self._rules_by_output, cache, literal_values
+                item, free_values, features, side.rules_by_output, cache, literal_values
             )
 
         keep = np.ones(rows, dtype=bool)
@@ -721,6 +784,7 @@ class World:
 
     def _fixed_local(
         self,
+        side: _FixedSide,
         category: Category | None,
         base: np.ndarray,
         held: np.ndarray,
@@ -730,10 +794,10 @@ class World:
         """The local test, for a cone too large to enumerate: the taxonomy generator's test on a
         copy of the category in which the held features are defining. Literals on determined
         features are left out, which can only miss a fixed feature."""
-        features = self._statics.features
-        rules = self._rules
+        features = side.features
+        rules = side.rules
         if feature.free:
-            index = self._free_index[feature.label]
+            index = side.free_index[feature.label]
             return (int(base[index]) if held[index] else None), LOCAL
         roles = np.where(held, Role.DEFINING_NEW, Role.UNDIAGNOSTIC).astype(np.int8)
         scalars = np.zeros(features.scalar_count) if category is None else category.scalars
@@ -743,7 +807,7 @@ class World:
             fixed, _ = fixed_by_rule(rules, stand_in, cone_limit, scalars=None)
         else:
             stand_in = dataclasses.replace(category, free_values=base, values=values, roles=roles)
-            fixed, _ = fixed_by_rule(rules, stand_in, cone_limit, self._taxonomy.config.scalars)
+            fixed, _ = fixed_by_rule(rules, stand_in, cone_limit, side.scalars)
         return (int(values[feature.position]) if fixed[feature.position] else None), LOCAL
 
     # Rules -----------------------------------------------------------------------------------

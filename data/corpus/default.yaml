@@ -104,5 +104,5 @@ renderings:
 
 test_sets:
   size: 500                      # true items per set; each gets one matched false item
-  changes: [predicate, subject, quantifier, polarity, event, role, condition, object]   # polarity and event apply to the causal sets, condition to the conditional effect statements, and object (stage c4c, WM.56) to the pair, location, and SAME items of the state sets and to the event items of place event types
+  changes: [predicate, subject, quantifier, polarity, event, role, condition, object, form]   # polarity and event apply to the causal sets, condition to the conditional effect statements, object (stage c4c, WM.56) to the pair, location, and SAME items of the state sets and to the event items of place event types, and form (stage c5b) to the profile sets
   seen: {descriptions: true}     # whether a description counts as stated, for the seen mark

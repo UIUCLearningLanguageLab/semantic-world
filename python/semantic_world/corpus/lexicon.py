@@ -363,6 +363,14 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
         # the generic head noun for places (stage c5a), in a world with places: the last
         # content concept, so that every earlier content lexeme keeps its label
         concepts.append(Concept(SOMEPLACE, GENERIC, NOUN, SOMEPLACE))
+    # The prepositions of the pair fluents that the dynamics use and that no literal reads as
+    # a pair (Jon's ruling 1 of WM.75, stage c5b): a pair fluent that only SAME, SOME, or
+    # SOMEOF literals read, or that only effects write. They are the last content concepts,
+    # after SOMEPLACE, so that every earlier content lexeme keeps its label and its word.
+    read = set(world.pair_fluents_read())
+    concepts += [
+        Concept(f, PAIR, PREPOSITION, f) for f in world.pair_fluents_used() if f not in read
+    ]
     return tuple(concepts)
 
 

@@ -29,8 +29,8 @@ from semantic_world.corpus.grammar import (
     Predication,
     SentencePlan,
 )
-from semantic_world.corpus.logical import has_pole
-from semantic_world.corpus.mentions import comparative_plan
+from semantic_world.corpus.logical import has_pole, logical_form
+from semantic_world.corpus.mentions import comparative_plan, plan_for
 from semantic_world.corpus.planner import COMPARATIVE_SECTION, COMPARISON_KIND, PLACE_COMPARATIVE
 from semantic_world.corpus.propositions import (
     ABOVE,
@@ -47,8 +47,9 @@ from semantic_world.corpus.propositions import (
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import leaves
+from semantic_world.corpus.renderings import propositional
 from semantic_world.corpus.testsets import INSTANCE_COMPARISON, PREDICATE, ROLE
-from semantic_world.corpus.world import ENTITY, THING
+from semantic_world.corpus.world import ENTITY, EVERYPLACE, THING
 
 WORLDS = ("tiny", "deep", pytest.param("default", marks=pytest.mark.slow))
 MANY = {"documents": {"comparative_rate": 0.6, "instance_description_rate": 0.4}}
@@ -126,7 +127,12 @@ def test_every_comparison_sentence_is_true_by_the_oracle(cases, runs, name) -> N
             if proposition.level == CLASS:
                 category = proposition.subject.category
                 assert predicate["class"] == facts.comparison_class(category)
-                if facts.world.category[category].parent is None:
+                if facts.is_place_category(category):
+                    # a category of places (stage c5b): its parent in the place tree, or
+                    # EVERYPLACE for a top-level category of places
+                    parent = facts.world.place_category[category].parent
+                    assert predicate["class"] == (EVERYPLACE if parent is None else parent)
+                elif facts.world.category[category].parent is None:
                     assert predicate["class"] == ENTITY
                 else:
                     assert predicate["class"] == facts.world.category[category].parent
@@ -181,7 +187,24 @@ def test_every_comparison_sentence_is_true_by_the_oracle(cases, runs, name) -> N
     # they are shared with the numeric fluents, so the scalar ones are fewer in a world with
     # numeric fluents (the tiny world: one scalar, two numeric fluents)
     assert counts["instance comparative"] > 0 and counts["class comparative"] > 10, counts
-    assert counts["class pole"] > 0 and counts["modifier"] > 10, counts
+    assert counts["modifier"] > 10, counts
+    # the class-level poles: whether a document draws one depends on the draws (the tiny
+    # world's are all negative facts, stated at the negation rate, and since stage c5b the
+    # categories of places share the topics), so every class-level pole fact of the world, of
+    # the categories of entities and of places, is judged here by the oracle, both polarities
+    for category in facts.categories + facts.place_categories:
+        for negative in (False, True):
+            for fact in facts.class_facts(category, negative):
+                if fact.predicate.kind != COMPARISON:
+                    continue
+                plan = plan_for(facts, fact, bare=True)
+                form = logical_form(plan, fact, {}, config.scalar_z, facts.truth.cuts)
+                form = json.loads(json.dumps(form))
+                assert oracle.truth(form) is True, form
+                assert form["predicate"]["class"] == facts.comparison_class(category)
+                assert proposition_of(parse_propositional(propositional(form))) == fact
+                counts["class pole facts"] += 1
+    assert counts["class pole facts"] > 0, counts
     if name == "default":
         assert counts["instance pole"] > 0, counts
 

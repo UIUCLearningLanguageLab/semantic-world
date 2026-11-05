@@ -225,7 +225,11 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
                 # an instance, a category (or the generic noun), a place, or the generic noun
                 # for places (stage c5a), which the bound pronoun of a statement about a place
                 # event type refers to too
-                assert entry["referent"] in instances | categories | places | {"SOMEPLACE"}
+                # since stage c5b a category of places too: the subject of a class-level
+                # fact about places, or the patient of a place event type's relation fact
+                assert entry["referent"] in (
+                    instances | categories | places | place_categories | {"SOMEPLACE"}
+                )
                 assert entry["noun"] is None or entry["noun"] in (
                     categories | place_categories | {"SOMEPLACE"}
                 )
@@ -250,6 +254,7 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
                 "state",
                 "able_now",
                 "causal",
+                "profile",  # a profile statement, in a document about a pair fluent (c5b)
                 *QUANTIFIERS,
             }
 
@@ -390,6 +395,7 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         "sentences",
         "states",
         "causal",
+        "places",
         "comparisons",
         "quantifiers",
         "tokens",
@@ -502,7 +508,7 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
         [
             r
             for r in s["readings"]
-            if r in ("generic", "capacity", "event", "state", "able_now", "causal")
+            if r in ("generic", "capacity", "event", "state", "able_now", "causal", "profile")
         ]
         for s in sentences
     ]
@@ -799,7 +805,7 @@ def test_statistics_without_test_sets_and_without_documents(cases) -> None:
     assert all(
         not test_set.pairs
         for test_set in empty.test_sets
-        if test_set.level not in ("class", "causal_effect", "causal_precondition")
+        if test_set.level not in ("class", "causal_effect", "causal_precondition", "profile")
     )
     assert empty.stats["cooccurrence"]["by_document_type"]["all"]["words"]["thematic"] == {
         "pearson": None,

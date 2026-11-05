@@ -159,12 +159,14 @@ from semantic_world.corpus.world import (
     PLACE_CATEGORY_PREFIX,
     PLACE_EVENT_PREFIX,
     PLACE_PART_PREFIX,
+    PLACE_PATIENT_CAPACITY_PREFIX,
     PLACE_PREFIX,
     PLACE_PROPERTY_PREFIX,
     PLACE_SCALAR_PREFIX,
     PROPERTY_PREFIX,
     SAME_PREFIX,
     SCALAR_PREFIX,
+    SOMEPLACE,
     THING,
 )
 from semantic_world.world.runtime import RANGE
@@ -239,6 +241,14 @@ class NounPhrase:
         ``the``, named by a category of places, told apart by place features, and never a
         pronoun; it takes no relative clause."""
         return self.kind == INSTANCE_NP and self.referent.startswith(PLACE_PREFIX)
+
+    @property
+    def place_category(self) -> bool:
+        """Whether the phrase is a class-level noun phrase about a category of places (stage
+        c5b): the subject of a class-level fact about places, or the object of a place event
+        type in a relation fact ("owls can go to deserts"). It takes place features as its
+        modifiers, and no relative clause."""
+        return self.kind == CLASS_NP and self.referent.startswith(PLACE_CATEGORY_PREFIX)
 
     @property
     def negated(self) -> tuple[Literal, ...]:
@@ -818,8 +828,26 @@ def _check_place_subject(plan: SentencePlan) -> None:
     subject, predication = plan.subject, plan.predication
     label = predication.label
     about_a_place = label.startswith(PLACE_FEATURE_PREFIXES)
+    capacity = predication.kind == PROJECTION and label.startswith(PLACE_PATIENT_CAPACITY_PREFIX)
+    if subject.place_category:
+        # a category of places (stage c5b) is the subject of a class-level sentence about the
+        # features of places alone: a place property or part, a place patient capacity,
+        # membership in a category of places, a place pole, or a comparative with another
+        # category of places; a place does nothing, so it is the agent of no event type
+        if predication.kind not in (IS, HAS, MEMBER, COMPARISON, COMPARATIVE, PROJECTION) or not (
+            about_a_place or capacity
+        ):
+            raise GrammarError(
+                "a category of places is described by a place property or part, a place "
+                "patient capacity, a category of places, a place pole, or a comparative on a "
+                "place scalar"
+            )
+        target = predication.object
+        if predication.kind == COMPARATIVE and (target is None or not target.place_category):
+            raise GrammarError("a category of places is compared with a category of places")
+        return
     if not subject.place:
-        if about_a_place and predication.kind != PAIR_STATE:
+        if (about_a_place and predication.kind != PAIR_STATE) or capacity:
             raise GrammarError(f"{label} is said of a place, and the subject is an entity")
         return
     if plan.level != INSTANCE or predication.time is not None or predication.event is not None:
@@ -1087,12 +1115,23 @@ def _check_phrase(phrase: NounPhrase, level: str, top: bool = False, causal: boo
                     f"{literal.feature} is not a place feature: a place is told apart by its "
                     "own features"
                 )
-    elif phrase.kind == INSTANCE_NP:
+    elif phrase.place_category:
+        # a category of places (stage c5b): restricted by place features, and never by a
+        # relative clause
+        if phrase.clause is not None:
+            raise GrammarError("a category of places takes no relative clause")
+        for literal in phrase.restriction:
+            if not literal.feature.startswith("PLACE"):
+                raise GrammarError(
+                    f"{literal.feature} is not a place feature: a category of places is "
+                    "restricted by place features"
+                )
+    elif phrase.kind == INSTANCE_NP or phrase.referent != SOMEPLACE:
         for literal in phrase.restriction:
             if literal.feature.startswith("PLACE"):
                 raise GrammarError(
-                    f"{literal.feature} is a place feature: an entity is told apart by its own "
-                    "features"
+                    f"{literal.feature} is a place feature: an entity, or a category of "
+                    "entities, is described by its own features"
                 )
     for literal in phrase.restriction:
         if literal.pole and not literal.positive:
@@ -1214,9 +1253,11 @@ def _check_predication(
             raise GrammarError("the object of a SAME preposition is an entity")
     if kind == PLACE_EVENT:
         target = predication.object
-        if not gap and (target is None or not target.place):
-            raise GrammarError("the object of a place event type is a place")
-        if subject.place:
+        if not gap and (target is None or not (target.place or target.place_category)):
+            raise GrammarError(
+                "the object of a place event type is a place, or a category of places"
+            )
+        if subject.place or subject.place_category:
             raise GrammarError("the agent of a place event type is an entity")
     if kind == STATE_KIND and is_numeric(predication.label):
         if not predication.become:

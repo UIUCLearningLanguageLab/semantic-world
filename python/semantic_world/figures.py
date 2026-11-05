@@ -502,6 +502,19 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
             },
             "place_event_pairs": sum(s.get("place_event_pairs", 0) for s in sets.values()),
         },
+        # stage c5b: the documents about places and about pair fluents, the class-level
+        # sentences about places, and the profile sets
+        "class_places": {
+            "documents_about_places": stats["documents"].get("by_topic", {}).get("about_places"),
+            "documents_about_pair_fluents": stats["documents"]
+            .get("by_topic", {})
+            .get("about_pair_fluents"),
+            "by_topic": dict(stats["documents"].get("by_topic", {})),
+            **dict(stats.get("places", {})),
+            "profile_pairs": sum(
+                s["pairs"] for name, s in sets.items() if name.startswith("profile")
+            ),
+        },
         "narratives_short": {
             kind: by_type[kind]["shorter_than_drawn_share"] for kind in ("entity", "situational")
         },

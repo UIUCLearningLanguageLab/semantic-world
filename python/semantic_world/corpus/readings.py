@@ -58,13 +58,23 @@ from __future__ import annotations
 
 from semantic_world.corpus.config import Config
 from semantic_world.corpus.lexicon import ABLE_NOW_WORD, BEFORE_WORD, Lexicon
-from semantic_world.corpus.propositions import ALL, COUNTERPART, MOST, NEC_ALL, NEC_NO, NO, SOME
+from semantic_world.corpus.propositions import (
+    ALL,
+    COUNTERPART,
+    MOST,
+    NEC_ALL,
+    NEC_NO,
+    NO,
+    SOME,
+    is_property_feature,
+)
 from semantic_world.corpus.realize import Tree, token_parts
 from semantic_world.corpus.world import (
     CATEGORY_PREFIX,
     FLUENT_PREFIX,
     NUMERIC_PREFIX,
-    PROPERTY_PREFIX,
+    PLACE_CATEGORY_PREFIX,
+    PLACE_SCALAR_PREFIX,
     SCALAR_PREFIX,
 )
 
@@ -186,7 +196,8 @@ class _Reader:
         adjective = None if verb_phrase is None else self.child(verb_phrase, "A")
         if adjective is not None:
             concept = self.lexicon.lexeme(token_parts(self.token(adjective))[0]).concept
-            if concept.startswith(SCALAR_PREFIX):
+            if concept.startswith((SCALAR_PREFIX, PLACE_SCALAR_PREFIX)):
+                # a pole of a scalar, or (stage c5b) of a place scalar of a category of places
                 return ()
         determiner = self.child(subject, "Det")
         if determiner is None:
@@ -236,13 +247,13 @@ class _Reader:
 
     def names_a_category(self, verb_phrase: Tree) -> bool:
         """Whether the verb phrase's predicate is a membership predicate: a predicate noun whose
-        concept is a category."""
+        concept is a category, of entities or (stage c5b) of places."""
         nominal = self.child(verb_phrase, "NP-PRD")
         noun = None if nominal is None else self.child(nominal, "N")
         if noun is None:
             return False
         concept = self.lexicon.lexeme(token_parts(self.token(noun))[0]).concept
-        return concept.startswith(CATEGORY_PREFIX)
+        return concept.startswith((CATEGORY_PREFIX, PLACE_CATEGORY_PREFIX))
 
     def walk(self, node: Tree) -> set[str]:
         """The readings that every verb phrase below a node allows."""
@@ -282,7 +293,7 @@ class _Reader:
                     or auxiliary_gloss == "become"
                 ):
                     return {STATE}
-                if in_clause and negated and concept.startswith(PROPERTY_PREFIX):
+                if in_clause and negated and is_property_feature(concept):
                     # "that is not red" restricts its noun phrase, at any level
                     return {CAPACITY, EVENT, STATE, ABLE_NOW}
             return {CAPACITY}

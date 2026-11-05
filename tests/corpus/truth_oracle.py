@@ -96,6 +96,7 @@ EVENT_TYPE_KINDS = ("event_type", PLACE_EVENT_TYPE)
 """The kinds of event-type record that name events: an entity event type, and (stage c3a) a
 place event type with dynamics."""
 ENTITY = "ENTITY"
+EVERYPLACE = "EVERYPLACE"
 NEC_ALL, ALL, MOST, SOME, NO, NEC_NO = "nec_all", "all", "most", "some", "no", "nec_no"
 
 
@@ -207,6 +208,59 @@ class Oracle:
         config = yaml.safe_load((folder / "taxonomy" / "config.yaml").read_text(encoding="utf-8"))
         self.drift = config["scalars"]["drift"]["values"]
         self.instance_drift = config["scalars"]["instance_drift"]
+        # The place taxonomy (stage c5b), read from the place run the world wrote to places/:
+        # its tree, its defining features, its generative values, and its scalar settings, for
+        # the class-level facts about categories of places and their fixed test. The labels of
+        # the two taxonomies never meet, so the tables are shared.
+        self.place_free = {
+            s["label"]
+            for s in self.record["symbols"]
+            if s["kind"] in ("place_property", "place_part") and not s["derived"]
+        }
+        self.free |= self.place_free
+        self.place_parent: dict[str, Any] = {}
+        self.place_drift: list[float] = []
+        self.place_instance_drift = 0.0
+        self.place_capacity: dict[str, np.ndarray] = {}
+        places_folder = folder / "places"
+        if places_folder.is_dir():
+            place_tree = pl.read_csv(places_folder / "tree.csv", infer_schema_length=None)
+            for label, parent, level in zip(
+                place_tree["label"].to_list(),
+                place_tree["parent"].to_list(),
+                place_tree["level"].to_list(),
+                strict=True,
+            ):
+                self.place_parent[label] = parent
+                self.parent[label] = parent
+                self.level[label] = level
+                self.defining[label] = []
+            place_roles = pl.read_csv(places_folder / "roles.csv", infer_schema_length=None)
+            for category, feature, role in zip(
+                place_roles["category"].to_list(),
+                place_roles["feature"].to_list(),
+                place_roles["role"].to_list(),
+                strict=True,
+            ):
+                if role.startswith("defining"):
+                    self.defining[category].append(feature)
+            place_generative = pl.read_csv(
+                places_folder / "categories_generative.csv", infer_schema_length=None
+            )
+            for row in place_generative.iter_rows(named=True):
+                self.generative[row["label"]] = dict(row.items())
+            place_config = yaml.safe_load(
+                (places_folder / "config.yaml").read_text(encoding="utf-8")
+            )
+            self.place_drift = place_config["scalars"]["drift"]["values"]
+            self.place_instance_drift = place_config["scalars"]["instance_drift"]
+            place_capacities = pl.read_csv(
+                folder / "derived" / "place_capacities.csv", infer_schema_length=None
+            )
+            assert place_capacities["label"].to_list() == self.place_labels
+            for name in place_capacities.columns:
+                if name.startswith("CANBE."):
+                    self.place_capacity[name] = place_capacities[name].to_numpy()
         self._matrices: dict[str, np.ndarray] = {}
         self._place_matrices: dict[str, np.ndarray] = {}
         self._states: dict[str, list[dict[str, frozenset[str]]]] = {}
@@ -215,10 +269,34 @@ class Oracle:
 
     # Sets of rows ----------------------------------------------------------------------------
 
+    def is_place_category(self, category: str) -> bool:
+        """Whether a label is a category of places (stage c5b), by the place tree."""
+        return category in self.place_parent
+
     def below(self, category: str) -> np.ndarray:
         if category in (THING, ENTITY):
             return np.ones(self.n, dtype=bool)
+        if category == EVERYPLACE or self.is_place_category(category):
+            # a mask over the places (stage c5b)
+            return np.array(
+                [
+                    category == EVERYPLACE or category in self.place_path(q)
+                    for q in self.place_labels
+                ],
+                dtype=bool,
+            )
         return np.array([category in self.path[label] for label in self.labels], dtype=bool)
+
+    def place_pole(self, pole: str, comparison: np.ndarray, z: float | None = None) -> np.ndarray:
+        """Which places are at a place pole against a comparison class (a mask of places), as
+        :meth:`pole` judges entities."""
+        z = self.z if z is None else z
+        scalar, side = pole.rsplit(".", 1)
+        values = self.place_column(scalar).astype(float)
+        mean, sd = values[comparison].mean(), values[comparison].std()
+        if sd == 0:
+            return np.zeros(len(self.place_labels), dtype=bool)
+        return values >= mean + z * sd if side == "HIGH" else values <= mean - z * sd
 
     def pole(self, pole: str, comparison: np.ndarray, z: float | None = None) -> np.ndarray:
         """Which rows are at a pole against a comparison class (a mask of rows), at ``z``
@@ -236,6 +314,18 @@ class Oracle:
     def subject_set(self, term: dict[str, Any], z: float | None = None) -> np.ndarray:
         below = self.below(term["category"])
         keep = below.copy()
+        if self.is_place_category(term["category"]):
+            # a category of places (stage c5b): a mask over the places, restricted by place
+            # features and place poles, with no relative clause
+            assert not term.get("clauses")
+            for literal in term["restriction"]:
+                positive = not literal.startswith("not ")
+                name = literal.removeprefix("not ")
+                if name.startswith("PLACESCALARDIM."):
+                    keep &= self.place_pole(name, below, z)
+                else:
+                    keep &= self.place_column(name) == int(positive)
+            return keep
         for literal in term["restriction"]:
             positive = not literal.startswith("not ")
             name = literal.removeprefix("not ")
@@ -338,6 +428,9 @@ class Oracle:
         when the feature varies. Every setting of the free features that are not held, and every
         position of every scalar among its thresholds, is tried."""
         category = term["category"]
+        place = self.is_place_category(category)
+        drift = self.place_drift if place else self.drift
+        instance_drift = self.place_instance_drift if place else self.instance_drift
         held: dict[str, int] = {}
         if category != THING:
             held = {f: int(self.generative[category][f]) for f in self.defining[category]}
@@ -345,7 +438,7 @@ class Oracle:
         for literal in term["restriction"]:
             value = int(not literal.startswith("not "))
             name = literal.removeprefix("not ")
-            if name.startswith("SCALARDIM."):
+            if name.startswith(("SCALARDIM.", "PLACESCALARDIM.")):
                 continue  # a pole fixes no binary feature
             if name in self.free:
                 if held.get(name, value) != value:
@@ -360,8 +453,8 @@ class Oracle:
         open_features = sorted(free - set(held))
         scalars_fixed = (
             category != THING
-            and all(d == 0 for d in self.drift[self.level[category] - 1 :])
-            and self.instance_drift == 0
+            and all(d == 0 for d in drift[self.level[category] - 1 :])
+            and instance_drift == 0
         )
         groups: dict[str, list[float]] = {}
         for scalar, threshold in thresholds:
@@ -1094,10 +1187,53 @@ class Oracle:
                         if not recorded:
                             return False
                         continue
+                    pair = self._pair_statement(predicate["label"])
+                    if pair is not None:
+                        # a pair literal (stage c5b), from the replayed pairs: the pair or
+                        # SAME between the participant in the role and the other one (the
+                        # place, for a place event), or SOME of the participant
+                        other = event.get("patient" if subject["role"] == "agent" else "agent")
+                        held = self._pair_literal_held(
+                            scene, step["step"] + offset, pair, entity, other
+                        )
+                        if held != predicate["value"]:
+                            return False
+                        continue
                     value = self.fluent_at(scene, step["step"] + offset, entity, predicate["label"])
                     if value != predicate["value"]:
                         return False
         return seen
+
+    def _pair_literal_held(
+        self,
+        scene: dict[str, Any],
+        time: int,
+        pair: tuple[str, str],
+        first: str,
+        second: str | None,
+    ) -> bool:
+        """Whether a pair literal held at ``TIME.<time>`` (stage c5b), from the pair sets the
+        oracle replays: a pair by membership, counting both directions of a symmetric pair
+        fluent as the replay writes them; ``SAME`` when the two have a partner in common; and
+        ``SOME`` when the first stands first in some pair."""
+        kind, fluent = pair
+        held = self.pairs_at(scene, time)[fluent]
+        if kind == "pair_some":
+            return any(a == first for a, _ in held)
+        if second is None:
+            return False
+        if kind == "pair_same":
+            partners = {b for a, b in held if a == first}
+            return any(a == second and b in partners for a, b in held)
+        return (first, second) in held
+
+    def profile_observed(self, form: dict[str, Any], scenes: list[dict[str, Any]]) -> bool:
+        """The ``observed`` mark of a false profile item (stage c5b): the form held of every
+        pair at every time point of the scenes (:meth:`profile_held`), and at least one time
+        point of one scene held a pair of the pair fluent."""
+        label = form["predicate"]["label"]
+        seen = any(pairs[label] for scene in scenes for pairs in self.pairs_at(scene))
+        return seen and self.profile_held(form, scenes)
 
     # Truth -----------------------------------------------------------------------------------
 
@@ -1129,7 +1265,42 @@ class Oracle:
             return int(block.sum()), int(
                 members.sum() * patients.sum() - (members & patients).sum()
             )
+        if kind == "place_event_type":
+            # a relation fact about a place event type (stage c5b): the bindings of a member
+            # of the subject category and a place of the patient category
+            patients = self.subject_set(predicate["patient"], z)
+            block = self.place_matrix(predicate["label"])[np.ix_(members, patients)]
+            return int(block.sum()), int(members.sum() * patients.sum())
+        if self.is_place_category(form["subject"]["category"]):
+            if kind == "patient_capacity":
+                column = self.place_capacity[predicate["label"]]
+            else:
+                column = self.place_column(predicate["label"])
+            return int(column[members].sum()), int(members.sum())
         return int(self.column[predicate["label"]][members].sum()), int(members.sum())
+
+    def _sorts_agree(self, form: dict[str, Any]) -> bool:
+        """Whether a class-level form says a predicate of the kind of thing its subject is
+        (stage c5b): a place feature, place capacity, place pole, place scalar, or category of
+        places of a category of places, and none of them of a category of entities; the
+        patient of a place event type is a category of places, and of a two-place event type a
+        category of entities; a category of places is the agent of nothing."""
+        subject, predicate = form["subject"], form["predicate"]
+        kind, label = predicate["kind"], predicate["label"]
+        place = self.is_place_category(subject["category"])
+        if kind in ("event_type1", "event_type2", "place_event_type"):
+            if place:
+                return False
+            if kind == "event_type1":
+                return True
+            patient_is_place = self.is_place_category(predicate["patient"]["category"])
+            return patient_is_place == (kind == "place_event_type")
+        about_a_place = label.startswith(("PLACE", "CANBE.PLACEEVENTTYPE."))
+        if kind == "comparative":
+            return (
+                place == about_a_place == self.is_place_category(predicate["patient"]["category"])
+            )
+        return place == about_a_place
 
     def _class_comparison(self, form: dict[str, Any]) -> bool | None:
         """A class-level comparison (a pole of the category's mean against its comparison class,
@@ -1142,14 +1313,18 @@ class Oracle:
             return None
         if subject["restriction"] or subject.get("clauses"):
             return None  # a statement about the category, not about a restricted set
+        if not self._sorts_agree(form):
+            return None
+        place = self.is_place_category(category)
         members = self.subject_set(subject)
         if kind == "comparison":
             scalar, side = predicate["label"].rsplit(".", 1)
             comparison = predicate["class"]
-            if comparison != ENTITY and comparison not in self.ancestors(category):
+            top = EVERYPLACE if place else ENTITY
+            if comparison != top and comparison not in self.ancestors(category):
                 return None
             z = form.get("z", self.z)  # a form without a recorded z is judged at the oracle's
-            values = self.column[scalar].astype(float)
+            values = (self.place_column(scalar) if place else self.column[scalar]).astype(float)
             rows = self.below(comparison)
             mean, sd = values[rows].mean(), values[rows].std()
             value = values[members].mean()
@@ -1165,7 +1340,9 @@ class Oracle:
             return None
         if other["category"] in (THING, category):
             return None
-        values = self.column[predicate["label"]].astype(float)
+        values = (
+            self.place_column(predicate["label"]) if place else self.column[predicate["label"]]
+        ).astype(float)
         first, second = values[members].mean(), values[self.subject_set(other)].mean()
         if self._low_word(predicate):
             first, second = second, first  # "smaller than": the sentence's object is the greater
@@ -1188,6 +1365,8 @@ class Oracle:
         if quantifier in (NEC_ALL, NEC_NO):
             if kind not in ("property", "part", "event_type1", "member") or subject.get("clauses"):
                 return None
+        if category != THING and not self._sorts_agree(form):
+            return None
         members = self.subject_set(subject, form.get("z"))
         if not members.any():
             return None

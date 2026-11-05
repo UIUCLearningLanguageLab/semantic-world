@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from types import SimpleNamespace
 
 import pytest
 
@@ -40,6 +41,7 @@ from semantic_world.corpus.grammar import (
 )
 from semantic_world.corpus.lexicon import BEFORE_WORD, FUNCTION_WORDS
 from semantic_world.corpus.logical import is_descriptive, logical_form, with_cut
+from semantic_world.corpus.mentions import plan_for
 from semantic_world.corpus.planner import CAUSAL, TEMPLATE
 from semantic_world.corpus.propositions import (
     AGENT,
@@ -56,6 +58,11 @@ from semantic_world.corpus.propositions import (
     EventTerm,
     Predicate,
     Proposition,
+    is_pair_label,
+    is_pair_literal_label,
+    is_same_label,
+    is_some_label,
+    pair_fluent_of_label,
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import Realizer, leaves, token_parts
@@ -116,9 +123,31 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
     event_types = {e["label"]: e for e in record["event_types"]}
     kinds: Counter = Counter()
     about_categories = numeric_statements = conditional_statements = 0
-    for document, sentence in causal_sentences(corpus):
+    # the causal sentences of the documents, then every causal statement of the world that no
+    # document of the run states, with the form the documents would write: which statements a
+    # run of a few documents draws depends on its topics (since stage c5b the place features,
+    # the place event types, and the pair fluents share them), and the property is about
+    # every statement
+    facts = corpus.planner.facts
+    items = list(causal_sentences(corpus))
+    stated = {(s.proposition.subject, s.proposition.predicate) for _, s in items}
+    for statement in facts.causal_statements():
+        if (statement.subject, statement.predicate) in stated:
+            continue
+        plan = plan_for(facts, statement, bare=True)
+        form = logical_form(plan, statement, {}, corpus.config.scalar_z, facts.truth.cuts)
+        items.append(
+            (
+                None,
+                SimpleNamespace(
+                    proposition=statement, plan=plan, logical_form=form, label=str(statement)
+                ),
+            )
+        )
+    for document, sentence in items:
         proposition = sentence.proposition
-        assert document.type == "encyclopedic_feature" and sentence.section == CAUSAL
+        if document is not None:
+            assert document.type == "encyclopedic_feature" and sentence.section == CAUSAL
         assert proposition.level == CLASS and proposition.quantifier == NEC_ALL
         assert proposition.polarity is True and isinstance(proposition.subject, EventTerm)
         assert proposition.predicate.kind in CAUSAL_KINDS
@@ -455,8 +484,7 @@ def test_capped_causal_sets_keep_every_statement(runs) -> None:
             assert record["event_type"] == true.proposition.subject.event_type
         every: dict = {}
         for true in facts.causal_statements(kind=kind):
-            if true.predicate.pair_literal or true.subject.place:
-                continue  # the causal sets keep to the statements of stage c4c (stage c5a)
+            # every statement: those with pair literals and about place event types too (c5b)
             for false in false_items(facts, true, test_set.change):
                 group = LAWLIKE if truth.observed(false) else ""
                 if group == test_set.kind:
@@ -495,7 +523,9 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
     oracle = case.oracle()
     scenes = list(scenes_json(corpus).values())
     world = corpus.planner.world
+    facts = corpus.planner.facts
     kinds: Counter = Counter()
+    pair_items = place_items = 0
     for test_set in corpus.test_sets:
         if test_set.level not in CAUSAL_LEVELS:
             continue
@@ -516,10 +546,21 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
                     record_entry["value"] = form["predicate"]["value"]
                 if "condition" in form["subject"]:
                     record_entry["condition"] = form["subject"]["condition"]
+                label = form["predicate"]["label"]
+                if is_pair_label(label) or is_same_label(label):
+                    # a pair or SAME (stage c5b): the role of the literal's second argument
+                    other = PATIENT if form["subject"]["role"] == AGENT else AGENT
+                    record_entry["second"] = other
                 assert "causal" not in form and item.meta["causal"] == record_entry
                 assert item.input["document"] is None
-                label = form["predicate"]["label"]
-                assert label in world.base_fluents or label in world.numeric_fluents
+                # a base fluent or a numeric fluent, or (since stage c5b) a pair literal: a
+                # pair fluent, SAME on one, or SOME of one, with a preposition
+                if is_pair_literal_label(label):
+                    assert pair_fluent_of_label(label) in facts.pair_prepositions
+                    pair_items += 1
+                else:
+                    assert label in world.base_fluents or label in world.numeric_fluents
+                place_items += world.is_place_event_type(form["subject"]["event"])
                 # true by the definition, or false under NEC: the definition lacks the entry
                 assert oracle.causal(form) is item.meta["truth"], form
             assert true.meta["observed"] is False
@@ -530,11 +571,31 @@ def test_false_causal_items_are_false_under_nec_and_observed_marks_agree(cases, 
             a, b = true.proposition, false.proposition
             if test_set.change == ROLE:
                 assert not a.subject.event_type.startswith("EVENTTYPE1.")
+                # the role swap never gives an item for a symmetric pair fluent or SAME (WM.41
+                # and WM.75), nor for a place event type, whose statements are about the agent
+                assert not a.subject.place
+                label = a.predicate.label
+                assert not is_same_label(label)
+                if is_pair_label(label):
+                    assert not world.pair_fluent_info[label].symmetric
+            elif test_set.change == EVENT_SWAP and a.subject.place:
+                # another place event type with a verb (stage c5b)
+                assert b.subject.place and b.subject.event_type in facts.place_verbs
             elif test_set.change == EVENT_SWAP:
                 info_a = world.event_types[a.subject.event_type]
                 info_b = world.event_types[b.subject.event_type]
                 assert (info_a.arity, info_a.level) == (info_b.arity, info_b.level)
+            elif test_set.change == PREDICATE and a.predicate.pair_literal:
+                # a pair literal keeps its kind: a pair, SAME, or SOME (stage c5b)
+                kinds_of = (is_pair_label, is_same_label, is_some_label)
+                assert [f(a.predicate.label) for f in kinds_of] == [
+                    f(b.predicate.label) for f in kinds_of
+                ]
             kinds[(test_set.level, test_set.change, test_set.kind)] += 1
+    # since stage c5b the causal sets hold the statements with pair literals and about place
+    # event types
+    assert (pair_items > 0) == bool(facts.pair_prepositions)
+    assert (place_items > 0) == bool(facts.place_verbs)
     for level in CAUSAL_LEVELS:
         for change in (PREDICATE, POLARITY, EVENT_SWAP):
             assert kinds[(level, change, "")] > 0, (level, change, kinds)
@@ -581,11 +642,8 @@ def test_the_causal_sets_pair_every_statement_with_every_valid_false_item(runs, 
         for change in (PREDICATE, POLARITY, EVENT_SWAP, ROLE):
             expected: dict = {}
             for true in facts.causal_statements(kind=kind):
-                # the causal sets keep to the statements of stage c4c (stage c5a's filter):
-                # the statements with pair literals and about place event types enter the
-                # sets in stage c5b
-                if true.predicate.pair_literal or true.subject.place:
-                    continue
+                # every statement: since stage c5b those with pair literals and about place
+                # event types are in the sets too
                 for false in false_items(facts, true, change):
                     group = LAWLIKE if truth.observed(false) else ""
                     expected.setdefault(group, []).append((true, false))
@@ -662,6 +720,14 @@ def test_an_observed_false_item_held_of_every_event_in_the_scenes(runs) -> None:
                         # a numeric statement is about the effect: the event's own recorded
                         # change has its direction (stage b3b)
                         assert truth.recorded_direction(scene.label, event, entity, predicate)
+                        continue
+                    if predicate.pair_literal:
+                        # a pair literal (stage c5b), from the replayed pairs
+                        other = event.patient if subject.role == AGENT else event.agent
+                        held = truth.pair_literal_held(
+                            scene.label, event.step + offset, predicate.label, entity, other
+                        )
+                        assert held == predicate.value
                         continue
                     value = truth.fluent_value(
                         scene.label, event.step + offset, entity, predicate.label
@@ -904,9 +970,21 @@ def test_feature_documents_about_event_types_and_fluents(runs) -> None:
             assert all(s.proposition.predicate.label == topic for s in causal)
             statements = facts.causal_statements(fluent=topic)
             assert len(document.sentences) == min(document.drawn_length, len(statements))
-        elif topic in facts.verbs or topic in facts.features[CAN]:
+        elif topic in facts.verbs or topic in facts.features[CAN] or topic in facts.place_verbs:
+            # an event type between entities, or (stage c5b) a place event type
             topics["event_type"] += 1
             assert all(s.proposition.subject.event_type == topic for s in causal)
+        elif topic in facts.pair_prepositions:
+            # a document about a pair fluent (stage c5b): statements alone, its profile
+            # statement and the causal statements whose literal reads it
+            topics["pair_fluent"] += 1
+            assert all(s.proposition.profile for s in others)
+            assert all(pair_fluent_of_label(s.proposition.predicate.label) == topic for s in causal)
+            statements = facts.causal_statements(pair_fluent=topic)
+            profile = facts.profile_statements(topic)
+            assert len(document.sentences) == min(
+                document.drawn_length, len(statements) + len(profile)
+            )
         else:
             topics["feature"] += 1
             assert not causal
@@ -926,7 +1004,14 @@ def test_the_causal_statement_rate_is_a_setting(runs) -> None:
                 continue
             topic = document.topic
             facts = corpus.planner.facts
-            if topic in facts.base_fluents or topic in facts.numeric_fluents:
+            statements_only = (
+                topic in facts.base_fluents
+                or topic in facts.numeric_fluents
+                or topic in facts.pair_prepositions
+            )
+            if statements_only:
+                # a document about a fluent, or (stage c5b) about a pair fluent, holds
+                # statements alone, whatever the rate
                 found["fluent_documents"] += 1
                 found["fluent_sentences"] += len(document.sentences)
             else:

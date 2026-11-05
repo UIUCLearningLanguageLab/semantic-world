@@ -93,9 +93,14 @@ def test_concepts_of_the_default_world(default_world) -> None:
     assert labels["scalar"] == [
         f"{dimension}.{pole}" for dimension in world.scalars for pole in ("HIGH", "LOW")
     ]
-    # the generic noun, and since stage c5a the generic noun for places, the last content concept
+    # the generic noun, and since stage c5a the generic noun for places, the last content
+    # concept of that stage; since stage c5b (WM.75) only the prepositions of the pair fluents
+    # that the dynamics use and no literal reads as a pair follow it
     assert [c.label for c in lexicon.of_type(GENERIC)] == [THING, "SOMEPLACE"]
-    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
+    read = world.pair_fluents_read()
+    later = [f for f in world.pair_fluents_used() if f not in read]
+    concepts = [x.concept for x in lexicon.content_lexemes]
+    assert concepts[len(concepts) - len(later) - 1 :] == ["SOMEPLACE", *later]
     # no agent capacity is a concept: the event type itself is the word
     assert not any(c.label.startswith("CAN.") for c in lexicon.concepts)
 
@@ -140,8 +145,15 @@ def test_concept_order_follows_the_specification_table(default_world) -> None:
     # (stage c4b), so that every content lexeme of a world without them keeps its label; the
     # tiny and default place taxonomies have no place parts, so place_has is empty
     phase_c = [t for t in PHASE_C_TYPES if t != "place_has"]
-    # and the generic noun for places (stage c5a) stands last among the content concepts
-    order = list(CONCEPT_TYPES[: -len(PHASE_C_TYPES)]) + [GENERIC] + phase_c + [GENERIC, FUNCTION]
+    # and the generic noun for places (stage c5a) stands after them, followed only by the
+    # prepositions of the pair fluents that no literal reads as a pair (stage c5b, WM.75: the
+    # default world has one)
+    order = (
+        list(CONCEPT_TYPES[: -len(PHASE_C_TYPES)])
+        + [GENERIC]
+        + phase_c
+        + [GENERIC, "pair", FUNCTION]
+    )
     assert [t for i, t in enumerate(types) if i == 0 or types[i - 1] != t] == order
 
 
@@ -397,8 +409,13 @@ def test_lexeme_labels(default_world) -> None:
     phase_c = [
         x for x in lexicon.content_lexemes if lexicon.concept(x.concept).type in PHASE_C_TYPES
     ]
-    # and the generic noun for places (stage c5a) is the last content lexeme of all
-    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
+    # the generic noun for places (stage c5a) follows the phase (c) lexemes of stage c4b, and
+    # the prepositions of WM.75 (stage c5b) follow it: they are phase (c) lexemes too, and the
+    # last content lexemes of all
+    concepts = [x.concept for x in lexicon.content_lexemes]
+    place_noun = concepts.index("SOMEPLACE")
+    assert all(x in phase_c for x in lexicon.content_lexemes[place_noun + 1 :])
+    assert all(x.pos == "preposition" for x in lexicon.content_lexemes[place_noun + 1 :])
     assert phase_c and lexicon.content_lexemes[-len(phase_c) - 2].concept == THING
     assert lexicon.lexeme(f"LEXEME.{content - len(phase_c) - 1}").concept == THING
     assert lexicon.lexeme(f"LEXEME.{content + 1}").gloss == "a"

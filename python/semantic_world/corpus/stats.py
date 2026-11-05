@@ -29,6 +29,10 @@ They hold:
 - ``scenes`` (the histories: steps, events, changes, quiescence), ``propositions``,
   ``lexicon`` (with the event types that get no word), and ``rule_statements`` (with the rule
   terms that were skipped, and why);
+- ``places`` (stage c5b): the class-level sentences about categories of places, by the kind
+  of their predicate, and the relation facts about place event types; ``documents.by_topic``
+  counts the encyclopedic documents by the kind of their topic, with those about places and
+  about pair fluents;
 - ``cooccurrence``: the co-occurrence check;
 - ``test_sets``: for each test set, the number of pairs, the share of its true items whose
   logical form appears in a document, and, for a state set, the share of its items marked
@@ -83,6 +87,7 @@ from semantic_world.corpus.planner import (
     PLACE_DESCRIPTION,
     PLACES,
     POLE,
+    PROFILE_SECTION,
     RESULT,
     Document,
     Planner,
@@ -90,20 +95,26 @@ from semantic_world.corpus.planner import (
 )
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
+    CAN,
     CHANGE,
     CLASS,
     COMPARATIVE,
     COMPARISON,
     EFFECT,
     EVENT,
+    HAS,
     INSTANCE,
+    IS,
     LEVELS,
     LOWERS,
+    MEMBER,
+    NEC_QUANTIFIERS,
     PAIR_STATE,
     PLACE_EVENT,
     PRECONDITION,
     PROFILE_FORMS,
     PROGRESSIVE,
+    PROJECTION,
     QUANTIFIERS,
     RAISES,
     STATE,
@@ -297,7 +308,93 @@ def _documents(planner: Planner, documents: Sequence[Document]) -> dict[str, Any
             "shorter_than_drawn_share": _share(short, len(made)),
         }
     # the drafts with nothing to say that were drawn again (stage c4a)
-    return {"count": len(documents), "redrawn_drafts": planner.redrawn_drafts, "by_type": by_type}
+    return {
+        "count": len(documents),
+        "redrawn_drafts": planner.redrawn_drafts,
+        "by_type": by_type,
+        "by_topic": _topics(planner, documents),
+    }
+
+
+TOPIC_KINDS = (
+    "category",
+    "place_category",
+    "property",
+    "part",
+    "event_unary",
+    "event",
+    "fluent",
+    "numeric_fluent",
+    "place_property",
+    "place_part",
+    "place_event",
+    "pair_fluent",
+)
+"""The kinds of topic of an encyclopedic document: a category of entities or (stage c5b) of
+places for a category document; for a feature document, a PROPERTY or PART feature, a one-place
+event type, a two-place event type or category of them, a Boolean fluent, a numeric fluent,
+and (stage c5b) a place property or part, a place event type, or a pair fluent."""
+
+
+def _topics(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
+    """The encyclopedic documents by the kind of their topic (stage c5b), with the documents
+    about places (a category of places, a place property or part, or a place event type) and
+    about pair fluents summed apart."""
+    facts = planner.facts
+    kind_of: dict[str, str] = {}
+    for kind, labels in (
+        ("category", facts.categories),
+        ("place_category", facts.place_categories),
+        ("property", facts.features[IS]),
+        ("part", facts.features[HAS]),
+        ("event_unary", facts.features[CAN]),
+        ("event", facts.verbs),
+        ("fluent", facts.base_fluents),
+        ("numeric_fluent", facts.numeric_fluents),
+        ("place_property", facts.place_features[IS]),
+        ("place_part", facts.place_features[HAS]),
+        ("place_event", facts.place_verbs),
+        ("pair_fluent", facts.pair_prepositions),
+    ):
+        kind_of.update(dict.fromkeys(labels, kind))
+    counts = Counter(
+        kind_of[d.topic] for d in documents if d.type in DOCUMENT_TYPES[:2] and d.topic in kind_of
+    )
+    by_kind = {kind: counts[kind] for kind in TOPIC_KINDS}
+    places = ("place_category", "place_property", "place_part", "place_event")
+    return {
+        **by_kind,
+        "about_places": sum(by_kind[kind] for kind in places),
+        "about_pair_fluents": by_kind["pair_fluent"],
+    }
+
+
+def _places(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
+    """The class-level sentences about places (stage c5b, ``WORLD_PHASE_C.md``, "Places in
+    documents"): those whose subject is a category of places, by the kind of their predicate
+    (a place property or part, a place patient capacity, a place pole, a comparison with
+    another category of places, or membership), with the ``NEC`` ones among them; and the
+    relation facts about a place event type, whose patient is a category of places."""
+    truth = planner.truth
+    sentences = [s for d in documents for s in d.sentences if s.proposition.level == CLASS]
+    about = [s for s in sentences if truth.is_place_term(s.proposition.subject)]
+    kinds = Counter(s.proposition.predicate.kind for s in about)
+    relations = [
+        s
+        for s in sentences
+        if s.proposition.predicate.kind == PLACE_EVENT
+        and isinstance(s.proposition.subject, CategoryTerm)
+    ]
+    return {
+        "class_sentences": len(about),
+        "feature_sentences": kinds[IS] + kinds[HAS],
+        "capacity_sentences": kinds[PROJECTION],
+        "pole_sentences": kinds[COMPARISON],
+        "comparison_fact_sentences": kinds[COMPARATIVE],
+        "membership_sentences": kinds[MEMBER],
+        "nec_sentences": sum(s.proposition.quantifier in NEC_QUANTIFIERS for s in about),
+        "relation_sentences": len(relations),
+    }
 
 
 def _sentences(documents: Sequence[Document]) -> dict[str, Any]:
@@ -431,6 +528,10 @@ def _causal(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
             form: sum(p.predicate.form == form for p in planner.facts.profile_statements())
             for form in PROFILE_FORMS
         },
+        # the profile statements that the documents about pair fluents state (stage c5b)
+        "profile_sentences": sum(
+            s.section == PROFILE_SECTION for d in documents for s in d.sentences
+        ),
     }
 
 
@@ -493,6 +594,9 @@ def _comparisons(planner: Planner, documents: Sequence[Document]) -> dict[str, A
             PARTICIPANTS: across[PARTICIPANTS],
             PLACES: across[PLACES],
         },
+        # Jon's ruling 3 of WM.75 (stage c5b): the comparisons made on another dimension than
+        # the one first drawn, and those no dimension allowed
+        "made_on_another_scalar": dict(planner.other_scalar_comparisons),
         "skipped_not_told_apart": dict(planner.skipped_comparisons),
     }
 
@@ -620,6 +724,7 @@ def corpus_stats(
         "sentences": _sentences(documents),
         "states": _states(planner, documents),
         "causal": _causal(planner, documents),
+        "places": _places(planner, documents),
         "comparisons": _comparisons(planner, documents),
         "quantifiers": _quantifiers(documents),
         "tokens": tokens,

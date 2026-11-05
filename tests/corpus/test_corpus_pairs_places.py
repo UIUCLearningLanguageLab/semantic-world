@@ -289,7 +289,21 @@ def test_the_lexicon_names_the_pair_fluents_and_the_places(cases, runs, name) ->
         for lit in list(et.precondition) + [c for e in et.effects for c in e.condition]
         if lit.pair and lit.kind == "pair_same"
     }
-    assert [c.label for c in of("pair")] == [f for f in world.pair_fluents if f in read]
+    # every pair fluent the dynamics use gets a preposition (Jon's ruling 1 of WM.75, stage
+    # c5b): those read as a pair first, as stage c4b named them, then, after SOMEPLACE, those
+    # that only SAME, SOME, or SOMEOF literals read or that only effects write; a pair fluent
+    # that nothing reads or writes gets none
+    used = {
+        lit.pair_fluent
+        for et in definition.event_types
+        for lit in list(et.precondition) + [c for e in et.effects for c in e.condition]
+        if lit.pair
+    } | {e.fluent for et in definition.event_types for e in et.effects if e.pair}
+    later = [f for f in world.pair_fluents if f in used and f not in read]
+    assert [c.label for c in of("pair")] == [f for f in world.pair_fluents if f in read] + later
+    assert all(not lexicon.is_named(f) for f in world.pair_fluents if f not in used)
+    content = [x.concept for x in lexicon.content_lexemes]
+    assert content[content.index("SOMEPLACE") + 1 :] == later
     assert world.location_fluents[0] in read  # a move's compiled literal reads it
     assert [c.label for c in of("same")] == [f"SAME.{f}" for f in world.pair_fluents if f in same]
     assert all(c.pos == PREPOSITION for c in of("pair") + of("same"))
@@ -313,9 +327,10 @@ def test_the_lexicon_names_the_pair_fluents_and_the_places(cases, runs, name) ->
         assert all(lexicon.is_named(c.label) for c in of(concept_type))
     assert not any(_carries(c.label, UNNAMED_LABELS) for c in lexicon.concepts)
     # since stage c5a the lexicon has the bound pronoun and the generic noun for places, the
-    # last content lexeme (tests/corpus/test_corpus_class_pairs.py)
+    # last content lexeme of that stage; since stage c5b the prepositions of WM.75 follow it,
+    # and nothing else (tests/corpus/test_corpus_class_pairs.py)
     assert any(x.gloss == "them" for x in lexicon.lexemes)
-    assert lexicon.content_lexemes[-1].concept == "SOMEPLACE"
+    assert lexicon.content_lexemes[-1 - len(later)].concept == "SOMEPLACE"
     # the earlier content lexemes keep their labels: every lexeme before the first phase (c)
     # lexeme names no phase (c) concept, and the generic noun stands right before them
     first = next(i for i, x in enumerate(lexicon.content_lexemes) if _carries(x.concept))
