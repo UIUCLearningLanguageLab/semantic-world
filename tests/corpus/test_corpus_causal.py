@@ -130,6 +130,10 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
         # no causal statement names a derived fluent
         fluent = proposition.predicate.label
         assert fluent not in world.derived_fluents
+        if proposition.predicate.pair_literal:
+            # a statement with a pair literal (stage c5a): its JSON form and its entry of the
+            # record are checked in test_corpus_class_pairs.py
+            continue
         assert fluent in world.base_fluents or fluent in world.numeric_fluents
         # the JSON form: the event term (with the condition of a conditional statement, stage
         # b3b), the predicate with its value (or the direction of a numeric effect statement),
@@ -200,7 +204,13 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
     # the statements about categories the language can state (the default world has some;
     # a run of 200 documents need not state one): each holds of every event type below, by
     # the record (WM.16)
-    pool = corpus.planner.facts.causal_statements()
+    # (the statements of the stages before c5a: a statement with a pair literal, or about a
+    # place event type, is checked against the record in test_corpus_class_pairs.py)
+    pool = [
+        p
+        for p in corpus.planner.facts.causal_statements()
+        if not p.predicate.pair_literal and not p.subject.place
+    ]
     about = [p for p in pool if world.event_types[p.subject.event_type].category]
     if name == "default":
         assert about
@@ -232,7 +242,11 @@ def test_causal_statements_are_true_by_a_rereading_of_the_definition(cases, runs
 @pytest.mark.parametrize("name", WORLDS)
 def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, name) -> None:
     """``Facts.causal_statements`` lists exactly the definition's entries about event types and
-    base fluents with a word, categories included when every leaf below shares the entry."""
+    base fluents with a word, categories included when every leaf below shares the entry. Since
+    stage c5a it also lists the statements with pair literals and about place event types,
+    which ``test_corpus_class_pairs.py`` enumerates from the record in the same way; this test
+    keeps its subject, the Boolean and numeric entries of the event types between entities,
+    and checks every statement, the new ones included, by the oracle."""
     case = cases(name)
     corpus = runs(name)
     facts = corpus.planner.facts
@@ -242,7 +256,7 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
     for entry in record["event_types"]:
         label = entry["label"]
         if label not in facts.named or entry["kind"] == "place_event_type":
-            continue  # a place event type has a word since stage c4b, and no causal statement until c5a
+            continue  # the statements about place event types (stage c5a) are enumerated apart
         for kind in CAUSAL_KINDS:
             found = None
             for leaf in oracle.leaves_below(label):
@@ -267,13 +281,15 @@ def test_every_true_causal_statement_of_the_world_is_enumerated(cases, runs, nam
             p.predicate.kind,
         )
         for p in facts.causal_statements()
+        if not p.predicate.pair_literal and not p.subject.place
     }
     # a condition whose concept has no word makes no statement
     expected = {key for key in expected if all(label in facts.named for _, label, _ in key[4])}
     assert listed == expected
     assert len(facts.causal_statements(kind=EFFECT)) + len(
         facts.causal_statements(kind=PRECONDITION)
-    ) == len(listed)
+    ) == len(facts.causal_statements())
+    assert len(set(facts.causal_statements())) == len(facts.causal_statements())
     for statement in facts.causal_statements():
         # a bare form carries no cut; the documents write it through logical_form (WM.35)
         assert oracle.causal(with_cut(statement.to_json(), corpus.planner.truth.cuts)) is True
@@ -439,6 +455,8 @@ def test_capped_causal_sets_keep_every_statement(runs) -> None:
             assert record["event_type"] == true.proposition.subject.event_type
         every: dict = {}
         for true in facts.causal_statements(kind=kind):
+            if true.predicate.pair_literal or true.subject.place:
+                continue  # the causal sets keep to the statements of stage c4c (stage c5a)
             for false in false_items(facts, true, test_set.change):
                 group = LAWLIKE if truth.observed(false) else ""
                 if group == test_set.kind:
@@ -563,6 +581,11 @@ def test_the_causal_sets_pair_every_statement_with_every_valid_false_item(runs, 
         for change in (PREDICATE, POLARITY, EVENT_SWAP, ROLE):
             expected: dict = {}
             for true in facts.causal_statements(kind=kind):
+                # the causal sets keep to the statements of stage c4c (stage c5a's filter):
+                # the statements with pair literals and about place event types enter the
+                # sets in stage c5b
+                if true.predicate.pair_literal or true.subject.place:
+                    continue
                 for false in false_items(facts, true, change):
                     group = LAWLIKE if truth.observed(false) else ""
                     expected.setdefault(group, []).append((true, false))
@@ -1202,7 +1225,8 @@ def test_causal_propositions_the_truth_tests_reject(cases) -> None:
 def test_the_function_word_before(cases, runs) -> None:
     corpus = runs("tiny")
     lexicon = corpus.planner.lexicon
-    assert FUNCTION_WORDS[-3:] == ("become", BEFORE_WORD, "than")
+    # them (stage c5a) is appended after than, so the words before it keep their order
+    assert FUNCTION_WORDS[-4:] == ("become", BEFORE_WORD, "than", "them")
 
     before = lexicon.function_word(BEFORE_WORD)
     assert before.concept == "BEFORE" and not before.content

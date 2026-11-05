@@ -37,7 +37,13 @@ The reading undoes the grammar's fixed choices:
   ``before`` predications of their relative clauses, are the condition of a conditional effect
   statement (stage b3b);
 - a verb phrase without an auxiliary in a joined relative clause takes the auxiliary of the
-  verb phrase before it, when that auxiliary fits its predicate word.
+  verb phrase before it, when that auxiliary fits its predicate word;
+- a pair fluent's preposition with a category as the subject (stage c5a) makes a causal
+  statement about a pair literal, an effect with ``become`` and a precondition with the copula
+  and ``before``, or, with the copula alone, a profile statement; its object is the bound
+  pronoun ``them`` or a quantified generic noun ("no things"); in an object relative, with the
+  head as its object, it is the restrictor of a profile statement, wherever the preposition
+  stands (stranded in its own ``PP``, or at the front of the clause with the relative word).
 
 The quantifier of a class-level sentence is not in the words either: what "all" expresses is a
 setting of the language, and a bare plural says nothing of it. The record gives it
@@ -69,6 +75,7 @@ from semantic_world.corpus.lexicon import (
     BEFORE_WORD,
     PREPOSITION,
     THAN_WORD,
+    THEM_WORD,
     Lexicon,
 )
 from semantic_world.corpus.propositions import (
@@ -88,6 +95,7 @@ from semantic_world.corpus.propositions import (
     PLACE_EVENT,
     PRECONDITION,
     PRESENT,
+    PROFILE,
     PROJECTION,
     STATE_KIND,
     VERB,
@@ -224,6 +232,9 @@ class _Reader:
         if predication.kind in CAUSAL_KINDS:
             # a causal statement: the subject's relative clause names the event
             return SentencePlan(self.bound_subject(subject), predication, NEC_ALL)
+        if predication.kind == PROFILE:
+            # a profile statement (stage c5a): nec_all, as the definition guarantees it
+            return SentencePlan(subject, predication, NEC_ALL)
         quantifier = self.quantifier if subject.kind == CLASS_NP else None
         if (
             subject.kind == CLASS_NP
@@ -267,7 +278,8 @@ class _Reader:
         ``before`` predications stay as they are: the fluent condition of a conditional
         statement (stage b3b)."""
         clause = subject.clause
-        verbs = [] if clause is None else [p for p in clause.predications if p.kind in (CAN, VERB)]
+        kinds = (CAN, VERB, PLACE_EVENT)  # a place event type names its events too (stage c5a)
+        verbs = [] if clause is None else [p for p in clause.predications if p.kind in kinds]
         if subject.kind != CLASS_NP or clause is None or len(verbs) != 1:
             raise GrammarError(
                 "the subject of a causal statement is a category with a relative clause that "
@@ -275,7 +287,7 @@ class _Reader:
             )
         predications = tuple(
             dataclasses.replace(p, event=EVENT_VARIABLE, tense=PRESENT, aspect=None)
-            if p.kind in (CAN, VERB)
+            if p.kind in kinds
             else p
             for p in clause.predications
         )
@@ -285,7 +297,12 @@ class _Reader:
 
     def noun_phrase(self, node: Tree) -> NounPhrase:
         referent = self.referent[id(node)]
-        if self.child(node, "Pro") is not None:
+        pronoun = self.child(node, "Pro")
+        if pronoun is not None:
+            if self.gloss(pronoun) == THEM_WORD:
+                # the bound pronoun of a class-level statement (stage c5a): its referent is the
+                # generic noun of the other participant
+                return NounPhrase(CLASS_NP, referent)
             return NounPhrase(INSTANCE_NP, referent)
         noun_node = self.child(node, "N")
         if noun_node is None:
@@ -318,7 +335,15 @@ class _Reader:
                 agent = self.noun_phrase(agent_node)
                 if len(verb_phrases) != 1:
                     raise GrammarError("an object relative has one verb phrase")
-                predication, _ = self.predication(verb_phrases[0], None, agent.kind, None)
+                # the preposition of a prepositional predicate whose object is the head (stage
+                # c5a): stranded in the verb phrase or in the clause, or at the front of the
+                # clause with the relative word
+                preposition = self.pair_preposition(clause_node) or self.pair_preposition(
+                    verb_phrases[0]
+                )
+                predication, _ = self.predication(
+                    verb_phrases[0], None, agent.kind, None, preposition, gap=True
+                )
                 clause = RelativeClause((predication,), agent)
             else:
                 predications = []
@@ -341,12 +366,14 @@ class _Reader:
         subject_kind: str,
         previous: str | None,
         preposition: str | None = None,
+        gap: bool = False,
     ) -> tuple[Predication, str | None]:
         """The predication of a verb phrase, and the gloss of its auxiliary. ``previous`` is the
         auxiliary of the verb phrase before it in a joined relative clause. ``preposition`` is
         the concept of the pair fluent's preposition when the sentence has a ``PP`` of one
         (stage c4b): the verb phrase is then a pair state, the copula or ``become`` with the
-        preposition's object."""
+        preposition's object. ``gap`` says the verb phrase is that of an object relative, whose
+        head is the object (stage c5a)."""
         auxiliary_node = self.child(node, "AUX")
         auxiliary = None if auxiliary_node is None else self.gloss(auxiliary_node)
         polarity = self.child(node, "Neg") is None
@@ -357,10 +384,7 @@ class _Reader:
             # a prepositional predicate (stage c4b): a pair state at the time point the record
             # gives, with the copula, or a pair change with become
             if subject_kind == CLASS_NP:
-                raise GrammarError(
-                    f"the preposition {preposition} with a category as the subject is a "
-                    "statement of stage c5a, which the grammar does not read yet"
-                )
+                return self.class_preposition(node, preposition, auxiliary, polarity, target, gap)
             report = self.event[id(node)]
             if report is None or not is_time_key(report[0]):
                 raise GrammarError(
@@ -492,6 +516,46 @@ class _Reader:
         if nominal is None:
             raise GrammarError("a verb phrase has a verb, an adjective, or a predicate noun")
         return self.nominal(nominal, auxiliary, polarity)
+
+    def class_preposition(
+        self,
+        node: Tree,
+        preposition: str,
+        auxiliary: str | None,
+        polarity: bool,
+        target: Tree | None,
+        gap: bool,
+    ) -> tuple[Predication, str | None]:
+        """A pair fluent's preposition with a category as the subject (stage c5a). In an
+        object relative, with the head as its object, it is the restrictor of a profile
+        statement ("things that things are near"). In the main clause it is an effect
+        (``become``), a precondition (the copula and ``before``), or a profile statement (the
+        copula alone), with the bound pronoun or a quantified generic noun as its object."""
+        if gap:
+            if auxiliary not in ("is", "are") or not polarity or target is not None:
+                raise GrammarError(
+                    f"the preposition {preposition} in an object relative is said with the "
+                    "copula, is never negated, and has the head as its object"
+                )
+            return Predication(PAIR_STATE, preposition), auxiliary
+        if target is None:
+            raise GrammarError(f"the preposition {preposition} has no object")
+        patient = self.noun_phrase(target)
+        adverb = self.child(node, "Adv")
+        before = adverb is not None and self.gloss(adverb) == BEFORE_WORD
+        if auxiliary == "become" and not before:
+            kind = EFFECT
+        elif auxiliary in ("is", "are") and before:
+            kind = PRECONDITION
+        elif auxiliary in ("is", "are"):
+            kind = PROFILE
+        else:
+            raise GrammarError(
+                f"the preposition {preposition} with a category as the subject makes an effect "
+                f"with become, a precondition with the copula and {BEFORE_WORD}, or a profile "
+                "statement with the copula"
+            )
+        return Predication(kind, preposition, polarity, patient), auxiliary
 
     def numeric(
         self,

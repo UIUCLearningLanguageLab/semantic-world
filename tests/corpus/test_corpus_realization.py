@@ -364,11 +364,13 @@ def test_the_generated_sentences_cover_the_grammar(cases, plans) -> None:
     }  # fmt: skip
     # every function word of the language is used, apart from the pronoun, which the planner
     # of the documents brings in
-    # "it" needs a document, "become" a change of a fluent (test_corpus_states.py), and
-    # "before" a causal statement (test_corpus_causal.py)
+    # "it" needs a document, "become" a change of a fluent (test_corpus_states.py),
+    # "before" a causal statement (test_corpus_causal.py), and "them" a causal statement
+    # about a pair literal (stage c5a, test_corpus_class_pairs.py)
     assert function_words == {x.gloss for x in lexicon.function_lexemes} - {
         "it",
         "become",
         "before",
+        "them",
     }
     assert affixes == {None, "PLURAL", "PAST", "COMPARATIVE"}

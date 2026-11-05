@@ -81,6 +81,9 @@ SCALAR_POLES = ("HIGH", "LOW")
 
 PROPERTY_KIND = "property"
 PART_KIND = "part"
+SOMEPLACE = "SOMEPLACE"
+"""The generic head noun for places (stage c5a, ``WORLD_PHASE_C.md``, WM.49), as ``THING`` is
+for things: "things that go to places"."""
 PLACE_EVENT_PREFIX = "PLACEEVENTTYPE."
 """The prefix of a place event type's label (stage c3a): a transitive verb with a place as its
 object since stage c4b."""

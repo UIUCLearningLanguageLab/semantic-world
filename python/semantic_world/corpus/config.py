@@ -109,6 +109,7 @@ SIDES = ("before", "after")
 ADPOSITIONS = ("preposition", "postposition")
 NEGATION_POSITIONS = ("after_auxiliary", "before_auxiliary")
 BEFORE_POSITIONS = ("after_predicate", "before_predicate")
+STRANDINGS = ("strand", "pied_pipe")
 """``grammar.word_order.before``: where the function word ``before`` of a precondition
 statement stands, at the end of the verb phrase or at its start."""
 DESCRIPTION_MODES = ("marked", "omitted")
@@ -452,6 +453,10 @@ class WordOrderConfig:
     before: str
     """Where the function word ``before`` of a precondition statement stands:
     ``after_predicate`` or ``before_predicate``."""
+    stranding: str = "strand"
+    """Where a preposition stands when its object is the gap of a relative clause ("things
+    that things are near", stage c5a, Jon's ruling WM.58): ``strand``, in its place, or
+    ``pied_pipe``, at the front of the clause with the relative word."""
 
     def resolved(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -1040,6 +1045,7 @@ def _read_grammar(node: _Node, event_tense: str) -> GrammarConfig:
         auxiliary=words.choice("auxiliary", "before", SIDES),
         negation=words.choice("negation", "after_auxiliary", NEGATION_POSITIONS),
         before=words.choice("before", "after_predicate", BEFORE_POSITIONS),
+        stranding=words.choice("stranding", "strand", STRANDINGS),
     )
     words.finish()
     can_node = node.mapping("can_rate")

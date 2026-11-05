@@ -222,8 +222,13 @@ def test_documents_jsonl_round_trips_with_the_documented_schema(runs, tmp_path, 
             assert len(sentence["referents"]) == len(phrases)
             for entry in sentence["referents"]:
                 assert list(entry) == ["referent", "noun"]
-                assert entry["referent"] in instances | categories | places
-                assert entry["noun"] is None or entry["noun"] in categories | place_categories
+                # an instance, a category (or the generic noun), a place, or the generic noun
+                # for places (stage c5a), which the bound pronoun of a statement about a place
+                # event type refers to too
+                assert entry["referent"] in instances | categories | places | {"SOMEPLACE"}
+                assert entry["noun"] is None or entry["noun"] in (
+                    categories | place_categories | {"SOMEPLACE"}
+                )
             assert len(sentence["events"]) == len(verb_phrases)
             # the event a verb phrase reports, or the time point it is about
             assert all(e is None or e in event_labels or is_time_key(e) for e in sentence["events"])
@@ -525,8 +530,13 @@ def test_the_statistics_count_what_the_documents_hold(runs, tmp_path, name) -> N
     assert block["definite"] == sum(mark is not None for mark in entity_marks)
     assert block["place_definite_not_distinguished"] == sum(mark is False for mark in place_marks)
     assert block["place_definite"] == sum(mark is not None for mark in place_marks)
-    pronouns = sum(entry["noun"] is None for s in sentences for entry in s["referents"])
+    # a pronoun mentions an instance; the bound pronoun of a class-level statement about a
+    # pair literal (stage c5a) refers back to a generic noun, and is counted apart
+    nounless = [e["referent"] for s in sentences for e in s["referents"] if e["noun"] is None]
+    pronouns = sum(referent.startswith("INSTANCE.") for referent in nounless)
     assert block["pronouns"] == pronouns
+    assert block["bound_pronouns"] == len(nounless) - pronouns
+    assert all(r.startswith("INSTANCE.") or r in ("THING", "SOMEPLACE") for r in nounless)
     assert block["instance_mentions"] == block["indefinite"] + block["definite"] + pronouns
     assert block["place_mentions"] == block["place_indefinite"] + block["place_definite"]
     assert block["instance_mentions"] + block["place_mentions"] == len(entity_marks) + len(

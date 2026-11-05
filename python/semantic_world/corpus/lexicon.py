@@ -7,7 +7,8 @@ concept has a concept label: the world's label (``CATEGORY.1.3.2``, ``PROPERTY.1
 ``BOOLFL.3``, ``EVENTTYPE2.1.2``, ``CANBE.EVENTTYPE2.1.1``). A scalar pole is its dimension's
 label with ``HIGH`` or ``LOW`` (``SCALARDIM.1.HIGH``), and so is a pole of a numeric fluent
 (``NUMFL.1.HIGH``, an absolute adjective, concept type ``numeric``, stage b3b). The generic head
-noun is ``THING``, and a function word's concept label is its gloss in capitals (``THE``). A
+noun is ``THING`` (and, in a world with places, ``SOMEPLACE`` for places, stage c5a), and a
+function word's concept label is its gloss in capitals (``THE``). A
 Boolean fluent's word is a **state adjective** (concept type ``state``), which the lexeme tells
 from a static adjective: it names a fluent, and a static adjective a PROPERTY feature, a patient
 capacity, or a scalar pole.
@@ -46,6 +47,7 @@ from semantic_world.corpus.world import (
     PART_KIND,
     PROPERTY_KIND,
     SCALAR_POLES,
+    SOMEPLACE,
     THING,
     World,
 )
@@ -104,12 +106,16 @@ LEXEME_PREFIX = "LEXEME."
 
 FUNCTION_WORDS = (
     "a", "the", "all", "most", "some", "no", "not", "can", "is", "has", "with", "without",
-    "and", "that", "it", "become", "before", "than",
+    "and", "that", "it", "become", "before", "than", "them",
 )  # fmt: skip
 """The glosses of the function words every language has, in the order of the specification:
 the fifteen of the corpus generator, then ``become`` (``docs/specs/WORLD_AND_LANGUAGE.md``,
-"States and changes"), ``before`` ("Causal statements"), and ``than`` ("Comparatives", stage
-b3a), each appended so that the words before it keep their order."""
+"States and changes"), ``before`` ("Causal statements"), ``than`` ("Comparatives", stage
+b3a), and ``them`` (``docs/specs/WORLD_PHASE_C.md``, "Grammar", stage c5a), each appended so
+that the words before it keep their order."""
+THEM_WORD = "them"
+"""The gloss of the bound pronoun of a class-level statement (stage c5a): it refers back to
+the other participant of the restrictor, "things that approach things become near them"."""
 BEFORE_WORD = "before"
 """The gloss of the function word of a precondition statement ("things that catch things are
 awake before")."""
@@ -353,6 +359,10 @@ def world_concepts(world: World) -> tuple[Concept, ...]:
         Concept(label, PLACE_PATIENT_PROJECTION, ADJECTIVE, label)
         for label in world.place_patient_capacities
     ]
+    if world.place_categories:
+        # the generic head noun for places (stage c5a), in a world with places: the last
+        # content concept, so that every earlier content lexeme keeps its label
+        concepts.append(Concept(SOMEPLACE, GENERIC, NOUN, SOMEPLACE))
     return tuple(concepts)
 
 

@@ -79,6 +79,19 @@ precondition the copula with the state adjective and the function word ``before`
 before"), which stands at the end of the verb phrase (``word_order.before: after_predicate``) or
 at its start (``before_predicate``).
 
+**Pair literals at the class level** (stage c5a). A causal statement about a pair fluent has a
+prepositional predicate: ``become`` (an effect) or the copula with ``before`` (a precondition),
+and the pair fluent's preposition with the bound pronoun ``them``, which refers back to the
+other participant ("things that approach things become near them", "things that go to places
+are not at them before"), or with a quantified generic noun for ``SOME`` ("things that grab
+things are near no things before"). The ``PP`` stands where an object stands, and ``before``
+stays at the edge of the verb phrase, after the ``PP`` when the ``PP`` is inside it. A profile
+statement is the copula with the preposition and ``them``, and its subject's relative clause
+has the preposition's object as its gap ("things that things are near are near them"): with
+``word_order.stranding: strand`` the preposition stays where the object would stand, alone in
+its ``PP``; with ``pied_pipe`` it moves to the front of the clause with the relative word, in
+one ``PP``, before or after it by ``word_order.adposition``.
+
 The grammar's own choices are drawn from the generator it is given: a synonym for a concept
 with two lexemes, the adjective order when it is not fixed, and the ``can`` of a positive
 capacity. The draws are made in one order, whatever the word order, so a word-order setting
@@ -106,6 +119,7 @@ from semantic_world.corpus.lexicon import (
     ADJECTIVE,
     BEFORE_WORD,
     THAN_WORD,
+    THEM_WORD,
     Lexeme,
     Lexicon,
 )
@@ -120,6 +134,7 @@ from semantic_world.corpus.propositions import (
     NO,
     PAIR_STATE,
     PRECONDITION,
+    PROFILE,
     STATE_KIND,
 )
 from semantic_world.corpus.propositions import PAST as PAST_TENSE
@@ -321,8 +336,9 @@ class _Builder:
         return self.morphology.number.enabled and phrase.kind == CLASS_NP
 
     def noun_phrase(self, phrase: NounPhrase, label: str) -> Tree:
-        if phrase.pronoun:
-            node = [label, self.function("Pro", "it")]
+        if phrase.pronoun or phrase.bound_pronoun:
+            # "it", or the bound pronoun "them" of a class-level statement (stage c5a)
+            node = [label, self.function("Pro", "it" if phrase.pronoun else THEM_WORD)]
             self.referents[id(node)] = (phrase.referent, None)
             self.phrases[id(node)] = phrase
             return node
@@ -390,6 +406,10 @@ class _Builder:
         if clause is not None and clause.agent is not None:
             # An object relative: the clause's subject and its verb, with the head as the object.
             agent = self.noun_phrase(clause.agent, "NP-SBJ")
+            if clause.predications[0].kind == PAIR_STATE:
+                return self.prepositional_clause(
+                    relativizer, agent, clause.predications[0], clause.agent
+                )
             parts, _, _ = self.verb_phrase(clause.predications[0], clause.agent)
             verb_phrase = self.verb_node(parts, clause.predications[0])
             ordered = [agent, verb_phrase] if self.subject_first else [verb_phrase, agent]
@@ -406,6 +426,51 @@ class _Builder:
                 parts = parts + [target] if self.verb_first else [target] + parts
             children.append(self.verb_node(parts, predication))
         return ["RC", *children]
+
+    def prepositional_clause(
+        self, relativizer: Tree, agent: Tree, predication: Predication, subject: NounPhrase
+    ) -> Tree:
+        """A relative clause whose predicate is the copula and a pair fluent's preposition,
+        with the head as the preposition's object (stage c5a, "things that things are near").
+        With ``word_order.stranding: strand`` the preposition stays where the object would
+        stand, alone in its ``PP``: inside the verb phrase when the verb and the object are
+        neighbors, and a daughter of the clause otherwise. With ``pied_pipe`` it moves to the
+        front of the clause with the relative word, in one ``PP``: before the relative word
+        (``adposition: preposition``) or after it (``postposition``)."""
+        copula = "are" if self.plural(subject) and self.morphology.agreement else "is"
+        words: list[Tree] = [self.function("AUX", copula)]
+        adposition = self.word("P", predication.label)
+        clause = self.order.clause
+        if self.order.stranding == "pied_pipe":
+            preposition = self.order.adposition == "preposition"
+            front = (
+                ["PP", adposition, relativizer] if preposition else ["PP", relativizer, adposition]
+            )
+            verb_phrase = self.verb_node(words, predication)
+            ordered = [agent, verb_phrase] if self.subject_first else [verb_phrase, agent]
+            return ["RC", front, *ordered]
+        stranded: Tree = ["PP", adposition]
+        if abs(clause.index("V") - clause.index("O")) == 1:
+            inside = words + [stranded] if self.verb_first else [stranded] + words
+            verb_phrase = self.verb_node(inside, predication)
+            ordered = [agent, verb_phrase] if self.subject_first else [verb_phrase, agent]
+        else:
+            nodes = {"S": agent, "V": self.verb_node(words, predication), "O": stranded}
+            ordered = [nodes[letter] for letter in clause]
+        return ["RC", relativizer, *ordered]
+
+    def with_object(self, parts: list[Tree], target: Tree) -> list[Tree]:
+        """The words of a verb phrase with its object inside it, the object after the words or
+        before them by the clause order. The function word ``before`` of a precondition stays
+        at the edge of the verb phrase (stage c5a): after the object with ``word_order.before:
+        after_predicate`` ("are near them before"), and before everything otherwise."""
+        adverbs = [part for part in parts if part[0] == "Adv"]
+        words = [part for part in parts if part[0] != "Adv"]
+        inside = words + [target] if self.verb_first else [target] + words
+        if not adverbs:
+            return inside
+        after = self.order.before == "after_predicate"
+        return inside + adverbs if after else adverbs + inside
 
     # Verb phrases ----------------------------------------------------------------------------
 
@@ -461,6 +526,17 @@ class _Builder:
             head = None
             assert predication.object is not None
             target = self.prepositional(predication.label, predication.object)
+        elif kind in (EFFECT, PRECONDITION, PROFILE) and predication.prepositional:
+            # a pair literal at the class level (stage c5a): become (an effect) or the copula
+            # (a precondition, with "before", or a profile statement), and the preposition with
+            # the bound pronoun or a quantified generic noun as a PP, where an object stands
+            auxiliary = "become" if kind == EFFECT else ("are" if plural and agree else "is")
+            negated = not polarity
+            head = None
+            assert predication.object is not None
+            target = self.prepositional(predication.label, predication.object)
+            if kind == PRECONDITION:
+                adverb = self.function("Adv", BEFORE_WORD)
         elif kind == STATE_KIND and predication.comparative_form:
             # a numeric change (stage b3b): become with the comparative form of the pole
             auxiliary = "become"
@@ -565,7 +641,7 @@ class _Builder:
             children = [subject, verb_phrase] if self.subject_first else [verb_phrase, subject]
         elif abs(clause.index("V") - clause.index("O")) == 1:
             # the verb and the object are neighbors: the object is inside the verb phrase
-            inside = parts + [target] if self.verb_first else [target] + parts
+            inside = self.with_object(parts, target)
             verb_phrase = self.verb_node(inside, plan.predication)
             children = [subject, verb_phrase] if self.subject_first else [verb_phrase, subject]
         else:

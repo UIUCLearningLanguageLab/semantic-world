@@ -62,6 +62,8 @@ from semantic_world.corpus.grammar import (
     RelativeClause,
     SentencePlan,
     phrase_of,
+    quantified_things,
+    them,
 )
 from semantic_world.corpus.histories import SceneEvent, event_of, scene_of, time_key
 from semantic_world.corpus.propositions import (
@@ -79,16 +81,21 @@ from semantic_world.corpus.propositions import (
     MEMBER,
     PLACE_EVENT,
     PRECONDITION,
+    PROFILE,
     SIMPLE,
     STATE_KIND,
+    SYMMETRIC,
     VERB,
     CategoryTerm,
     EventTerm,
     Literal,
+    PairTerm,
     Predicate,
     Proposition,
     direction_pole,
     is_part_feature,
+    is_some_label,
+    pair_fluent_of_label,
 )
 from semantic_world.corpus.streams import Streams
 from semantic_world.corpus.world import (
@@ -117,9 +124,11 @@ def mention(
     return NounPhrase(INSTANCE_NP, instance, noun or leaf_of(facts, instance), determiner)
 
 
-def class_phrase(term: CategoryTerm | EventTerm, determiner: str | None = None) -> NounPhrase:
-    """The noun phrase of a category term, with its relative clauses, or of the event term of a
-    causal statement."""
+def class_phrase(
+    term: CategoryTerm | EventTerm | PairTerm, determiner: str | None = None
+) -> NounPhrase:
+    """The noun phrase of a category term, with its relative clauses, of the event term of a
+    causal statement, or (stage c5a) of the pair term of a profile statement."""
     return phrase_of(term, determiner)
 
 
@@ -169,10 +178,38 @@ def plan_for(
         return mentions.get(instance) or mention(facts, instance, noun)
 
     if proposition.level == CLASS:
-        assert isinstance(proposition.subject, CategoryTerm | EventTerm)
+        assert isinstance(proposition.subject, CategoryTerm | EventTerm | PairTerm)
         quantifier = proposition.quantifier
         determiner = None if bare or quantifier is None else WORD_OF[quantifier]
         subject = class_phrase(proposition.subject, determiner)
+        if proposition.profile:
+            # a profile statement (stage c5a): the preposition with the bound pronoun, negated
+            # for the asymmetric form ("are not above them")
+            return SentencePlan(
+                subject,
+                Predication(PROFILE, predicate.label, predicate.form == SYMMETRIC, them()),
+                quantifier,
+            )
+        if proposition.causal and predicate.pair_literal:
+            # a pair literal (stage c5a): SOME with a quantified object, whose determiner
+            # carries the value ("near no things"); a pair or SAME with the bound pronoun for
+            # the other participant, a thing or a place
+            assert isinstance(proposition.subject, EventTerm) and predicate.value is not None
+            if is_some_label(predicate.label):
+                said = Predication(
+                    predicate.kind,
+                    pair_fluent_of_label(predicate.label),
+                    True,
+                    quantified_things(predicate.value),
+                )
+            else:
+                said = Predication(
+                    predicate.kind,
+                    predicate.label,
+                    predicate.value,
+                    them(proposition.subject.other_noun),
+                )
+            return SentencePlan(subject, said, quantifier)
         if proposition.causal:
             if predicate.direction is not None:
                 # a numeric effect statement (stage b3b): the pole whose comparative form
@@ -665,6 +702,9 @@ class Mentions:
         first mention."""
         self._previous: tuple[str | None, frozenset[str]] | None = None
         self._current: list[str] = []
+        self.skipped_comparisons: list[str] = []
+        """The comparisons the document's planner did not make because nothing told their two
+        mentions apart (Jon's ruling WM.74), by kind: ``participants`` or ``places``."""
 
     def label(self, instance: str) -> str:
         return self.referents[instance]
@@ -799,6 +839,74 @@ class Mentions:
             return literals
         options.sort(key=lambda x: x.sort_key)
         return literals + (options[int(rng.integers(len(options)))],)
+
+    def comparison_phrases(
+        self,
+        rng: np.random.Generator,
+        first: str,
+        second: str,
+        dimension: str | None = None,
+    ) -> tuple[NounPhrase, NounPhrase, bool]:
+        """The mentions of the two arguments of a comparative, of participants or of places,
+        under Jon's ruling WM.74 (stage c5a), and whether something tells the two apart.
+
+        ``dimension`` is the compared scalar, whose poles could be modifiers (a numeric fluent
+        has none). Both mentions are first made with the compared scalar's poles left out,
+        because within one comparison class "the hot meadow is hotter than the cold meadow"
+        says the comparison twice. When the two nouns name different categories, the poles are
+        relative to different comparison classes and the sentence does not follow from its own
+        words ("the cold desert is hotter than the hot meadow"): each definite mention is then
+        told apart as any other mention is, with the compared poles allowed.
+
+        The two mentions are told apart when the noun and the modifiers of one of them do not
+        fit the other's referent; a pronoun is told apart by the rule that allowed it. A
+        comparison whose mentions nothing tells apart is not made: the caller drops the
+        sentence."""
+        avoid = () if dimension is None else (f"{dimension}.{HIGH}", f"{dimension}.{LOW}")
+        phrases = [
+            self.noun_phrase(rng, first, avoid=avoid),
+            self.noun_phrase(rng, second, avoid=avoid),
+        ]
+        nouns = [phrase.noun for phrase in phrases]
+        if avoid and None not in nouns and nouns[0] != nouns[1]:
+            phrases = [self._with_compared_poles(phrase, avoid) for phrase in phrases]
+        return phrases[0], phrases[1], self.told_apart(phrases[0], phrases[1])
+
+    def _with_compared_poles(self, phrase: NounPhrase, avoid: Sequence[str]) -> NounPhrase:
+        """A definite mention of a comparison across comparison classes, told apart again with
+        the compared scalar's poles allowed (WM.74). The modifiers that the first pass added
+        beyond those that told the referent apart (a modifier at ``mention.modifier_rate``) are
+        kept while the limits on adjectives and with-phrases hold."""
+        if phrase.determiner != "the" or phrase.noun is None:
+            return phrase
+        rules, settings = self.rules, self.rules.settings
+        pool = self.places if phrase.place else self.cast
+        before, _ = rules.distinguish(phrase.referent, phrase.noun, pool, avoid)
+        literals, _ = rules.distinguish(phrase.referent, phrase.noun, pool)
+        chosen = list(literals)
+        stated = {literal.feature for literal in chosen}
+        for extra in phrase.restriction:
+            if extra in before or extra.feature in stated:
+                continue
+            is_with = is_part_feature(extra.feature)
+            count = sum(is_part_feature(x.feature) == is_with for x in chosen)
+            if count >= (settings.max_with_phrases if is_with else settings.max_adjectives):
+                continue
+            chosen.append(extra)
+            stated.add(extra.feature)
+        return dataclasses.replace(phrase, restriction=tuple(chosen))
+
+    def told_apart(self, first: NounPhrase, second: NounPhrase) -> bool:
+        """Whether something tells two mentions apart (WM.74): the noun and the modifiers of
+        one of them do not fit the other's referent. A pronoun is told apart by the rule that
+        allowed it (the referent was the subject, or the only referent, of the sentence
+        before)."""
+        if first.noun is None or second.noun is None:
+            return True
+        rules = self.rules
+        return not (
+            rules.matches(first, [second.referent]) and rules.matches(second, [first.referent])
+        )
 
     def distinguished(self, phrase: NounPhrase) -> bool | None:
         """For a definite mention with a noun: whether the noun and the modifiers pick out its

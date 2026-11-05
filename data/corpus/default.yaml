@@ -88,7 +88,7 @@ mention:
 grammar:
   adjective_order: {fixed: true}
   can_rate: {class: 0.5, instance: 1.0}   # share of positive capacities that say "can"; below 1 at the instance level, "the penguin swim" is ambiguous
-  word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary, before: after_predicate}   # before: where the function word "before" of a precondition statement stands
+  word_order: {clause: SVO, determiner: before, adjective: before, with_phrase: after, relative_clause: after, adposition: preposition, auxiliary: before, negation: after_auxiliary, before: after_predicate, stranding: strand}   # before: where the function word "before" of a precondition statement stands; stranding: where a preposition stands when its object is the gap of a relative clause ("things that things are near"): strand (in its place) or pied_pipe (at the front of the clause, with the relative word)
   morphology:
     number: {enabled: false, realization: affix, position: after, agreement: true, verb_marks: plural}   # verb_marks: plural or singular (English)
     tense: {enabled: false, realization: affix, position: after}    # whether and how the past is marked

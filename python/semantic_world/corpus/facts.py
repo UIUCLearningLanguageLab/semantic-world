@@ -56,6 +56,17 @@ gain the numeric effect statements (``RAISES`` and ``LOWERS``, one for each unco
 numeric effect) and the conditional statements, one for each conditional effect, Boolean or
 numeric, whose condition the grammar can realize; ``causal_report`` counts the conditional
 effects that make no statement, and why.
+
+**Pair literals and profiles** (stage c5a, ``docs/specs/WORLD_PHASE_C.md``, "Class level"). The
+causal statements gain the entries with pair literals: an effect that adds or deletes a pair of
+a pair fluent with a preposition, and a precondition literal that requires a pair, its absence,
+``SAME``, or ``SOME`` of a role, compiled literals included; each is about the role of the
+literal's first argument, and on a symmetric pair fluent, and for ``SAME``, about either role.
+The place event types with a verb join the event types of the causal statements, about their
+agent. A ``SOMEOF`` literal makes no statement (WM.55), and neither does a conditional effect
+whose condition holds a pair literal, in either form (WM.59). The profile statements
+(:meth:`Facts.profile_statements`) state the symmetry of each symmetric or asymmetric pair
+fluent between entities that has a preposition.
 """
 
 from __future__ import annotations
@@ -91,10 +102,11 @@ from semantic_world.corpus.propositions import (
     PLACE_EVENT,
     POSITIVE_ORDER,
     PRECONDITION,
+    PROFILE,
+    PROFILE_FORMS,
     PROJECTION,
-    RAISES,
-    ROLES,
     SIMPLE,
+    SOME_PREFIX,
     STATE,
     STATE_KIND,
     VERB,
@@ -103,9 +115,11 @@ from semantic_world.corpus.propositions import (
     Condition,
     EventTerm,
     Literal,
+    PairTerm,
     Predicate,
     Proposition,
     Truth,
+    effect_states,
     pole_dimension,
 )
 from semantic_world.corpus.world import ENTITY, PROPERTY_PREFIX, THING, World
@@ -220,14 +234,17 @@ class Facts:
         self._rules: tuple[Proposition, ...] | None = None
         self.rule_report: dict[str, Any] = {}
         self._causal: tuple[Proposition, ...] | None = None
+        self._profiles: tuple[Proposition, ...] | None = None
         self.causal_report: dict[str, Any] = {}
         """The conditional effects of the world's event types, and how many make no conditional
         statement, by reason (stage b3b): ``numeric_condition`` (a numeric threshold literal,
         decision 23), ``patient_relative`` (a fluent or a negated PROPERTY literal of the
         patient's role in a statement about the patient, which an object relative cannot hold),
-        ``no_word`` (a literal whose concept has no word), and, since stage c4a,
-        ``pair_condition`` (a pair literal in the condition, WM.59) and ``pair_effect`` (a
-        conditional pair effect, whose statement is stage c5a's)."""
+        ``no_word`` (a literal, an event type, or a pair fluent whose concept has no word), and,
+        since stage c4a, ``pair_condition`` (a pair literal in the condition, WM.59). A
+        conditional pair effect is stated like any other since stage c5a. The report also
+        counts the pair entries of the definition and those that make a statement
+        (``pair_entries``)."""
         self._partners: dict[str, tuple[str, ...]] = {}
 
     def expressible(self, proposition: Proposition) -> bool:
@@ -707,9 +724,16 @@ class Facts:
 
     @property
     def event_type_labels(self) -> tuple[str, ...]:
-        """The event types with a word that a causal statement can be about: the one-place
-        event types, then the two-place event types and categories in tree order."""
+        """The event types between entities with a word that a causal statement can be about:
+        the one-place event types, then the two-place event types and categories in tree
+        order. The causal test sets swap event types among them."""
         return self.features[CAN] + self.verbs
+
+    @property
+    def causal_event_types(self) -> tuple[str, ...]:
+        """Every event type with a word that a causal statement can be about (stage c5a):
+        :attr:`event_type_labels`, then the place event types with a verb."""
+        return self.event_type_labels + self.place_verbs
 
     def causal_statements(
         self, event_type: str | None = None, fluent: str | None = None, kind: str | None = None
@@ -718,7 +742,8 @@ class Facts:
         type (or category), about a fluent, or of one kind (``effect`` or ``precondition``):
         for each event type with a word, each role, each base fluent with a word, and each
         value, the effect statement and the precondition statement that the definition makes
-        true."""
+        true; then the numeric effect statements; then (stage c5a) the statements with pair
+        literals."""
         if self._causal is None:
             self._causal = self._build_causal_statements()
         return tuple(
@@ -733,39 +758,61 @@ class Facts:
         self, records: list[Any], role: str, fluent: str, value: bool | None, direction: str | None
     ) -> list[tuple[Condition, ...]]:
         """The distinct conditions under which the effects of the given event-type records set
-        the fluent of the role to the value (or move it in the direction), the empty condition
-        first when some effect is unconditional, then in one order. An effect under a numeric
-        threshold condition gives none (decision 23), unless the threshold is the language's
-        cut, when the condition is the numeric pole (WM.35)."""
+        the fluent of the role to the value (or move it in the direction, or, stage c5a, add
+        or delete the pair), the empty condition first when some effect is unconditional, then
+        in one order. An effect under a numeric threshold condition gives none (decision 23),
+        unless the threshold is the language's cut, when the condition is the numeric pole
+        (WM.35); an effect under a pair condition gives none (WM.59)."""
         found: list[tuple[Condition, ...]] = []
+        symmetric = self.truth.symmetric_pairs
         for record in records:
             for effect in record.effects:
-                if effect.role != role or effect.fluent != fluent:
-                    continue
-                if effect.numeric:
-                    if direction is None or (effect.amount >= 0) != (direction == RAISES):
-                        continue
-                elif direction is not None or effect.value != value:
+                if not effect_states(effect, role, fluent, value, direction, symmetric):
                     continue
                 condition = self.truth.condition_of(effect)
                 if condition is not None and condition not in found:
                     found.append(condition)
         return sorted(found, key=lambda c: (len(c), [x.sort_key for x in c]))
 
+    def _causal_entries(self, arity: int) -> list[tuple[str, str, bool | None, str | None]]:
+        """The entries a causal statement about one role could state, as ``(kind, fluent,
+        value, direction)``, in the order of the statements: the base fluents with a word, each
+        value, an effect and a precondition; the numeric fluents with words, each direction;
+        then (stage c5a) the pair literals: each pair fluent with a preposition, each value, an
+        effect and a precondition (two participants); each ``SAME`` preposition, each value, a
+        precondition (two participants); and ``SOME`` of each pair fluent between entities with
+        a preposition, each value, a precondition."""
+        entries: list[tuple[str, str, bool | None, str | None]] = []
+        for fluent in self.base_fluents:
+            for value in (True, False):
+                entries += [(kind, fluent, value, None) for kind in CAUSAL_KINDS]
+        for fluent in self.numeric_fluents:
+            entries += [(EFFECT, fluent, None, d) for d in EFFECT_DIRECTIONS]
+        if arity > 1:
+            for fluent in self.pair_prepositions:
+                for value in (True, False):
+                    entries += [(kind, fluent, value, None) for kind in CAUSAL_KINDS]
+            for same in self.same_prepositions:
+                entries += [(PRECONDITION, same, value, None) for value in (True, False)]
+        for fluent in self.entity_pair_prepositions:
+            entries += [
+                (PRECONDITION, f"{SOME_PREFIX}{fluent}", value, None) for value in (True, False)
+            ]
+        return entries
+
     def _build_causal_statements(self) -> tuple[Proposition, ...]:
         truth, world = self.truth, self.world
         definition = world.definition
         statements: list[Proposition] = []
-        for label in self.event_type_labels:
+        for label in self.causal_event_types:
             records = [definition.event_type(leaf) for leaf in world.event_types_below(label)]
-            for role in ROLES[: world.event_types[label].arity]:
-                entries: list[tuple[str, str, bool | None, str | None]] = []
-                for fluent in self.base_fluents:
-                    for value in (True, False):
-                        entries += [(kind, fluent, value, None) for kind in CAUSAL_KINDS]
-                for fluent in self.numeric_fluents:
-                    entries += [(EFFECT, fluent, None, d) for d in EFFECT_DIRECTIONS]
-                for kind, fluent, value, direction in entries:
+            roles = truth.roles_of(label)
+            if world.is_place_event_type(label):
+                roles = roles[:1]  # a statement about a place event type is about its agent
+            for role in roles:
+                for kind, fluent, value, direction in self._causal_entries(
+                    len(truth.roles_of(label))
+                ):
                     if kind == PRECONDITION:
                         conditions: list[tuple[Condition, ...]] = [()]
                     else:
@@ -791,13 +838,23 @@ class Facts:
                         if grounded is not None:
                             statements.append(grounded)
         self.causal_report = self._conditional_report(statements)
+        self.causal_report["pair_entries"] = self._pair_entry_report(statements)
         return tuple(statements)
+
+    def _event_types_with_events(self) -> tuple[str, ...]:
+        """The event types that have events: the two-place leaves, the one-place event types,
+        and (stage c5a) the place event types with dynamics."""
+        world = self.world
+        return (
+            world.binary_leaves
+            + world.unary
+            + tuple(label for label in world.place_event_types if world.event_names(label))
+        )
 
     def _conditional_report(self, statements: list[Proposition]) -> dict[str, Any]:
         """The conditional effects of the event types that have events, and those that make no
         conditional statement about their own event type, by reason."""
-        world = self.world
-        definition = world.definition
+        definition = self.world.definition
         stated = {
             (p.subject.event_type, p.subject.role, p.predicate.label, p.subject.condition)
             for p in statements
@@ -808,17 +865,13 @@ class Facts:
             "patient_relative": 0,
             "no_word": 0,
             "pair_condition": 0,
-            "pair_effect": 0,
         }
         total = made = 0
-        for label in world.binary_leaves + world.unary:
+        for label in self._event_types_with_events():
             for effect in definition.event_type(label).effects:
                 if not effect.condition:
                     continue
                 total += 1
-                if effect.pair:
-                    reasons["pair_effect"] += 1  # a conditional pair effect (stage c5a's)
-                    continue
                 if any(lit.pair for lit in effect.condition):
                     reasons["pair_condition"] += 1  # a pair literal in the condition (WM.59)
                     continue
@@ -835,6 +888,108 @@ class Facts:
                 else:
                     reasons["no_word"] += 1
         return {"conditional_effects": total, "stated": made, "unstated": reasons}
+
+    def _pair_entry_report(self, statements: list[Proposition]) -> dict[str, Any]:
+        """The pair entries of the event types that have events (stage c5a): their pair
+        effects and pair precondition literals, compiled literals included, and how many make
+        a statement about their own event type, with the others by reason: ``someof`` (a
+        ``SOMEOF`` literal, WM.55), ``pair_condition`` (an effect under a pair condition,
+        WM.59), ``numeric_condition`` and ``patient_relative`` (as for any conditional effect),
+        and ``no_word`` (the pair fluent has no preposition, or the event type no verb)."""
+        definition = self.world.definition
+        stated = {
+            (p.subject.event_type, p.subject.role, p.predicate.kind, p.predicate.label,
+             p.predicate.value, p.subject.condition)
+            for p in statements
+            if isinstance(p.subject, EventTerm) and p.predicate.pair_literal
+        }  # fmt: skip
+        reasons = {
+            "someof": 0,
+            "pair_condition": 0,
+            "numeric_condition": 0,
+            "patient_relative": 0,
+            "no_word": 0,
+        }
+        effects = literals = made = 0
+        prefix = {"pair": "", "pair_same": "SAME.", "pair_some": SOME_PREFIX}
+        for label in self._event_types_with_events():
+            record = definition.event_type(label)
+            for literal in record.precondition:
+                if not literal.pair:
+                    continue
+                literals += 1
+                if literal.kind not in prefix:
+                    reasons["someof"] += 1
+                    continue
+                key = (
+                    label,
+                    literal.first,
+                    PRECONDITION,
+                    f"{prefix[literal.kind]}{literal.pair_fluent}",
+                    bool(literal.value),
+                    (),
+                )
+                if key in stated:
+                    made += 1
+                else:
+                    reasons["no_word"] += 1
+            for effect in record.effects:
+                if not effect.pair:
+                    continue
+                effects += 1
+                if any(lit.pair for lit in effect.condition):
+                    reasons["pair_condition"] += 1
+                    continue
+                condition = self.truth.condition_of(effect)
+                if condition is None:
+                    reasons["numeric_condition"] += 1
+                    continue
+                if not realizable_condition(EventTerm(label, effect.role, condition)):
+                    reasons["patient_relative"] += 1
+                    continue
+                key = (label, effect.role, EFFECT, effect.fluent, bool(effect.value), condition)
+                if key in stated:
+                    made += 1
+                else:
+                    reasons["no_word"] += 1
+        return {
+            "effects": effects,
+            "precondition_literals": literals,
+            "stated": made,
+            "unstated": reasons,
+        }
+
+    # Profile statements ----------------------------------------------------------------------
+
+    def profile_statements(self, pair_fluent: str | None = None) -> tuple[Proposition, ...]:
+        """The profile statements that the language can state (stage c5a, ruling 5b), or the
+        one about a pair fluent: for each symmetric or asymmetric pair fluent between entities
+        with a preposition, in label order, the statement of its symmetry, ``nec_all``:
+        "things that things are near are near them", "things that things are above are not
+        above them". A general pair fluent, a functional or total profile, and a location
+        fluent make no statement."""
+        if self._profiles is None:
+            statements: list[Proposition] = []
+            for fluent in self.entity_pair_prepositions:
+                symmetry = self.world.pair_fluent_info[fluent].symmetry
+                if symmetry not in PROFILE_FORMS:
+                    continue
+                candidate = Proposition(
+                    CLASS,
+                    PairTerm(fluent),
+                    Predicate(PROFILE, fluent, form=symmetry),
+                    True,
+                    NEC_ALL,
+                )
+                if not self.expressible(candidate):
+                    continue
+                grounded = self.truth.grounded(candidate)
+                if grounded is not None:
+                    statements.append(grounded)
+            self._profiles = tuple(statements)
+        if pair_fluent is None:
+            return self._profiles
+        return tuple(p for p in self._profiles if p.predicate.label == pair_fluent)
 
     def draw_causal_statement(
         self, rng: np.random.Generator, pool: tuple[Proposition, ...] | None = None

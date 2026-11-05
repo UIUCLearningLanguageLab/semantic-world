@@ -135,11 +135,9 @@ from semantic_world.corpus.propositions import (
     DECREASE,
     EVENT,
     HAS,
-    HIGH,
     INCREASE,
     INSTANCE,
     IS,
-    LOW,
     MEMBER,
     MOST,
     PAIR_STATE,
@@ -175,6 +173,10 @@ RARER = "rarer"
 RELATION = "relation"
 RULE = "rule"
 CAUSAL = "causal"
+PARTICIPANTS = "participants"
+PLACES = "places"
+"""The two kinds of comparison that Jon's ruling WM.74 counts: of two participants of an event,
+and of two places."""
 TEMPLATE = (MEMBERSHIP, DEFINING, CHARACTERISTIC, RARER, RELATION, RULE, CAUSAL)
 """The sections of an encyclopedic document, in the order of the template."""
 TOPIC = "topic"
@@ -367,7 +369,9 @@ def content_words(plan: SentencePlan) -> int:
     def phrase(noun_phrase: NounPhrase | None) -> int:
         if noun_phrase is None:
             return 0
-        count = (0 if noun_phrase.pronoun else 1) + len(noun_phrase.restriction)
+        # a pronoun, "it" or the bound pronoun "them" (stage c5a), is a function word
+        pronoun = noun_phrase.pronoun or noun_phrase.bound_pronoun
+        count = (0 if pronoun else 1) + len(noun_phrase.restriction)
         if noun_phrase.clause is not None:
             count += phrase(noun_phrase.clause.agent)
             count += sum(predication(p) for p in noun_phrase.clause.predications)
@@ -428,6 +432,10 @@ class Planner:
         self.clauses = RelativeClauses(config, self.facts)
         self.rules = MentionRules(config, self.facts, self.streams)
         self.scenes: list[History] = []
+        self.skipped_comparisons = {PARTICIPANTS: 0, PLACES: 0}
+        """The comparisons of the documents made so far that were not made because nothing
+        told their two mentions apart (Jon's ruling WM.74, stage c5a), of participants and of
+        places."""
         self.redrawn_drafts = 0
         """Drafts with nothing to say that ``next_document`` drew again (stage c4a)."""
         """Every scene of the documents made so far, in order."""
@@ -508,6 +516,9 @@ class Planner:
             )
         self._made = number
         self.scenes += draft.scenes
+        if draft.mentions is not None:
+            for skipped in draft.mentions.skipped_comparisons:
+                self.skipped_comparisons[skipped] += 1
         return self._realize(label, draft, rngs["grammar"])
 
     def _realize(self, label: str, draft: _Draft, rng: np.random.Generator) -> Document:
@@ -1536,8 +1547,17 @@ class Planner:
             return None
         dimension, fact = options[int(comparative_rng.integers(len(options)))]
         low = fact.subject != agent
-        greater_phrase = mentions.noun_phrase(rng, agent)
-        lesser_phrase = mentions.noun_phrase(rng, patient)
+        # the two mentions under Jon's ruling WM.74 (stage c5a): the compared scalar's poles
+        # are modifiers only across comparison classes, and a comparison whose two mentions
+        # nothing tells apart is not made (a numeric fluent has no pole among the modifiers)
+        known = dict(mentions.referents)
+        greater_phrase, lesser_phrase, apart = mentions.comparison_phrases(
+            rng, agent, patient, dimension if dimension in facts.scalars else None
+        )
+        if not apart:
+            mentions.drop_sentence(known)
+            mentions.skipped_comparisons.append(PARTICIPANTS)
+            return None
         if low:
             greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
         when = None if fact.time is None else time_key(scene.label, fact.time)
@@ -1576,9 +1596,15 @@ class Planner:
             return None
         other, dimension, fact = options[int(comparative_rng.integers(len(options)))]
         low = fact.subject != place
-        avoid = (f"{dimension}.{HIGH}", f"{dimension}.{LOW}")
-        greater_phrase = mentions.noun_phrase(rng, place, avoid=avoid)
-        lesser_phrase = mentions.noun_phrase(rng, other, avoid=avoid)
+        # the two mentions under Jon's ruling WM.74 (stage c5a), as for participants
+        known = dict(mentions.referents)
+        greater_phrase, lesser_phrase, apart = mentions.comparison_phrases(
+            rng, place, other, dimension
+        )
+        if not apart:
+            mentions.drop_sentence(known)
+            mentions.skipped_comparisons.append(PLACES)
+            return None
         if low:
             greater_phrase, lesser_phrase = lesser_phrase, greater_phrase
         plan = comparative_plan(greater_phrase, lesser_phrase, dimension, low)

@@ -556,8 +556,9 @@ def test_noun_levels_apply_to_instances_only(cases, corpora, name) -> None:
     for _, sentence in sentences_of(documents):
         for phrase in sentence.plan.noun_phrases():
             if phrase.kind == CLASS_NP:
-                # a class-level noun phrase is always named by its own noun
-                assert phrase.noun == phrase.referent
+                # a class-level noun phrase is always named by its own noun; the bound
+                # pronoun of a statement about a pair literal (stage c5a) has none
+                assert phrase.bound_pronoun or phrase.noun == phrase.referent
             elif phrase.place:
                 # a place (stage c4b) is named by a category of places above it, at a level of
                 # the place tree by mention.place_level_weights

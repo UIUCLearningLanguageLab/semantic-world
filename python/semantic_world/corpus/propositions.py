@@ -118,6 +118,23 @@ statement exactly when its precondition holds that literal; a statement about a 
 event types is true when every event type below the category has the entry. The polarity is
 always positive: the value is in the predicate.
 
+**Pair literals at the class level** (stage c5a, ``docs/specs/WORLD_PHASE_C.md``, "Class
+level"). A causal statement can state a pair literal of the definition: its predicate's label
+is then a pair fluent (``PAIRFL.2``: the pair from the subject's role to the other participant,
+``AFTER(EVENTVAR.1, PAIRFL.2(VAR.1, VAR.2))`` for an add and with ``NOT`` for a delete or a
+required absence), ``SAME`` on a functional pair fluent (``SAME.PAIRFL.5``, a precondition
+only), or ``SOME`` on a pair fluent between entities (``SOME.PAIRFL.2``, a precondition only:
+the subject's role has at least one partner, ``BEFORE(EVENTVAR.1, NOT SOME.PAIRFL.2(VAR.1))``).
+The event type can be a place event type, whose other participant is a place and whose
+statements are about its agent. A symmetric pair fluent's pair holds both ways, so the
+statement about either role is true, and so is a ``SAME`` statement about either role. A
+``SOMEOF`` literal is the entry of no statement (WM.55), and an effect whose condition holds a
+pair literal is the entry of no statement, conditional or not (WM.59). A **profile statement**
+(:class:`PairTerm`, predicate kind ``profile``) states a pair fluent's symmetry: ``NEC(ALL(
+PAIRFL.2(VAR.2, VAR.1), PAIRFL.2(VAR.1, VAR.2)))`` for a symmetric pair fluent, and with ``NOT``
+in the scope for an asymmetric one; it is true exactly when the definition records that
+symmetry.
+
 **The language's words** decide what a proposition's words mean, never what the proposition
 means: which quantifiers "all" and "no" express (``quantifiers.universal_words``), the least
 share at which a speaker says "most" (``quantifiers.most.usage_min``), and the implicature of
@@ -148,12 +165,16 @@ from semantic_world.corpus.world import (
     EVERYPLACE,
     FLUENT_PREFIX,
     NUMERIC_PREFIX,
+    PAIR_PREFIX,
     PART_PREFIX,
+    PLACE_EVENT_PREFIX,
     PLACE_PART_PREFIX,
     PLACE_PROPERTY_PREFIX,
     PLACE_SCALAR_PREFIX,
     PROPERTY_PREFIX,
+    SAME_PREFIX,
     SCALAR_PREFIX,
+    SOMEPLACE,
     THING,
     World,
 )
@@ -252,6 +273,19 @@ PLACE_EVENT = "place_event_type"
 """The kind of a place event type's predicate (stage c4b): an event of a move or an act at a
 place, a transitive verb whose patient is a place, ``EVENT(SCENE.8.EVENTINSTANCE.4, PAST,
 SIMPLE, PLACEEVENTTYPE.2(REF.1, REF.3))``. The key is the world's symbol kind."""
+PROFILE = "profile"
+"""The kind of the predicate of a profile statement (stage c5a, ``WORLD_PHASE_C.md``, "Class
+level", ruling 5b): what a pair fluent's symmetry guarantees of every pair, at every time point.
+Its ``form`` is ``symmetric`` ("things that things are near are near them", ``NEC(ALL(PAIRFL.2(
+VAR.2, VAR.1), PAIRFL.2(VAR.1, VAR.2)))``) or ``asymmetric`` ("things that things are above are
+not above them", with ``NOT`` in the scope)."""
+SYMMETRIC = "symmetric"
+ASYMMETRIC = "asymmetric"
+PROFILE_FORMS = (SYMMETRIC, ASYMMETRIC)
+SOME_PREFIX = "SOME."
+"""The prefix of the label of a ``SOME`` literal in a causal statement (stage c5a, WM.55):
+``SOME.PAIRFL.2`` in ``BEFORE(EVENTVAR.1, NOT SOME.PAIRFL.2(VAR.1))``, "are near no things
+before". The word is the pair fluent's preposition, with a quantified object."""
 CAUSAL_KINDS = (EFFECT, PRECONDITION)
 COMPARISON_KINDS = (COMPARISON, COMPARATIVE)
 """The kinds judged by the world's comparisons of scalars."""
@@ -272,6 +306,7 @@ KINDS = (
     PRECONDITION,
     PAIR_STATE,
     PLACE_EVENT,
+    PROFILE,
 )
 FEATURE_KINDS = (IS, HAS, CAN)
 """The kinds whose predicate is a feature of the world's feature table: a PROPERTY feature, a
@@ -358,6 +393,41 @@ def _number(value: float) -> float:
 # ---------------------------------------------------------------------------------------------
 # Logical forms
 # ---------------------------------------------------------------------------------------------
+
+
+def is_pair_label(label: str) -> bool:
+    """Whether a label is a pair fluent's (``PAIRFL.2``)."""
+    return label.startswith(PAIR_PREFIX)
+
+
+def is_same_label(label: str) -> bool:
+    """Whether a label is a ``SAME`` literal's (``SAME.PAIRFL.5``)."""
+    return label.startswith(SAME_PREFIX)
+
+
+def is_some_label(label: str) -> bool:
+    """Whether a label is a ``SOME`` literal's (``SOME.PAIRFL.2``, stage c5a)."""
+    return label.startswith(SOME_PREFIX)
+
+
+def is_pair_literal_label(label: str) -> bool:
+    """Whether a label is one a pair literal of a causal statement has (stage c5a): a pair
+    fluent, ``SAME`` on one, or ``SOME`` on one."""
+    return is_pair_label(label) or is_same_label(label) or is_some_label(label)
+
+
+def pair_fluent_of_label(label: str) -> str:
+    """The pair fluent that a pair literal's label reads: ``PAIRFL.2`` of ``PAIRFL.2``,
+    ``SAME.PAIRFL.2``, and ``SOME.PAIRFL.2``."""
+    for prefix in (SAME_PREFIX, SOME_PREFIX):
+        if label.startswith(prefix):
+            return label[len(prefix) :]
+    return label
+
+
+def other_role(role: str) -> str:
+    """The other role of a two-place event type."""
+    return PATIENT if role == AGENT else AGENT
 
 
 @dataclass(frozen=True)
@@ -568,14 +638,28 @@ class EventTerm:
         return bool(self.condition)
 
     @property
+    def place(self) -> bool:
+        """Whether the event type is a place event type (stage c5a): its other participant is
+        a place, named by the generic noun ``SOMEPLACE`` ("things that go to places")."""
+        return self.event_type.startswith(PLACE_EVENT_PREFIX)
+
+    @property
+    def other_noun(self) -> str:
+        """The generic noun of the other participant: ``SOMEPLACE`` for a place event type,
+        and ``THING`` otherwise."""
+        return SOMEPLACE if self.place else THING
+
+    @property
     def unconditional(self) -> EventTerm:
         """The same term without its condition."""
         return EventTerm(self.event_type, self.role)
 
     def concepts(self) -> list[str]:
-        """The concepts that the term needs words for: the generic noun, the event type, and
-        the features and fluents of its condition."""
-        return [THING, self.event_type] + [c.label for c in self.condition]
+        """The concepts that the term needs words for: the generic noun, the event type, the
+        generic noun for places when the event type is a place event type, and the features and
+        fluents of its condition."""
+        nouns = [THING, SOMEPLACE] if self.place else [THING]
+        return nouns + [self.event_type] + [c.label for c in self.condition]
 
     def to_json(self) -> dict[str, Any]:
         data: dict[str, Any] = {"head": THING, "event": self.event_type, "role": self.role}
@@ -590,6 +674,34 @@ class EventTerm:
             data["role"],
             tuple(Condition.from_json(c) for c in data.get("condition", ())),
         )
+
+
+@dataclass(frozen=True)
+class PairTerm:
+    """The subject of a profile statement (stage c5a): the things that stand second in a pair
+    of a pair fluent, "things that things are near". The head is the generic noun, and its
+    relative clause has the generic noun as its subject and the pair fluent's preposition as
+    its predicate, with the head as the preposition's object. In the JSON logical form it is
+    ``{"head": "THING", "pair": "PAIRFL.2", "role": "second"}``."""
+
+    pair_fluent: str
+
+    @property
+    def category(self) -> str:
+        """The head noun's category: the generic noun."""
+        return THING
+
+    def concepts(self) -> list[str]:
+        """The concepts that the term needs words for: the generic noun and the pair fluent's
+        preposition."""
+        return [THING, self.pair_fluent]
+
+    def to_json(self) -> dict[str, Any]:
+        return {"head": THING, "pair": self.pair_fluent, "role": "second"}
+
+    @classmethod
+    def from_json(cls, data: dict[str, Any]) -> PairTerm:
+        return cls(data["pair"])
 
 
 def is_event_variable(label: str | None) -> bool:
@@ -669,10 +781,19 @@ class Predicate:
     """Numeric fluents only (stage b3b): ``increase`` or ``decrease`` for a change of kind
     ``state`` whose label is a numeric fluent, ``raises`` or ``lowers`` for an effect statement
     about one."""
+    form: str | None = None
+    """Profile statements only (stage c5a): ``symmetric`` or ``asymmetric``."""
 
     @property
     def causal(self) -> bool:
         return self.kind in CAUSAL_KINDS
+
+    @property
+    def pair_literal(self) -> bool:
+        """Whether the predicate of a causal statement is a pair literal (stage c5a): a pair
+        fluent between the event's two participants, ``SAME`` between them, or ``SOME`` of the
+        subject's role."""
+        return self.kind in CAUSAL_KINDS and is_pair_literal_label(self.label)
 
     @property
     def numeric(self) -> bool:
@@ -713,6 +834,8 @@ class Predicate:
             data["value"] = self.value
         if self.direction is not None:
             data["direction"] = self.direction
+        if self.form is not None:
+            data["form"] = self.form
         return data
 
     @classmethod
@@ -730,6 +853,7 @@ class Predicate:
             data.get("class"),
             data.get("value"),
             data.get("direction"),
+            data.get("form"),
         )
 
 
@@ -739,9 +863,10 @@ class Proposition:
     grounding, and the rule a statement comes from take no part in comparisons."""
 
     level: str
-    subject: CategoryTerm | EventTerm | str
-    """A category term (class level), an event term (a causal statement, class level), or an
-    instance label (the other levels)."""
+    subject: CategoryTerm | EventTerm | PairTerm | str
+    """A category term (class level), an event term (a causal statement, class level), a pair
+    term (a profile statement, class level, stage c5a), or an instance label (the other
+    levels)."""
     predicate: Predicate
     polarity: bool = True
     quantifier: str | None = None
@@ -777,10 +902,17 @@ class Proposition:
         events of an event type."""
         return isinstance(self.subject, EventTerm)
 
+    @property
+    def profile(self) -> bool:
+        """Whether the proposition is a profile statement (stage c5a)."""
+        return isinstance(self.subject, PairTerm)
+
     def causal_record(self) -> dict[str, Any] | None:
         """The definition entry that a causal statement states (the ``causal`` record of
-        "Causal statements"): the event type, the role, the fluent, and the value. None for any
-        other proposition."""
+        "Causal statements"): the event type, the role, the fluent, and the value. A pair
+        literal (stage c5a) names the pair fluent, ``SAME`` on it, or ``SOME`` on it as its
+        ``fluent``, and, for a literal over two roles, the role of its second argument under
+        ``second``. None for any other proposition."""
         if not isinstance(self.subject, EventTerm):
             return None
         record: dict[str, Any] = {
@@ -788,6 +920,8 @@ class Proposition:
             "role": self.subject.role,
             "fluent": self.predicate.label,
         }
+        if is_pair_label(self.predicate.label) or is_same_label(self.predicate.label):
+            record["second"] = other_role(self.subject.role)
         if self.predicate.direction is not None:
             record["direction"] = self.predicate.direction
         else:
@@ -816,13 +950,16 @@ class Proposition:
         comparative form says its direction ("became hungrier", "become fuller")."""
         labels: list[str] = []
         for term in (self.subject, self.predicate.patient):
-            if isinstance(term, CategoryTerm | EventTerm):
+            if isinstance(term, CategoryTerm | EventTerm | PairTerm):
                 labels += term.concepts()
         predicate = self.predicate
         if predicate.kind == COMPARATIVE:
             labels += [f"{predicate.label}.{HIGH}", f"{predicate.label}.{LOW}"]
         elif predicate.direction is not None:
             labels.append(direction_pole(predicate.label, predicate.direction))
+        elif is_some_label(predicate.label):
+            # SOME is said with the pair fluent's preposition and a quantified object
+            labels.append(pair_fluent_of_label(predicate.label))
         else:
             labels.append(predicate.label)
         if predicate.comparison is not None and predicate.comparison not in (ENTITY, RANGE):
@@ -833,7 +970,7 @@ class Proposition:
         """The logical form as it is written to ``documents.jsonl``."""
         data: dict[str, Any] = {"id": self.id, "level": self.level}
         if self.level == CLASS:
-            assert isinstance(self.subject, CategoryTerm | EventTerm)
+            assert isinstance(self.subject, CategoryTerm | EventTerm | PairTerm)
             data["quantifier"] = self.quantifier
             data["polarity"] = self.polarity
             data["subject"] = self.subject.to_json()
@@ -864,7 +1001,9 @@ class Proposition:
         rule = data.get("rule")
         predicate = Predicate.from_json(data["predicate"])
         if "instance" in subject:
-            read_subject: CategoryTerm | EventTerm | str = subject["instance"]
+            read_subject: CategoryTerm | EventTerm | PairTerm | str = subject["instance"]
+        elif "pair" in subject:
+            read_subject = PairTerm.from_json(subject)
         elif "head" in subject:
             read_subject = EventTerm.from_json(subject)
         else:
@@ -974,6 +1113,34 @@ def condition_of(effect: Any, cut_points: CutPoints | None = None) -> tuple[Cond
     return tuple(sorted(set(found), key=lambda c: c.sort_key))
 
 
+def effect_states(
+    effect: Any,
+    role: str,
+    fluent: str,
+    value: bool | None,
+    direction: str | None,
+    symmetric: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether an effect record of the world, its condition apart, is what an effect statement
+    says: the same role and fluent, and the value (a Boolean effect) or the sign (a numeric
+    effect: ``raises`` for an addition, ``lowers`` for a subtraction). A pair effect (stage
+    c5a) is the entry of a statement whose ``fluent`` is its pair fluent, about the role of
+    its first argument, with the value true for an add and false for a delete; on a symmetric
+    pair fluent (``symmetric``) the effect writes both directions, so it is the entry of the
+    statement about either role."""
+    if effect.pair:
+        if effect.fluent != fluent or direction is not None or value is None:
+            return False
+        if effect.role != role and fluent not in symmetric:
+            return False
+        return bool(effect.value) == value
+    if effect.role != role or effect.fluent != fluent:
+        return False
+    if effect.numeric:
+        return direction is not None and (effect.amount >= 0) == (direction == RAISES)
+    return direction is None and effect.value == value
+
+
 def effect_matches(
     effect: Any,
     role: str,
@@ -982,22 +1149,52 @@ def effect_matches(
     direction: str | None,
     condition: tuple[Condition, ...],
     cut_points: CutPoints | None = None,
+    symmetric: frozenset[str] = frozenset(),
 ) -> bool:
-    """Whether an effect record of the world is the entry of an effect statement: the same role
-    and fluent, the value (a Boolean effect) or the sign (a numeric effect: ``raises`` for an
-    addition, ``lowers`` for a subtraction), and the same condition (none for an unconditional
-    statement; a numeric threshold literal at the language's cut is its numeric pole, WM.35).
-    An effect under any other numeric threshold condition is no entry of any statement, and
-    neither is a pair effect or an effect under a pair condition (stage c4a; stage c5a states
-    pair effects)."""
-    if effect.pair or effect.role != role or effect.fluent != fluent:
-        return False
-    if effect.numeric:
-        if direction is None or (effect.amount >= 0) != (direction == RAISES):
-            return False
-    elif direction is not None or effect.value != value:
+    """Whether an effect record of the world is the entry of an effect statement
+    (:func:`effect_states`) under the same condition (none for an unconditional statement; a
+    numeric threshold literal at the language's cut is its numeric pole, WM.35). An effect
+    under any other numeric threshold condition is no entry of any statement, and neither is
+    an effect under a pair condition (WM.59): it makes no conditional statement, and its
+    unconditional form is never true."""
+    if not effect_states(effect, role, fluent, value, direction, symmetric):
         return False
     return condition_of(effect, cut_points) == condition
+
+
+def literal_matches(
+    literal: Any,
+    role: str,
+    fluent: str,
+    value: bool | None,
+    symmetric: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether a precondition literal of the world is the entry of a precondition statement:
+    a Boolean fluent of the role with the value, or (stage c5a) a pair literal. A pair literal
+    ``PAIRFL.k(x, y)`` is the entry of the statement about the role of its first argument
+    whose ``fluent`` is ``PAIRFL.k``, and on a symmetric pair fluent of the statement about
+    either role, because the literal reads both directions of its pair; ``SAME.PAIRFL.k(x,
+    y)`` of the statement about either role whose ``fluent`` is ``SAME.PAIRFL.k``, because two
+    things share a partner both ways; ``SOME.PAIRFL.k(x)`` of the statement about ``x`` whose
+    ``fluent`` is ``SOME.PAIRFL.k``. A ``SOMEOF`` literal and a numeric threshold literal are
+    the entries of no statement (WM.55 and decision 23)."""
+    if literal.numeric or value is None or bool(literal.value) != value:
+        return False
+    if not literal.pair:
+        return (
+            not is_pair_literal_label(fluent)
+            and literal.role == role
+            and (literal.fluent == fluent)
+        )
+    if literal.pair_fluent != pair_fluent_of_label(fluent):
+        return False
+    if is_some_label(fluent):
+        return literal.kind == "pair_some" and literal.first == role
+    if is_same_label(fluent):
+        return literal.kind == "pair_same"
+    if not is_pair_label(fluent) or literal.kind != "pair":
+        return False
+    return literal.first == role or fluent in symmetric
 
 
 class Truth:
@@ -1023,6 +1220,11 @@ class Truth:
         arithmetic: a numeric condition literal of the world whose threshold is exactly one of
         them is stated with the numeric adjective (WM.35)."""
         self.cone_limit = cone_limit
+        self.symmetric_pairs: frozenset[str] = frozenset(
+            label for label, info in world.pair_fluent_info.items() if info.symmetric
+        )
+        """The symmetric pair fluents (stage c5a): a pair effect or a pair literal on one
+        holds in both directions, so it is the entry of the statement about either role."""
         self._masks: dict[tuple[str, str], tuple[np.ndarray, float, float]] = {}
         self.count = world.count
         self.instance_index = world.instance_index
@@ -1072,6 +1274,7 @@ class Truth:
             proposition.predicate.kind == MEMBER
             or proposition.rule is not None
             or proposition.causal
+            or proposition.profile
         ):
             return True
         positive = COUNTERPART[quantifier] if quantifier in (NO, NEC_NO) else quantifier
@@ -1234,6 +1437,8 @@ class Truth:
     def evaluate(self, proposition: Proposition) -> Evaluation:
         """Judge a logical form against the world."""
         if proposition.level == CLASS:
+            if proposition.profile or proposition.predicate.kind == PROFILE:
+                return self._evaluate_profile(proposition)
             if proposition.causal or proposition.predicate.causal:
                 return self._evaluate_causal(proposition)
             return self._evaluate_class(proposition)
@@ -1377,6 +1582,34 @@ class Truth:
                 return f"{label} has no dynamics: no event is a move or an act of it"
             if predicate.patient is None:
                 return "an event of a place event type has a patient: the place"
+        elif kind == PROFILE:
+            if not world.is_pair_fluent(label) or world.is_location_fluent(label):
+                return (
+                    f"{label!r} is not a pair fluent between entities: a profile statement is "
+                    "about one"
+                )
+            if predicate.form not in PROFILE_FORMS:
+                return "a profile statement has a form, symmetric or asymmetric"
+        elif kind in CAUSAL_KINDS and is_pair_literal_label(label):
+            # a pair literal (stage c5a): a pair fluent, SAME on a functional one, or SOME of
+            # the subject's role on a pair fluent between entities
+            fluent = pair_fluent_of_label(label)
+            if not world.is_pair_fluent(fluent):
+                return f"unknown pair fluent {fluent!r}"
+            if is_same_label(label):
+                if world.is_same_literal(label) is None:
+                    return f"{label} needs a functional pair fluent"
+                if kind == EFFECT:
+                    return f"{label} is read, never written: no effect sets SAME"
+            elif is_some_label(label):
+                if world.is_location_fluent(fluent):
+                    return f"{label} is constant: every entity is at a place"
+                if kind == EFFECT:
+                    return f"{label} is read, never written: an effect adds or deletes a pair"
+            if predicate.direction is not None:
+                return f"the pair literal {label} has a value, not a direction"
+            if not isinstance(predicate.value, bool):
+                return f"an {kind} statement has a value, true or false"
         elif kind in CAUSAL_KINDS:
             if label in world.numeric_fluents:
                 if kind == PRECONDITION:
@@ -1405,6 +1638,8 @@ class Truth:
             return "only a numeric change or a numeric effect statement has a direction"
         if predicate.direction is not None and not predicate.numeric:
             return "only a predicate about a numeric fluent has a direction"
+        if (kind == PROFILE) != (predicate.form is not None):
+            return "a profile statement, and only one, has a form"
         if (kind in (VERB, COMPARATIVE, PAIR_STATE, PLACE_EVENT)) != (
             predicate.patient is not None
         ):
@@ -1765,38 +2000,69 @@ class Truth:
         precondition literal (``precondition``) that sets, or requires, the fluent of the role
         to the value; for a numeric effect (stage b3b), the effect of the ``direction``'s sign;
         for a conditional effect statement, the effect under exactly that ``condition`` (a
-        numeric threshold literal at the language's cut being its numeric pole, WM.35). A
-        category of event types has it when every event type below it does. An unconditional
-        statement needs an unconditional effect (stage b1): an effect with a condition
-        guarantees nothing after every event."""
+        numeric threshold literal at the language's cut being its numeric pole, WM.35); for a
+        pair literal (stage c5a), the pair effect or the pair literal (:func:`effect_states`,
+        :func:`literal_matches`), compiled literals included. A category of event types has it
+        when every event type below it does. An unconditional statement needs an unconditional
+        effect (stage b1): an effect with a condition guarantees nothing after every event."""
         definition = self.world.definition
+        symmetric = self.symmetric_pairs
         for label in self.world.event_types_below(event_type):
             record = definition.event_type(label)
             if kind == EFFECT:
                 found = any(
-                    effect_matches(e, role, fluent, value, direction, condition, self.cut_points)
+                    effect_matches(
+                        e, role, fluent, value, direction, condition, self.cut_points, symmetric
+                    )
                     for e in record.effects
                 )
             else:
-                # a pair literal is no entry (stage c4a; the statements with pair literals are
-                # stage c5a's)
                 found = any(
-                    not lit.numeric
-                    and not lit.pair
-                    and lit.role == role
-                    and lit.fluent == fluent
-                    and lit.value == value
+                    literal_matches(lit, role, fluent, value, symmetric)
                     for lit in record.precondition
                 )
             if not found:
                 return False
         return True
 
+    def roles_of(self, event_type: str) -> tuple[str, ...]:
+        """The roles of an event type: the agent, and the patient of a two-place event type, a
+        category of them, or a place event type (whose patient is a place)."""
+        if self.world.is_place_event_type(event_type):
+            return ROLES
+        return ROLES[: self.world.event_types[event_type].arity]
+
+    def _pair_literal_problem(
+        self, subject: EventTerm, predicate: Predicate, roles: tuple[str, ...]
+    ) -> str:
+        """Why a causal statement's pair literal (stage c5a) cannot be about its event type, or
+        an empty string: a pair or ``SAME`` needs two participants; a place event type reads
+        and writes its location fluent toward the place, and an event type between entities a
+        pair fluent between entities, or ``SAME`` on any functional one."""
+        label = predicate.label
+        if not predicate.pair_literal or is_some_label(label):
+            return ""
+        if len(roles) < 2:
+            return f"{subject.event_type} has one participant, and {label} relates two"
+        place = self.world.is_place_event_type(subject.event_type)
+        location = self.world.is_location_fluent(pair_fluent_of_label(label))
+        if is_same_label(label):
+            return "SAME relates two entities, never an entity and a place" if place else ""
+        if place != location:
+            return (
+                f"{label} relates {'two entities' if not location else 'an entity and a place'}, "
+                f"and the participants of {subject.event_type} are "
+                f"{'an entity and a place' if place else 'two entities'}"
+            )
+        return ""
+
     def _condition_problem(self, subject: EventTerm, roles: tuple[str, ...]) -> str:
         """Why a conditional statement's condition cannot be judged, or an empty string."""
         world = self.world
-        if subject.condition and subject.event_type not in world.event_types:
-            return ""
+        if subject.condition and world.is_place_event_type(subject.event_type):
+            for literal in subject.condition:
+                if literal.role != AGENT:
+                    return "a condition of a place event type is about its agent"
         for literal in subject.condition:
             if literal.role not in roles:
                 return f"{subject.event_type} has no {literal.role} for the condition to be about"
@@ -1826,18 +2092,29 @@ class Truth:
             return _invalid("a causal statement is nec_all: the definition guarantees it")
         if not proposition.polarity:
             return _invalid("a causal statement is never negated: its value is in its predicate")
-        if subject.event_type not in world.event_types:
+        place = world.is_place_event_type(subject.event_type)
+        if place and not world.event_names(subject.event_type):
+            return _invalid(f"{subject.event_type} has no dynamics: it has no events")
+        if not place and subject.event_type not in world.event_types:
             return _invalid(f"unknown event type {subject.event_type!r}")
-        roles = ROLES[: world.event_types[subject.event_type].arity]
+        roles = self.roles_of(subject.event_type)
         if subject.role not in roles:
             return _invalid(
                 f"{subject.event_type} has no {subject.role}: its roles are {', '.join(roles)}"
+            )
+        if place and subject.role != AGENT:
+            return _invalid(
+                "a causal statement about a place event type is about its agent: a place has "
+                "no fluent, and stands first in no pair"
             )
         problem = self._predicate_problem(predicate)
         if problem:
             return _invalid(problem)
         if predicate.patient is not None:
             return _invalid("a causal statement has no patient: the roles are in its subject")
+        problem = self._pair_literal_problem(subject, predicate, roles)
+        if problem:
+            return _invalid(problem)
         problem = self._condition_problem(subject, roles)
         if problem:
             return _invalid(problem)
@@ -1866,6 +2143,53 @@ class Truth:
             "event_types": len(below),
             "with_entry": holding,
             "able_bindings": able,
+            "test": DEFINITION,
+        }
+        felicitous = true and self.statable(proposition)
+        return Evaluation(True, true, felicitous, grounding)
+
+    def can_hold(self, pair_fluent: str) -> bool:
+        """Whether a pair of a pair fluent can ever hold: it has initial pairs (a positive
+        initial rate, or a location fluent, whose pairs are the habitats), or some effect of
+        the world adds a pair of it."""
+        info = self.world.pair_fluent_info[pair_fluent]
+        if info.total or (info.initial_rate or 0.0) > 0:
+            return True
+        return any(
+            e.pair and e.fluent == pair_fluent and bool(e.value)
+            for record in self.world.definition.event_types
+            for e in record.effects
+        )
+
+    def _evaluate_profile(self, proposition: Proposition) -> Evaluation:
+        """A profile statement (stage c5a, ruling 5b): true exactly when the pair fluent's
+        symmetry, as the definition records it, is the statement's form. The symmetric form
+        says that the pair holds the other way round too, and the asymmetric form that it does
+        not, at every time point: the runtime keeps both as invariants. The grounding records
+        whether a pair of the fluent can ever hold (``can_hold``): the statement about a pair
+        fluent that never holds is true of no pair."""
+        subject, predicate = proposition.subject, proposition.predicate
+        if not isinstance(subject, PairTerm):
+            return _invalid("the subject of a profile statement is a pair term")
+        if predicate.kind != PROFILE:
+            return _invalid("a profile statement states a profile")
+        if proposition.quantifier != NEC_ALL:
+            return _invalid("a profile statement is nec_all: the definition guarantees it")
+        if not proposition.polarity:
+            return _invalid("a profile statement is never negated: its form is in its predicate")
+        problem = self._predicate_problem(predicate)
+        if problem:
+            return _invalid(problem)
+        if predicate.patient is not None:
+            return _invalid("a profile statement has no patient: both arguments are in its form")
+        if subject.pair_fluent != predicate.label:
+            return _invalid("a profile statement is about one pair fluent")
+        symmetry = self.world.pair_fluent_info[predicate.label].symmetry
+        true = symmetry == predicate.form
+        grounding = {
+            "pair_fluent": predicate.label,
+            "symmetry": symmetry,
+            "can_hold": self.can_hold(predicate.label),
             "test": DEFINITION,
         }
         felicitous = true and self.statable(proposition)
