@@ -371,7 +371,9 @@ def test_places_and_entities_are_kept_apart(cases) -> None:
 def test_documents_about_places_and_pair_fluents(cases, runs, name) -> None:
     """The categories of places are topics of category documents, with membership, facts about
     the topic and its subcategories, capacity facts with the category of places as the patient,
-    and comparison facts with a sibling; the place properties and parts and the place event
+    and comparison facts with a sibling (a document about a category of entities states the
+    capacity facts with its topic as the agent, Jon's ruling 1 of WM.76, and no other document
+    states one); the place properties and parts and the place event
     types are topics of feature documents; and a pair fluent with a preposition is a topic
     whose document holds its profile statement, if it has one, and then causal statements
     alone, about the event types that add it, delete it, and need it. Every sentence is true
@@ -393,11 +395,28 @@ def test_documents_about_places_and_pair_fluents(cases, runs, name) -> None:
         if not (place_category or place_feature or place_verb or pair_fluent):
             for sentence in document.sentences:
                 proposition = sentence.proposition
-                # no other document is about a place: a place feature, a category of places as
-                # a subject, and a relation fact with a place stay in the documents above
+                # no other document is about a place: a place feature and a category of places
+                # as a subject stay in the documents above. A relation fact with a place stands
+                # in a document about a category of entities too, with the topic as its agent
+                # (Jon's ruling 1 of WM.76), and in no other document.
                 if proposition.level == CLASS and isinstance(proposition.subject, CategoryTerm):
                     assert not truth.is_place_term(proposition.subject)
-                    assert proposition.predicate.kind != PLACE_EVENT
+                    if proposition.predicate.kind == PLACE_EVENT:
+                        assert document.type == "encyclopedic_category"
+                        assert topic in facts.categories
+                        assert sentence.section in (RELATION, "contrast")
+                        if sentence.section == RELATION:
+                            assert proposition.subject.category == topic
+                        else:
+                            assert proposition.subject.category in planner._siblings[topic]
+                        assert truth.is_place_term(proposition.predicate.patient)
+                        assert proposition.quantifier not in NEC_QUANTIFIERS
+                        form = json.loads(json.dumps(sentence.logical_form))
+                        assert oracle.truth(form) is True, form
+                        assert (
+                            proposition_of(parse_propositional(sentence.propositional))
+                            == proposition
+                        )
                 assert not proposition.profile
             continue
         kind = (

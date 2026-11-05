@@ -234,6 +234,14 @@ class Facts:
         self.entity_pair_prepositions = tuple(
             f for f in self.pair_prepositions if not world.is_location_fluent(f)
         )
+        self.state_pair_prepositions = tuple(
+            f for f in self.entity_pair_prepositions if self.truth.can_hold(f)
+        )
+        """The pair fluents between entities with a preposition that a pair state can be about
+        (Jon's ruling 3 of WM.76): those of which a pair can ever hold. Of a pair fluent with no
+        initial pair and no add anywhere in the world, "the owl was not near the mouse" is
+        always true and teaches nothing, so no initial-state sentence and no state item, true
+        or false, names it. The pair fluent keeps its preposition and its causal statements."""
         self.place_verbs = of_type("place_event")
         """The place event types that have a word: the moves and the acts a narrative can
         report. Kept apart from ``verbs``, which the relation facts, the causal statements, the
@@ -463,10 +471,11 @@ class Facts:
         """The pair-state predicates a sentence about a participant could have (stage c4c): a
         pair fluent between entities with a preposition toward each of ``others``, a location
         fluent with a preposition toward each of ``places``, and ``SAME`` with a preposition
-        toward each of ``others``; in that order."""
+        toward each of ``others``; in that order. A pair fluent between entities that can never
+        hold gives none (Jon's ruling 3 of WM.76)."""
         predicates = [
             Predicate(PAIR_STATE, fluent, other)
-            for fluent in self.entity_pair_prepositions
+            for fluent in self.state_pair_prepositions
             for other in others
         ]
         predicates += [

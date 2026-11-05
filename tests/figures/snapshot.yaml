@@ -237,7 +237,7 @@ tiny:
     documents: 20
     sentences: 197
     by_level: {class: 125, instance: 7, event: 39, state: 5, change: 16, able_now: 5}
-    tokens: 1044
+    tokens: 1043
     scenes: 17
     events: 135
     lexemes:
@@ -247,15 +247,15 @@ tiny:
       without_word: {}
     test_sets:
       count: 56
-      pairs: 634
-      items: 1268
+      pairs: 633
+      items: 1266
       by_set:
-        class_predicate: {pairs: 20, true_items_seen_share: 0.35}
-        class_predicate_lawlike: {pairs: 17, true_items_seen_share: 0.470588}
+        class_predicate: {pairs: 20, true_items_seen_share: 0.5}
+        class_predicate_lawlike: {pairs: 18, true_items_seen_share: 0.333333}
         class_subject: {pairs: 20, true_items_seen_share: 0.25}
-        class_subject_lawlike: {pairs: 2, true_items_seen_share: 0.5}
+        class_subject_lawlike: {pairs: 1, true_items_seen_share: 1.0}
         class_quantifier: {pairs: 20, true_items_seen_share: 0.5}
-        class_quantifier_lawlike: {pairs: 20, true_items_seen_share: 0.35}
+        class_quantifier_lawlike: {pairs: 20, true_items_seen_share: 0.25}
         class_role: {pairs: 20, true_items_seen_share: 0.1}
         instance_predicate: {pairs: 20, true_items_seen_share: 0.15}
         instance_subject: {pairs: 20, true_items_seen_share: 0.25}
@@ -274,7 +274,7 @@ tiny:
         event_object_possible: {pairs: 0, true_items_seen_share: null}
         event_object_blocked: {pairs: 0, true_items_seen_share: null}
         event_object_impossible: {pairs: 0, true_items_seen_share: null}
-        state_predicate_changed: {pairs: 17, true_items_seen_share: 0.0}
+        state_predicate_changed: {pairs: 16, true_items_seen_share: 0.0}
         state_predicate_unchanged: {pairs: 20, true_items_seen_share: 0.0}
         state_subject_changed: {pairs: 19, true_items_seen_share: 0.0}
         state_subject_unchanged: {pairs: 20, true_items_seen_share: 0.0}
@@ -306,8 +306,8 @@ tiny:
         profile_predicate: {pairs: 0, true_items_seen_share: null, true_statements: 0}
         profile_predicate_lawlike: {pairs: 0, true_items_seen_share: null, true_statements: 0}
         profile_form: {pairs: 1, true_items_seen_share: 1.0, true_statements: 1}
-    seen: {min_share: 0.05, min_set: instance_role, max_share: 1.0, max_set: event_role_impossible, min_set_code: '`instance_role`',
-      max_set_code: '`event_role_impossible`'}
+    seen: {min_share: 0.05, min_set: instance_role, max_share: 1.0, max_set: class_subject_lawlike, min_set_code: '`instance_role`',
+      max_set_code: '`class_subject_lawlike`'}
     rule_statements: {rules: 8, terms: 31, stated: 20}
     causal:
       causal_sentences: 10
@@ -338,8 +338,8 @@ tiny:
       comparative_descriptions: 1
       place_comparative_sentences: 0
       numeric_comparative_sentences: 0
-      pole_modifiers: 25
-      pole_restrictions: 1
+      pole_modifiers: 24
+      pole_restrictions: 2
       compared_poles_across_classes: {participants: 0, places: 0}
       made_on_another_scalar: {participants: 0, places: 0}
       skipped_not_told_apart: {participants: 0, places: 0}
@@ -365,7 +365,7 @@ tiny:
       place_mentions: 8
       place_definite_not_distinguished_share: 0.0
       prepositions: 4
-      state_items_by_kind: {boolean: 39, numeric: 23, pair: 15, location: 0, same: 19}
+      state_items_by_kind: {boolean: 41, numeric: 25, pair: 12, location: 1, same: 16}
       place_event_pairs: 15
     class_places:
       documents_about_places: 1
@@ -381,6 +381,7 @@ tiny:
       membership_sentences: 0
       nec_sentences: 0
       relation_sentences: 4
+      entity_relation_facts: {event_type: 28, place_event_type: 0, place_share: 0.0}
       profile_pairs: 1
     narratives_short: {entity: 0.25, situational: 0.0}
     cooccurrence:
@@ -388,26 +389,26 @@ tiny:
       words:
         entity: {thematic: 0.687478, taxonomic: 0.103985}
         situational: {thematic: 0.88617, taxonomic: 0.411406}
-        encyclopedic_category: {thematic: 0.602456, taxonomic: 0.246794}
+        encyclopedic_category: {thematic: 0.898443, taxonomic: 0.020328}
         encyclopedic_feature: {thematic: -0.168531, taxonomic: -0.056482}
       check:
         words:
-          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: false}
           taxonomic_situational_below_encyclopedic: {pearson: false, spearman: false}
         referents:
-          thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
+          thematic_situational_above_encyclopedic: {pearson: true, spearman: false}
           taxonomic_situational_below_encyclopedic: {pearson: false, spearman: false}
     ambiguity: {ambiguous: 9, share: 0.045685}
-    changed_items_share: {state_predicate_changed: 0.558824, state_subject_changed: 0.5, state_role_changed: null,
+    changed_items_share: {state_predicate_changed: 0.5625, state_subject_changed: 0.5, state_role_changed: null,
       state_object_changed: null}
-    wrote_line: 20 documents, 197 sentences, 1044 tokens, 17 scenes, 56 test sets with 634 pairs
-    wrote_code: '`20 documents, 197 sentences, 1044 tokens, 17 scenes, 56 test sets with 634 pairs`'
+    wrote_line: 20 documents, 197 sentences, 1043 tokens, 17 scenes, 56 test sets with 633 pairs
+    wrote_code: '`20 documents, 197 sentences, 1043 tokens, 17 scenes, 56 test sets with 633 pairs`'
     quick_start_block: '
 
       ```
 
-      wrote runs/corpus/tiny_seed1: 20 documents, 197 sentences, 1044 tokens, 17 scenes, 56 test sets
-      with 634 pairs
+      wrote runs/corpus/tiny_seed1: 20 documents, 197 sentences, 1043 tokens, 17 scenes, 56 test sets
+      with 633 pairs
 
       ```
 
@@ -705,9 +706,9 @@ default:
     seed: 1
     world: baa625dfd0fb
     documents: 10000
-    sentences: 100106
-    by_level: {class: 49183, instance: 6578, event: 29872, state: 4268, change: 7469, able_now: 2736}
-    tokens: 499870
+    sentences: 100107
+    by_level: {class: 49183, instance: 6578, event: 29871, state: 4270, change: 7468, able_now: 2737}
+    tokens: 499852
     scenes: 10091
     events: 83413
     lexemes:
@@ -717,40 +718,40 @@ default:
       without_word: {}
     test_sets:
       count: 56
-      pairs: 19017
-      items: 38034
+      pairs: 18968
+      items: 37936
       by_set:
-        class_predicate: {pairs: 500, true_items_seen_share: 0.67}
-        class_predicate_lawlike: {pairs: 344, true_items_seen_share: 0.627907}
-        class_subject: {pairs: 500, true_items_seen_share: 0.606}
-        class_subject_lawlike: {pairs: 302, true_items_seen_share: 0.569536}
-        class_quantifier: {pairs: 500, true_items_seen_share: 0.752}
-        class_quantifier_lawlike: {pairs: 500, true_items_seen_share: 0.604}
-        class_role: {pairs: 500, true_items_seen_share: 0.364}
+        class_predicate: {pairs: 500, true_items_seen_share: 0.658}
+        class_predicate_lawlike: {pairs: 323, true_items_seen_share: 0.656347}
+        class_subject: {pairs: 500, true_items_seen_share: 0.662}
+        class_subject_lawlike: {pairs: 271, true_items_seen_share: 0.616236}
+        class_quantifier: {pairs: 500, true_items_seen_share: 0.766}
+        class_quantifier_lawlike: {pairs: 500, true_items_seen_share: 0.59}
+        class_role: {pairs: 500, true_items_seen_share: 0.342}
         instance_predicate: {pairs: 500, true_items_seen_share: 0.412}
-        instance_subject: {pairs: 500, true_items_seen_share: 0.496}
+        instance_subject: {pairs: 500, true_items_seen_share: 0.494}
         instance_role: {pairs: 500, true_items_seen_share: 0.012}
         instance_comparison_predicate: {pairs: 500, true_items_seen_share: 0.024}
         instance_comparison_role: {pairs: 500, true_items_seen_share: 0.016}
         event_predicate_possible: {pairs: 500, true_items_seen_share: 0.932}
-        event_predicate_blocked: {pairs: 500, true_items_seen_share: 0.842}
+        event_predicate_blocked: {pairs: 500, true_items_seen_share: 0.844}
         event_predicate_impossible: {pairs: 500, true_items_seen_share: 0.872}
         event_subject_possible: {pairs: 500, true_items_seen_share: 0.858}
         event_subject_blocked: {pairs: 500, true_items_seen_share: 0.874}
         event_subject_impossible: {pairs: 500, true_items_seen_share: 0.964}
         event_role_possible: {pairs: 500, true_items_seen_share: 0.69}
-        event_role_blocked: {pairs: 500, true_items_seen_share: 0.608}
-        event_role_impossible: {pairs: 500, true_items_seen_share: 0.788}
+        event_role_blocked: {pairs: 500, true_items_seen_share: 0.61}
+        event_role_impossible: {pairs: 500, true_items_seen_share: 0.786}
         event_object_possible: {pairs: 500, true_items_seen_share: 1.0}
         event_object_blocked: {pairs: 54, true_items_seen_share: 1.0}
-        event_object_impossible: {pairs: 392, true_items_seen_share: 1.0}
+        event_object_impossible: {pairs: 376, true_items_seen_share: 1.0}
         state_predicate_changed: {pairs: 500, true_items_seen_share: 0.0}
         state_predicate_unchanged: {pairs: 500, true_items_seen_share: 0.0}
         state_subject_changed: {pairs: 500, true_items_seen_share: 0.0}
         state_subject_unchanged: {pairs: 500, true_items_seen_share: 0.0}
         state_role_changed: {pairs: 21, true_items_seen_share: 0.0}
         state_role_unchanged: {pairs: 500, true_items_seen_share: 0.0}
-        state_object_changed: {pairs: 481, true_items_seen_share: 0.0}
+        state_object_changed: {pairs: 500, true_items_seen_share: 0.0}
         state_object_unchanged: {pairs: 500, true_items_seen_share: 0.0}
         state_comparison_role: {pairs: 500, true_items_seen_share: 0.0}
         able_now_predicate_blocked: {pairs: 500, true_items_seen_share: 0.0}
@@ -803,27 +804,27 @@ default:
       profile_statements: {symmetric: 1, asymmetric: 0}
       profile_sentences: 17
     comparisons:
-      comparison_sentences: {class: 282, instance: 243}
-      comparative_sentences: {class: 5330, instance: 738}
+      comparison_sentences: {class: 297, instance: 243}
+      comparative_sentences: {class: 5317, instance: 738}
       comparative_descriptions: 1219
       place_comparative_sentences: 114
       numeric_comparative_sentences: 595
-      pole_modifiers: 3729
-      pole_restrictions: 329
+      pole_modifiers: 3723
+      pole_restrictions: 335
       compared_poles_across_classes: {participants: 26, places: 23}
       made_on_another_scalar: {participants: 0, places: 0}
       skipped_not_told_apart: {participants: 0, places: 0}
     effect_statements: 75
     precondition_statements: 69
-    states: {events_with_result_share: 0.250033, result_sentences: 7469, numeric_state_sentences: 575,
+    states: {events_with_result_share: 0.250008, result_sentences: 7468, numeric_state_sentences: 579,
       numeric_change_sentences: 1933}
     pairs_places:
-      pair_state_sentences: 977
+      pair_state_sentences: 957
       pair_change_sentences: 1404
-      location_sentences: 1700
+      location_sentences: 1701
       move_sentences: 2541
       act_sentences: 595
-      same_state_sentences: 108
+      same_state_sentences: 116
       blocked_place_sentences: 361
       blocked_move_sentences: 225
       place_description_sentences: 305
@@ -836,8 +837,8 @@ default:
       place_mentions: 5878
       place_definite_not_distinguished_share: 0.012436
       prepositions: 5
-      state_items_by_kind: {boolean: 1073, numeric: 481, pair: 1229, location: 228, same: 491}
-      place_event_pairs: 1403
+      state_items_by_kind: {boolean: 1098, numeric: 454, pair: 1197, location: 273, same: 499}
+      place_event_pairs: 1387
     class_places:
       documents_about_places: 758
       documents_about_pair_fluents: 55
@@ -851,15 +852,16 @@ default:
       comparison_fact_sentences: 803
       membership_sentences: 875
       nec_sentences: 1117
-      relation_sentences: 1955
+      relation_sentences: 2076
+      entity_relation_facts: {event_type: 6256, place_event_type: 121, place_share: 0.018974}
       profile_pairs: 2
-    narratives_short: {entity: 0.40639, situational: 0.400862}
+    narratives_short: {entity: 0.405891, situational: 0.400862}
     cooccurrence:
       pairs: 741
       words:
-        entity: {thematic: 0.651753, taxonomic: 0.190219}
-        situational: {thematic: 0.53281, taxonomic: 0.188599}
-        encyclopedic_category: {thematic: 0.103365, taxonomic: 0.494051}
+        entity: {thematic: 0.652391, taxonomic: 0.193002}
+        situational: {thematic: 0.532205, taxonomic: 0.190242}
+        encyclopedic_category: {thematic: 0.133699, taxonomic: 0.504842}
         encyclopedic_feature: {thematic: 0.197056, taxonomic: 0.189878}
       check:
         words:
@@ -868,19 +870,19 @@ default:
         referents:
           thematic_situational_above_encyclopedic: {pearson: true, spearman: true}
           taxonomic_situational_below_encyclopedic: {pearson: true, spearman: true}
-    ambiguity: {ambiguous: 6107, share: 0.061005}
-    changed_items_share: {state_predicate_changed: 0.523, state_subject_changed: 0.514, state_role_changed: 0.5,
-      state_object_changed: 0.595634}
-    wrote_line: 10000 documents, 100106 sentences, 499870 tokens, 10091 scenes, 56 test sets with 19017
+    ambiguity: {ambiguous: 6108, share: 0.061015}
+    changed_items_share: {state_predicate_changed: 0.522, state_subject_changed: 0.519, state_role_changed: 0.5,
+      state_object_changed: 0.604}
+    wrote_line: 10000 documents, 100107 sentences, 499852 tokens, 10091 scenes, 56 test sets with 18968
       pairs
-    wrote_code: '`10000 documents, 100106 sentences, 499870 tokens, 10091 scenes, 56 test sets with 19017
+    wrote_code: '`10000 documents, 100107 sentences, 499852 tokens, 10091 scenes, 56 test sets with 18968
       pairs`'
     quick_start_block: '
 
       ```
 
-      wrote runs/corpus/default_seed1: 10000 documents, 100106 sentences, 499870 tokens, 10091 scenes,
-      56 test sets with 19017 pairs
+      wrote runs/corpus/default_seed1: 10000 documents, 100107 sentences, 499852 tokens, 10091 scenes,
+      56 test sets with 18968 pairs
 
       ```
 
@@ -1277,7 +1279,7 @@ tiny_place_chain:
 baselines:
   conditional_effects_off:
     tiny: {rule_set_id: 08cbb73684458a54b0c08f3247676e731fef1ac5051ffd0cfdc59d1676cbe311, rule_set_short: 08cbb7368445,
-      rule_set_code: '`08cbb7368445...`', documents_sha256: 9b227d35ef1b208b98a15ba3fd74a5d9c79e1ef3b7cf926d72b4fe72581900ba}
+      rule_set_code: '`08cbb7368445...`', documents_sha256: 5744b5f99e9e97bb66b3b508701898094131c063982cc553f5f2150e2b999ea2}
     default: {rule_set_id: b7e2428b0c0b8cb461d18e59be2b9c026a89001894ae2f1a1ee86db1c6d16a1e, rule_set_short: b7e2428b0c0b,
       rule_set_code: '`b7e2428b0c0b...`'}
   fluents_off:
