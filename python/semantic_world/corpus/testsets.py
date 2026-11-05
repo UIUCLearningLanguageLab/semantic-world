@@ -152,6 +152,7 @@ from semantic_world.corpus.planner import (
 from semantic_world.corpus.propositions import (
     ABLE_NOW,
     AGENT,
+    ASYMMETRIC,
     CAN,
     CLASS,
     COMPARATIVE,
@@ -179,16 +180,21 @@ from semantic_world.corpus.propositions import (
     RAISES,
     SIMPLE,
     SOME,
+    SOME_PREFIX,
     STATE,
     STATE_KIND,
+    SYMMETRIC,
     TIMED_LEVELS,
     VERB,
     CategoryTerm,
     EventTerm,
+    PairTerm,
     Predicate,
     Proposition,
     Truth,
     is_property_feature,
+    is_same_label,
+    is_some_label,
 )
 from semantic_world.corpus.readings import readings
 from semantic_world.corpus.realize import as_json
@@ -212,7 +218,10 @@ OBJECT = "object"
 state swapped for another referent of the document or another place of the scene, or the place
 of an event of a place event type swapped for another place of the scene; a swap keeps the kind
 of the second argument."""
-CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE, CONDITION, OBJECT)
+FORM = "form"
+"""The change of the profile sets alone (stage c5b): the other form of a profile statement, the
+asymmetric statement for a symmetric pair fluent, and the reverse."""
+CHANGES = (PREDICATE, SUBJECT, QUANTIFIER, POLARITY, EVENT_SWAP, ROLE, CONDITION, OBJECT, FORM)
 
 LAWLIKE = "lawlike"
 POSSIBLE = "possible"
@@ -227,6 +236,11 @@ CAUSAL_LEVELS = (CAUSAL_EFFECT, CAUSAL_PRECONDITION)
 """The two causal "levels" of the test sets: their items are class-level propositions, and the
 sets are named by the kind of statement."""
 _CAUSAL_KIND = {CAUSAL_EFFECT: EFFECT, CAUSAL_PRECONDITION: PRECONDITION}
+PROFILE_LEVEL = "profile"
+"""The builder's level of the profile sets (stage c5b, ``WORLD_PHASE_C.md``, "Test sets"): the
+profile statements of the world, class-level propositions, enumerated as the causal statements
+are. ``profile_predicate`` says the same form of another pair fluent, which lacks the profile,
+and ``profile_form`` the other form of the same pair fluent."""
 INSTANCE_COMPARISON = "instance_comparison"
 """The "level" of the instance comparison sets (stage b3a): their items are instance-level
 comparatives between two referents of a narrative document."""
@@ -244,6 +258,7 @@ ITEM_LEVELS = (
     ABLE_NOW,
     CAUSAL_EFFECT,
     CAUSAL_PRECONDITION,
+    PROFILE_LEVEL,
 )
 """The levels that have test sets, in file order (a change is stated in documents only)."""
 TRUE_ITEM = "true_item"
@@ -287,6 +302,7 @@ LEVEL_CHANGES = {
     ABLE_NOW: (PREDICATE, SUBJECT),
     CAUSAL_EFFECT: (PREDICATE, POLARITY, EVENT_SWAP, ROLE, CONDITION),
     CAUSAL_PRECONDITION: (PREDICATE, POLARITY, EVENT_SWAP, ROLE),
+    PROFILE_LEVEL: (PREDICATE, FORM),
 }
 """The changes that can apply at each level: only a class-level proposition has a quantifier,
 the ``able_now`` sets take a predicate swap and a subject swap, the state sets those and (stage
@@ -350,6 +366,8 @@ def candidates(
 
     if isinstance(subject, EventTerm):
         return _causal_candidates(facts, proposition, change)
+    if isinstance(subject, PairTerm):
+        return _profile_candidates(facts, proposition, change)
     world = facts.world
 
     def pool_of(instances: Sequence[str] | None) -> Sequence[str]:
@@ -405,22 +423,35 @@ def candidates(
             if predicate.numeric:
                 return with_predicate(facts.numeric_fluents)  # another numeric fluent
             return with_predicate(facts.fluents)
+        # a predicate about places keeps to the places' words (stage c5b): another place
+        # property or part, place patient capacity, place pole, place scalar, or category of
+        # places
+        if predicate.kind in (IS, HAS) and predicate.label in world.place_feature_kind:
+            return with_predicate(facts.place_features[predicate.kind])
         if predicate.kind in FEATURE_KINDS:
             return with_predicate(facts.features[predicate.kind])
         if predicate.kind == PROJECTION:
+            if predicate.label in world.place_patient_capacities:
+                return with_predicate(facts.place_projections)
             return with_predicate(facts.projections)
         if predicate.kind == COMPARISON:
             if predicate.numeric:
                 return with_predicate(facts.numeric_poles)  # another numeric pole
+            if world.is_place_pole(predicate.label):
+                return with_predicate(facts.place_poles)
             return with_predicate(facts.poles)
         if predicate.kind == COMPARATIVE:
             if predicate.numeric:
                 return with_predicate(facts.numeric_fluents)
+            if predicate.label in world.place_scalars:
+                return with_predicate(facts.place_scalars)
             return with_predicate(facts.scalars)  # another scalar dimension
         if predicate.kind == VERB:
             return with_predicate(facts.verbs)
-        level = facts.level[predicate.label]
-        return with_predicate([c for c in facts.categories if facts.level[c] == level])
+        level = facts.level_of(predicate.label)
+        return with_predicate(
+            [c for c in facts.categories_like(predicate.label) if facts.level_of(c) == level]
+        )
 
     if change == SUBJECT:
         if predicate.kind == COMPARATIVE:
@@ -428,11 +459,13 @@ def candidates(
         if isinstance(subject, CategoryTerm):
             if subject.category == THING:
                 return []
-            level = facts.level[subject.category]
+            # another category of the subject's own tree at its level: of entities, or (stage
+            # c5b) of places
+            level = facts.level_of(subject.category)
             return [
                 dataclasses.replace(proposition, subject=dataclasses.replace(subject, category=c))
-                for c in facts.categories
-                if c != subject.category and facts.level[c] == level
+                for c in facts.categories_like(subject.category)
+                if c != subject.category and facts.level_of(c) == level
             ]
         return [
             dataclasses.replace(proposition, subject=other)
@@ -482,7 +515,18 @@ def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> l
     assert isinstance(subject, EventTerm)
     world = facts.world
     if change == PREDICATE:
-        fluents = facts.numeric_fluents if predicate.numeric else facts.base_fluents
+        if predicate.pair_literal:
+            # a pair literal keeps its kind (stage c5b): another pair fluent with a
+            # preposition, another SAME preposition, or SOME of another pair fluent between
+            # entities; the truth tests drop a pair fluent the event type cannot have
+            if is_same_label(predicate.label):
+                fluents: Sequence[str] = facts.same_prepositions
+            elif is_some_label(predicate.label):
+                fluents = tuple(f"{SOME_PREFIX}{f}" for f in facts.entity_pair_prepositions)
+            else:
+                fluents = facts.pair_prepositions
+        else:
+            fluents = facts.numeric_fluents if predicate.numeric else facts.base_fluents
         return [
             dataclasses.replace(proposition, predicate=dataclasses.replace(predicate, label=f))
             for f in fluents
@@ -500,6 +544,13 @@ def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> l
             return []
         return [dataclasses.replace(proposition, subject=subject.unconditional)]
     if change == EVENT_SWAP:
+        if subject.place:
+            # another place event type with a verb (stage c5b): the place event types are flat
+            return [
+                dataclasses.replace(proposition, subject=dataclasses.replace(subject, event_type=e))
+                for e in facts.place_verbs
+                if e != subject.event_type
+            ]
         info = world.event_types[subject.event_type]
         return [
             dataclasses.replace(proposition, subject=dataclasses.replace(subject, event_type=e))
@@ -509,13 +560,43 @@ def _causal_candidates(facts: Facts, proposition: Proposition, change: str) -> l
             and world.event_types[e].level == info.level
         ]
     if change == ROLE:
+        if subject.place:
+            return []  # a statement about a place event type is about its agent alone
         if world.event_types[subject.event_type].arity < 2:
+            return []
+        if facts.mirror(PATIENT, predicate.label):
+            # a pair on a symmetric pair fluent, or SAME (stage c5b, WM.41 and WM.75): the
+            # statement about the other role is the mirror, which the symmetric meaning makes
+            # true, so the role swap gives no item
             return []
         other = PATIENT if subject.role == AGENT else AGENT
         swapped = dataclasses.replace(subject, role=other)
         if not realizable_condition(swapped):
             return []  # the condition has no place in a statement about the other role
         return [dataclasses.replace(proposition, subject=swapped)]
+    return []
+
+
+def _profile_candidates(facts: Facts, proposition: Proposition, change: str) -> list[Proposition]:
+    """The candidates of a profile statement (stage c5b): the same form about another pair
+    fluent between entities with a preposition (``predicate``), or the other form about the
+    same pair fluent (``form``)."""
+    predicate = proposition.predicate
+    if change == PREDICATE:
+        return [
+            dataclasses.replace(
+                proposition,
+                subject=PairTerm(fluent),
+                predicate=dataclasses.replace(predicate, label=fluent),
+            )
+            for fluent in facts.entity_pair_prepositions
+            if fluent != predicate.label
+        ]
+    if change == FORM:
+        other = ASYMMETRIC if predicate.form == SYMMETRIC else SYMMETRIC
+        return [
+            dataclasses.replace(proposition, predicate=dataclasses.replace(predicate, form=other))
+        ]
     return []
 
 
@@ -569,6 +650,12 @@ def changes_for(proposition: Proposition, facts: Facts | None = None) -> tuple[s
     """The kinds of change that can apply to a proposition at all. ``facts`` tells whether a
     pair state's arguments can be exchanged (stage c4c); without it a pair state takes no role
     swap."""
+    if isinstance(proposition.subject, PairTerm):
+        return (PREDICATE, FORM)
+    if proposition.predicate.kind == PLACE_EVENT and proposition.level == CLASS:
+        # a relation fact about a place event type (stage c5b): a place is never an agent, so
+        # it takes no role swap
+        return (PREDICATE, SUBJECT, QUANTIFIER)
     if proposition.predicate.kind == PLACE_EVENT:
         return (PREDICATE, SUBJECT, OBJECT)
     if proposition.predicate.kind == PAIR_STATE:
@@ -578,7 +665,9 @@ def changes_for(proposition: Proposition, facts: Facts | None = None) -> tuple[s
         return (*changes, OBJECT)
     if isinstance(proposition.subject, EventTerm):
         changes = [PREDICATE, POLARITY, EVENT_SWAP]
-        if not proposition.subject.event_type.startswith("EVENTTYPE1."):
+        if not proposition.subject.event_type.startswith("EVENTTYPE1.") and not (
+            proposition.subject.place
+        ):
             changes.append(ROLE)
         if proposition.subject.condition:
             changes.append(CONDITION)
@@ -910,7 +999,7 @@ class ItemSet:
             record["place_event_pairs"] = sum(
                 true.proposition.predicate.kind == PLACE_EVENT for true, _ in self.pairs
             )
-        if self.level in CAUSAL_LEVELS:
+        if self.level in CAUSAL_LEVELS or self.level == PROFILE_LEVEL:
             record["true_statements"] = len({true.meta["statement"] for true, _ in self.pairs})
         return record
 
@@ -941,6 +1030,10 @@ def _kinds(level: str, change: str) -> tuple[str, ...]:
         # a polarity swap is never observed: the true entry guarantees the opposite value (for
         # a numeric statement, the event's own recorded change has the effect's sign)
         return (_ORDINARY,) if change == POLARITY else (_ORDINARY, LAWLIKE)
+    if level == PROFILE_LEVEL:
+        # the other form is never observed (stage c5b): a pair of a symmetric pair fluent holds
+        # both ways, and a pair of an asymmetric one never does, and the mark needs a pair
+        return (_ORDINARY,) if change == FORM else (_ORDINARY, LAWLIKE)
     return (_ORDINARY,)
 
 
@@ -1040,7 +1133,7 @@ class TestSetBuilder:
         """The test sets of one level and one change. True items are drawn until every set has
         ``test_sets.size`` pairs, or the draws run out. A true item is used once. The causal
         sets are enumerated instead (:meth:`_causal_group`)."""
-        if level in CAUSAL_LEVELS:
+        if level in CAUSAL_LEVELS or level == PROFILE_LEVEL:
             return self._causal_group(level, change)
         rng = self.streams.substream("tests", f"{level}_{change}")
         aspects = self.streams.substream("grammar", f"tests:{level}_{change}:aspect")
@@ -1124,21 +1217,20 @@ class TestSetBuilder:
         candidates_by_kind: dict[str, list[tuple[Proposition, Proposition]]] = {
             kind: [] for kind in kinds
         }
-        # the causal sets keep to the statements of stage c4c (stage c5a's filter): a
-        # statement with a pair literal, or about a place event type, enters the sets in stage
-        # c5b, with the role swap that skips symmetric pair fluents
-        pool = tuple(
-            p
-            for p in self.facts.causal_statements(kind=_CAUSAL_KIND[level])
-            if not p.predicate.pair_literal and not p.subject.place
-        )
+        # every causal statement of the set's kind, those with pair literals and about place
+        # event types among them since stage c5b; the profile sets (stage c5b) are enumerated
+        # the same way over the profile statements
+        if level == PROFILE_LEVEL:
+            pool = self.facts.profile_statements()
+        else:
+            pool = self.facts.causal_statements(kind=_CAUSAL_KIND[level])
         for true in pool:
             for false in false_items(self.facts, true, change):
-                kind = LAWLIKE if self.truth.observed(false) else _ORDINARY
+                kind = LAWLIKE if self._observed(false) else _ORDINARY
                 if kind not in candidates_by_kind:
                     raise CorpusError(
-                        f"a {change} swap of a causal statement was observed in the scenes, "
-                        f"which the world's laws rule out: {true} against {false}"
+                        f"a {change} swap of a causal or profile statement was observed in the "
+                        f"scenes, which the world's laws rule out: {true} against {false}"
                     )
                 candidates_by_kind[kind].append((true, false))
         sets: list[ItemSet] = []
@@ -1157,6 +1249,14 @@ class TestSetBuilder:
                     pairs.append(pair)
             sets.append(ItemSet(name, level, change, kind, tuple(pairs)))
         return sets
+
+    def _observed(self, proposition: Proposition) -> bool:
+        """The ``observed`` mark of a false causal statement or (stage c5b) of a false profile
+        statement: it held in every case the corpus's scenes show, and they show at least
+        one."""
+        if proposition.profile:
+            return self.truth.profile_observed(proposition)
+        return self.truth.observed(proposition)
 
     def _kind(
         self, level: str, document: Document | None, true: Proposition, false: Proposition
@@ -1428,6 +1528,8 @@ class TestSetBuilder:
             elif level in CAUSAL_LEVELS:
                 meta["observed"] = not truth and self.truth.observed(proposition)
                 meta["causal"] = self._causal_record(proposition)
+            elif level == PROFILE_LEVEL:
+                meta["observed"] = not truth and self.truth.profile_observed(proposition)
             elif level in (EVENT, ABLE_NOW):
                 meta["possible"] = proposition.grounding["able"]
             elif level == STATE:
@@ -1435,6 +1537,10 @@ class TestSetBuilder:
                 meta["changed_item"] = changed_item
             meta["grounding"] = proposition.grounding
             items.append(Item(record, meta, proposition))
+        if level == PROFILE_LEVEL:
+            # the true profile statement that the pair tests, on both items, for grouping
+            for item in items:
+                item.meta["statement"] = items[0].input["propositional"]
         if level in CAUSAL_LEVELS:
             # the true statement that the pair tests, on both items, for grouping: its
             # propositional rendering, and its causal record with its kind (stage b1, Jon's

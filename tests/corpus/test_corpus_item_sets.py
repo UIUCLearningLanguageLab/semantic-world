@@ -46,6 +46,7 @@ from semantic_world.corpus.testsets import (
     CAUSAL_LEVELS,
     CHANGES,
     EVENT_SWAP,
+    FORM,
     IMPOSSIBLE,
     INPUT_FIELDS,
     INSTANCE_COMPARISON,
@@ -54,6 +55,7 @@ from semantic_world.corpus.testsets import (
     POLARITY,
     POSSIBLE,
     PREDICATE,
+    PROFILE_LEVEL,
     QUANTIFIER,
     ROLE,
     STATE_COMPARISON,
@@ -126,15 +128,23 @@ ALL_SETS = (
     "causal_precondition_event_lawlike",
     "causal_precondition_role",
     "causal_precondition_role_lawlike",
+    "profile_predicate",
+    "profile_predicate_lawlike",
+    "profile_form",
 )
 CAUSAL_SETS = tuple(name for name in ALL_SETS if name.startswith("causal"))
-EMPTY_IN_DEFAULT = ("causal_effect_condition_lawlike",)
+PROFILE_SETS = tuple(name for name in ALL_SETS if name.startswith("profile"))
+"""The profile sets (stage c5b): enumerated as the causal sets are, every profile statement of
+the world with every valid false item, so they hold what the world gives; the other form is
+never observed, so ``profile_form`` has no law-like twin."""
+EMPTY_IN_DEFAULT = ("causal_effect_condition_lawlike", "profile_predicate_lawlike")
 UNFILLED_IN_DEFAULT = (
     "state_role_changed",
     "state_role_unchanged",
     "event_object_possible",
     "event_object_blocked",
     "event_object_impossible",
+    "state_object_changed",
 )
 """The sets of stage c4c that the default world may not fill, and may leave empty in a run of
 a few hundred documents: a role swap of a pair between entities needs a pair fluent between
@@ -143,7 +153,10 @@ fluents), and one whose pair changed over the scene is rare; the event items of 
 types are the moves and acts the documents report, a tenth of the reported events, and a false
 one that was never legal, or is not able, is rare when the moves are able at most places. The
 sets hold what the world gives, as the law-like sets do (the full default run fills
-`event_object_possible`, `state_role_unchanged`, and the object state sets)."""
+`event_object_possible`, `state_role_unchanged`, and the object state sets). Since stage c5b a
+run of 200 documents may leave `state_object_changed` short too: an object item whose pair
+changed over its scene is one of the rarer kinds, and the documents of the run changed with the
+new topics."""
 """The sets that the default world leaves empty: its ten conditional statements (four since
 stage b3b, six more with the numeric conditions at the cut, WM.35) have no law-like false item,
 because the condition fails for some event of each type."""
@@ -226,7 +239,7 @@ def test_the_layout_of_the_test_sets(runs) -> None:
                 assert list(item.to_json()) == ["input", "meta"]
                 assert list(item.input) == list(INPUT_FIELDS)
                 # a causal item is a class-level proposition; its set is named by its kind
-                expected = CLASS if level in CAUSAL_LEVELS else level
+                expected = CLASS if level in CAUSAL_LEVELS or level == PROFILE_LEVEL else level
                 if level == INSTANCE_COMPARISON:
                     expected = INSTANCE  # an instance-level comparative, in a set of its own
                 elif level == STATE_COMPARISON:
@@ -236,7 +249,7 @@ def test_the_layout_of_the_test_sets(runs) -> None:
     # stage a7a, the possible and blocked role swaps of events fill too) and some of the causal
     # sets, which hold every pair of a true statement and a valid false item, capped at the size
     sizes = {s.name: len(s.pairs) for s in corpus.test_sets}
-    unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS}
+    unfilled = {name for name in ALL_SETS if LAWLIKE in name or name in CAUSAL_SETS + PROFILE_SETS}
     unfilled |= set(UNFILLED_IN_DEFAULT)
     assert all(sizes[name] == size for name in ALL_SETS if name not in unfilled), sizes
     # the default world's conditional statements have no law-like false item: the condition
@@ -246,7 +259,9 @@ def test_the_layout_of_the_test_sets(runs) -> None:
     # a true item is used once in the sets of one level and change, except in the causal sets,
     # where a true statement is paired with every valid false item
     for level, change in {
-        (s.level, s.change) for s in corpus.test_sets if s.level not in CAUSAL_LEVELS
+        (s.level, s.change)
+        for s in corpus.test_sets
+        if s.level not in CAUSAL_LEVELS and s.level != PROFILE_LEVEL
     }:
         used = [
             (true.input["document"], true.proposition)
@@ -297,7 +312,7 @@ def test_a_corpus_without_narratives_has_class_level_sets_only(runs) -> None:
     assert all(
         (count > 0) == name.startswith("class")
         for name, count in sizes.items()
-        if name not in CAUSAL_SETS
+        if name not in CAUSAL_SETS + PROFILE_SETS
     ), sizes
     assert any(sizes[name] > 0 for name in CAUSAL_SETS)
 
@@ -344,6 +359,27 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
             assert corpus.planner.facts.expressible(item.proposition)
         changed = differences(true.proposition, false.proposition)
         a, b = true.proposition, false.proposition
+        if test_set.level == PROFILE_LEVEL:
+            # the profile changes (stage c5b): the same form about another pair fluent, which
+            # lacks the profile, or the other form about the same pair fluent
+            assert a.profile and b.profile
+            if test_set.change == PREDICATE:
+                assert changed == {"subject", "predicate"}
+                assert b.predicate.form == a.predicate.form
+                assert b.predicate.label != a.predicate.label
+                assert b.subject.pair_fluent == b.predicate.label
+                symmetry = corpus.planner.world.pair_fluent_info[b.predicate.label].symmetry
+                assert symmetry != b.predicate.form
+            else:
+                assert test_set.change == FORM and changed == {"predicate"}
+                assert dataclasses.replace(b.predicate, form=a.predicate.form) == a.predicate
+                assert b.predicate.form != a.predicate.form
+            assert false.meta["observed"] == oracle.profile_observed(
+                false.input["logical_form"], list(scenes.values())
+            )
+            assert (test_set.kind == LAWLIKE) == false.meta["observed"]
+            assert true.meta["observed"] is False
+            continue
         if test_set.level in CAUSAL_LEVELS:
             # the causal changes: another fluent, the opposite value, another event type at
             # the same level, or the other role (test_corpus_causal.py checks them further)
@@ -381,7 +417,11 @@ def test_true_items_are_true_and_false_items_differ_by_one_change(cases, runs, n
                 facts = corpus.planner.facts
                 assert b.subject.restriction == a.subject.restriction
                 assert b.subject.clauses == a.subject.clauses
-                assert facts.level[b.subject.category] == facts.level[a.subject.category]
+                # another category of the same tree, of entities or (stage c5b) of places
+                assert facts.level_of(b.subject.category) == facts.level_of(a.subject.category)
+                assert facts.is_place_category(b.subject.category) == facts.is_place_category(
+                    a.subject.category
+                )
             else:
                 # the new subject is another referent of the item's document
                 referents = documents[true.input["document"]]["referents"].values()
@@ -584,7 +624,7 @@ def test_instance_and_event_items_continue_a_document(runs, name) -> None:
     lexicon = corpus.planner.lexicon
     checked = 0
     for test_set, true, false in pairs_of(corpus):
-        if test_set.level == CLASS or test_set.level in CAUSAL_LEVELS:
+        if test_set.level in (CLASS, PROFILE_LEVEL) or test_set.level in CAUSAL_LEVELS:
             assert true.input["document"] is None and false.input["document"] is None
             assert all(label is None for label in true.input["coreference"])
             continue
@@ -631,7 +671,12 @@ def test_an_item_without_a_noun_for_its_referent_is_left_out(cases) -> None:
     )
     planner = Planner(config, case.result)
     sets = build_test_sets(planner, planner.generate())
-    assert all(not s.pairs for s in sets if s.level != CLASS and s.level not in CAUSAL_LEVELS)
+    # the class-level, causal, and profile items name categories of places and generic nouns
+    assert all(
+        not s.pairs
+        for s in sets
+        if s.level != CLASS and s.level not in CAUSAL_LEVELS and s.level != PROFILE_LEVEL
+    )
 
 
 # ---------------------------------------------------------------------------------------------

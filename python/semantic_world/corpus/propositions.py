@@ -1282,6 +1282,12 @@ class Truth:
 
     # Sets of instances -----------------------------------------------------------------------
 
+    def is_place_term(self, term: Any) -> bool:
+        """Whether a term is a category of places (stage c5b, ``WORLD_PHASE_C.md``, "Places in
+        documents"): the subject of a class-level fact about places, or the patient of a
+        relation fact about a place event type."""
+        return isinstance(term, CategoryTerm) and term.category in self.world.place_category
+
     def members(self, term: CategoryTerm) -> np.ndarray:
         """The subject set of a category term: the indices of the instances below its category
         that satisfy its restriction and its relative clauses. A scalar pole in the restriction
@@ -1289,6 +1295,18 @@ class Truth:
         about another category keeps the members related to at least one member of it."""
         if term not in self._members:
             world = self.world
+            if self.is_place_term(term):
+                # a category of places (stage c5b): the indices of the places below it that
+                # satisfy its place feature literals and its place poles; no relative clause
+                below = world.place_below(term.category)
+                keep = np.ones(len(below), dtype=bool)
+                for literal in term.restriction:
+                    if literal.pole:
+                        keep &= self.place_pole_mask(literal.feature, term.category)[0][below]
+                    else:
+                        keep &= world.place_column(literal.feature)[below] == int(literal.positive)
+                self._members[term] = below[keep]
+                return self._members[term]
             below = world.below(term.category)
             keep = np.ones(len(below), dtype=bool)
             for literal in term.restriction:
@@ -1406,8 +1424,10 @@ class Truth:
         return self.world.capacity(label)
 
     def ancestors(self, category: str) -> tuple[str, ...]:
-        """The labels of a category's strict ancestors, from the top."""
-        return self.categories[category].ancestors
+        """The labels of a category's strict ancestors, from the top: of a category of
+        entities, or (stage c5b) of a category of places in the place tree."""
+        info = self.categories.get(category) or self.world.place_category[category]
+        return info.ancestors
 
     def disjoint(self, a: str, b: str) -> bool:
         """Whether two categories share no instance: neither is the other or above it."""
@@ -1427,9 +1447,8 @@ class Truth:
                 for literal in term.restriction
                 if not literal.pole
             )
-            self._fixed[key] = self.world.fixed(
-                term.category, restriction, feature, self.cone_limit
-            )
+            test = self.world.place_fixed if self.is_place_term(term) else self.world.fixed
+            self._fixed[key] = test(term.category, restriction, feature, self.cone_limit)
         return self._fixed[key]
 
     # Evaluation ------------------------------------------------------------------------------
@@ -1465,6 +1484,23 @@ class Truth:
         world = self.world
         if not isinstance(term, CategoryTerm):
             return f"the {what} of a class-level proposition is a category term"
+        if term.category in world.place_category:
+            # a category of places (stage c5b): restricted by place features and place poles,
+            # and never by a relative clause
+            for literal in term.restriction:
+                if literal.pole:
+                    if not world.is_place_pole(literal.feature):
+                        return f"{literal.feature!r} is not a pole of a place scalar"
+                    if not literal.positive:
+                        return "a scalar pole in a restriction is never negated"
+                elif literal.feature not in world.place_feature_kind:
+                    return (
+                        f"{literal.feature!r} is not a place property or part: a category of "
+                        "places is restricted by place features"
+                    )
+            if term.clauses:
+                return "a category of places takes no relative clause"
+            return ""
         if term.category != THING and term.category not in self.categories:
             return f"unknown category {term.category!r}"
         for literal in term.restriction:
@@ -1552,7 +1588,10 @@ class Truth:
             if label not in self.categories and label not in world.place_category:
                 return f"unknown category {label!r}"
         elif kind == PROJECTION:
-            if label not in world.patient_capacities:
+            if (
+                label not in world.patient_capacities
+                and label not in world.place_patient_capacities
+            ):
                 return f"unknown patient capacity {label!r}"
         elif kind == VERB:
             if label not in world.binary:
@@ -1659,6 +1698,10 @@ class Truth:
         if problem:
             return _invalid(problem)
         assert isinstance(subject, CategoryTerm)
+        problem = self._class_sort_problem(subject, predicate)
+        if problem:
+            return _invalid(problem)
+        place = self.is_place_term(subject)
         if kind in COMPARISON_KINDS:
             if quantifier is not None:
                 return _invalid(f"a class-level {kind} has no quantifier")
@@ -1703,22 +1746,33 @@ class Truth:
         grounding: dict[str, Any]
         fixed_value: int | None = None
         fixed_test = EXACT
-        if kind == VERB:
+        if kind in (VERB, PLACE_EVENT):
+            # a relation fact: a two-place event type with a patient category, or (stage c5b)
+            # a place event type with a category of places as its patient, over the bindings
+            # of an entity and a place
             patient = predicate.patient
             problem = self._term_problem(patient, "patient")
             if problem:
                 return _invalid(problem)
             assert isinstance(patient, CategoryTerm)
+            if kind == PLACE_EVENT and patient.category == SOMEPLACE:
+                return _invalid("a relation fact is about a category of places")
             patients = self.members(patient)
-            pairs = len(members) * len(patients) - len(np.intersect1d(members, patients))
+            pairs = len(members) * len(patients)
+            if kind == VERB:
+                pairs -= len(np.intersect1d(members, patients))
             if pairs == 0:
                 return _invalid("there is no pair of distinct instances")
             count = int(self.matrix(predicate.label)[np.ix_(members, patients)].sum())
             total = pairs
             grounding = {"proportion": _number(count / total), "pairs": total, "test": OBSERVED}
         else:
-            if kind == PROJECTION:
+            if kind == PROJECTION and place:
+                column = self.world.place_capacity(predicate.label)[members]
+            elif kind == PROJECTION:
                 column = self.projection(predicate.label)[members]
+            elif place:
+                column = self.world.place_column(predicate.label)[members]
             else:
                 column = self.world.column(predicate.label)[members]
             count, total = int(column.sum()), len(members)
@@ -1761,16 +1815,21 @@ class Truth:
             return _invalid("the generic noun has no comparison class")
         comparison = predicate.comparison
         assert comparison is not None and predicate.operator is not None
-        if comparison != ENTITY and comparison not in self.ancestors(category):
+        place = self.is_place_term(subject)
+        top = EVERYPLACE if place else ENTITY
+        if comparison != top and comparison not in self.ancestors(category):
             return _invalid(
-                f"the comparison class of {category} is one of its ancestors, or ENTITY, not "
+                f"the comparison class of {category} is one of its ancestors, or {top}, not "
                 f"{comparison!r}"
             )
         scalar = pole_dimension(predicate.label)
         has_pole = self.compare(predicate.operator, scalar, Mean(category), standard=comparison)
         _, mean, sd = self.comparison_class(comparison, scalar)
+        column = (
+            self.world.place_scalar_column(scalar) if place else self.world.scalar_column(scalar)
+        )
         grounding = {
-            "value": _number(self.world.scalar_column(scalar)[members].mean()),
+            "value": _number(column[members].mean()),
             "comparison": comparison,
             "mean": _number(mean),
             "sd": _number(sd),
@@ -1802,7 +1861,10 @@ class Truth:
         others = self.members(patient)
         scalar = predicate.label
         true = self.compare(GREATER, scalar, Mean(subject.category), Mean(patient.category))
-        column = self.world.scalar_column(scalar)
+        if self.is_place_term(subject):
+            column = self.world.place_scalar_column(scalar)
+        else:
+            column = self.world.scalar_column(scalar)
         grounding = {
             "value": _number(column[members].mean()),
             "other": _number(column[others].mean()),
@@ -1827,7 +1889,10 @@ class Truth:
         above = category in self.ancestors(subject.category)
         apart = self.disjoint(subject.category, category)
         true = apart if quantifier in (NO, NEC_NO) else above
-        share = np.isin(members, self.world.below(category)).mean()
+        if self.is_place_term(subject):
+            share = np.isin(members, self.world.place_below(category)).mean()
+        else:
+            share = np.isin(members, self.world.below(category)).mean()
         grounding = {"proportion": _number(share), "instances": len(members), "test": TREE}
         felicitous = true and self.statable(
             Proposition(CLASS, subject, Predicate(MEMBER, category), polarity, quantifier)
@@ -1922,7 +1987,39 @@ class Truth:
             return world.is_place_pole(label)
         if predicate.kind == COMPARATIVE:
             return label in world.place_scalars
+        if predicate.kind == PROJECTION:
+            return label in world.place_patient_capacities
         return False
+
+    def _class_sort_problem(self, subject: CategoryTerm, predicate: Predicate) -> str:
+        """Why a class-level predicate cannot be said of its subject's kind of thing (stage
+        c5b), or an empty string. A category of places takes place properties and parts, place
+        patient capacities, place poles, comparatives on a place scalar with a category of
+        places, and membership in a category of places; a category of entities takes none of
+        them. The agent of an event type is a category of entities, the patient of a two-place
+        event type too, and the patient of a place event type a category of places."""
+        place = self.is_place_term(subject)
+        kind, label = predicate.kind, predicate.label
+        if kind in (CAN, VERB, PLACE_EVENT):
+            if place:
+                return f"a category of places is never the agent of {label}: a place does nothing"
+            if kind == CAN:
+                return ""
+            patient_is_place = self.is_place_term(predicate.patient)
+            if kind == PLACE_EVENT and not patient_is_place:
+                return f"the patient of the place event type {label} is a category of places"
+            if kind == VERB and patient_is_place:
+                return f"the patient of {label} is a category of entities, not of places"
+            return ""
+        if place != self._about_a_place(predicate):
+            said_of, subject_is = ("a place", "entities") if not place else ("an entity", "places")
+            return (
+                f"{label} is said of {said_of}, and {subject.category} is a category of "
+                f"{subject_is}"
+            )
+        if kind == COMPARATIVE and place != self.is_place_term(predicate.patient):
+            return "a comparative compares two categories of entities, or two of places"
+        return ""
 
     def _evaluate_place(self, proposition: Proposition) -> Evaluation:
         """An instance-level proposition about a place (stage c4c, Jon's ruling 3 of WM.73): a
@@ -2222,8 +2319,57 @@ class Truth:
                     if not self.recorded_direction(scene, event, entity, predicate):
                         return False
                     continue
+                if predicate.pair_literal:
+                    # a pair literal (stage c5b): the pair, SAME, or SOME of the participant
+                    # in the statement's role, from the replayed pairs
+                    other = event.patient if subject.role == AGENT else event.agent
+                    held = self.pair_literal_held(
+                        scene, event.step + offset, predicate.label, entity, other
+                    )
+                    if held != predicate.value:
+                        return False
+                    continue
                 value = self.fluent_value(scene, event.step + offset, entity, predicate.label)
                 if value != predicate.value:
+                    return False
+        return seen
+
+    def pair_literal_held(
+        self, scene: str, time: int, label: str, first: str, second: str | None
+    ) -> bool:
+        """Whether a causal statement's pair literal held at ``TIME.<time>`` of a scene (stage
+        c5b), from the replayed pairs: ``PAIRFL.k`` or ``SAME.PAIRFL.k`` between the
+        participant in the statement's role and the other participant (an entity, or the place
+        of a place event), or ``SOME.PAIRFL.k`` of the participant, true when its row holds a
+        pair."""
+        if is_some_label(label):
+            fluent = pair_fluent_of_label(label)
+            matrix = self.states_of(scene)[time - 1].pairs[self.world.definition.pair_index(fluent)]
+            return bool(matrix[self.instance_index[first]].any())
+        if second is None:
+            return False
+        return self.pair_holds_at(scene, time, label, first, second)
+
+    def profile_observed(self, proposition: Proposition, scenes: list[str] | None = None) -> bool:
+        """Whether a profile statement held of every pair at every time point of the known
+        scenes (or of ``scenes``), and at least one time point held a pair of its pair fluent
+        (stage c5b, ``WORLD_PHASE_C.md``, "Test sets"): for each pair ``(y, x)``, the pair
+        ``(x, y)`` held too (the symmetric form) or did not (the asymmetric form). A false
+        profile statement that is observed is law-like: no scene contradicts it."""
+        predicate = proposition.predicate
+        k = self.world.definition.pair_index(predicate.label)
+        symmetric = predicate.form == SYMMETRIC
+        seen = False
+        for scene in self.scenes if scenes is None else scenes:
+            for state in self.states_of(scene):
+                matrix = state.pairs[k]
+                if not matrix.any():
+                    continue
+                seen = True
+                mutual = matrix & matrix.T
+                if symmetric and not np.array_equal(mutual, matrix):
+                    return False
+                if not symmetric and mutual.any():
                     return False
         return seen
 

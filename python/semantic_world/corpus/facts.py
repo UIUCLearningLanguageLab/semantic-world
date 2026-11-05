@@ -61,12 +61,20 @@ effects that make no statement, and why.
 causal statements gain the entries with pair literals: an effect that adds or deletes a pair of
 a pair fluent with a preposition, and a precondition literal that requires a pair, its absence,
 ``SAME``, or ``SOME`` of a role, compiled literals included; each is about the role of the
-literal's first argument, and on a symmetric pair fluent, and for ``SAME``, about either role.
+literal's first argument, and on a symmetric pair fluent, and for ``SAME``, about the agent
+alone (no mirror statement, Jon's ruling 4 of WM.75, stage c5b).
 The place event types with a verb join the event types of the causal statements, about their
 agent. A ``SOMEOF`` literal makes no statement (WM.55), and neither does a conditional effect
 whose condition holds a pair literal, in either form (WM.59). The profile statements
 (:meth:`Facts.profile_statements`) state the symmetry of each symmetric or asymmetric pair
-fluent between entities that has a preposition.
+fluent between entities that has a preposition and can ever hold (ruling 2 of WM.75).
+
+**Places at the class level** (stage c5b, "Places in documents"). A category of places is a
+category term: its predicates are the place properties and parts, the place patient
+capacities, the place poles against its parent in the place tree or ``EVERYPLACE``, and
+membership in a category of places; it is compared with its siblings on the place scalars, and
+it is the patient of the capacity facts about the place event types with a verb ("owls can go
+to deserts"), whose agent is a category of entities.
 """
 
 from __future__ import annotations
@@ -81,6 +89,7 @@ from semantic_world.corpus.grammar import realizable_condition
 from semantic_world.corpus.histories import SceneEvent
 from semantic_world.corpus.lexicon import Lexicon, world_concepts
 from semantic_world.corpus.propositions import (
+    AGENT,
     ALL,
     CAN,
     CAUSAL_KINDS,
@@ -120,9 +129,13 @@ from semantic_world.corpus.propositions import (
     Proposition,
     Truth,
     effect_states,
+    is_pair_literal_label,
+    is_same_label,
+    is_some_label,
+    pair_fluent_of_label,
     pole_dimension,
 )
-from semantic_world.corpus.world import ENTITY, PROPERTY_PREFIX, THING, World
+from semantic_world.corpus.world import ENTITY, EVERYPLACE, PROPERTY_PREFIX, THING, World
 from semantic_world.world.runtime import RANGE
 
 SKIP_THRESHOLD = "threshold"
@@ -247,6 +260,24 @@ class Facts:
         (``pair_entries``)."""
         self._partners: dict[str, tuple[str, ...]] = {}
 
+    # Categories of entities and of places (stage c5b) -------------------------------------------
+
+    def is_place_category(self, category: str) -> bool:
+        """Whether a label is a category of places: a topic of category documents and the
+        subject of class-level facts since stage c5b."""
+        return category in self.world.place_category
+
+    def categories_like(self, category: str) -> tuple[str, ...]:
+        """The named categories of the tree a category belongs to: the categories of places for
+        a category of places, the categories of entities otherwise."""
+        return self.place_categories if self.is_place_category(category) else self.categories
+
+    def level_of(self, category: str) -> int:
+        """A category's level in its own tree."""
+        if self.is_place_category(category):
+            return self.place_level[category]
+        return self.level[category]
+
     def expressible(self, proposition: Proposition) -> bool:
         """Whether every concept the proposition needs has a word."""
         return all(label in self.named for label in proposition.concepts())
@@ -260,6 +291,26 @@ class Facts:
         capacities, patient capacities, scalar poles, membership in a category at the same level
         or above, and a two-place event type with a patient category (every named category, or
         ``patients``)."""
+        if self.is_place_category(category):
+            # a category of places (stage c5b, ``WORLD_PHASE_C.md``, "Places in documents"):
+            # its place properties and parts, the place patient capacities, the place poles
+            # against its comparison class, and membership in a category of places at the same
+            # level or above; a place is the agent of no event type
+            predicates = [
+                Predicate(kind, f) for kind in (IS, HAS) for f in self.place_features[kind]
+            ]
+            predicates += [Predicate(PROJECTION, p) for p in self.place_projections]
+            comparison = self.comparison_class(category)
+            predicates += [
+                Predicate(COMPARISON, p, comparison=comparison) for p in self.place_poles
+            ]
+            level = self.place_level[category]
+            predicates += [
+                Predicate(MEMBER, c)
+                for c in self.place_categories
+                if c != category and self.place_level[c] <= level
+            ]
+            return predicates
         predicates = [Predicate(kind, f) for kind in (IS, HAS, CAN) for f in self.features[kind]]
         predicates += [Predicate(PROJECTION, p) for p in self.projections]
         if category != THING:
@@ -441,6 +492,23 @@ class Facts:
             members = truth.members(term)
             stated = {literal.feature for literal in term.restriction}
             options: list[Literal] = []
+            if self.is_place_category(term.category):
+                # a category of places (stage c5b): its place properties and parts, positive
+                # and negative, and its place poles, that some of its places satisfy and not all
+                for feature in self.place_features[IS] + self.place_features[HAS]:
+                    if feature in stated:
+                        continue
+                    count = int(world.place_column(feature)[members].sum())
+                    if 0 < count < len(members):
+                        options += [Literal(feature), Literal(feature, False)]
+                for pole in self.place_poles:
+                    if pole in stated:
+                        continue
+                    mask = truth.place_pole_mask(pole, term.category)[0]
+                    if 0 < int(mask[members].sum()) < len(members):
+                        options.append(Literal(pole))
+                self._restrictions[term] = tuple(options)
+                return self._restrictions[term]
             for feature in self.features[IS] + self.features[HAS]:
                 if feature in stated:
                     continue
@@ -511,6 +579,8 @@ class Facts:
         settings = self.config.mention.relative_clauses
         if term.clauses or depth > settings.max_depth:
             return None
+        if self.is_place_category(term.category):
+            return None  # a category of places takes no relative clause (stage c5b)
         negated = any(
             not x.positive and x.feature.startswith(PROPERTY_PREFIX) for x in term.restriction
         )
@@ -549,8 +619,12 @@ class Facts:
         """The comparison class of a class-level pole of a category (CG.3): the ancestor
         ``scalar_adjectives.class_levels_up`` levels above it, or ``ENTITY`` when the tree runs
         out (a top-level category, at the default of 1)."""
-        path = self.world.category[category].path
         up = self.config.class_levels_up
+        if self.is_place_category(category):
+            # a category of places (stage c5b): its ancestor in the place tree, or EVERYPLACE
+            path = self.world.place_category[category].path
+            return path[-1 - up] if len(path) > up else EVERYPLACE
+        path = self.world.category[category].path
         return path[-1 - up] if len(path) > up else ENTITY
 
     def comparison_fact(self, a: str, b: str, dimension: str) -> Proposition | None:
@@ -616,6 +690,17 @@ class Facts:
         relatedness of their leaves to the topic's leaves, ties in tree order), or both
         (``both``, the pool of stage b3a). Empty when no other category of the level has a
         word."""
+        if topic not in self._partners and self.is_place_category(topic):
+            # a category of places (stage c5b) is compared with its siblings with a word,
+            # whatever the setting: thematic relatedness is a relation between entity leaves
+            parent = self.world.place_category[topic].parent
+            self._partners[topic] = tuple(
+                c
+                for c in self.place_categories
+                if c != topic
+                and parent is not None
+                and self.world.place_category[c].parent == parent
+            )
         if topic not in self._partners:
             world = self.world
             info = world.category[topic]
@@ -736,14 +821,20 @@ class Facts:
         return self.event_type_labels + self.place_verbs
 
     def causal_statements(
-        self, event_type: str | None = None, fluent: str | None = None, kind: str | None = None
+        self,
+        event_type: str | None = None,
+        fluent: str | None = None,
+        kind: str | None = None,
+        pair_fluent: str | None = None,
     ) -> tuple[Proposition, ...]:
         """Every true causal statement that the language can state, or those about an event
         type (or category), about a fluent, or of one kind (``effect`` or ``precondition``):
         for each event type with a word, each role, each base fluent with a word, and each
         value, the effect statement and the precondition statement that the definition makes
         true; then the numeric effect statements; then (stage c5a) the statements with pair
-        literals."""
+        literals. ``pair_fluent`` gives the statements about a pair fluent (stage c5b): those
+        whose literal is a pair of it, ``SAME`` on it, or ``SOME`` of it, the content of a
+        document about the pair fluent."""
         if self._causal is None:
             self._causal = self._build_causal_statements()
         return tuple(
@@ -752,6 +843,13 @@ class Facts:
             if (event_type is None or p.subject.event_type == event_type)
             and (fluent is None or p.predicate.label == fluent)
             and (kind is None or p.predicate.kind == kind)
+            and (
+                pair_fluent is None
+                or (
+                    p.predicate.pair_literal
+                    and pair_fluent_of_label(p.predicate.label) == pair_fluent
+                )
+            )
         )
 
     def _conditions(
@@ -813,6 +911,8 @@ class Facts:
                 for kind, fluent, value, direction in self._causal_entries(
                     len(truth.roles_of(label))
                 ):
+                    if self.mirror(role, fluent):
+                        continue  # the statement about the agent says it (WM.75)
                     if kind == PRECONDITION:
                         conditions: list[tuple[Condition, ...]] = [()]
                     else:
@@ -840,6 +940,22 @@ class Facts:
         self.causal_report = self._conditional_report(statements)
         self.causal_report["pair_entries"] = self._pair_entry_report(statements)
         return tuple(statements)
+
+    def mirror(self, role: str, label: str) -> bool:
+        """Whether the causal statement about a role's pair literal is a mirror statement
+        (Jon's ruling 4 of WM.75, stage c5b): a pair on a symmetric pair fluent, or ``SAME``,
+        said about the patient. The symmetric meaning already carries it, so the statement is
+        made in one direction only, with the agent as its subject; the mirror stays true by the
+        truth test, and is not enumerated or stated."""
+        if role == AGENT or not is_pair_literal_label(label) or is_some_label(label):
+            return False
+        return is_same_label(label) or pair_fluent_of_label(label) in self.truth.symmetric_pairs
+
+    def _stated_role(self, role: str, label: str) -> str:
+        """The role that the statement of a pair entry is about: the entry's first argument,
+        or the agent for a symmetric pair or ``SAME``, whose one statement is about the agent
+        (WM.75)."""
+        return AGENT if self.mirror(role, label) else role
 
     def _event_types_with_events(self) -> tuple[str, ...]:
         """The event types that have events: the two-place leaves, the one-place event types,
@@ -921,11 +1037,12 @@ class Facts:
                 if literal.kind not in prefix:
                     reasons["someof"] += 1
                     continue
+                name = f"{prefix[literal.kind]}{literal.pair_fluent}"
                 key = (
                     label,
-                    literal.first,
+                    self._stated_role(literal.first, name),
                     PRECONDITION,
-                    f"{prefix[literal.kind]}{literal.pair_fluent}",
+                    name,
                     bool(literal.value),
                     (),
                 )
@@ -947,7 +1064,14 @@ class Facts:
                 if not realizable_condition(EventTerm(label, effect.role, condition)):
                     reasons["patient_relative"] += 1
                     continue
-                key = (label, effect.role, EFFECT, effect.fluent, bool(effect.value), condition)
+                key = (
+                    label,
+                    self._stated_role(effect.role, effect.fluent),
+                    EFFECT,
+                    effect.fluent,
+                    bool(effect.value),
+                    condition,
+                )
                 if key in stated:
                     made += 1
                 else:
@@ -973,6 +1097,10 @@ class Facts:
             for fluent in self.entity_pair_prepositions:
                 symmetry = self.world.pair_fluent_info[fluent].symmetry
                 if symmetry not in PROFILE_FORMS:
+                    continue
+                if not self.truth.can_hold(fluent):
+                    # a pair fluent that can never hold makes its statement true of no pair:
+                    # it teaches nothing, and is left out (Jon's ruling 2 of WM.75)
                     continue
                 candidate = Proposition(
                     CLASS,

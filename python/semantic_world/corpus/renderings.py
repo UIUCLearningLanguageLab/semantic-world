@@ -1156,7 +1156,9 @@ def proposition_of(formula: Formula, referents: Mapping[str, str] | None = None)
         subject_variable = atom.arguments[0]
         kind = _kind(atom.label)
         patient = None
-        if kind == VERB:
+        if kind in (VERB, PLACE_EVENT):
+            # a relation fact: a two-place event type, or (stage c5b) a place event type with
+            # a category of places as its patient
             variable = atom.arguments[1]
             patient = _read_term(
                 variable, tuple(p for p in main.restrictor if _mentions(p, variable))

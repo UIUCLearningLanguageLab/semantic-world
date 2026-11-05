@@ -46,6 +46,7 @@ from semantic_world.corpus.planner import (
     MEMBERSHIP,
     PLACE_COMPARATIVE,
     PLACE_DESCRIPTION,
+    PROFILE_SECTION,
     RARER,
     RELATION,
     RESULT,
@@ -621,7 +622,9 @@ def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> N
             if sentence.section == MEMBERSHIP:
                 assert kind == MEMBER
             elif sentence.section == RELATION:
-                assert kind == VERB
+                # a two-place event type, or (stage c5b) a place event type with a category of
+                # places as its patient
+                assert kind in (VERB, PLACE_EVENT)
             elif sentence.section == RULE:
                 assert proposition.rule is not None and proposition.subject.category == "THING"
             elif sentence.section == CONTRAST:
@@ -638,7 +641,11 @@ def test_with_shuffle_0_encyclopedic_documents_follow_the_template(corpora) -> N
                 if proposition.quantifier == SOME:
                     assert sentence.section == RARER
     assert checked > 100
-    assert set(sections) == {*TEMPLATE, CONTRAST}
+    # every section of the template but the profile statement's (stage c5b), which only a
+    # document about a pair fluent with a profile holds (the default world has one such pair
+    # fluent among its 153 feature topics); test_corpus_class_places.py checks that it comes
+    # first in its document
+    assert set(sections) | {PROFILE_SECTION} == {*TEMPLATE, CONTRAST}
 
 
 @pytest.mark.slow
@@ -707,6 +714,10 @@ def test_category_documents(corpora) -> None:
         if document.type != "encyclopedic_category":
             continue
         topic = document.topic
+        if facts.is_place_category(topic):
+            # a document about a category of places (stage c5b) is checked in
+            # test_corpus_class_places.py; this test keeps its subject, the categories of entities
+            continue
         topics[facts.level[topic]] += 1
         children = list(planner.world.category[topic].children)
         stated = set()
@@ -764,6 +775,17 @@ def test_feature_documents(corpora) -> None:
         if document.type != "encyclopedic_feature":
             continue
         topic = document.topic
+        if topic not in planner.world.feature_kind and not (
+            topic in facts.verbs or topic in facts.base_fluents or topic in facts.numeric_fluents
+        ):
+            # a place property or part, a place event type, or a pair fluent (stage c5b): its
+            # document is checked in test_corpus_class_places.py
+            assert (
+                topic in facts.place_features[IS] + facts.place_features[HAS]
+                or topic in facts.place_verbs
+                or topic in facts.pair_prepositions
+            )
+            continue
         if topic in facts.verbs:
             kind = VERB
         elif topic in facts.base_fluents or topic in facts.numeric_fluents:
@@ -1006,8 +1028,12 @@ def test_sibling_contrasts(corpora) -> None:
             assert first.predicate.patient == second.predicate.patient
         assert ours == CategoryTerm(document.topic) and theirs != ours
         assert theirs.restriction == () and theirs.clauses == ()
-        category = planner.world.category
+        # siblings in their own tree: of entities, or (stage c5b) of places
+        category = {**planner.world.category, **planner.world.place_category}
         assert category[ours.category].parent == category[theirs.category].parent
+        assert planner.facts.is_place_category(ours.category) == planner.facts.is_place_category(
+            theirs.category
+        )
         # both are strong facts: a universal, most, or a scalar pole
         for proposition in (first, second):
             strong = planner.facts.class_fact(
@@ -1552,7 +1578,12 @@ def test_a_world_without_verbs_and_scalars(world_files) -> None:
     assert sections[RELATION] == 0 and sections[EVENT_SECTION] > 50
     for document, sentence in sentences_of(documents):
         proposition = sentence.proposition
-        assert proposition.predicate.kind not in (VERB, COMPARISON)
+        # no two-place event type between entities, and no pole of an entity scalar; since
+        # stage c5b a document about a category of places can state a place pole, because the
+        # world's places keep their scalars
+        assert proposition.predicate.kind != VERB
+        if proposition.predicate.kind == COMPARISON:
+            assert planner.world.is_place_pole(proposition.predicate.label)
         assert planner.truth.is_true(proposition)
         parsed = parse_propositional(sentence.propositional)
         assert proposition_of(parsed, document.referents) == proposition

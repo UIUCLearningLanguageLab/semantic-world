@@ -704,7 +704,13 @@ class Mentions:
         self._current: list[str] = []
         self.skipped_comparisons: list[str] = []
         """The comparisons the document's planner did not make because nothing told their two
-        mentions apart (Jon's ruling WM.74), by kind: ``participants`` or ``places``."""
+        mentions apart (Jon's ruling WM.74), by kind: ``participants`` or ``places``. Since
+        stage c5b a comparison is skipped only when no dimension of its pair allows it (Jon's
+        ruling 3 of WM.75)."""
+        self.other_scalar_comparisons: list[str] = []
+        """The comparisons the document's planner made on another dimension than the one first
+        drawn, because nothing told the two mentions apart on the first (Jon's ruling 3 of
+        WM.75, stage c5b), by kind."""
 
     def label(self, instance: str) -> str:
         return self.referents[instance]

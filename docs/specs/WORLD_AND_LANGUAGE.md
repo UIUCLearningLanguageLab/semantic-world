@@ -13,7 +13,7 @@ The refactor is built in four phases. Each phase ends with a working corpus:
 - **(c)** pair fluents (the stored fluent relations of the first design), their profiles, and locations;
 - **(d)** sorts, derived relations, and parts.
 
-Phases (a) and (b) are specified in full. Phase (c) is specified in full in a file of its own, `docs/specs/WORLD_PHASE_C.md` (October 16, 2026). Phase (d) is specified as a design with open questions, and gets its detailed sections, reviewed by Jon, before its build starts.
+Phases (a) and (b) are specified in full. Phase (c) is specified in full in a file of its own, `docs/specs/WORLD_PHASE_C.md` (October 16, 2026), and is built (November 4, 2026). Phase (d) is specified as a design with open questions, and gets its detailed sections, reviewed by Jon, before its build starts.
 
 Every taxonomy run, world run, and corpus is regenerated. No output of the refactor needs to match an output made before the refactor.
 
@@ -726,7 +726,7 @@ An effect can hold only under a condition, as a blow breaks a thing only if the 
 
 ## Phase (c): pair fluents, their profiles, and locations
 
-Phase (c) is specified in `docs/specs/WORLD_PHASE_C.md`, which replaces the design that stood here. Jon settled the design's five questions, and further questions and points of review, on October 15 and 16, 2026; `docs/DECISIONS.md` logs them as WM.36 to WM.59. The main changes from the design: a stored relation is a pair fluent, `PAIRFL.<n>`, because "relation" already names a two-place event type's requirement (WM.43); constraints between pair fluents move to phase (d), and phase (c) adds the literal `SAME` instead (WM.36); places come from a second run of the taxonomy generator, with labels of their own (WM.40); profiles are compiled into precondition literals (WM.46); and initial places follow the entities' capacities at places, so habitats emerge (WM.39).
+**Status: phase (c) is built** (stages c1 to c5b, October 16 to November 4, 2026). Phase (c) is specified in `docs/specs/WORLD_PHASE_C.md`, which replaces the design that stood here, and whose as-built notes record the build. Jon settled the design's five questions, and further questions and points of review, on October 15 and 16, 2026; `docs/DECISIONS.md` logs them as WM.36 to WM.59. The main changes from the design: a stored relation is a pair fluent, `PAIRFL.<n>`, because "relation" already names a two-place event type's requirement (WM.43); constraints between pair fluents move to phase (d), and phase (c) adds the literal `SAME` instead (WM.36); places come from a second run of the taxonomy generator, with labels of their own (WM.40); profiles are compiled into precondition literals (WM.46); and initial places follow the entities' capacities at places, so habitats emerge (WM.39).
 
 ## Phase (d): sorts, derived relations, and parts (design)
 

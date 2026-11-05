@@ -1,5 +1,5 @@
-# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 58 content
-# lexemes (44 before stage c4b, which added the prepositions and the places' words, and 57 before stage c5a, which added the generic noun for places), 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
+# The word forms of the tiny corpus (data/corpus/tiny.yaml): 60 content words for its 60 content
+# lexemes (44 before stage c4b, which added the prepositions and the places' words, 57 before stage c5a, which added the generic noun for places, and 58 before stage c5b, which added the prepositions of the two pair fluents that no literal reads as a pair, WM.75). The count stays at 60, with no word to spare: a larger count changes the words the earlier lexemes get (with 64, 57 of the 58 earlier content lexemes get another word), and with 60 every earlier lexeme keeps its word. 3 speakers per engine, 1 token per speaker, and fixed embeddings only. Generate the
 # corpus first, so that its request exists:
 #
 #   python -m semantic_world.corpus generate data/corpus/tiny.yaml

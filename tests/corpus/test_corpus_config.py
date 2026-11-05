@@ -159,6 +159,7 @@ def test_default_values() -> None:
         "role",
         "condition",
         "object",
+        "form",  # stage c5b: the other form of a profile statement
     )
     assert config.test_sets.seen_descriptions is True
     assert config.documents.place_description_rate == 0.1  # stage c4c, Jon's ruling 3 of WM.73

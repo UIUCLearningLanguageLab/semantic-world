@@ -43,7 +43,7 @@ from semantic_world.corpus.grammar import (
     them,
 )
 from semantic_world.corpus.interpret import interpret
-from semantic_world.corpus.lexicon import FUNCTION_WORDS, GENERIC, NOUN, THEM_WORD
+from semantic_world.corpus.lexicon import FUNCTION_WORDS, GENERIC, NOUN, PREPOSITION, THEM_WORD
 from semantic_world.corpus.logical import logical_form, with_cut
 from semantic_world.corpus.mentions import Mentions, plan_for
 from semantic_world.corpus.planner import (
@@ -52,6 +52,7 @@ from semantic_world.corpus.planner import (
     PARTICIPANTS,
     PLACE_COMPARATIVE,
     PLACES,
+    PROFILE_SECTION,
 )
 from semantic_world.corpus.propositions import (
     AGENT,
@@ -73,6 +74,7 @@ from semantic_world.corpus.propositions import (
     is_pair_label,
     is_same_label,
     is_some_label,
+    pair_fluent_of_label,
     pole_dimension,
 )
 from semantic_world.corpus.readings import readings
@@ -159,9 +161,10 @@ def form_of(case: Case, proposition: Proposition, **sections) -> dict:
 
 def test_them_and_someplace_are_the_new_words(runs, tmp_path) -> None:
     """``them`` is a base function word, appended last, and ``SOMEPLACE`` the generic head
-    noun for places: a content noun, the last content lexeme of a world with places, so that
-    every earlier content lexeme keeps its label. A world without places has no ``SOMEPLACE``.
-    The word-form request lists both."""
+    noun for places: a content noun, the last content lexeme of stage c5a, so that every
+    earlier content lexeme keeps its label; since stage c5b (WM.75) only the prepositions of
+    the pair fluents that no literal reads as a pair follow it. A world without places has no
+    ``SOMEPLACE``. The word-form request lists both."""
     assert FUNCTION_WORDS[-1] == THEM_WORD
     corpus = runs("tiny")
     lexicon = corpus.planner.lexicon
@@ -170,13 +173,25 @@ def test_them_and_someplace_are_the_new_words(runs, tmp_path) -> None:
     glosses_in_order = [x.gloss for x in lexicon.function_lexemes]
     assert glosses_in_order[: len(FUNCTION_WORDS)] == list(FUNCTION_WORDS)
     assert [c.label for c in lexicon.of_type(GENERIC)] == ["THING", "SOMEPLACE"]
-    last = lexicon.content_lexemes[-1]
-    assert last.concept == "SOMEPLACE" and last.pos == NOUN and last.content
-    assert last.label == f"LEXEME.{len(lexicon.content_lexemes)}"
+    content = lexicon.content_lexemes
+    position = next(i for i, x in enumerate(content) if x.concept == "SOMEPLACE")
+    last = content[position]
+    assert last.pos == NOUN and last.content
+    assert last.label == f"LEXEME.{position + 1}"
     assert lexicon.is_named("SOMEPLACE")
+    # after it come the prepositions of WM.75 alone, in label order
+    world = corpus.planner.world
+    read = world.pair_fluents_read()
+    later = [x.concept for x in content[position + 1 :]]
+    assert later == [f for f in world.pair_fluents_used() if f not in read]
+    assert all(x.pos == PREPOSITION for x in content[position + 1 :])
     request = wordform_request(corpus)
     assert THEM_WORD in request["function_words"]
-    assert request["lexemes"][-1] == {"label": last.label, "concept": "SOMEPLACE", "pos": NOUN}
+    assert request["lexemes"][position] == {
+        "label": last.label,
+        "concept": "SOMEPLACE",
+        "pos": NOUN,
+    }
     # a world without places has no generic noun for them, and every language has the pronoun
     text = (REPO / "data/world/tiny.yaml").read_text(encoding="utf-8")
     lines = [
@@ -199,10 +214,11 @@ def test_them_and_someplace_are_the_new_words(runs, tmp_path) -> None:
 
 
 def _record_pair_entries(record: dict, leaf: str) -> set[tuple]:
-    """The pair entries of one event type of ``definition.json`` that a statement can state,
-    as ``(kind, role, label, value)``: an unconditional pair effect and a pair literal about
-    the role of the first argument, and on a symmetric pair fluent about either role; ``SAME``
-    about either role; ``SOME`` about its role. ``SOMEOF``, and an effect under a condition,
+    """The pair entries of one event type of ``definition.json`` that a statement states, as
+    ``(kind, role, label, value)``: an unconditional pair effect and a pair literal about the
+    role of the first argument; on a symmetric pair fluent, and for ``SAME``, about the agent
+    alone, in whichever direction the definition writes the entry (Jon's ruling 4 of WM.75: no
+    mirror statements); ``SOME`` about its role. ``SOMEOF``, and an effect under a condition,
     give none here (the conditional statements are judged by the oracle alone)."""
     symmetric = {s["label"] for s in record["symbols"] if s.get("symmetry") == "symmetric"}
     entry = next(e for e in record["event_types"] if e["label"] == leaf)
@@ -211,19 +227,16 @@ def _record_pair_entries(record: dict, leaf: str) -> set[tuple]:
         if effect.get("kind") != "pair" or effect.get("condition"):
             continue
         fluent = effect["pair_fluent"]
-        roles = [effect["first"]] + ([effect["second"]] if fluent in symmetric else [])
-        found |= {(EFFECT, role, fluent, bool(effect["value"])) for role in roles}
+        role = AGENT if fluent in symmetric else effect["first"]
+        found.add((EFFECT, role, fluent, bool(effect["value"])))
     for literal in entry["precondition"]["literals"]:
         kind, value = literal.get("kind"), bool(literal.get("value"))
         if kind == "pair":
             fluent = literal["pair_fluent"]
-            roles = [literal["first"]] + ([literal["second"]] if fluent in symmetric else [])
-            found |= {(PRECONDITION, role, fluent, value) for role in roles}
+            role = AGENT if fluent in symmetric else literal["first"]
+            found.add((PRECONDITION, role, fluent, value))
         elif kind == "pair_same":
-            label = f"SAME.{literal['pair_fluent']}"
-            found |= {
-                (PRECONDITION, role, label, value) for role in (literal["first"], literal["second"])
-            }
+            found.add((PRECONDITION, AGENT, f"SAME.{literal['pair_fluent']}", value))
         elif kind == "pair_some":
             found.add((PRECONDITION, literal["role"], f"SOME.{literal['pair_fluent']}", value))
     return found
@@ -308,21 +321,49 @@ def test_statements_with_pair_literals_are_the_definitions_entries(worlds, name)
 @pytest.mark.parametrize("name", EVERY_WORLD)
 def test_profile_statements_are_the_symmetries_of_the_definition(worlds, name) -> None:
     """A profile statement is made for each symmetric or asymmetric pair fluent between
-    entities with a preposition, and for no other: its form is the symbol's symmetry in
-    ``definition.json``, it is true by the truth test and by the oracle, and the other form is
-    false by both. A general pair fluent, a location fluent, and a functional or total profile
-    make no statement."""
+    entities with a preposition that can ever hold, and for no other: its form is the symbol's
+    symmetry in ``definition.json``, it is true by the truth test and by the oracle, and the
+    other form is false by both. A general pair fluent, a location fluent, and a functional or
+    total profile make no statement, and neither does a pair fluent that can never hold (Jon's
+    ruling 2 of WM.75): one with an initial rate of 0 that no effect of the world adds."""
     case = worlds(name)
     facts, oracle = case.facts(), case.oracle()
     record = json.loads((case.folder / "definition.json").read_text(encoding="utf-8"))
     symbols = {s["label"]: s for s in record["symbols"] if s["kind"] == "pair_fluent"}
+    added = {
+        effect["pair_fluent"]
+        for entry in record["event_types"]
+        for effect in entry["effects"]
+        if effect.get("kind") == "pair" and effect["value"]
+    }
+    holds = {label for label, symbol in symbols.items() if symbol["initial_rate"] or label in added}
     expected = {
         (label, symbol["symmetry"])
         for label, symbol in symbols.items()
         if symbol["symmetry"] in (SYMMETRIC, ASYMMETRIC)
         and not symbol.get("total")
         and label in facts.named
+        and label in holds
     }
+    # the statement left out is still true by the truth test, with can_hold false
+    for label, symbol in symbols.items():
+        if (
+            label in holds
+            or symbol.get("total")
+            or symbol["symmetry"] not in (SYMMETRIC, ASYMMETRIC)
+        ):
+            continue
+        vacuous = Proposition(
+            CLASS,
+            PairTerm(label),
+            Predicate(PROFILE, label, form=symbol["symmetry"]),
+            True,
+            NEC_ALL,
+        )
+        evaluation = facts.truth.evaluate(vacuous)
+        assert evaluation.valid and evaluation.true
+        assert evaluation.grounding["can_hold"] is False
+        assert all(p.predicate.label != label for p in facts.profile_statements())
     statements = facts.profile_statements()
     assert {(p.predicate.label, p.predicate.form) for p in statements} == expected
     for statement in statements:
@@ -426,8 +467,10 @@ def test_profile_statements_hold_in_the_replayed_scenes(worlds, name) -> None:
     for document in corpus.documents:
         for sentence in document.sentences:
             proposition = sentence.proposition
-            assert not proposition.profile
-            if not (proposition.causal and proposition.predicate.pair_literal):
+            if proposition.profile:
+                # since stage c5b a document about a pair fluent states its profile statement
+                assert proposition in statements and sentence.section == PROFILE_SECTION
+            elif not (proposition.causal and proposition.predicate.pair_literal):
                 continue
             assert oracle.truth(json.loads(json.dumps(sentence.logical_form))) is True
             read = interpret(
@@ -641,14 +684,27 @@ def test_the_words_of_the_statements_in_the_english_like_order(worlds) -> None:
         f"NEC(ALL(EVENT(EVENTVAR.1, {verb}(VAR.1, VAR.2)), "
         f"AFTER(EVENTVAR.1, {symmetric}(VAR.1, VAR.2))))"
     )
-    # the same effect about the patient, because the pair fluent is symmetric
-    mirrored = dataclasses.replace(approach, subject=EventTerm(verb, PATIENT))
-    assert mirrored in facts.causal_statements()
+    # the same effect about the patient is the mirror statement: true by the truth test,
+    # because the pair fluent is symmetric, sayable, and not enumerated (Jon's ruling 4 of
+    # WM.75: the statement is made in one direction only, with the agent as its subject)
+    mirrored = dataclasses.replace(approach, subject=EventTerm(verb, PATIENT), grounding=None)
+    assert facts.truth.is_true(mirrored)
+    assert all(
+        (p.subject, p.predicate) != (mirrored.subject, mirrored.predicate)
+        for p in facts.causal_statements()
+    )
+    assert facts.mirror(PATIENT, symmetric) and not facts.mirror(AGENT, symmetric)
     assert said(pairs, mirrored) == f"THING that THING {verb} become {symmetric} them"
     assert f"AFTER(EVENTVAR.1, {symmetric}(VAR.2, VAR.1))" in propositional(
         form_of(pairs, mirrored)
     )
-    none = next(p for p in facts.causal_statements() if is_some_label(p.predicate.label))
+    none = next(
+        p
+        for p in facts.causal_statements()
+        if is_some_label(p.predicate.label)
+        and not p.predicate.value
+        and p.subject.event_type.startswith("EVENTTYPE2.")
+    )
     fluent = none.predicate.label.removeprefix("SOME.")
     verb = none.subject.event_type
     assert not none.predicate.value
@@ -856,12 +912,13 @@ def test_plans_and_forms_the_grammar_and_the_truth_tests_refuse(worlds) -> None:
 def test_documents_state_pair_literals_where_they_call_for_causal_statements(
     cases, runs, name
 ) -> None:
-    """The causal statements with pair literals, and those about place event types, appear
-    where documents already call for causal statements: in feature documents, about an event
-    type between entities (its own statements) or about a fluent (the event types, place event
-    types included, that set it or need it). Each is true by the oracle, reads back, and has
-    the reading ``causal``. No document states a profile statement, and no causal test item is
-    one of this stage's statements (stage c5b)."""
+    """The causal statements with pair literals, and those about place event types, appear in
+    feature documents: about an event type between entities or a place event type (its own
+    statements), about a fluent (the event types, place event types included, that set it or
+    need it), or, since stage c5b, about a pair fluent (the event types that add it, delete
+    it, and need it). Each is true by the oracle, reads back, and has the reading ``causal``.
+    A profile statement stands in the document about its pair fluent alone, in the section
+    ``profile``. Since stage c5b the causal sets hold these statements too."""
     case = cases(name)
     corpus = runs(name, **MANY)
     oracle = case.oracle(**MANY)
@@ -871,8 +928,14 @@ def test_documents_state_pair_literals_where_they_call_for_causal_statements(
     for document in corpus.documents:
         for sentence in document.sentences:
             proposition = sentence.proposition
-            assert not proposition.profile and proposition.predicate.kind != PROFILE
-            assert "profile" not in sentence.readings
+            if proposition.profile:
+                assert document.type == "encyclopedic_feature"
+                assert document.topic == proposition.predicate.label
+                assert sentence.section == PROFILE_SECTION and "profile" in sentence.readings
+                assert proposition in facts.profile_statements()
+                assert oracle.truth(json.loads(json.dumps(sentence.logical_form))) is True
+                continue
+            assert proposition.predicate.kind != PROFILE and "profile" not in sentence.readings
             if not proposition.causal:
                 continue
             new = proposition.predicate.pair_literal or proposition.subject.place
@@ -880,13 +943,16 @@ def test_documents_state_pair_literals_where_they_call_for_causal_statements(
                 continue
             assert document.type == "encyclopedic_feature" and sentence.section == CAUSAL
             assert proposition in facts.causal_statements()
-            if proposition.subject.place:
-                # no document of this stage is about a place event type or a pair fluent
+            fluent_topics = facts.base_fluents + facts.numeric_fluents
+            if document.topic in facts.pair_prepositions:
+                # a document about a pair fluent: the statements whose literal reads it
+                assert proposition.predicate.pair_literal
+                assert pair_fluent_of_label(proposition.predicate.label) == document.topic
+            elif document.topic in fluent_topics:
                 assert document.topic == proposition.predicate.label
-                assert document.topic in facts.base_fluents + facts.numeric_fluents
-                about_place += 1
             else:
                 assert document.topic == proposition.subject.event_type
+            about_place += proposition.subject.place
             with_pair += proposition.predicate.pair_literal
             form = json.loads(json.dumps(sentence.logical_form))
             assert oracle.truth(form) is True, form
@@ -911,16 +977,18 @@ def test_documents_state_pair_literals_where_they_call_for_causal_statements(
         p.predicate.pair_literal for p in facts.causal_statements()
     )
     assert sum(stats["profile_statements"].values()) == len(facts.profile_statements())
-    # the causal sets keep to the statements of stage c4c
-    items = 0
+    # since stage c5b the causal sets hold the statements with pair literals and about place
+    # event types
+    items = with_pair_items = place_items = 0
     for test_set in corpus.test_sets:
         if test_set.level not in CAUSAL_LEVELS:
             continue
         for item in test_set.items:
             proposition = item.proposition
-            assert not proposition.predicate.pair_literal and not proposition.subject.place
+            with_pair_items += proposition.predicate.pair_literal
+            place_items += proposition.subject.place
             items += 1
-    assert items > 0
+    assert items > 0 and with_pair_items > 0 and place_items > 0
 
 
 # ---------------------------------------------------------------------------------------------

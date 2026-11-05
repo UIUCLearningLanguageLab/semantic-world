@@ -129,10 +129,11 @@ TEST_CHANGES = (
     "role",
     "condition",
     "object",
+    "form",
 )
 """The changes of the test sets, in the order of ``test_sets.changes``: ``object`` (stage c4c,
 WM.56) swaps the second argument of a pair, location, or ``SAME`` item, or the place of an event
-of a place event type."""
+of a place event type; ``form`` (stage c5b) gives the other form of a profile statement."""
 """The changes a false test item can be made by. ``predicate``, ``subject``, ``quantifier``, and
 ``role`` are those of ``CORPUS_GENERATOR.md``; ``polarity`` and ``event`` are the changes of the
 causal sets (``WORLD_AND_LANGUAGE.md``, "Test sets"), beside ``predicate`` and ``role``;

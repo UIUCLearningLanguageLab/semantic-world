@@ -73,10 +73,12 @@ def test_formal_rendering(tiny_world) -> None:
     # thirteen words of its pair fluents and places (stage c4b: a preposition for the location
     # fluent and one for SAME on it, two place nouns, four place adjectives, two place pole
     # adjectives, two place verbs, and one place patient capacity) stand before the function
-    # words, and so does the generic noun for places (stage c5a), the last content lexeme, so
-    # "the" is the 60th lexeme (the 59th in stage c4b, the 46th in stage b3b, the 42nd in b3a)
-    assert formal([the, noun, verb]) == "the/LEXEME.60 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.28"
-    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.64"
+    # words, and so do the generic noun for places (stage c5a) and, after it, the two
+    # prepositions of the pair fluents that no literal reads as a pair (stage c5b, WM.75), so
+    # "the" is the 62nd lexeme (the 60th in stage c5a, the 59th in stage c4b, the 46th in stage
+    # b3b, the 42nd in b3a)
+    assert formal([the, noun, verb]) == "the/LEXEME.62 CATEGORY.1.1/LEXEME.2 EVENTTYPE1.2/LEXEME.28"
+    assert formal_word(lexicon.function_word("no")) == "no/LEXEME.66"
     assert formal([]) == ""
     for lexeme in lexicon.lexemes:
         gloss, label = formal_word(lexeme).split("/")
