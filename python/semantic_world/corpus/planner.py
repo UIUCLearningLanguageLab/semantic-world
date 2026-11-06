@@ -792,13 +792,24 @@ class Planner:
             ]
         pairs = [(verb, other) for verb in facts.verbs for other in facts.categories]
         if as_agent:
-            return [(topic, Predicate(VERB, verb, CategoryTerm(other))) for verb, other in pairs]
+            # the facts about the two-place event types ("owls eat mice"), and (Jon's ruling 1
+            # of WM.76) the capacity facts about places with the topic as the agent ("owls can
+            # go to deserts"): one pool, drawn the same way
+            return [
+                (topic, Predicate(VERB, verb, CategoryTerm(other))) for verb, other in pairs
+            ] + [
+                (topic, Predicate(PLACE_EVENT, verb, CategoryTerm(place)))
+                for verb in facts.place_verbs
+                for place in facts.place_categories
+            ]
         return [(CategoryTerm(other), Predicate(VERB, verb, topic)) for verb, other in pairs]
 
     def _relation_fact(
         self, rng: np.random.Generator, topic: CategoryTerm, negative: bool, stated: set
     ) -> Proposition | None:
-        """A relation fact with the topic as agent or as patient, each with the same chance."""
+        """A relation fact with the topic as agent or as patient, each with the same chance.
+        With a category of entities as the agent, the fact is about a two-place event type or
+        (Jon's ruling 1 of WM.76) a capacity fact about a category of places."""
         as_agent = bool(rng.random() < 0.5)
         for agent_role in (as_agent, not as_agent):
             candidates = self._relation_candidates(topic, agent_role)
@@ -944,12 +955,14 @@ class Planner:
         return kinds[int(rng.choice(len(kinds), p=counts / counts.sum()))]
 
     def _has_relations(self, topic: str) -> bool:
-        """Whether a category has relation facts to state at all: the two-place event types
-        with a word for a category of entities, the place event types with a verb for a
-        category of places (stage c5b)."""
+        """Whether a category has relation facts to state at all: for a category of places
+        (stage c5b), the place event types with a verb and a category of entities as the agent;
+        for a category of entities, the two-place event types with a word, or (Jon's ruling 1
+        of WM.76) the place event types with a verb and a category of places as the patient."""
+        places = bool(self.facts.place_verbs)
         if self.facts.is_place_category(topic):
-            return bool(self.facts.place_verbs and self.facts.categories)
-        return bool(self.facts.verbs)
+            return bool(places and self.facts.categories)
+        return bool(self.facts.verbs or (places and self.facts.place_categories))
 
     def _category_document(self, kind: str, rngs: dict[str, np.random.Generator]) -> _Draft:
         rng, facts_rng = rngs["documents"], rngs["propositions"]
@@ -1434,8 +1447,9 @@ class Planner:
         """A sentence stating one of a participant's fluents at ``TIME.<step>``, a numeric pole
         (stage b3b), or (stage c4c, ``WORLD_PHASE_C.md``, "Initial states", and Jon's ruling 1
         of WM.73) its place on a location fluent with a preposition, its pair on a pair fluent
-        between entities with a preposition toward an entity already mentioned, or ``SAME`` with
-        an entity already mentioned: the polarity at ``propositions.negation_rate.state``, the
+        between entities with a preposition toward an entity already mentioned (never a pair
+        fluent that can never hold, Jon's ruling 3 of WM.76), or ``SAME`` with an entity
+        already mentioned: the polarity at ``propositions.negation_rate.state``, the
         predicate drawn among those that have the value then (the other polarity when none
         has). A positive location state names the participant's own place, mentioned or not; a
         negative one a place of the scene already mentioned."""

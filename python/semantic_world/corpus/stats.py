@@ -32,7 +32,9 @@ They hold:
 - ``places`` (stage c5b): the class-level sentences about categories of places, by the kind
   of their predicate, and the relation facts about place event types; ``documents.by_topic``
   counts the encyclopedic documents by the kind of their topic, with those about places and
-  about pair fluents;
+  about pair fluents; and ``documents.entity_category_relation_facts`` (Jon's ruling 1 of
+  WM.76) counts the relation facts of the documents about categories of entities by kind, a
+  two-place event type or a place event type, with the share of the place facts;
 - ``cooccurrence``: the co-occurrence check;
 - ``test_sets``: for each test set, the number of pairs, the share of its true items whose
   logical form appears in a document, and, for a state set, the share of its items marked
@@ -118,6 +120,7 @@ from semantic_world.corpus.propositions import (
     QUANTIFIERS,
     RAISES,
     STATE,
+    VERB,
     CategoryTerm,
     EventTerm,
     is_same_label,
@@ -313,6 +316,28 @@ def _documents(planner: Planner, documents: Sequence[Document]) -> dict[str, Any
         "redrawn_drafts": planner.redrawn_drafts,
         "by_type": by_type,
         "by_topic": _topics(planner, documents),
+        "entity_category_relation_facts": _entity_relation_facts(planner, documents),
+    }
+
+
+def _entity_relation_facts(planner: Planner, documents: Sequence[Document]) -> dict[str, Any]:
+    """The relation facts of the documents about a category of entities, by kind (Jon's ruling
+    1 of WM.76): those about a two-place event type ("owls eat mice", the topic as agent or as
+    patient) and those about a place event type (the capacity facts about a category of places,
+    "owls can go to deserts", the topic as agent), with the share the place facts take. A
+    sibling contrast of a relation fact is counted with it."""
+    entities = set(planner.facts.categories)
+    kinds = Counter(
+        s.proposition.predicate.kind
+        for d in documents
+        if d.type == DOCUMENT_TYPES[0] and d.topic in entities
+        for s in d.sentences
+        if s.proposition.level == CLASS and s.proposition.predicate.kind in (VERB, PLACE_EVENT)
+    )
+    return {
+        "event_type": kinds[VERB],
+        "place_event_type": kinds[PLACE_EVENT],
+        "place_share": _share(kinds[PLACE_EVENT], kinds[VERB] + kinds[PLACE_EVENT]),
     }
 
 

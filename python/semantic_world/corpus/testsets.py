@@ -408,13 +408,14 @@ def candidates(
             return with_predicate(facts.place_verbs)  # another move or act (stage c4c)
         if predicate.kind == PAIR_STATE:
             # another pair fluent of the same kind (stage c4c): a location fluent, a pair fluent
-            # between entities, or SAME
+            # between entities, or SAME; never a pair fluent that can never hold (Jon's ruling
+            # 3 of WM.76), which no state item names, true or false
             label = predicate.label
             if world.is_same_literal(label) is not None:
                 return with_predicate(facts.same_prepositions)
             if world.is_location_fluent(label):
                 return with_predicate(facts.location_prepositions)
-            return with_predicate(facts.entity_pair_prepositions)
+            return with_predicate(facts.state_pair_prepositions)
         if proposition.level in (EVENT, ABLE_NOW):
             # an event is a two-place event type with a patient, or a one-place one: the kind
             # is kept
@@ -1363,7 +1364,8 @@ class TestSetBuilder:
         a location fluent toward a place of the scene, or ``SAME`` with another referent), that
         holds of a participant of a situational narrative at the scene's final time point. For
         the role and object changes the predicate is drawn among the pair states they apply
-        to."""
+        to. No item, true or false, names a pair fluent that can never hold (Jon's ruling 3 of
+        WM.76)."""
         if not self.situational:
             return None
         document = self.situational[int(rng.integers(len(self.situational)))]

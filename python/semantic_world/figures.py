@@ -24,6 +24,16 @@ has its markers on lines of their own around the block, because a Markdown line 
 HTML comment is an HTML block to its end. ``guides`` rewrites every marked figure from the runs and
 prints what moved; ``--check`` prints without writing. Prose around a figure stays hand-written,
 and a figure from another run, or a run time, is hand-written with the date of its run.
+
+The guides' examples of the tiny corpus are figures too (Jon's ruling 5 of WM.76), under
+``tiny.examples``: a sentence in its four renderings, rule statements, comparisons, the first
+sentences of a category document and of a situational narrative, a parse tree, and a pair of a
+test set. ``corpus_examples`` reads them from the rendered tiny run (``documents.jsonl`` and
+``tests/``). Each example is chosen by a stated property (``EXAMPLES``), never by its words or
+its label, and is written with its label; ``guides`` fails, as for a missing figure, when no
+sentence of the run has the property. The prose beside an example describes the form the
+property guarantees, because the script cannot rewrite prose. The examples are not part of the
+snapshot: they are texts of one run, and the spelled rendering needs the word forms.
 """
 
 from __future__ import annotations
@@ -511,6 +521,11 @@ def corpus_figures(folder: str | Path) -> dict[str, Any]:
             .get("about_pair_fluents"),
             "by_topic": dict(stats["documents"].get("by_topic", {})),
             **dict(stats.get("places", {})),
+            # Jon's ruling 1 of WM.76: the relation facts of the documents about categories of
+            # entities, by kind, with the share of the capacity facts about places
+            "entity_relation_facts": dict(
+                stats["documents"].get("entity_category_relation_facts", {})
+            ),
             "profile_pairs": sum(
                 s["pairs"] for name, s in sets.items() if name.startswith("profile")
             ),
@@ -628,6 +643,323 @@ def tiny_corpus_hash_off(feature: str, folder: str | Path) -> str:
     data["world"] = {"config": str(world_path), "seed": data["world"].get("seed", 1)}
     corpus = generate(config_from_mapping(data))
     return documents_hash(corpus.write(folder / "corpus"))
+
+
+# ---------------------------------------------------------------------------------------------
+# The guides' examples of the tiny corpus
+# ---------------------------------------------------------------------------------------------
+
+EXAMPLE_CORPUS = "tiny"
+"""The corpus whose run gives the guides' examples."""
+EXAMPLE_SENTENCES = 6
+"""The sentences of a document that an example of a document shows: its first six."""
+EXAMPLES: dict[str, str] = {
+    "renderings": (
+        "the first sentence of a narrative that reports an event and whose subject is a "
+        "definite mention with a relative clause that reports an event, in a rendered run "
+        "(`corpus render` fills the spelled rendering)"
+    ),
+    "rule_statements": (
+        "the first rule statement said with a quantifier word, and the first rule statement "
+        "said with a bare plural, each among the documents' sentences or, when they hold "
+        "none, among the true items of the class test sets"
+    ),
+    "comparisons": (
+        "the first instance-level comparative of two entities on a scalar, and the first "
+        "class-level comparative of two categories of entities on a scalar, each among the "
+        "documents' sentences or, when they hold none, among the true items of the test sets"
+    ),
+    "category_document": (
+        "the first category document about a category of entities whose first "
+        f"{EXAMPLE_SENTENCES} sentences hold a membership fact and a fact said with the word "
+        "for nec_all"
+    ),
+    "narrative": (
+        f"the first situational narrative whose first {EXAMPLE_SENTENCES} sentences hold a "
+        "state sentence, a change sentence, and a definite mention with a modifier"
+    ),
+    "tree": (
+        "the first sentence of a narrative that reports an event of a two-place event type "
+        "and whose two mentions are a determiner and a noun"
+    ),
+    "lawlike_pair": (
+        "the first pair of class_quantifier_lawlike whose false item's quantifier is nec_all"
+    ),
+}
+"""The guides' examples and the property each is chosen by. An example is the first sentence,
+document, or pair of the run with its property, in the run's order: the documents' sentences,
+and, for an example of one sentence that the documents may not hold, the true items of the test
+sets after them, the sets in the order of their names."""
+
+_NARRATIVES = ("entity", "situational")
+
+
+def _jsonl(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def _code(text: str) -> str:
+    return f"`{text}`"
+
+
+def _block(lines: Sequence[str]) -> str:
+    """A fenced block, as a figure whose markers stand on lines of their own."""
+    return "\n```\n" + "\n".join(lines) + "\n```\n"
+
+
+def _labeled(sentences: Sequence[Mapping[str, Any]]) -> str:
+    """A fenced block of sentences in the conceptual rendering, each after its label."""
+    width = max(len(s["label"]) for s in sentences)
+    return _block([f"{s['label']:<{width}}  {s['conceptual']}" for s in sentences])
+
+
+def _children(tree: Any, label: str) -> list[Any]:
+    """The children of a tree node that have a label."""
+    return [c for c in tree[1:] if isinstance(c, list) and c and c[0] == label]
+
+
+def _subject_phrase(sentence: Mapping[str, Any]) -> list[Any]:
+    found = _children(sentence["tree"], "NP-SBJ")
+    return found[0] if found else []
+
+
+def _said_with_quantifier_word(sentence: Mapping[str, Any]) -> bool:
+    """Whether a class-level sentence's subject has a determiner: a quantifier word, where a
+    bare plural has none."""
+    return bool(_children(_subject_phrase(sentence), "Det"))
+
+
+def _restricted(term: Any) -> bool:
+    return isinstance(term, Mapping) and bool(term.get("restriction") or term.get("clauses"))
+
+
+def _first(sentences: Sequence[Mapping[str, Any]], test) -> Mapping[str, Any] | None:
+    return next((s for s in sentences if test(s)), None)
+
+
+def _is_entity_category(label: Any) -> bool:
+    return isinstance(label, str) and label.startswith("CATEGORY.")
+
+
+def _renderings_example(documents: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    def fits(sentence: Mapping[str, Any]) -> bool:
+        form = sentence["logical_form"]
+        subject = form["subject"]
+        return (
+            form["level"] == "event"
+            and bool(subject.get("descriptive"))
+            and any(clause.get("event") for clause in subject.get("clauses", ()))
+            and bool(sentence.get("text"))
+        )
+
+    for document in documents:
+        if document["type"] not in _NARRATIVES:
+            continue
+        sentence = _first(document["sentences"], fits)
+        if sentence is not None:
+            return {
+                "label": _code(sentence["label"]),
+                "conceptual": _code(sentence["conceptual"]),
+                "formal": _code(sentence["formal"]),
+                "propositional": _code(sentence["propositional"]),
+                "spelled": _code(sentence["text"]),
+            }
+    return None
+
+
+def _item_pool(folder: Path, prefixes: Sequence[str]) -> list[dict[str, Any]]:
+    """The true items of the test sets whose names start with one of ``prefixes``, as
+    sentences: the sets in the order of their names, each item with the label ``<set> pair
+    <n>`` and its ``rule`` from its metadata."""
+    found: list[dict[str, Any]] = []
+    tests = folder / "tests"
+    if not tests.is_dir():
+        return found
+    for path in sorted(tests.glob("*.jsonl")):
+        if not any(path.stem.startswith(prefix) for prefix in prefixes):
+            continue
+        for item in _jsonl(path):
+            if item["meta"]["truth"]:
+                found.append(
+                    {
+                        **item["input"],
+                        "label": f"{path.stem} pair {item['meta']['pair']}",
+                        "rule": item["meta"].get("rule"),
+                    }
+                )
+    return found
+
+
+def _document_pool(documents: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The documents' sentences, each with its ``rule`` beside its logical form."""
+    return [{**s, "rule": s["logical_form"].get("rule")} for d in documents for s in d["sentences"]]
+
+
+def _rule_statements_example(
+    documents: Sequence[Mapping[str, Any]], folder: Path
+) -> dict[str, Any] | None:
+    pool = _document_pool(documents) + _item_pool(folder, ("class_",))
+    rules = [s for s in pool if s["rule"] is not None]
+    worded = _first(rules, _said_with_quantifier_word)
+    bare = _first(rules, lambda s: not _said_with_quantifier_word(s))
+    if worded is None or bare is None:
+        return None
+    return {"block": _labeled([worded, bare])}
+
+
+def _comparisons_example(
+    documents: Sequence[Mapping[str, Any]], folder: Path
+) -> dict[str, Any] | None:
+    def comparative(level: str):
+        def fits(sentence: Mapping[str, Any]) -> bool:
+            form = sentence["logical_form"]
+            predicate = form["predicate"]
+            return (
+                form["level"] == level
+                and predicate["kind"] == "comparative"
+                and predicate["label"].startswith("SCALARDIM.")
+            )
+
+        return fits
+
+    sentences = _document_pool(documents)
+    instance = _first(sentences + _item_pool(folder, ("instance_",)), comparative("instance"))
+    category = _first(sentences + _item_pool(folder, ("class_",)), comparative("class"))
+    if instance is None or category is None:
+        return None
+    return {"block": _labeled([instance, category])}
+
+
+def _category_document_example(
+    documents: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    def membership(sentence: Mapping[str, Any]) -> bool:
+        return sentence["logical_form"]["predicate"]["kind"] == "member"
+
+    def worded_law(sentence: Mapping[str, Any]) -> bool:
+        form = sentence["logical_form"]
+        return form.get("quantifier") == "nec_all" and _said_with_quantifier_word(sentence)
+
+    for document in documents:
+        if document["type"] != "encyclopedic_category":
+            continue
+        if not _is_entity_category(document["topic"]):
+            continue
+        first = document["sentences"][:EXAMPLE_SENTENCES]
+        if all(_first(first, test) is not None for test in (membership, worded_law)):
+            return {
+                "label": _code(document["label"]),
+                "topic": _code(document["topic"]),
+                "block": _block([s["conceptual"] for s in first]),
+            }
+    return None
+
+
+def _narrative_example(documents: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    def level(name: str):
+        return lambda sentence: sentence["logical_form"]["level"] == name
+
+    def modified_definite(sentence: Mapping[str, Any]) -> bool:
+        form = sentence["logical_form"]
+        mentions = [form["subject"], form["predicate"].get("patient")]
+        return any(
+            isinstance(m, Mapping) and m.get("descriptive") and _restricted(m) for m in mentions
+        )
+
+    for document in documents:
+        if document["type"] != "situational":
+            continue
+        first = document["sentences"][:EXAMPLE_SENTENCES]
+        tests = (level("state"), level("change"), modified_definite)
+        if all(_first(first, test) is not None for test in tests):
+            return {
+                "label": _code(document["label"]),
+                "block": _block([s["conceptual"] for s in first]),
+            }
+    return None
+
+
+def _tree_example(documents: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    def plain(phrase: Sequence[Any]) -> bool:
+        return [c[0] for c in phrase[1:]] in (["Det", "N"], ["N", "Det"])
+
+    def fits(sentence: Mapping[str, Any]) -> bool:
+        form = sentence["logical_form"]
+        if form["level"] != "event" or form["predicate"]["kind"] != "event_type2":
+            return False
+        verb_phrase = _children(sentence["tree"], "VP")
+        objects = _children(verb_phrase[0], "NP-OBJ") if verb_phrase else []
+        return bool(objects) and plain(_subject_phrase(sentence)) and plain(objects[0])
+
+    for document in documents:
+        if document["type"] not in _NARRATIVES:
+            continue
+        sentence = _first(document["sentences"], fits)
+        if sentence is not None:
+            return {
+                "label": _code(sentence["label"]),
+                "conceptual": _code(sentence["conceptual"]),
+                "tree": _code(json.dumps(sentence["tree"])),
+            }
+    return None
+
+
+def _lawlike_pair_example(folder: Path) -> dict[str, Any] | None:
+    path = folder / "tests" / "class_quantifier_lawlike.jsonl"
+    if not path.is_file():
+        return None
+    pairs: dict[int, dict[bool, Mapping[str, Any]]] = {}
+    for item in _jsonl(path):
+        pairs.setdefault(item["meta"]["pair"], {})[bool(item["meta"]["truth"])] = item["input"]
+    for number, pair in pairs.items():
+        if set(pair) != {True, False}:
+            continue
+        if pair[False]["logical_form"].get("quantifier") != "nec_all":
+            continue
+        return {
+            "pair": number,
+            "block": _block(
+                [f"true:   {pair[True]['conceptual']}", f"false:  {pair[False]['conceptual']}"]
+            ),
+        }
+    return None
+
+
+def corpus_examples(folder: str | Path) -> dict[str, Any]:
+    """The guides' examples of a corpus run folder: for each name of ``EXAMPLES`` whose
+    property some sentence, document, or pair of the run has, the example's texts as the guides
+    write them (a label, renderings as code, or a fenced block). An example that the run does
+    not hold is left out, and ``guides`` fails on its key."""
+    folder = Path(folder)
+    documents = _jsonl(folder / "documents.jsonl")
+    found = {
+        "renderings": _renderings_example(documents),
+        "rule_statements": _rule_statements_example(documents, folder),
+        "comparisons": _comparisons_example(documents, folder),
+        "category_document": _category_document_example(documents),
+        "narrative": _narrative_example(documents),
+        "tree": _tree_example(documents),
+        "lawlike_pair": _lawlike_pair_example(folder),
+    }
+    return {name: example for name, example in found.items() if example is not None}
+
+
+def add_examples(figures: dict[str, Any], runs: str | Path = RUNS) -> dict[str, Any]:
+    """The figures with the guides' examples of the tiny corpus under ``tiny.examples``, read
+    from its run under ``runs`` (nothing is added when the run is not there)."""
+    folder = run_folders(runs)[EXAMPLE_CORPUS]["corpus"]
+    if (folder / "documents.jsonl").is_file():
+        figures.setdefault(EXAMPLE_CORPUS, {})["examples"] = corpus_examples(folder)
+    return figures
+
+
+def missing_example(key: str) -> str | None:
+    """The property of the example a figure key names, when the key is an example's."""
+    parts = key.split(".")
+    if len(parts) >= 3 and parts[0] == EXAMPLE_CORPUS and parts[1] == "examples":
+        return EXAMPLES.get(parts[2])
+    return None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -822,7 +1154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{key}: {old} -> {new}")
         print(f"wrote {args.snapshot}: {len(changed)} figure(s) moved")
         return 0
-    figures = figures_of_runs(args.runs)
+    figures = add_examples(figures_of_runs(args.runs), args.runs)
     snapshot_path = Path(args.snapshot)
     figures["baselines"] = (
         load_snapshot(snapshot_path).get("baselines", {}) if snapshot_path.is_file() else {}
@@ -831,6 +1163,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         changed = fill_guides(figures, REPO, check=args.check)
     except KeyError as error:
         print(f"error: no figure {error} in the runs under {args.runs}", file=sys.stderr)
+        wanted = missing_example(str(error.args[0]))
+        if wanted:
+            print(
+                f"the {EXAMPLE_CORPUS} run holds no example with the property: {wanted}",
+                file=sys.stderr,
+            )
         return 1
     for name, key, old, new in changed:
         print(f"{name}: {key}: {old!r} -> {new!r}")
